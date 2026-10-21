@@ -21,6 +21,7 @@ import type {
 } from "@/bindings";
 import type { Backend } from "@/lib/backend";
 import { GLOBAL_THROTTLE_RULE_ID, emptyMatcher, matcherSummary, normalizeRule, type Rule } from "@/lib/rules";
+import { createMockDevices } from "@/lib/mockDevices";
 
 /** A fully specified mock flow with bodies (the dev zoo, see `dev/zoo.ts`). */
 export interface MockFlow {
@@ -533,6 +534,8 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
         "",
       ].join("\n");
     },
+    // `?devicePrompt=<ip>`: a LAN client waiting to be allowed.
+    ...createMockDevices(9090, new URLSearchParams(window.location.search).get("devicePrompt")),
   };
 }
 
@@ -561,7 +564,7 @@ function sidebar(flows: FlowRow_Serialize[]): SidebarSnapshot_Deserialize {
     total: flows.length,
     apps: [...apps]
       .sort(([a], [b]) => a.toLowerCase().localeCompare(b.toLowerCase()))
-      .map(([name, count]) => ({ name, bundle_id: null, has_icon: false, count })),
+      .map(([name, count]) => ({ name, bundle_id: null, has_icon: false, remote: false, count })),
     domains: [...domains]
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([domain, list]) => ({

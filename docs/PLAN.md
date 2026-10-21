@@ -34,7 +34,7 @@ The Cargo workspace uses edition 2024, plus an npm workspace for the UI.
 ```
 crates/pm-model     pure types (serde + specta + schemars): Flow*, Rule/Matcher/Action, FilterSpec, Settings
 crates/pm-core      headless Engine: proxy/, tls/, store/, rules/ (compile, eval, local, breakpoints, app.sqlite), io/ (har, curl, session) — no Tauri dep
-crates/pm-platform  OS traits + cfg impls: sysproxy, trust, procinfo, netif, simctl (macos/ linux/ windows/)
+crates/pm-platform  OS traits + cfg impls: sysproxy, trust, procinfo, netif, simctl, adb (macos/ linux/ windows/)
 crates/pm-mcp       rmcp server over Arc<Engine>: Streamable HTTP (axum) + stdio bridge
 crates/pm-testkit   test upstreams (h1/h2 TLS, WS echo, SSE, slow/huge bodies), test CA; re-exports the synthetic flow generator (which lives in pm-core::synth so the app and CLI can seed data)
 apps/desktop/src-tauri   thin Tauri adapters → Engine; also `proxymate mcp-stdio`, `--sysproxy-guardian`
@@ -63,7 +63,8 @@ apps/cli                 proxymate-cli serve|mcp-stdio|gen-flows|bench (headless
   - Flows are capped at 250k with ring eviction. Pinned flows are kept.
 - **Sessions.** A saved session (`.proxymate`) is a single SQLite file. A `BlobBackend` trait lets the same store and view code read live segments, saved sessions and imported HARs.
 - **App database.** `app.sqlite` (rusqlite, WAL) holds rules, settings, the SSL include/exclude lists, the LAN client allow-list and the MCP audit log.
-  - Until it exists, the SSL lists (include, exclude, bypass, insecure upstream) live in `<data_dir>/ssl.json` (M2).
+  - The SSL lists (include, exclude, bypass, insecure upstream) still live in `<data_dir>/ssl.json` (M2).
+  - (M9) The LAN client allow-list is a `devices` table (ip, nickname, allowed); LAN access on/off and the chosen interface are the `lan` settings row. Like the rules, they stay in memory for an engine without a data dir.
 
 ### Filtering at 100k+ rows (in Rust)
 - **Views.** Each `View` holds `{CompiledFilter, SortSpec, indices: Vec<u32>}` and is maintained incrementally as flows arrive and change.
@@ -95,8 +96,11 @@ We build our own engine and use hudsucker only as a reading reference. Its handl
 
 ### Connection pipeline
 1. **Accept and sniff.**
-   - Loopback clients are always allowed. A new LAN IP raises an "Allow?" prompt, and its connections are held for up to 30 s while the user decides.
+   - Loopback clients and this machine's own addresses are always allowed. A new LAN IP raises an "Allow?" prompt (with a nickname field), and its connections are held for up to 30 s while the user decides, then refused (`403` for HTTP). Answers persist; pending prompts don't. An allowed device's flows are labelled `Nickname (10.0.0.23)` (or just the IP) in the Client column and the sidebar's Apps.
    - Then peek at the first bytes to choose a path: `CONNECT` goes to the tunnel, an absolute-form URI goes to the forward proxy, and an origin-form request addressed to us goes to the **onboarding server** (`/`, `/cert.pem`, `/cert.crt`, `/proxymate.mobileconfig`).
+   - (M9) An absolute-form request for `proxy.mate` (any port) or for one of our own addresses on the listener's port also gets the onboarding server, which is what stops proxy loops. `CONNECT proxy.mate:443` is refused with `502`, so browsers that try https first fall back to the plain page. Onboarding requests are never recorded.
+   - (M9) The `.mobileconfig` is an unsigned profile with one `com.apple.security.root` payload; its identifiers and UUIDs derive from the CA fingerprint, so reinstalling replaces it and a regenerated CA gets its own.
+   - (M9) **LAN access** rebinds the listener from `127.0.0.1` to `0.0.0.0` on the same port (falling back to the old listener if that fails). The chosen interface (from `if-addrs`, Wi-Fi and Ethernet first) only decides the address the toolbar's "Listening on …", the setup URL and the QR codes show; the system proxy, the trust check and the terminal env keep using loopback.
 2. **CONNECT.** Reply `200`, then decide between MITM and passthrough. The inputs are the SSL include/exclude globs, per-app exclusions and the auto-learned pinning bypass list.
    - The default is to MITM `*` except Apple, iCloud and OCSP hosts, plus a few others that pin.
    - Passthrough uses `copy_bidirectional` and records one tunnel flow.
@@ -131,6 +135,7 @@ We build our own engine and use hudsucker only as a reading reference. Its handl
 - A compressed (`Content-Encoding`) event stream is parsed once it is complete, without per-event times.
 - The flow table's Status column shows `101` for a closed WebSocket; the close code and reason are in the WebSocket panel.
 - HTTP/1.1 header names are forwarded with their original case, but recorded lower-cased (hyper doesn't expose its case map) and shown in Title-Case.
+- LAN clients are identified by IP address: a device that gets a new address is asked about again, and renaming a device doesn't relabel its earlier flows. LAN access listens on IPv4 only.
 
 ## Rules engine
 - **Data model.** A `Rule` has `{id, name, enabled, order, origin: User|Preset{preset}|Agent{client, session, created_at_ms}, matcher, actions[]}` (`pm-model/src/rules.rs`, serde + specta + schemars so the M7 MCP schemas are the same types).
@@ -149,7 +154,7 @@ We build our own engine and use hudsucker only as a reading reference. Its handl
   - A host `RegexSet` prefilters candidate rules.
   - Every rule is compiled on save, enabled or not, so a broken rule is never stored.
   - Each flow snapshots the rule set when it starts.
-- **Persistence.** `app.sqlite` (rusqlite, bundled, WAL) in the data dir holds the rules (one JSON document per row, so new action fields need no migration) and the rule settings. An engine without a data dir keeps them in memory. The SSL lists stay in `ssl.json` for now.
+- **Persistence.** `app.sqlite` (rusqlite, bundled, WAL) in the data dir holds the rules (one JSON document per row, so new action fields need no migration) and the rule settings. An engine without a data dir keeps them in memory. The SSL lists stay in `ssl.json` for now; the device allow-list joined in M9.
 - **Evaluation order** (`pm-core/src/rules/eval.rs`, applied on the wire by `pm-core/src/proxy/exchange.rs`):
   1. **Request phase.** All matching rules run in `order`; this is not first-match.
      - A `Block` in any matching rule stops the flow before any rewrite.
@@ -200,7 +205,12 @@ We build our own engine and use hudsucker only as a reading reference. Its handl
   - Remote devices show their IP plus a nickname from the allow-list.
 - **iOS Simulator.**
   - `xcrun simctl list devices booted -j`, then `xcrun simctl keychain <udid> add-root-cert`. "Install to all booted" is one click.
-  - The simulator uses the Mac's system proxy, so no extra proxy setup is needed.
+  - The simulator uses the Mac's system proxy, so no extra proxy setup is needed. (M9) The wizard checks that the system proxy is on and offers to turn it on.
+  - (M9) Simulator processes are recognised by their `CoreSimulator` paths and named `<app> (Simulator)`; the wizard's live check waits for the first decrypted HTTPS flow from one. The Android emulator's traffic arrives from its qemu process and shows as `Android Emulator`.
+- **Android (M9).**
+  - Phones are set up by hand (Wi-Fi proxy, the CA as a user certificate, a debug-only `network_security_config.xml` for the user's own apps); the wizard shows the steps and a QR code of the setup page.
+  - Emulators are set up over `adb` (from the SDK's usual places, then `PATH`): `settings put global http_proxy 10.0.2.2:<port>`, cleared with `:0` on quit, and `adb push` of the DER to `/sdcard/Download/` for the user to install.
+- **Commands (M9).** `simctl` and `adb` run behind a `command::Runner` trait in `pm-platform`, so their command lines and output parsing are tested with a fake runner.
 - **Linux and Windows equivalents (M11).**
   - Linux: `pkexec update-ca-certificates`/`update-ca-trust` plus NSS `certutil`; proxy via gsettings or kwriteconfig; app detection via netlink sock_diag and `/proc`.
   - Windows: the CurrentUser ROOT store; proxy via the HKCU Internet Settings registry key and `InternetSetOption`; app detection via `GetExtendedTcpTable`; the guardian uses `WaitForSingleObject`.
@@ -359,7 +369,7 @@ Tokens are CSS variables set per `[data-theme]`. Pills use a tinted background w
 | M6 | `m6-websockets-sse` | WebSocket relay and frame panel, SSE event list | WS echo and SSE tests |
 | M7 | `m7-mcp` | All MCP tools and resources, auth, read-only mode, agent badges, audit log, stdio bridge | MCP Inspector; `claude mcp add` end to end |
 | M8 | `m8-replay-sessions` | Compose, Replay and Edit & Replay, cURL, HAR 1.2 import/export, `.proxymate` sessions | Golden files; Chrome HAR round trip; save and reopen 100k flows |
-| M9 | `m9-device-setup` | Onboarding server, QR codes, LAN IPs, client allow-list, Simulator one-click install, iPhone and Android wizards (emulator is a stretch goal) | Simulator Safari decrypts; physical iPhone decrypts |
+| M9 | `m9-device-setup` | Onboarding server, QR codes, LAN IPs, client allow-list, Simulator one-click install, iPhone and Android wizards (emulator is a stretch goal) | Simulator Safari decrypts; physical iPhone decrypts (a manual checklist in the PR) |
 | M10 | `m10-polish` | Light-mode pass, keyboard navigation, column persistence, eviction, deep search, DSL autocomplete, error UX | 1-hour soak; stable RSS |
 | M11 | `m11-macos-release` | Developer ID signing, hardened runtime, notarisation, DMG, updater, release workflow | `spctl` and `stapler validate` pass |
 | M12 | `m12-linux-windows` | pm-platform implementations for Linux and Windows, AppImage/deb/rpm, MSI/NSIS, CI matrix | Integration suite green on all three OSes |

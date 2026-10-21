@@ -7,6 +7,8 @@ interface SidebarState {
   snapshot: SidebarSnapshot_Deserialize;
   /** Names of apps `pmicon://` has an icon for. */
   icons: ReadonlySet<string>;
+  /** Clients that are LAN devices (nickname and IP), not apps. */
+  remote: ReadonlySet<string>;
 }
 
 /**
@@ -16,6 +18,7 @@ interface SidebarState {
 export const useSidebar = create<SidebarState>()(() => ({
   snapshot: { total: 0, apps: [], domains: [] },
   icons: new Set(),
+  remote: new Set(),
 }));
 
 let started = false;
@@ -26,6 +29,7 @@ export function startSidebar() {
   started = true;
   void backend.subscribeSidebar((snapshot) => {
     const icons = new Set(snapshot.apps.filter((a) => a.has_icon).map((a) => a.name));
-    useSidebar.setState({ snapshot, icons });
+    const remote = new Set(snapshot.apps.filter((a) => a.remote).map((a) => a.name));
+    useSidebar.setState({ snapshot, icons, remote });
   });
 }

@@ -109,6 +109,14 @@ pub(super) async fn connect(ctx: Arc<ProxyCtx>, peer: Arc<PeerClient>, req: Requ
         });
         return connection_established();
     }
+    if target.host.eq_ignore_ascii_case(crate::devices::ONBOARDING_HOST) {
+        // Refused rather than served over TLS, so a browser that tries
+        // https first falls back to the plain-HTTP setup page.
+        return text_response(
+            StatusCode::BAD_GATEWAY,
+            "Proxymate: open http://proxy.mate/ (plain HTTP) for device setup.\n",
+        );
+    }
     let policy = engine.ssl_policy();
     let mut decrypt = policy.intercepts(&target.host);
     if decrypt

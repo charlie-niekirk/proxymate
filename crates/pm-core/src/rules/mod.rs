@@ -8,7 +8,7 @@
 
 mod breakpoints;
 pub mod compile;
-mod db;
+pub(crate) mod db;
 pub(crate) mod eval;
 pub(crate) mod local;
 #[cfg(test)]

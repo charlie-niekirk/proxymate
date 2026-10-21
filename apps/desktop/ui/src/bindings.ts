@@ -78,6 +78,26 @@ export const commands = {
 	getBreakpointBody: (id: number) => typedError<unknown, string>(__TAURI_INVOKE("get_breakpoint_body", { id })),
 	/**  Continues, aborts or answers a paused flow. The first resolution wins. */
 	resolveBreakpoint: (id: number, resolution: BreakpointResolution_Deserialize) => typedError<null, string>(__TAURI_INVOKE("resolve_breakpoint", { id, resolution })),
+	/**  LAN interfaces, the chosen one, the setup URL and its QR code. */
+	getDeviceAccess: () => typedError<DeviceAccess_Serialize, string>(__TAURI_INVOKE("get_device_access")),
+	/**
+	 *  Listens on every interface (or loopback only). Failures come back in
+	 *  `error`.
+	 */
+	setLanAccess: (on: boolean) => typedError<DeviceAccess_Serialize, string>(__TAURI_INVOKE("set_lan_access", { on })),
+	setLanInterface: (name: string) => typedError<DeviceAccess_Serialize, string>(__TAURI_INVOKE("set_lan_interface", { name })),
+	/**  Streams LAN clients (pending prompts first) and device activity. */
+	subscribeDevices: (onSnapshot: Channel<DevicesSnapshot_Deserialize>) => __TAURI_INVOKE<void>("subscribe_devices", { onSnapshot }),
+	decideDevice: (ip: string, allow: boolean, nickname: string | null) => typedError<DevicesSnapshot_Serialize, string>(__TAURI_INVOKE("decide_device", { ip, allow, nickname })),
+	forgetDevice: (ip: string) => typedError<DevicesSnapshot_Serialize, string>(__TAURI_INVOKE("forget_device", { ip })),
+	getSimulatorStatus: () => typedError<SimulatorStatus_Serialize, string>(__TAURI_INVOKE("get_simulator_status")),
+	/**  Adds the CA to each booted simulator in `udids` (all booted if empty). */
+	installSimulatorCert: (udids: string[]) => typedError<SimInstallResult_Serialize[], string>(__TAURI_INVOKE("install_simulator_cert", { udids })),
+	getAndroidStatus: () => typedError<AndroidStatus_Serialize, string>(__TAURI_INVOKE("get_android_status")),
+	/**  Points an emulator's proxy at us, or clears it. */
+	setAndroidProxy: (serial: string, on: boolean) => typedError<AndroidStatus_Serialize, string>(__TAURI_INVOKE("set_android_proxy", { serial, on })),
+	/**  Copies the CA to the device's Downloads; returns the path on the device. */
+	pushAndroidCert: (serial: string) => typedError<string, string>(__TAURI_INVOKE("push_android_cert", { serial })),
 };
 
 /* Types */
@@ -190,6 +210,51 @@ preserve_host: boolean } |
 /**  Stops the flow. */
 { type: "Block"; mode: BlockMode };
 
+/**  A device or emulator `adb` sees. */
+export type AndroidDevice = AndroidDevice_Serialize | AndroidDevice_Deserialize;
+
+/**  A device or emulator `adb` sees. */
+export type AndroidDevice_Deserialize = {
+	serial: string,
+	model?: string | null,
+	emulator: boolean,
+	/**  `device`, `offline`, `unauthorized`, … */
+	state: string,
+	/**  Its global `http_proxy` setting, if any. */
+	proxy?: string | null,
+};
+
+/**  A device or emulator `adb` sees. */
+export type AndroidDevice_Serialize = {
+	serial: string,
+	model: string | null,
+	emulator: boolean,
+	/**  `device`, `offline`, `unauthorized`, … */
+	state: string,
+	/**  Its global `http_proxy` setting, if any. */
+	proxy: string | null,
+};
+
+export type AndroidStatus = AndroidStatus_Serialize | AndroidStatus_Deserialize;
+
+export type AndroidStatus_Deserialize = {
+	/**  `adb` was found. */
+	available: boolean,
+	detail?: string | null,
+	devices: AndroidDevice_Deserialize[],
+	/**  The `http_proxy` value emulators should use (`10.0.2.2:<port>`). */
+	emulator_proxy?: string | null,
+};
+
+export type AndroidStatus_Serialize = {
+	/**  `adb` was found. */
+	available: boolean,
+	detail: string | null,
+	devices: AndroidDevice_Serialize[],
+	/**  The `http_proxy` value emulators should use (`10.0.2.2:<port>`). */
+	emulator_proxy: string | null,
+};
+
 /**  One client app in the sidebar, with its flow count. */
 export type AppCount = AppCount_Serialize | AppCount_Deserialize;
 
@@ -200,6 +265,8 @@ export type AppCount_Deserialize = {
 	bundle_id?: string | null,
 	/**  True if `pmicon://localhost/<name>` serves an icon. */
 	has_icon: boolean,
+	/**  A LAN device (shown as its nickname and IP), not an app on this Mac. */
+	remote?: boolean,
 	count: number,
 };
 
@@ -210,6 +277,8 @@ export type AppCount_Serialize = {
 	bundle_id: string | null,
 	/**  True if `pmicon://localhost/<name>` serves an icon. */
 	has_icon: boolean,
+	/**  A LAN device (shown as its nickname and IP), not an app on this Mac. */
+	remote: boolean,
 	count: number,
 };
 
@@ -433,6 +502,116 @@ export type ContentGroup = "json" | "form" | "xml" | "js" | "css" | "graphql" | 
 export type ContentKind = 
 /**  No body, or not detected yet. */
 "none" | "json" | "xml" | "html" | "formurlencoded" | "multipart" | "graphql" | "javascript" | "css" | "text" | "image" | "svg" | "video" | "audio" | "font" | "pdf" | "binary";
+
+/**  LAN access as the device setup wizard shows it. */
+export type DeviceAccess = DeviceAccess_Serialize | DeviceAccess_Deserialize;
+
+/**  LAN access as the device setup wizard shows it. */
+export type DeviceAccess_Deserialize = {
+	/**  The proxy listens on every interface, so phones can reach it. */
+	enabled: boolean,
+	/**  The interface the toolbar and the QR codes use, by name. */
+	interface?: string | null,
+	/**  Best first. */
+	interfaces: LanInterface[],
+	port?: number | null,
+	/**  The chosen interface's address and port, e.g. `10.0.0.5:9090`. */
+	proxy?: string | null,
+	/**  `http://<lan-ip>:<port>/`: the onboarding page, for QR codes. */
+	setup_url?: string | null,
+	/**  A QR code of `setup_url` as an SVG document. */
+	qr_svg?: string | null,
+	/**  The last failure to switch LAN access. */
+	error?: string | null,
+};
+
+/**  LAN access as the device setup wizard shows it. */
+export type DeviceAccess_Serialize = {
+	/**  The proxy listens on every interface, so phones can reach it. */
+	enabled: boolean,
+	/**  The interface the toolbar and the QR codes use, by name. */
+	interface: string | null,
+	/**  Best first. */
+	interfaces: LanInterface[],
+	port: number | null,
+	/**  The chosen interface's address and port, e.g. `10.0.0.5:9090`. */
+	proxy: string | null,
+	/**  `http://<lan-ip>:<port>/`: the onboarding page, for QR codes. */
+	setup_url: string | null,
+	/**  A QR code of `setup_url` as an SVG document. */
+	qr_svg: string | null,
+	/**  The last failure to switch LAN access. */
+	error: string | null,
+};
+
+/**  A LAN client: one IP address, with its nickname and what it sent. */
+export type DeviceClient = DeviceClient_Serialize | DeviceClient_Deserialize;
+
+/**  A LAN client: one IP address, with its nickname and what it sent. */
+export type DeviceClient_Deserialize = {
+	ip: string,
+	nickname?: string | null,
+	decision: DeviceDecision,
+	/**  What the Client column and the sidebar show for its flows. */
+	label: string,
+	/**  Since launch. */
+	flows: number,
+	/**  Flows decrypted by the MITM: the device trusts the CA. */
+	https_decrypted: number,
+	/**  HTTPS connections the device refused (it doesn't trust the CA yet). */
+	https_refused: number,
+	/**  The device fetched the onboarding page or a certificate. */
+	onboarding: boolean,
+	/**  Epoch ms. */
+	last_seen_ms?: number | null,
+	/**  Connections currently held while the decision is pending. */
+	waiting: number,
+};
+
+/**  A LAN client: one IP address, with its nickname and what it sent. */
+export type DeviceClient_Serialize = {
+	ip: string,
+	nickname: string | null,
+	decision: DeviceDecision,
+	/**  What the Client column and the sidebar show for its flows. */
+	label: string,
+	/**  Since launch. */
+	flows: number,
+	/**  Flows decrypted by the MITM: the device trusts the CA. */
+	https_decrypted: number,
+	/**  HTTPS connections the device refused (it doesn't trust the CA yet). */
+	https_refused: number,
+	/**  The device fetched the onboarding page or a certificate. */
+	onboarding: boolean,
+	/**  Epoch ms. */
+	last_seen_ms: number | null,
+	/**  Connections currently held while the decision is pending. */
+	waiting: number,
+};
+
+/**  What the user decided about a LAN client. */
+export type DeviceDecision = 
+/**  Not answered yet: its connections are held for up to 30 s. */
+"pending" | "allowed" | "denied";
+
+/**  LAN clients and local device activity, pushed whenever they change. */
+export type DevicesSnapshot = DevicesSnapshot_Serialize | DevicesSnapshot_Deserialize;
+
+/**  LAN clients and local device activity, pushed whenever they change. */
+export type DevicesSnapshot_Deserialize = {
+	/**  Pending first, then by IP. */
+	devices: DeviceClient_Deserialize[],
+	simulator: LocalActivity,
+	emulator: LocalActivity,
+};
+
+/**  LAN clients and local device activity, pushed whenever they change. */
+export type DevicesSnapshot_Serialize = {
+	/**  Pending first, then by IP. */
+	devices: DeviceClient_Serialize[],
+	simulator: LocalActivity,
+	emulator: LocalActivity,
+};
 
 /**  A registrable domain (`example.com`) and the hosts under it. */
 export type DomainNode = {
@@ -750,6 +929,20 @@ export type KvMatch_Serialize = {
 	value: Pattern_Serialize | null,
 	/**  Inverts the condition: the name is absent, or no value matches. */
 	negate: boolean,
+};
+
+/**  An IPv4 address of this machine that other devices can reach. */
+export type LanInterface = {
+	/**  `en0`, `bridge100`, … */
+	name: string,
+	ip: string,
+};
+
+/**  Traffic from local clients of one kind (the Simulator, the emulator). */
+export type LocalActivity = {
+	flows: number,
+	https_decrypted: number,
+	https_refused: number,
 };
 
 export type MapLocalSource = { kind: "inline"; body: string } | { kind: "file"; path: string } | 
@@ -1097,6 +1290,51 @@ export type SidebarSnapshot_Serialize = {
 	apps: AppCount_Serialize[],
 	/**  Sorted by domain. */
 	domains: DomainNode[],
+};
+
+/**  A booted iOS Simulator device. */
+export type SimDevice = {
+	udid: string,
+	name: string,
+	/**  `iOS 18.0`. */
+	runtime: string,
+	/**  The CA was added to its keychain since launch. */
+	cert_installed: boolean,
+};
+
+/**  One device's result from "Install to all booted". */
+export type SimInstallResult = SimInstallResult_Serialize | SimInstallResult_Deserialize;
+
+/**  One device's result from "Install to all booted". */
+export type SimInstallResult_Deserialize = {
+	udid: string,
+	name: string,
+	error?: string | null,
+};
+
+/**  One device's result from "Install to all booted". */
+export type SimInstallResult_Serialize = {
+	udid: string,
+	name: string,
+	error: string | null,
+};
+
+export type SimulatorStatus = SimulatorStatus_Serialize | SimulatorStatus_Deserialize;
+
+export type SimulatorStatus_Deserialize = {
+	/**  `xcrun simctl` works (Xcode is installed and selected). */
+	available: boolean,
+	/**  Why it doesn't, or the error listing devices. */
+	detail?: string | null,
+	booted: SimDevice[],
+};
+
+export type SimulatorStatus_Serialize = {
+	/**  `xcrun simctl` works (Xcode is installed and selected). */
+	available: boolean,
+	/**  Why it doesn't, or the error listing devices. */
+	detail: string | null,
+	booted: SimDevice[],
 };
 
 export type SortDir = "asc" | "desc";

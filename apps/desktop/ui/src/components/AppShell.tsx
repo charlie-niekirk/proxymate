@@ -1,6 +1,8 @@
 import { BreakpointEditor } from "@/components/Breakpoints/BreakpointEditor";
 import { CertWizard } from "@/components/CertWizard";
 import { DetailPane } from "@/components/DetailPane";
+import { DeviceAllowPrompt } from "@/components/DeviceAllowPrompt";
+import { DeviceSetupSheet } from "@/components/DeviceSetup/DeviceSetupSheet";
 import { FilterBar } from "@/components/FilterBar";
 import { FlowTable } from "@/components/FlowTable/FlowTable";
 import { Footer } from "@/components/Footer";
@@ -41,6 +43,8 @@ export function AppShell() {
     <CertWizard />
     <RulesEditor />
     <BreakpointEditor />
+    <DeviceSetupSheet />
+    <DeviceAllowPrompt />
     </>
   );
 }

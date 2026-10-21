@@ -4,6 +4,7 @@
 //! `io/` grows HAR, cURL and sessions in M8.
 
 mod client;
+mod devices;
 mod engine;
 mod ingest;
 mod integration;
@@ -16,7 +17,8 @@ pub mod synth;
 pub mod tls;
 pub mod trust;
 
-pub use client::ClientApp;
+pub use client::{ClientApp, ClientKind};
+pub use devices::{DevicesSink, HOLD as DEVICE_HOLD, ONBOARDING_HOST};
 pub use engine::{BodyBytes, DeltaSink, Engine, EngineConfig, PUBLISH_INTERVAL};
 pub use integration::SidebarSink;
 pub use proxy::ProxyConfig;
@@ -45,4 +47,7 @@ pub enum Error {
     Platform(#[from] pm_platform::PlatformError),
     #[error(transparent)]
     Rule(#[from] rules::RuleError),
+    /// Device setup: a bad address, a missing tool, a non-emulator serial.
+    #[error("{0}")]
+    Device(String),
 }

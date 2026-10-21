@@ -2,6 +2,7 @@ import { Channel, isTauri } from "@tauri-apps/api/core";
 
 import {
   commands,
+  type AndroidStatus_Serialize,
   type BodyPart,
   type BreakpointInfo_Deserialize,
   type BreakpointInfo_Serialize,
@@ -12,12 +13,17 @@ import {
   type RuleSettings,
   type RuleTestResult_Serialize,
   type CaInfo,
+  type DeviceAccess_Serialize,
+  type DevicesSnapshot_Deserialize,
+  type DevicesSnapshot_Serialize,
   type FilterSpec_Deserialize,
   type FlowDetail_Serialize,
   type FlowSummary_Serialize,
   type ProxyStatus_Serialize,
   type RowsPage_Serialize,
   type SidebarSnapshot_Deserialize,
+  type SimInstallResult_Serialize,
+  type SimulatorStatus_Serialize,
   type SortSpec,
   type SsePage_Serialize,
   type SslSettings,
@@ -112,6 +118,28 @@ export interface Backend {
   getBreakpointBody(id: number): Promise<ArrayBuffer>;
   /** Continue (with edits), abort or answer; the first resolution wins. */
   resolveBreakpoint(id: number, resolution: BreakpointResolution_Deserialize): Promise<void>;
+
+  // ---- Device setup (M9) ----
+  /** LAN interfaces, the chosen one, the setup URL and its QR code (SVG). */
+  getDeviceAccess(): Promise<DeviceAccess_Serialize>;
+  /** Listens on every interface, or loopback only; failures come back in `error`. */
+  setLanAccess(on: boolean): Promise<DeviceAccess_Serialize>;
+  /** Picks the interface the toolbar and QR codes show. */
+  setLanInterface(name: string): Promise<DeviceAccess_Serialize>;
+  /** LAN clients (pending prompts first) and device activity, pushed on change. */
+  subscribeDevices(onSnapshot: (snapshot: DevicesSnapshot_Deserialize) => void): Promise<void>;
+  /** Allows or denies a LAN client; its held connections proceed or are refused. */
+  decideDevice(ip: string, allow: boolean, nickname: string | null): Promise<DevicesSnapshot_Serialize>;
+  /** Drops a LAN client from the list; it is asked about again. */
+  forgetDevice(ip: string): Promise<DevicesSnapshot_Serialize>;
+  getSimulatorStatus(): Promise<SimulatorStatus_Serialize>;
+  /** Adds the CA to these booted simulators (all booted if empty). */
+  installSimulatorCert(udids: string[]): Promise<SimInstallResult_Serialize[]>;
+  getAndroidStatus(): Promise<AndroidStatus_Serialize>;
+  /** Points an emulator's global proxy at us (`10.0.2.2:<port>`), or clears it. */
+  setAndroidProxy(serial: string, on: boolean): Promise<AndroidStatus_Serialize>;
+  /** Copies the CA to the device's Downloads; resolves to the path there. */
+  pushAndroidCert(serial: string): Promise<string>;
 }
 
 type Result<T> = { status: "ok"; data: T } | { status: "error"; error: string };
@@ -193,6 +221,21 @@ const tauriBackend: Backend = {
   resolveBreakpoint: async (id, resolution) => {
     await unwrap(commands.resolveBreakpoint(id, resolution));
   },
+  getDeviceAccess: () => unwrap(commands.getDeviceAccess()),
+  setLanAccess: (on) => unwrap(commands.setLanAccess(on)),
+  setLanInterface: (name) => unwrap(commands.setLanInterface(name)),
+  subscribeDevices: async (onSnapshot) => {
+    const channel = new Channel<DevicesSnapshot_Deserialize>();
+    channel.onmessage = onSnapshot;
+    await commands.subscribeDevices(channel);
+  },
+  decideDevice: (ip, allow, nickname) => unwrap(commands.decideDevice(ip, allow, nickname)),
+  forgetDevice: (ip) => unwrap(commands.forgetDevice(ip)),
+  getSimulatorStatus: () => unwrap(commands.getSimulatorStatus()),
+  installSimulatorCert: (udids) => unwrap(commands.installSimulatorCert(udids)),
+  getAndroidStatus: () => unwrap(commands.getAndroidStatus()),
+  setAndroidProxy: (serial, on) => unwrap(commands.setAndroidProxy(serial, on)),
+  pushAndroidCert: (serial) => unwrap(commands.pushAndroidCert(serial)),
 };
 
 function pickBackend(): Backend {

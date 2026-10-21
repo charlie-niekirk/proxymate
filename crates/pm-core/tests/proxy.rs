@@ -238,13 +238,13 @@ async fn unreachable_upstreams_fail_the_flow_with_502() {
 }
 
 #[tokio::test]
-async fn requests_to_the_proxy_itself_get_the_info_page() {
+async fn requests_to_the_proxy_itself_get_the_setup_page() {
     let (engine, proxy) = proxy().await;
     let (status, body) = client::get(proxy, &format!("http://{proxy}/")).await;
     assert_eq!(status, 200);
-    assert!(String::from_utf8_lossy(&body).contains("Proxymate is running"));
+    assert!(String::from_utf8_lossy(&body).contains("Proxymate setup"));
     let origin_form = client::raw(proxy, b"GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n").await;
-    assert!(String::from_utf8_lossy(&origin_form).contains("Proxymate is running"));
+    assert!(String::from_utf8_lossy(&origin_form).contains("Proxymate setup"));
     engine.flush();
     assert_eq!(engine.total(), 0);
 }

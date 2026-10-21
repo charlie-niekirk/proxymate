@@ -40,6 +40,8 @@ Run these from the repo root unless noted.
 | Zoo in the browser UI | `npm run dev`, then open `http://localhost:1420/?zoo` (mock backend serving the zoo; `&select=<id>&theme=light&requestTab=Body`) |
 | Viewer snapshots + preview safety (Playwright) | `npm run e2e` (first time: `npx -w @proxymate/ui playwright install webkit chromium`). `-- --update-snapshots` after an intended visual change; `PM_E2E_PORT` picks the dev server port (default 1425) |
 | Open the app with the cert wizard / a search | `VITE_PM_OPEN=cert-wizard`, `VITE_PM_FILTER=<text>` (dev only, for screenshots) |
+| Open the app on device setup | `VITE_PM_OPEN=device-setup:iphone` (or `simulator`, `android`, `emulator`). With `VITE_PM_REMOTE=1`, `{"deviceTab":"android"}` switches tabs and `{"click":"<data-testid>"}` clicks a control (e.g. `simulator-install`, `lan-access`) |
+| Allow prompt in the browser UI | `npm run dev`, then open `http://localhost:1420/?devicePrompt=192.168.1.42` (mock LAN client waiting to be allowed) |
 | Run the app as the system proxy | `PROXYMATE_SYSTEM_PROXY=1 npm run tauri dev`. Changes the real macOS proxy settings: restored on quit, on signals, and by the guardian after `kill -9` |
 | UI only, in a browser | `npm run dev` (http://localhost:1420, in-memory mock backend) |
 | Rust format / lint / test | `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` |
@@ -66,7 +68,8 @@ crates/pm-core       headless Engine: proxy/ (h1 forward proxy, mitm.rs: CONNECT
                      trust (handshake check), integration (the OS-facing Engine methods), synth; later rules/
 crates/pm-platform   OS integration traits; macos/ impls, stub.rs elsewhere: fs (private files), sysproxy (backup +
                      restore over a ProxyBackend; networksetup), trust (keychain), procinfo (libproc port scan, app
-                     bundles, icons), process (kqueue exit wait)
+                     bundles, icons), process (kqueue exit wait), netif (if-addrs), simctl and adb (over a
+                     command::Runner, faked in tests)
 crates/pm-mcp        MCP server over Arc<Engine>, empty until M7
 crates/pm-testkit    test upstreams (h1, TLS h1/h2 with a test CA, WS echo, slow SSE), the body-viewer zoo (fixtures/zoo),
                      proxy, HTTPS and WebSocket clients; re-export of pm_core::synth
@@ -153,3 +156,9 @@ Targets:
 - The client app is resolved per connection in the background (`client.rs`); flows that start earlier get a `ClientResolved` event. The Client column and the sidebar Apps show its name; `pmicon://localhost/<name>` serves its icon.
 - The certificate wizard's trust check CONNECTs to `verify.proxymate.test`, which the proxy answers itself without dialling or recording a flow.
 - A `host` filter of `*.example.com` matches `example.com` and every host under it (sidebar domain rows).
+
+**Device setup (M9)**
+- `pm-core/src/devices.rs` owns LAN access, the allow-list (the `devices` table and `lan` settings row in `app.sqlite`, through M5's `rules::db::AppDb` on its own connection) and device activity; `proxy/onboarding.rs` serves `/`, `/cert.pem`, `/cert.crt` and `/proxymate.mobileconfig` to requests addressed to the proxy (origin form, our own address, or `proxy.mate`).
+- Every accepted connection goes through `Engine::admit` first: loopback and our own addresses pass, LAN IPs wait up to 30 s for the "Allow?" prompt. Tests can't make a non-local peer, so the hold/allow/deny logic is unit-tested on `DeviceRegistry` directly.
+- LAN access rebinds to `0.0.0.0` on the same port. Use `Engine::proxy_addr()` (loopback) for anything this machine connects to, and `display_addr` for what the user sees.
+- Tests never change the machine: no simulator boot or keychain install, no emulator proxy. Real `simctl`/`adb` runs need the user's OK.

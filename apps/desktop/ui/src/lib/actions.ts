@@ -1,6 +1,16 @@
 import type { PresetKind } from "@/bindings";
 import { backend } from "@/lib/backend";
-import { caInfoKey, proxyStatusKey, queryClient, rulesKey, sslSettingsKey, systemProxyKey, trustStatusKey } from "@/lib/query";
+import {
+  androidKey,
+  caInfoKey,
+  deviceAccessKey,
+  proxyStatusKey,
+  queryClient,
+  rulesKey,
+  sslSettingsKey,
+  systemProxyKey,
+  trustStatusKey,
+} from "@/lib/query";
 import { GLOBAL_THROTTLE_RULE_ID, curlCommand, normalizeRule, withThrottle, type Rule, type ThrottlePreset } from "@/lib/rules";
 import { useUi } from "@/store/ui";
 
@@ -123,4 +133,23 @@ export async function copyFlowUrl(flow: number) {
 export async function copyFlowCurl(flow: number) {
   const detail = await backend.getFlowDetail(flow);
   if (detail) await navigator.clipboard.writeText(curlCommand(detail));
+}
+
+// ---- Device setup ----
+
+/** Listens on every interface (or loopback only); the toolbar address follows. */
+export async function setLanAccess(on: boolean) {
+  queryClient.setQueryData(deviceAccessKey, await backend.setLanAccess(on));
+  await queryClient.invalidateQueries({ queryKey: proxyStatusKey });
+}
+
+/** Picks the interface the toolbar and the QR codes use. */
+export async function setLanInterface(name: string) {
+  queryClient.setQueryData(deviceAccessKey, await backend.setLanInterface(name));
+  await queryClient.invalidateQueries({ queryKey: proxyStatusKey });
+}
+
+/** Points an emulator's proxy at us, or clears it. */
+export async function setAndroidProxy(serial: string, on: boolean) {
+  queryClient.setQueryData(androidKey, await backend.setAndroidProxy(serial, on));
 }

@@ -8,11 +8,17 @@
 //! - `process`: pid liveness and exit waits (M4)
 //! - `netif`: LAN interface addresses for device setup (M9)
 //! - `simctl`: iOS Simulator root-cert install (M9)
+//! - `adb`: Android emulator proxy and CA push (M9)
+//! - `command`: the process runner `simctl` and `adb` are tested through (M9)
 //! - `fs`: private files (the CA key) (M2)
 
+pub mod adb;
+pub mod command;
 pub mod fs;
+pub mod netif;
 pub mod process;
 pub mod procinfo;
+pub mod simctl;
 pub mod sysproxy;
 pub mod trust;
 

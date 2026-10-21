@@ -17,6 +17,8 @@ pub struct AppInfo {
     pub bundle_path: Option<PathBuf>,
     /// The pid the name came from: the app's, not its helper's.
     pub pid: u32,
+    /// The process runs inside an iOS Simulator device.
+    pub simulator: bool,
 }
 
 pub trait ProcessInfo: Send + Sync {
@@ -63,6 +65,12 @@ pub fn is_helper(path: &Path) -> bool {
     path.contains(".xpc/") || path.contains(".framework/")
 }
 
+/// True for executables of an iOS Simulator runtime or device: their
+/// paths are under a `CoreSimulator` directory.
+pub fn is_simulator(path: &Path) -> bool {
+    path.components().any(|c| c.as_os_str() == "CoreSimulator")
+}
+
 /// The display name of an `.app` path: its file name without `.app`.
 pub fn app_name(bundle: &Path) -> String {
     bundle
@@ -90,5 +98,12 @@ mod tests {
         );
         assert!(is_helper(webkit));
         assert!(!is_helper(Path::new("/opt/homebrew/bin/node")));
+        assert!(!is_simulator(webkit));
+
+        let sim = Path::new(
+            "/Library/Developer/CoreSimulator/Volumes/iOS_23C54/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.2.simruntime/Contents/Resources/RuntimeRoot/Applications/MobileSafari.app/MobileSafari",
+        );
+        assert!(is_simulator(sim));
+        assert_eq!(app_name(&outermost_app(sim).unwrap()), "MobileSafari");
     }
 }
