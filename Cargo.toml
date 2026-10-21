@@ -36,6 +36,25 @@ parking_lot = "0.13"
 rayon = "1"
 thiserror = "2"
 
+# Proxy engine
+tokio = { version = "1.47", features = ["rt-multi-thread", "net", "io-util", "sync", "time", "macros"] }
+hyper = { version = "1.7", features = ["http1", "server", "client"] }
+hyper-util = { version = "0.1.17", features = ["tokio", "client-legacy", "http1"] }
+http = "1"
+http-body = "1"
+http-body-util = "0.1"
+bytes = "1"
+
+# Storage and decoding
+postcard = { version = "1", default-features = false, features = ["use-std"] }
+moka = { version = "0.12", features = ["sync"] }
+uuid = { version = "1", features = ["v4"] }
+flate2 = "1"
+brotli = "8"
+zstd = { version = "0.13", default-features = false }
+
+criterion = { version = "0.5", default-features = false }
+
 [workspace.lints.rust]
 unsafe_code = "deny"
 

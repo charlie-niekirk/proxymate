@@ -28,12 +28,16 @@ Run these from the repo root unless noted.
 |---|---|
 | Install JS deps | `npm install` (npm workspaces; pnpm is not used) |
 | Run the app | `npm run tauri dev` |
-| Run the app with the perf probe | `VITE_PM_PERF_PROBE=1 npm run tauri dev`. Scroll and filter timings print in the terminal as `[perf-probe]` |
+| Run the app with the perf probe | `PROXYMATE_SYNTH_FLOWS=100000 VITE_PM_PERF_PROBE=1 npm run tauri dev`. Scroll and filter timings print in the terminal as `[perf-probe]` |
+| Run the app with Auto Select on | `VITE_PM_AUTO_SELECT=1 npm run tauri dev`. New traffic is selected and inspected without a click (for verifying from a shell) |
+| Headless proxy | `cargo run -p proxymate-cli -- serve [PORT]`. Logs each finished flow |
+| Test upstream by hand | `cargo run -p pm-testkit --bin upstream`, then `curl -x http://127.0.0.1:9090 http://127.0.0.1:<port>/json` |
 | UI only, in a browser | `npm run dev` (http://localhost:1420, in-memory mock backend) |
 | Rust format / lint / test | `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` |
 | UI typecheck / lint / test / build | `npm run typecheck`, `npm run lint`, `npm run test`, `npm run build` |
 | Regenerate TS bindings | `cargo test -p proxymate-desktop export_bindings`. Debug app launches also regenerate them |
 | Engine micro-bench | `cargo run --release -p proxymate-cli -- bench [FLOWS]` |
+| Ingest bench (criterion, target < 2 s per 100k flows) | `cargo bench -p pm-core --bench ingest` |
 | Release bundle | `npm run tauri build` |
 
 CI (`.github/workflows/ci.yml`):
@@ -46,10 +50,11 @@ Run the same checks locally before pushing.
 
 ```
 crates/pm-model      pure types (serde + specta): FlowSummary, FlowRow, FilterSpec, SortSpec, ViewDelta, ...
-crates/pm-core       headless Engine: store/ (arena + views), synth (synthetic flows); later proxy/, tls/, rules/, io/
+crates/pm-core       headless Engine: proxy/ (h1 forward proxy), recorder (per-flow capture), ingest (event thread),
+                     store/ (arena + views, segments, bodies, details), io/ (content kind, decoding), synth; later tls/, rules/
 crates/pm-platform   OS integration traits + cfg impls (sysproxy, trust, procinfo, ...), empty until M4
 crates/pm-mcp        MCP server over Arc<Engine>, empty until M7
-crates/pm-testkit    test upstreams, test CA, re-export of pm_core::synth
+crates/pm-testkit    test upstreams and proxy clients (h1 now), later the test CA; re-export of pm_core::synth
 apps/desktop/src-tauri   thin Tauri adapters (commands.rs) + window chrome (window.rs)
 apps/desktop/ui          Vite + React 19 + TS strict + Tailwind v4 + shadcn/ui
 apps/cli                 proxymate-cli (headless; `bench` today)
@@ -63,7 +68,7 @@ Rules:
 
 ## Data path (performance core)
 
-1. Flows enter the store in batches, under one write lock per batch (`Engine::insert_flows` / `update_flows`). Views update incrementally.
+1. Traffic handlers record through a `FlowRecorder` (`Engine::begin_flow`). Summary changes go as small `FlowEvent`s over one channel to the `pm-ingest` thread, which applies each batch (up to 5 ms) under one write lock. Views update incrementally. Bodies never travel in events: they are tee'd into `store/blob.rs` (inline up to 8 KB, else segment files, capped at 64 MB, still content-encoded).
 2. The publisher thread ticks at 20 Hz and sends one `ViewDelta` per subscribed view over a `tauri::ipc::Channel`. A delta carries `{total, len, appended, changed ids, structural}`.
 3. The UI (`hooks/useFlowView.ts` and `lib/rowCache.ts`) fetches only the visible window plus one page of read-ahead with `get_rows(view, start, count)`. Rows arrive as positional `FlowRow` tuples, decoded by `lib/flow.ts`.
 4. `set_filter` and `set_sort` refilter synchronously in Rust (rayon above 50k flows) and return the new length right away.
@@ -107,7 +112,8 @@ Targets:
 - The overlay title bar with inset traffic lights is set in `tauri.conf.json`.
 - The window is transparent and `window.rs` applies sidebar vibrancy. Panes must paint opaque backgrounds, except the sidebar (`--sidebar` is transparent on macOS).
 
-**Synthetic data**
-- Until the proxy exists, the app seeds 100k synthetic flows plus a live trickle.
-- Tune it with `PROXYMATE_SYNTH_FLOWS` and `PROXYMATE_SYNTH_RATE`; set the rate to 0 to stop the trickle.
-- M1 replaces the seeding with real capture. Keep `synth` for tests and benches.
+**Proxy and synthetic data**
+- The app starts the proxy on 127.0.0.1:9090, falling back to 9091–9099. The toolbar shows the bound port, or why it couldn't bind.
+- Synthetic data is opt-in: `PROXYMATE_SYNTH_FLOWS` seeds flows and `PROXYMATE_SYNTH_RATE` adds that many live ones per second. Both default to 0. Keep `synth` for tests and benches.
+- Live segment files live under `~/Library/Application Support/Proxymate/live/<uuid>/`. Clear and quit delete them; the next launch sweeps any left by a crash.
+- Integration tests are in `crates/pm-core/tests/`, using `pm-testkit` upstreams and clients. Tests that need their own process (RSS, environment variables) get their own file.

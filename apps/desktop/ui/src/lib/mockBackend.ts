@@ -2,8 +2,10 @@ import type {
   ContentGroup,
   ContentKind,
   FilterSpec_Deserialize,
+  FlowDetail_Serialize,
   FlowRow_Serialize,
   FlowSummary_Serialize,
+  ProxyStatus_Serialize,
   ViewDelta,
 } from "@/bindings";
 import type { Backend } from "@/lib/backend";
@@ -13,12 +15,14 @@ import type { Backend } from "@/lib/backend";
  * tests. Static data, no live traffic, no sorting. The real logic is in Rust.
  */
 export function createMockBackend(count: number): Backend {
+  let recording = true;
+  const status = (): ProxyStatus_Serialize => ({ listening: "127.0.0.1:9090", error: null, recording });
   const hosts = ["api.github.com", "www.google.com", "api.stripe.com", "slack.com", "localhost", "i.ytimg.com"];
   const kinds: ContentKind[] = ["json", "html", "javascript", "image", "css", "xml", "graphql", "none"];
   const methods = ["GET", "GET", "GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"];
   const statuses = [200, 200, 200, 201, 204, 304, 404, 500];
   const now = Date.now();
-  const flows: FlowRow_Serialize[] = Array.from({ length: count }, (_, i) => {
+  let flows: FlowRow_Serialize[] = Array.from({ length: count }, (_, i) => {
     const host = hosts[i % hosts.length]!;
     const https = host !== "localhost";
     return [
@@ -101,5 +105,55 @@ export function createMockBackend(count: number): Backend {
       const len = views.get(view)?.length ?? 0;
       setTimeout(() => onDelta({ view, seq: 1, total: flows.length, len, appended: 0, changed: [], structural: true }), 0);
     },
+    async getFlowDetail(id): Promise<FlowDetail_Serialize | null> {
+      const f = flows[id];
+      if (!f) return null;
+      const body = mockBody(f[9]);
+      return {
+        id,
+        request: {
+          method: f[3],
+          url: `${f[2]}://${f[4]}${f[6]}${f[7] ? `?${f[7]}` : ""}`,
+          version: "HTTP/1.1",
+          headers: [
+            { name: "host", value: f[4] },
+            { name: "user-agent", value: "curl/8.7.1" },
+            { name: "accept", value: "*/*" },
+          ],
+        },
+        response: {
+          status: f[8] ?? 200,
+          reason: "OK",
+          version: "HTTP/1.1",
+          headers: [
+            { name: "content-type", value: f[9] === "json" ? "application/json" : "text/plain" },
+            { name: "content-length", value: String(body.length) },
+          ],
+        },
+        request_body: { size: 0, captured: 0, truncated: false, encoding: null, complete: true },
+        response_body: { size: body.length, captured: body.length, truncated: false, encoding: null, complete: true },
+        error: null,
+      };
+    },
+    async getBody(id, part) {
+      const f = flows[id];
+      const bytes = f && part === "response" ? new TextEncoder().encode(mockBody(f[9])) : new Uint8Array();
+      return bytes.buffer as ArrayBuffer;
+    },
+    async clearFlows() {
+      flows = [];
+      for (const view of views.keys()) views.set(view, []);
+    },
+    async setRecording(on) {
+      recording = on;
+      return status();
+    },
+    async getProxyStatus() {
+      return status();
+    },
   };
+}
+
+function mockBody(kind: ContentKind): string {
+  return kind === "json" ? JSON.stringify({ mock: true, items: [1, 2, 3], nested: { ok: true } }) : "mock body\n";
 }

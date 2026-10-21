@@ -2,6 +2,7 @@ import { useEffect, useReducer, useRef, useState } from "react";
 
 import type { ViewDelta } from "@/bindings";
 import { backend } from "@/lib/backend";
+import { flowKey, queryClient } from "@/lib/query";
 import { RowCache } from "@/lib/rowCache";
 import { useUi } from "@/store/ui";
 
@@ -58,6 +59,7 @@ export function useFlowView() {
           if (d.len !== cache.len) cache.append(d.len);
         }
         useUi.getState().setStats({ len: d.len, total: d.total });
+        refreshInspected(d);
         bump();
       });
     })();
@@ -93,6 +95,20 @@ export function useFlowView() {
   }, [live, sort]);
 
   return { cache: live?.cache ?? null, version };
+}
+
+/** Refetches the inspected flow if this delta may have changed it. */
+function refreshInspected(d: ViewDelta) {
+  const { selectedId, select } = useUi.getState();
+  if (selectedId === null) return;
+  if (d.total === 0) {
+    // Cleared.
+    select(null);
+    return;
+  }
+  if (d.structural || d.changed.includes(selectedId)) {
+    void queryClient.invalidateQueries({ queryKey: flowKey(selectedId) });
+  }
 }
 
 /**

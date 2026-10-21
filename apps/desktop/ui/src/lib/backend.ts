@@ -2,8 +2,11 @@ import { Channel, isTauri } from "@tauri-apps/api/core";
 
 import {
   commands,
+  type BodyPart,
   type FilterSpec_Deserialize,
+  type FlowDetail_Serialize,
   type FlowSummary_Serialize,
+  type ProxyStatus_Serialize,
   type RowsPage_Serialize,
   type SortSpec,
   type ViewDelta,
@@ -20,6 +23,12 @@ export interface Backend {
   getRows(view: number, start: number, count: number): Promise<RowsPage_Serialize>;
   getFlow(id: number): Promise<FlowSummary_Serialize | null>;
   subscribe(view: number, onDelta: (delta: ViewDelta) => void): Promise<void>;
+  getFlowDetail(id: number): Promise<FlowDetail_Serialize | null>;
+  /** Body bytes; with `decoded`, content-encoding undone (rejects if that fails). */
+  getBody(id: number, part: BodyPart, decoded: boolean): Promise<ArrayBuffer>;
+  clearFlows(): Promise<void>;
+  setRecording(on: boolean): Promise<ProxyStatus_Serialize>;
+  getProxyStatus(): Promise<ProxyStatus_Serialize>;
 }
 
 type Result<T> = { status: "ok"; data: T } | { status: "error"; error: string };
@@ -42,6 +51,13 @@ const tauriBackend: Backend = {
     channel.onmessage = onDelta;
     await unwrap(commands.subscribeView(view, channel));
   },
+  getFlowDetail: (id) => unwrap(commands.getFlowDetail(id)),
+  // `get_body` answers with a raw ipc::Response, which arrives as an ArrayBuffer;
+  // the binding can only say `unknown`.
+  getBody: async (id, part, decoded) => (await unwrap(commands.getBody(id, part, decoded))) as ArrayBuffer,
+  clearFlows: () => commands.clearFlows(),
+  setRecording: (on) => commands.setRecording(on),
+  getProxyStatus: () => commands.getProxyStatus(),
 };
 
 /**
