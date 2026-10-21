@@ -37,6 +37,7 @@ impl Proxy {
         let engine = Engine::with_config(EngineConfig {
             data_dir: Some(dir),
             extra_upstream_roots: upstream.map(|u| vec![u.ca_der()]).unwrap_or_default(),
+            ..Default::default()
         });
         let config = ProxyConfig {
             ports: 0..=0,

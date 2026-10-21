@@ -26,7 +26,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' data: blob: pmbody: http://pmbody.localhost; media-src 'self' blob: pmbody: http://pmbody.localhost; frame-src 'self' blob: pmbody: http://pmbody.localhost; font-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; connect-src 'self' ipc: http://ipc.localhost pmbody: http://pmbody.localhost"
+      "csp": "default-src 'self'; img-src 'self' data: blob: pmicon: http://pmicon.localhost pmbody: http://pmbody.localhost; media-src 'self' blob: pmbody: http://pmbody.localhost; frame-src 'self' blob: pmbody: http://pmbody.localhost; font-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; connect-src 'self' ipc: http://ipc.localhost pmbody: http://pmbody.localhost"
     }
   },
   "bundle": {

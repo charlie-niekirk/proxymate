@@ -50,6 +50,7 @@ use super::{
     now_ms, record_request, response_head, strip_hop_by_hop, text_response,
 };
 use crate::Engine;
+use crate::client::PeerClient;
 use crate::recorder::FlowRecorder;
 use crate::tls::{H2, HTTP11, TlsContext, summarize};
 
@@ -61,6 +62,9 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
 /// handshake and rejected it (pinning). Idle preconnects live far longer.
 const PINNED_CLOSE_WINDOW: Duration = Duration::from_secs(2);
 const TUNNEL_PROGRESS_INTERVAL: Duration = Duration::from_millis(500);
+/// With per-app SSL exclusions, a CONNECT waits this long at most for its
+/// client app to be known before deciding (a scan takes a few ms).
+const CLIENT_WAIT: Duration = Duration::from_millis(500);
 
 type UpstreamBody = TeeBody<Incoming>;
 
@@ -70,11 +74,13 @@ struct Target {
     host: String,
     port: u16,
     head: RequestHead,
+    /// The app the CONNECT came from.
+    peer: Arc<PeerClient>,
 }
 
 /// Handles a CONNECT request and returns its response; the tunnel itself
 /// runs in a spawned task once hyper hands over the connection.
-pub(super) async fn connect(ctx: Arc<ProxyCtx>, req: Request<Incoming>) -> Response<ProxyBody> {
+pub(super) async fn connect(ctx: Arc<ProxyCtx>, peer: Arc<PeerClient>, req: Request<Incoming>) -> Response<ProxyBody> {
     let Some(authority) = req.uri().authority().cloned() else {
         return text_response(StatusCode::BAD_REQUEST, "Proxymate: CONNECT needs host:port\n");
     };
@@ -94,8 +100,26 @@ pub(super) async fn connect(ctx: Arc<ProxyCtx>, req: Request<Incoming>) -> Respo
             version: super::version(req.version()),
             headers: headers(req.headers()),
         },
+        peer,
     };
-    if !engine.ssl_policy().intercepts(&target.host) {
+    if target.host.eq_ignore_ascii_case(crate::trust::PROBE_HOST) {
+        let tls = engine.tls();
+        tokio::spawn(async move {
+            if let Ok(upgraded) = hyper::upgrade::on(req).await {
+                trust_probe(&tls, TokioIo::new(upgraded)).await;
+            }
+        });
+        return connection_established();
+    }
+    let policy = engine.ssl_policy();
+    let mut decrypt = policy.intercepts(&target.host);
+    if decrypt
+        && policy.has_app_exclusions()
+        && let Some(app) = target.peer.app(CLIENT_WAIT).await
+    {
+        decrypt = !policy.excludes_app(&app.name, app.bundle_id.as_deref());
+    }
+    if !decrypt {
         return passthrough(&engine, req, target).await;
     }
     drop(engine);
@@ -105,6 +129,30 @@ pub(super) async fn connect(ctx: Arc<ProxyCtx>, req: Request<Incoming>) -> Respo
         }
     });
     connection_established()
+}
+
+/// Answers the certificate wizard's trust check: a TLS handshake with a
+/// leaf for [`crate::trust::PROBE_HOST`], then one canned response. Nothing
+/// is dialled and nothing recorded.
+async fn trust_probe<S>(tls: &TlsContext, io: S)
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    use tokio::io::AsyncWriteExt;
+    let acceptor = LazyConfigAcceptor::new(rustls::server::Acceptor::default(), io);
+    let Ok(Ok(start)) = tokio::time::timeout(HANDSHAKE_TIMEOUT, acceptor).await else {
+        return;
+    };
+    let host = crate::trust::PROBE_HOST;
+    let Ok(config) = tls.server_config(Some(HTTP11), Some(host), host) else {
+        return;
+    };
+    if let Ok(Ok(mut stream)) = tokio::time::timeout(HANDSHAKE_TIMEOUT, start.into_stream(config)).await {
+        let _ = stream
+            .write_all(b"HTTP/1.1 204 No Content\r\nconnection: close\r\n\r\n")
+            .await;
+        let _ = stream.shutdown().await;
+    }
 }
 
 fn connection_established() -> Response<ProxyBody> {
@@ -408,7 +456,7 @@ fn record_connect(
         tls: tls_info,
         timing: Timing::default(),
     };
-    engine.begin_flow(summary, detail)
+    target.peer.begin_flow(engine, summary, detail)
 }
 
 fn connect_response_head() -> ResponseHead {
@@ -434,12 +482,13 @@ where
     let service = service_fn(move |mut req: Request<Incoming>| {
         let ctx = ctx.clone();
         let authority = authority.clone();
+        let peer = target.peer.clone();
         async move {
             let pq = req.uri().path_and_query().map_or("/", PathAndQuery::as_str);
             match format!("http://{authority}{pq}").parse::<Uri>() {
                 Ok(uri) => {
                     *req.uri_mut() = uri;
-                    Ok::<_, Infallible>(forward(&ctx, req).await)
+                    Ok::<_, Infallible>(forward(&ctx, &peer, req).await)
                 }
                 Err(_) => Ok(text_response(
                     StatusCode::BAD_REQUEST,
@@ -695,6 +744,7 @@ impl MitmConn {
                 url: format!("https://{authority}{pq}"),
                 tls: TlsStatus::Intercepted,
                 tls_info: Some(self.info.clone()),
+                client: self.target.peer.clone(),
             };
             record_request(&engine, &req, origin)
         });

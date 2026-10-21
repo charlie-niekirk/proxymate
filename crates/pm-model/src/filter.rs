@@ -87,7 +87,8 @@ pub struct FilterSpec {
     pub protocol: ProtocolFilter,
     /// Content chips; empty means all content.
     pub content: Vec<ContentGroup>,
-    /// Restrict to one host (sidebar Domains selection).
+    /// Restrict to one host (sidebar Domains selection). `*.example.com`
+    /// matches `example.com` and every host under it.
     pub host: Option<String>,
     /// Restrict to one client app (sidebar Apps selection).
     pub client: Option<String>,

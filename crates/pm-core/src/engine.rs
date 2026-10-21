@@ -18,6 +18,7 @@ use rustls::pki_types::CertificateDer;
 
 use crate::Error;
 use crate::ingest::{self, FlowEvent, IngestTx};
+use crate::integration::Platform;
 use crate::io::decode;
 use crate::proxy::{self, ProxyConfig, ProxyHandle};
 use crate::recorder::FlowRecorder;
@@ -42,6 +43,9 @@ pub struct EngineConfig {
     /// DER certificates trusted for upstream TLS on top of the OS trust
     /// store, e.g. a test CA or a corporate CA the OS doesn't know.
     pub extra_upstream_roots: Vec<Vec<u8>>,
+    /// The executable that runs `--sysproxy-guardian` (the app itself).
+    /// Without it the system proxy is only restored by this process.
+    pub guardian_exe: Option<PathBuf>,
 }
 
 /// A body as returned to the inspector.
@@ -56,18 +60,19 @@ pub struct BodyBytes {
 }
 
 pub struct Engine {
-    store: RwLock<Store>,
+    pub(crate) store: RwLock<Store>,
     sinks: Mutex<HashMap<ViewId, DeltaSink>>,
     ingest: IngestTx,
     details: DetailStore,
     recording: AtomicBool,
     proxy: Mutex<ProxyState>,
     interned: Mutex<HashSet<Arc<str>>>,
-    root: PathBuf,
+    pub(crate) root: PathBuf,
     extra_roots: Vec<CertificateDer<'static>>,
     tls: RwLock<Arc<TlsContext>>,
     /// Write-locked across a read-modify-write of the settings.
     ssl: RwLock<Arc<SslPolicy>>,
+    pub(crate) platform: Platform,
 }
 
 #[derive(Default)]
@@ -122,6 +127,7 @@ impl Engine {
             recording: AtomicBool::new(true),
             proxy: Mutex::new(ProxyState::Stopped),
             interned: Mutex::new(HashSet::new()),
+            platform: Platform::new(&root, config.guardian_exe),
             root,
             extra_roots,
             tls: RwLock::new(Arc::new(tls)),
@@ -280,6 +286,13 @@ impl Engine {
         }
     }
 
+    pub(crate) fn proxy_addr(&self) -> Option<SocketAddr> {
+        match &*self.proxy.lock() {
+            ProxyState::Listening(handle) => Some(handle.addr),
+            _ => None,
+        }
+    }
+
     pub fn proxy_status(&self) -> ProxyStatus {
         let (listening, error) = match &*self.proxy.lock() {
             ProxyState::Stopped => (None, None),
@@ -347,7 +360,7 @@ impl Engine {
         })
     }
 
-    fn update_ssl(&self, change: impl FnOnce(&mut SslSettings)) -> Result<SslSettings, Error> {
+    pub(crate) fn update_ssl(&self, change: impl FnOnce(&mut SslSettings)) -> Result<SslSettings, Error> {
         let mut current = self.ssl.write();
         let mut settings = current.settings().clone();
         change(&mut settings);
@@ -405,6 +418,7 @@ impl Engine {
     /// hands it to its sink. Called by the publisher thread; public for tests
     /// and headless tools.
     pub fn publish_tick(&self) {
+        self.publish_sidebar();
         let mut sinks = self.sinks.lock();
         if sinks.is_empty() {
             return;

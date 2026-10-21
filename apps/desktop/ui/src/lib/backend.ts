@@ -9,8 +9,11 @@ import {
   type FlowSummary_Serialize,
   type ProxyStatus_Serialize,
   type RowsPage_Serialize,
+  type SidebarSnapshot_Deserialize,
   type SortSpec,
   type SslSettings,
+  type SystemProxyStatus_Serialize,
+  type TrustStatus_Serialize,
   type ViewDelta,
   type ViewInfo,
 } from "@/bindings";
@@ -49,6 +52,20 @@ export interface Backend {
   addSslBypass(host: string): Promise<SslSettings>;
   /** Accepts `host`'s upstream certificate without verification. */
   setInsecureUpstream(host: string, allow: boolean): Promise<SslSettings>;
+  /** Apps and Domains with counts, pushed whenever they change. */
+  subscribeSidebar(onSnapshot: (snapshot: SidebarSnapshot_Deserialize) => void): Promise<void>;
+  /** Stops (or resumes) decrypting an app, by bundle id or name. */
+  setAppSslExcluded(app: string, excluded: boolean): Promise<SslSettings>;
+  /** Keychain trust plus a real handshake check through the proxy. */
+  getTrustStatus(): Promise<TrustStatus_Serialize>;
+  /** Resolves once the macOS password / Touch ID prompt is answered. */
+  installCaTrust(): Promise<TrustStatus_Serialize>;
+  uninstallCaTrust(): Promise<TrustStatus_Serialize>;
+  getSystemProxyStatus(): Promise<SystemProxyStatus_Serialize>;
+  /** Failures come back in `error`, not as a rejection. */
+  setSystemProxy(on: boolean): Promise<SystemProxyStatus_Serialize>;
+  /** `export` lines for a proxied terminal. */
+  getTerminalEnv(): Promise<string>;
 }
 
 type Result<T> = { status: "ok"; data: T } | { status: "error"; error: string };
@@ -89,6 +106,18 @@ const tauriBackend: Backend = {
   setSslSettings: (settings) => unwrap(commands.setSslSettings(settings)),
   addSslBypass: (host) => unwrap(commands.addSslBypass(host)),
   setInsecureUpstream: (host, allow) => unwrap(commands.setInsecureUpstream(host, allow)),
+  subscribeSidebar: async (onSnapshot) => {
+    const channel = new Channel<SidebarSnapshot_Deserialize>();
+    channel.onmessage = onSnapshot;
+    await commands.subscribeSidebar(channel);
+  },
+  setAppSslExcluded: (app, excluded) => unwrap(commands.setAppSslExcluded(app, excluded)),
+  getTrustStatus: () => unwrap(commands.getTrustStatus()),
+  installCaTrust: () => unwrap(commands.installCaTrust()),
+  uninstallCaTrust: () => unwrap(commands.uninstallCaTrust()),
+  getSystemProxyStatus: () => unwrap(commands.getSystemProxyStatus()),
+  setSystemProxy: (on) => unwrap(commands.setSystemProxy(on)),
+  getTerminalEnv: () => commands.getTerminalEnv(),
 };
 
 function pickBackend(): Backend {

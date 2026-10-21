@@ -1,24 +1,17 @@
 import { useQuery } from "@tanstack/react-query";
-import {
-  Bot,
-  Circle,
-  Gauge,
-  Globe,
-  OctagonPause,
-  Plus,
-  Settings,
-  Trash2,
-  type LucideIcon,
-} from "lucide-react";
+import { Bot, Circle, Gauge, OctagonPause, Plus, Settings, ShieldAlert, Trash2, type LucideIcon } from "lucide-react";
 
 import type { ProxyStatus_Serialize } from "@/bindings";
 import { CertificateMenu } from "@/components/CertificateMenu";
+import { SystemProxyMenu } from "@/components/SystemProxyMenu";
 import { Button } from "@/components/ui/button";
+import { useTrustStatus } from "@/hooks/useTrustStatus";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { clearFlows, setRecording } from "@/lib/actions";
 import { backend } from "@/lib/backend";
 import { proxyStatusKey } from "@/lib/query";
+import { useUi } from "@/store/ui";
 
 function ToolButton({ icon: Icon, label, milestone }: { icon: LucideIcon; label: string; milestone: string }) {
   return (
@@ -78,11 +71,36 @@ export function Toolbar() {
       <ToolButton icon={Gauge} label="Throttle" milestone="M5" />
       <ToolButton icon={OctagonPause} label="Breakpoints" milestone="M5" />
       <Separator orientation="vertical" className="mx-1 !h-5" />
-      <ToolButton icon={Globe} label="System proxy" milestone="M4" />
+      <TrustWarning listening={!!status?.listening} />
+      <SystemProxyMenu />
       <CertificateMenu />
       <ToolButton icon={Bot} label="MCP server" milestone="M7" />
       <ToolButton icon={Settings} label="Settings" milestone="M10" />
     </header>
+  );
+}
+
+/** Shown while the OS doesn't trust the CA (checked at launch). */
+function TrustWarning({ listening }: { listening: boolean }) {
+  const { data: trust } = useTrustStatus();
+  const open = useUi((s) => s.setCertWizardOpen);
+  if (!listening || !trust || trust.verified || trust.keychain === "unsupported") return null;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="outline"
+          size="sm"
+          className="border-[var(--s-4xx)]/50 text-[var(--s-4xx)] hover:text-[var(--s-4xx)]"
+          onClick={() => open(true)}
+          data-testid="trust-warning"
+        >
+          <ShieldAlert />
+          Certificate not trusted
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>HTTPS traffic can&apos;t be decrypted yet · open the certificate wizard</TooltipContent>
+    </Tooltip>
   );
 }
 

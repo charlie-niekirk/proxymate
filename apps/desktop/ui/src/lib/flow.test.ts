@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { FlowRow_Serialize } from "@/bindings";
 
-import { decodeRow, formatDuration, formatMs, formatSize, methodToken, statusLabel, statusToken, urlParts, versionLabel } from "./flow";
+import { decodeRow, formatCount, formatDuration, formatMs, formatSize, methodToken, statusLabel, statusToken, urlParts, versionLabel } from "./flow";
 
 const tuple: FlowRow_Serialize = [
   7, "completed", "https", "GET", "api.example.com", 443, "/v1/users", "page=2", 404, "json", "Safari", 1.5, 42, 0, 1024, true,
@@ -67,5 +67,19 @@ describe("formatters", () => {
   it("labels HTTP versions compactly", () => {
     expect(versionLabel("HTTP/2")).toBe("h2");
     expect(versionLabel("HTTP/1.1")).toBe("1.1");
+  });
+});
+
+describe("formatCount", () => {
+  it("keeps sidebar counts narrow", () => {
+    expect([0, 999, 1000, 1234, 12_345, 999_999, 1_250_000].map(formatCount)).toEqual([
+      "0",
+      "999",
+      "1.0k",
+      "1.2k",
+      "12k",
+      "1000k",
+      "1.3M",
+    ]);
   });
 });

@@ -28,7 +28,7 @@ tauri.workspace = true
 tauri-specta.workspace = true
 tauri-plugin-dialog = "2"
 parking_lot.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["signal"] }
 
 [dev-dependencies]
 pm-testkit.workspace = true

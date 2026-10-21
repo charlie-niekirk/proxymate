@@ -38,6 +38,8 @@ Run these from the repo root unless noted.
 | Body-viewer zoo through the proxy | `cargo run -p pm-testkit --bin upstream -- --zoo [127.0.0.1:9090]` sends one flow per fixture in `crates/pm-testkit/fixtures/zoo/` |
 | Zoo in the browser UI | `npm run dev`, then open `http://localhost:1420/?zoo` (mock backend serving the zoo; `&select=<id>&theme=light&requestTab=Body`) |
 | Viewer snapshots + preview safety (Playwright) | `npm run e2e` (first time: `npx -w @proxymate/ui playwright install webkit chromium`). `-- --update-snapshots` after an intended visual change; `PM_E2E_PORT` picks the dev server port (default 1425) |
+| Open the app with the cert wizard / a search | `VITE_PM_OPEN=cert-wizard`, `VITE_PM_FILTER=<text>` (dev only, for screenshots) |
+| Run the app as the system proxy | `PROXYMATE_SYSTEM_PROXY=1 npm run tauri dev`. Changes the real macOS proxy settings: restored on quit, on signals, and by the guardian after `kill -9` |
 | UI only, in a browser | `npm run dev` (http://localhost:1420, in-memory mock backend) |
 | Rust format / lint / test | `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` |
 | UI typecheck / lint / test / build | `npm run typecheck`, `npm run lint`, `npm run test`, `npm run build` |
@@ -58,8 +60,12 @@ Run the same checks locally before pushing.
 crates/pm-model      pure types (serde + specta): FlowSummary, FlowRow, FilterSpec, SortSpec, ViewDelta, ...
 crates/pm-core       headless Engine: proxy/ (h1 forward proxy, mitm.rs: CONNECT, MITM, h2, passthrough), tls/ (CA, leaf
                      cache, SSL policy, upstream verifier), recorder (per-flow capture), ingest (event thread),
-                     store/ (arena + views, segments, bodies, details), io/ (content kind, decoding), synth; later rules/
-crates/pm-platform   OS integration traits + cfg impls (fs: private files; sysproxy, trust, procinfo, ... from M4)
+                     store/ (arena + views, sidebar counts, segments, bodies, details), io/ (content kind, decoding),
+                     client (loopback peer → app), trust (handshake check), integration (the OS-facing Engine
+                     methods), synth; later rules/
+crates/pm-platform   OS integration traits; macos/ impls, stub.rs elsewhere: fs (private files), sysproxy (backup +
+                     restore over a ProxyBackend; networksetup), trust (keychain), procinfo (libproc port scan, app
+                     bundles, icons), process (kqueue exit wait)
 crates/pm-mcp        MCP server over Arc<Engine>, empty until M7
 crates/pm-testkit    test upstreams (h1, TLS h1/h2 with a test CA), the body-viewer zoo (fixtures/zoo), proxy and HTTPS clients;
                      re-export of pm_core::synth
@@ -132,3 +138,10 @@ Targets:
 - Live segment files live under `~/Library/Application Support/Proxymate/live/<uuid>/`. Clear and quit delete them; the next launch sweeps any left by a crash.
 - HTTPS: the CA is `<data dir>/ca/proxymate-ca.pem` (key `proxymate-ca-key.pem`, mode 0600) and the SSL lists are `<data dir>/ssl.json`. Upstreams are verified with the OS trust store plus `EngineConfig::extra_upstream_roots` (`PROXYMATE_EXTRA_UPSTREAM_CA` in the app and CLI). Give each test engine its own `data_dir` so tests don't share a CA.
 - Integration tests are in `crates/pm-core/tests/`, using `pm-testkit` upstreams and clients. Tests that need their own process (RSS, environment variables) get their own file.
+
+**macOS integration (M4)**
+- Tests never change the machine's settings. System proxy logic is tested in `pm-platform` against a fake `ProxyBackend`; trust tests only read the keychain. Real keychain and proxy changes need the user's OK.
+- System proxy: `networksetup` per active service, with a backup in `<data dir>/sysproxy-backup.json` written first. The app spawns `proxymate --sysproxy-guardian <pid> --data-dir <dir>`, which restores after a crash or SIGKILL (about 0.25 s). A stale backup is restored at launch. Only settings that still point at us are put back.
+- The client app is resolved per connection in the background (`client.rs`); flows that start earlier get a `ClientResolved` event. The Client column and the sidebar Apps show its name; `pmicon://localhost/<name>` serves its icon.
+- The certificate wizard's trust check CONNECTs to `verify.proxymate.test`, which the proxy answers itself without dialling or recording a flow.
+- A `host` filter of `*.example.com` matches `example.com` and every host under it (sidebar domain rows).

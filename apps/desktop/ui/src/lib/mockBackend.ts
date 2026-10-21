@@ -8,8 +8,11 @@ import type {
   FlowRow_Serialize,
   FlowSummary_Serialize,
   ProxyStatus_Serialize,
+  SidebarSnapshot_Deserialize,
   SslSettings,
+  SystemProxyStatus_Serialize,
   TlsInfo_Serialize,
+  TrustStatus_Serialize,
   ViewDelta,
 } from "@/bindings";
 import type { Backend } from "@/lib/backend";
@@ -35,6 +38,7 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
   const urls = new Map<string, string>();
   const methods = ["GET", "GET", "GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"];
   const statuses = [200, 200, 200, 201, 204, 304, 404, 500];
+  const clients = ["Safari", "Google Chrome", "curl", "Slack", "node"];
   const now = Date.now();
   let flows: FlowRow_Serialize[] = Array.from({ length: count }, (_, i) => {
     const host = hosts[i % hosts.length]!;
@@ -54,7 +58,7 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
       !connect && i % 3 === 0 ? `page=${i % 20}` : "",
       connect ? null : statuses[(i * 13) % statuses.length]!,
       connect ? "none" : kinds[(i * 5) % kinds.length]!,
-      "Mock",
+      clients[(i * 3) % clients.length]!,
       now - (count - i) * 20,
       (i * 37) % 900,
       0,
@@ -70,7 +74,20 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
     flows = zoo.map((f) => f.row);
     for (const f of zoo) full.set(f.row[0], f);
   });
-  let ssl: SslSettings = { include: ["*"], exclude: ["*.apple.com", "ocsp*"], bypass: [], insecure_upstream: [] };
+  let ssl: SslSettings = {
+    include: ["*"],
+    exclude: ["*.apple.com", "ocsp*"],
+    bypass: [],
+    insecure_upstream: [],
+    exclude_apps: [],
+  };
+  let trust: TrustStatus_Serialize = {
+    keychain: "not_trusted",
+    verified: false,
+    detail: "the system doesn't trust the Proxymate CA yet (mock)",
+  };
+  let sysproxy: SystemProxyStatus_Serialize = { enabled: false, services: [], supported: true, error: null };
+  let onSidebar: ((s: SidebarSnapshot_Deserialize) => void) | null = null;
   const ca: CaInfo = {
     common_name: "Proxymate CA (mock, 2026-10-21)",
     cert_path: "/Users/you/Library/Application Support/Proxymate/ca/proxymate-ca.pem",
@@ -97,7 +114,8 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
       if (filter.protocol === "https" && f[2] !== "https") continue;
       if (filter.protocol === "websocket") continue;
       if (filter.content.length > 0 && !filter.content.includes(groupOf(f[9]))) continue;
-      if (filter.host && f[4] !== filter.host) continue;
+      if (filter.host && !hostMatches(f[4], filter.host)) continue;
+      if (filter.client && f[10] !== filter.client) continue;
       if (text && !`${f[4]}${f[6]}${f[7]}`.toLowerCase().includes(text)) continue;
       out.push(f[0]);
     }
@@ -250,6 +268,7 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
       await ready;
       flows = [];
       for (const view of views.keys()) views.set(view, []);
+      onSidebar?.(sidebar(flows));
     },
     async setRecording(on) {
       await ready;
@@ -288,6 +307,77 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
       ssl = { ...ssl, insecure_upstream: allow ? [...rest, host] : rest };
       return ssl;
     },
+    async subscribeSidebar(cb) {
+      onSidebar = cb;
+      setTimeout(() => cb(sidebar(flows)), 0);
+    },
+    async setAppSslExcluded(app, excluded) {
+      const rest = (ssl.exclude_apps ?? []).filter((a) => a.toLowerCase() !== app.toLowerCase());
+      ssl = { ...ssl, exclude_apps: excluded ? [...rest, app] : rest };
+      return ssl;
+    },
+    async getTrustStatus() {
+      return trust;
+    },
+    async installCaTrust() {
+      trust = { keychain: "trusted", verified: true, detail: null };
+      return trust;
+    },
+    async uninstallCaTrust() {
+      trust = { keychain: "not_trusted", verified: false, detail: "the system doesn't trust the Proxymate CA yet (mock)" };
+      return trust;
+    },
+    async getSystemProxyStatus() {
+      return sysproxy;
+    },
+    async setSystemProxy(on) {
+      sysproxy = { ...sysproxy, enabled: on, services: on ? ["Wi-Fi"] : [], error: null };
+      return sysproxy;
+    },
+    async getTerminalEnv() {
+      const proxy = "http://127.0.0.1:9090";
+      return [
+        ...["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"].map((v) => `export ${v}=${proxy}`),
+        ...["NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE"].map((v) => `export ${v}='${ca.cert_path}'`),
+        "",
+      ].join("\n");
+    },
+  };
+}
+
+/** `*.example.com` matches `example.com` and its subdomains, as in Rust. */
+function hostMatches(host: string, pattern: string): boolean {
+  if (!pattern.startsWith("*.")) return host === pattern;
+  const domain = pattern.slice(2);
+  return host === domain || host.endsWith(`.${domain}`);
+}
+
+/** The engine aggregates this in Rust; the mock does it the simple way. */
+function sidebar(flows: FlowRow_Serialize[]): SidebarSnapshot_Deserialize {
+  const apps = new Map<string, number>();
+  const hosts = new Map<string, number>();
+  for (const f of flows) {
+    if (f[10]) apps.set(f[10], (apps.get(f[10]) ?? 0) + 1);
+    hosts.set(f[4], (hosts.get(f[4]) ?? 0) + 1);
+  }
+  const domains = new Map<string, { host: string; count: number }[]>();
+  for (const [host, count] of hosts) {
+    const labels = host.split(".");
+    const domain = labels.length > 2 ? labels.slice(-2).join(".") : host;
+    domains.set(domain, [...(domains.get(domain) ?? []), { host, count }]);
+  }
+  return {
+    total: flows.length,
+    apps: [...apps]
+      .sort(([a], [b]) => a.toLowerCase().localeCompare(b.toLowerCase()))
+      .map(([name, count]) => ({ name, bundle_id: null, has_icon: false, count })),
+    domains: [...domains]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([domain, list]) => ({
+        domain,
+        count: list.reduce((n, h) => n + h.count, 0),
+        hosts: list.length === 1 && list[0]!.host === domain ? [] : list.sort((a, b) => a.host.localeCompare(b.host)),
+      })),
   };
 }
 

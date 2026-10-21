@@ -3,6 +3,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { ArrowDown, ArrowUp, MoreHorizontal, PencilLine } from "lucide-react";
 import { memo, useCallback, useEffect, useRef, type KeyboardEvent } from "react";
 
+import { AppIcon } from "@/components/AppIcon";
 import { useFlowView } from "@/hooks/useFlowView";
 import { backend } from "@/lib/backend";
 import { formatDuration, formatSize, formatTime, versionLabel, type Row } from "@/lib/flow";
@@ -193,7 +194,8 @@ function RowCells({ row }: { row: Row }) {
       <div className={cell}>
         <UrlText row={row} operation={row.graphqlOp} />
       </div>
-      <div className={cn(cell, "truncate font-sans text-xs")}>
+      <div className={cn(cell, "gap-1.5 truncate font-sans text-xs")}>
+        {row.client && <AppIcon name={row.client} />}
         <span className="truncate">{row.client ?? "—"}</span>
       </div>
       <div className={cn(cell, "justify-center")}>

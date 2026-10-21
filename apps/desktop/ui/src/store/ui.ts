@@ -31,6 +31,7 @@ interface UiState {
   responseTab: ResponseTab;
   /** Body viewer the user picked per content kind; sticks across flows. */
   viewerByKind: Partial<Record<ContentKind, ViewerId>>;
+  certWizardOpen: boolean;
 
   setText(text: string): void;
   setProtocol(protocol: ProtocolFilter): void;
@@ -45,6 +46,7 @@ interface UiState {
   setRequestTab(tab: RequestTab): void;
   setResponseTab(tab: ResponseTab): void;
   setViewer(kind: ContentKind, viewer: ViewerId): void;
+  setCertWizardOpen(open: boolean): void;
 }
 
 export const useUi = create<UiState>()((set) => ({
@@ -57,6 +59,7 @@ export const useUi = create<UiState>()((set) => ({
   requestTab: "Header",
   responseTab: "Body",
   viewerByKind: {},
+  certWizardOpen: false,
 
   setText: (text) => set((s) => ({ filter: { ...s.filter, text } })),
   setProtocol: (protocol) => set((s) => ({ filter: { ...s.filter, protocol } })),
@@ -77,4 +80,5 @@ export const useUi = create<UiState>()((set) => ({
   setRequestTab: (requestTab) => set({ requestTab }),
   setResponseTab: (responseTab) => set({ responseTab }),
   setViewer: (kind, viewer) => set((s) => ({ viewerByKind: { ...s.viewerByKind, [kind]: viewer } })),
+  setCertWizardOpen: (certWizardOpen) => set({ certWizardOpen }),
 }));

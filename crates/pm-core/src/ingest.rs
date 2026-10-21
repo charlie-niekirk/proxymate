@@ -45,6 +45,11 @@ pub(crate) enum FlowEvent {
         req_size: u64,
         resp_size: u64,
     },
+    /// The client app behind the flow's connection became known.
+    ClientResolved {
+        id: FlowId,
+        client: Arc<str>,
+    },
     /// Bulk append with ids already assigned (synthetic data, benches).
     Insert(Vec<FlowSummary>),
     /// Bulk replace by id.
