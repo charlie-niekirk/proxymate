@@ -28,6 +28,17 @@ if (responseTab) {
   useUi.getState().setResponseTab(responseTab);
 }
 
+// Dev only: start with this search text (e.g. a host), for screenshots.
+const filterText = import.meta.env.DEV ? (import.meta.env.VITE_PM_FILTER as string | undefined) : undefined;
+if (filterText) {
+  useUi.getState().setText(filterText);
+}
+
+// Dev only: open the certificate wizard at launch, for screenshots.
+if (import.meta.env.DEV && import.meta.env.VITE_PM_OPEN === "cert-wizard") {
+  useUi.getState().setCertWizardOpen(true);
+}
+
 if (import.meta.env.DEV && import.meta.env.VITE_PM_PERF_PROBE) {
   void import("@/dev/perfProbe").then((m) => m.runPerfProbe());
 }

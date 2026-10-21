@@ -166,19 +166,23 @@ We build our own engine and use hudsucker only as a reading reference. Its handl
   - Trust is re-checked at launch, and the toolbar warns if it's missing.
   - Uninstall removes the trust setting and deletes the cert.
   - For Firefox, the wizard explains `security.enterprise_roots.enabled`.
+  - (M4) The probe host `verify.proxymate.test` is answered by the proxy itself: no upstream dial, no flow. An empty user-domain trust array ("always trust") counts as trusted; security-framework's own check misreads it.
 - **System proxy.**
-  - Use `networksetup` per active service for web, secure web and bypass domains.
-  - **M3 spike:** check whether this prompts on macOS 27. If it does, fall back to `SCPreferencesCreateWithAuthorization`, which prompts once per launch.
+  - Use `networksetup` per active service (an enabled service with an IPv4/IPv6 address) for web, secure web and the bypass domains `localhost 127.0.0.1 *.local 169.254/16`.
+  - **Spike result (M4, macOS 27.0 26A428):** `networksetup` writes without any prompt for an admin user (it is Apple-entitled for `system.services.systemconfiguration.network`), about 20-35 ms a call. The `SCPreferencesCreateWithAuthorization` fallback is not needed and was not built. Independent reads and writes run concurrently (checked safe: no lost updates).
 - **Restoring the system proxy.**
   - Before changing anything, write a backup file containing the pid, host and port.
   - Restore on quit, on SIGINT/SIGTERM and from the panic hook.
-  - A detached **guardian process** (`proxymate --sysproxy-guardian <pid>`) waits on kqueue `NOTE_EXIT`, so a SIGKILL or crash still restores.
+  - A detached **guardian process** (`proxymate --sysproxy-guardian <pid> --data-dir <dir>`, in its own process group) waits on kqueue `NOTE_EXIT`, so a SIGKILL or crash still restores. Measured: 0.26 s from SIGKILL to `scutil --proxy` showing the proxy off.
   - At startup, a stale backup whose pid is dead also triggers a restore.
   - A service is only restored if its setting still points at us.
 - **Client app detection.**
   - For loopback peers, map the peer port to a pid with libproc (`proc_pidinfo` FD scan, cached, coalesced, and run in spawn_blocking off the hot path).
   - From the pid, find the `.app` bundle to get the name and bundle id. Helper processes map to their parent app.
-  - Icons come from `NSWorkspace.iconForFile` via objc2-app-kit and are served through a `pmicon://` URI scheme.
+  - For XPC services and framework processes (Safari's network process lives in WebKit.framework) the pid macOS holds responsible (`responsibility_get_pid_responsible_for_pid`, looked up with dlsym) names the app. Plain executables (curl, node) show their own name.
+  - Icons come from `NSWorkspace.iconForFile` via objc2-app-kit and are served through a `pmicon://` URI scheme. They follow the user's icon style (clear or tinted icons stay clear or tinted).
+  - Per-app SSL exclusions (`SslSettings.exclude_apps`, by bundle id or tool name): a CONNECT waits up to 500 ms for its client app when any app is excluded.
+  - The sidebar's Domains group hosts under a registrable domain by a small heuristic (two labels, three under `co.uk`-style suffixes), not the Public Suffix List.
   - Remote devices show their IP plus a nickname from the allow-list.
 - **iOS Simulator.**
   - `xcrun simctl list devices booted -j`, then `xcrun simctl keychain <udid> add-root-cert`. "Install to all booted" is one click.

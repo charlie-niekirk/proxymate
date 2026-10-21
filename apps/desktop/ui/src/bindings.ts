@@ -25,13 +25,49 @@ export const commands = {
 	getProxyStatus: () => __TAURI_INVOKE<ProxyStatus_Serialize>("get_proxy_status"),
 	getCaInfo: () => __TAURI_INVOKE<CaInfo>("get_ca_info"),
 	regenerateCa: () => typedError<CaInfo, string>(__TAURI_INVOKE("regenerate_ca")),
-	getSslSettings: () => __TAURI_INVOKE<SslSettings>("get_ssl_settings"),
-	setSslSettings: (settings: SslSettings) => typedError<SslSettings, string>(__TAURI_INVOKE("set_ssl_settings", { settings })),
-	addSslBypass: (host: string) => typedError<SslSettings, string>(__TAURI_INVOKE("add_ssl_bypass", { host })),
-	setInsecureUpstream: (host: string, allow: boolean) => typedError<SslSettings, string>(__TAURI_INVOKE("set_insecure_upstream", { host, allow })),
+	getSslSettings: () => __TAURI_INVOKE<SslSettings_Serialize>("get_ssl_settings"),
+	setSslSettings: (settings: SslSettings_Deserialize) => typedError<SslSettings_Serialize, string>(__TAURI_INVOKE("set_ssl_settings", { settings })),
+	addSslBypass: (host: string) => typedError<SslSettings_Serialize, string>(__TAURI_INVOKE("add_ssl_bypass", { host })),
+	setInsecureUpstream: (host: string, allow: boolean) => typedError<SslSettings_Serialize, string>(__TAURI_INVOKE("set_insecure_upstream", { host, allow })),
+	/**  Streams the sidebar's Apps and Domains whenever they change. */
+	subscribeSidebar: (onSnapshot: Channel<SidebarSnapshot_Deserialize>) => __TAURI_INVOKE<void>("subscribe_sidebar", { onSnapshot }),
+	setAppSslExcluded: (app: string, excluded: boolean) => typedError<SslSettings_Serialize, string>(__TAURI_INVOKE("set_app_ssl_excluded", { app, excluded })),
+	/**  Keychain trust plus a real handshake check through the proxy. */
+	getTrustStatus: () => typedError<TrustStatus_Serialize, string>(__TAURI_INVOKE("get_trust_status")),
+	/**  Installs and trusts the CA; resolves once the macOS prompt is answered. */
+	installCaTrust: () => typedError<TrustStatus_Serialize, string>(__TAURI_INVOKE("install_ca_trust")),
+	uninstallCaTrust: () => typedError<TrustStatus_Serialize, string>(__TAURI_INVOKE("uninstall_ca_trust")),
+	getSystemProxyStatus: () => typedError<SystemProxyStatus_Serialize, string>(__TAURI_INVOKE("get_system_proxy_status")),
+	/**  Failures are reported in the returned status, not as an error. */
+	setSystemProxy: (on: boolean) => typedError<SystemProxyStatus_Serialize, string>(__TAURI_INVOKE("set_system_proxy", { on })),
+	/**  `export` lines for a proxied terminal. */
+	getTerminalEnv: () => __TAURI_INVOKE<string>("get_terminal_env"),
 };
 
 /* Types */
+/**  One client app in the sidebar, with its flow count. */
+export type AppCount = AppCount_Serialize | AppCount_Deserialize;
+
+/**  One client app in the sidebar, with its flow count. */
+export type AppCount_Deserialize = {
+	/**  What the Client column shows, e.g. `Safari` or `curl`. */
+	name: string,
+	bundle_id?: string | null,
+	/**  True if `pmicon://localhost/<name>` serves an icon. */
+	has_icon: boolean,
+	count: number,
+};
+
+/**  One client app in the sidebar, with its flow count. */
+export type AppCount_Serialize = {
+	/**  What the Client column shows, e.g. `Safari` or `curl`. */
+	name: string,
+	bundle_id: string | null,
+	/**  True if `pmicon://localhost/<name>` serves an icon. */
+	has_icon: boolean,
+	count: number,
+};
+
 /**
  *  What was seen and recorded of one body. The bytes themselves are fetched
  *  separately (`get_body`), still content-encoded unless decoding is asked for.
@@ -117,6 +153,18 @@ export type ContentKind =
 /**  No body, or not detected yet. */
 "none" | "json" | "xml" | "html" | "formurlencoded" | "multipart" | "graphql" | "javascript" | "css" | "text" | "image" | "svg" | "video" | "audio" | "font" | "pdf" | "binary";
 
+/**  A registrable domain (`example.com`) and the hosts under it. */
+export type DomainNode = {
+	domain: string,
+	/**  Flows to the domain and all its hosts. */
+	count: number,
+	/**
+	 *  Hosts under the domain, the domain itself included if it was seen.
+	 *  Empty when the only host is the domain.
+	 */
+	hosts: HostCount[],
+};
+
 /**
  *  What a view shows. Shared by the filter row, the sidebar and (from M7) MCP.
  * 
@@ -136,7 +184,10 @@ export type FilterSpec_Deserialize = {
 	protocol: ProtocolFilter,
 	/**  Content chips; empty means all content. */
 	content: ContentGroup[],
-	/**  Restrict to one host (sidebar Domains selection). */
+	/**
+	 *  Restrict to one host (sidebar Domains selection). `*.example.com`
+	 *  matches `example.com` and every host under it.
+	 */
 	host?: string | null,
 	/**  Restrict to one client app (sidebar Apps selection). */
 	client?: string | null,
@@ -153,7 +204,10 @@ export type FilterSpec_Serialize = {
 	protocol: ProtocolFilter,
 	/**  Content chips; empty means all content. */
 	content: ContentGroup[],
-	/**  Restrict to one host (sidebar Domains selection). */
+	/**
+	 *  Restrict to one host (sidebar Domains selection). `*.example.com`
+	 *  matches `example.com` and every host under it.
+	 */
 	host: string | null,
 	/**  Restrict to one client app (sidebar Apps selection). */
 	client: string | null,
@@ -328,7 +382,19 @@ export type Header = {
 	value: string,
 };
 
+export type HostCount = {
+	host: string,
+	count: number,
+};
+
 export type HttpVersion = "HTTP/1.0" | "HTTP/1.1" | "HTTP/2";
+
+/**  What the OS trust store says about the Proxymate CA. */
+export type KeychainTrust = "trusted" | "not_trusted" | 
+/**  Explicitly set to "Never Trust". */
+"denied" | 
+/**  No trust store integration on this OS yet. */
+"unsupported";
 
 /**  Protocol chip in the filter row. */
 export type ProtocolFilter = "all" | "http" | "https" | "websocket";
@@ -396,6 +462,36 @@ export type RowsPage_Serialize = {
 /**  URL scheme of a flow as seen by the client. */
 export type Scheme = "http" | "https" | "ws" | "wss";
 
+/**
+ *  The sidebar's Apps and Domains, aggregated over every flow in the store.
+ *  Pushed when it changes, at most once per publisher tick.
+ */
+export type SidebarSnapshot = SidebarSnapshot_Serialize | SidebarSnapshot_Deserialize;
+
+/**
+ *  The sidebar's Apps and Domains, aggregated over every flow in the store.
+ *  Pushed when it changes, at most once per publisher tick.
+ */
+export type SidebarSnapshot_Deserialize = {
+	total: number,
+	/**  Sorted by name, case-insensitively. */
+	apps: AppCount_Deserialize[],
+	/**  Sorted by domain. */
+	domains: DomainNode[],
+};
+
+/**
+ *  The sidebar's Apps and Domains, aggregated over every flow in the store.
+ *  Pushed when it changes, at most once per publisher tick.
+ */
+export type SidebarSnapshot_Serialize = {
+	total: number,
+	/**  Sorted by name, case-insensitively. */
+	apps: AppCount_Serialize[],
+	/**  Sorted by domain. */
+	domains: DomainNode[],
+};
+
 export type SortDir = "asc" | "desc";
 
 /**  Sortable flow table columns. */
@@ -412,7 +508,13 @@ export type SortSpec = {
  *  Which CONNECT hosts are decrypted. Patterns are host globs (`*` matches
  *  across dots, matching is case-insensitive), without ports.
  */
-export type SslSettings = {
+export type SslSettings = SslSettings_Serialize | SslSettings_Deserialize;
+
+/**
+ *  Which CONNECT hosts are decrypted. Patterns are host globs (`*` matches
+ *  across dots, matching is case-insensitive), without ports.
+ */
+export type SslSettings_Deserialize = {
 	/**  Hosts to decrypt. `*` means everything not excluded. */
 	include: string[],
 	/**  Hosts never decrypted, e.g. Apple services and OCSP responders. */
@@ -421,6 +523,56 @@ export type SslSettings = {
 	bypass: string[],
 	/**  Hosts whose upstream certificate is accepted without verification. */
 	insecure_upstream: string[],
+	/**
+	 *  Client apps never decrypted, by bundle id (or name, for tools with no
+	 *  bundle). Matching is case-insensitive.
+	 */
+	exclude_apps?: string[],
+};
+
+/**
+ *  Which CONNECT hosts are decrypted. Patterns are host globs (`*` matches
+ *  across dots, matching is case-insensitive), without ports.
+ */
+export type SslSettings_Serialize = {
+	/**  Hosts to decrypt. `*` means everything not excluded. */
+	include: string[],
+	/**  Hosts never decrypted, e.g. Apple services and OCSP responders. */
+	exclude: string[],
+	/**  Hosts added with "Add to SSL bypass", typically pinned apps. */
+	bypass: string[],
+	/**  Hosts whose upstream certificate is accepted without verification. */
+	insecure_upstream: string[],
+	/**
+	 *  Client apps never decrypted, by bundle id (or name, for tools with no
+	 *  bundle). Matching is case-insensitive.
+	 */
+	exclude_apps: string[],
+};
+
+/**  Whether the OS proxy points at Proxymate. */
+export type SystemProxyStatus = SystemProxyStatus_Serialize | SystemProxyStatus_Deserialize;
+
+/**  Whether the OS proxy points at Proxymate. */
+export type SystemProxyStatus_Deserialize = {
+	/**  Proxymate turned it on and it still points at the listener. */
+	enabled: boolean,
+	/**  Active network services whose web or secure web proxy points at us. */
+	services: string[],
+	supported: boolean,
+	/**  The last enable/disable/read failure. */
+	error?: string | null,
+};
+
+/**  Whether the OS proxy points at Proxymate. */
+export type SystemProxyStatus_Serialize = {
+	/**  Proxymate turned it on and it still points at the listener. */
+	enabled: boolean,
+	/**  Active network services whose web or secure web proxy points at us. */
+	services: string[],
+	supported: boolean,
+	/**  The last enable/disable/read failure. */
+	error: string | null,
 };
 
 /**
@@ -531,6 +683,33 @@ export type TlsStatus =
  *  trusted by that client or the app pins its certificates.
  */
 "likely_pinned";
+
+/**  CA trust as the certificate wizard and the toolbar show it. */
+export type TrustStatus = TrustStatus_Serialize | TrustStatus_Deserialize;
+
+/**  CA trust as the certificate wizard and the toolbar show it. */
+export type TrustStatus_Deserialize = {
+	keychain: KeychainTrust,
+	/**
+	 *  A real handshake through our own MITM, checked with the OS verifier,
+	 *  succeeded. This is what browsers will see.
+	 */
+	verified: boolean,
+	/**  Why verification failed, if it did. */
+	detail?: string | null,
+};
+
+/**  CA trust as the certificate wizard and the toolbar show it. */
+export type TrustStatus_Serialize = {
+	keychain: KeychainTrust,
+	/**
+	 *  A real handshake through our own MITM, checked with the OS verifier,
+	 *  succeeded. This is what browsers will see.
+	 */
+	verified: boolean,
+	/**  Why verification failed, if it did. */
+	detail: string | null,
+};
 
 /**
  *  Per-tick change notification for one view, published at 20 Hz.

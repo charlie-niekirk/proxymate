@@ -20,3 +20,5 @@ export const flowKey = (id: number | null) => ["flow", id] as const;
 export const proxyStatusKey = ["proxy-status"] as const;
 export const caInfoKey = ["ca-info"] as const;
 export const sslSettingsKey = ["ssl-settings"] as const;
+export const trustStatusKey = ["trust-status"] as const;
+export const systemProxyKey = ["system-proxy"] as const;

@@ -1,3 +1,4 @@
+import { CertWizard } from "@/components/CertWizard";
 import { DetailPane } from "@/components/DetailPane";
 import { FilterBar } from "@/components/FilterBar";
 import { FlowTable } from "@/components/FlowTable/FlowTable";
@@ -12,6 +13,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/componen
  */
 export function AppShell() {
   return (
+    <>
     <ResizablePanelGroup orientation="horizontal" className="h-full">
       <ResizablePanel defaultSize={220} minSize={160} maxSize={360}>
         <Sidebar />
@@ -34,5 +36,7 @@ export function AppShell() {
         </main>
       </ResizablePanel>
     </ResizablePanelGroup>
+    <CertWizard />
+    </>
   );
 }

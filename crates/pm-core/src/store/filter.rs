@@ -49,10 +49,14 @@ impl CompiledFilter {
         if self.content_mask != 0 && self.content_mask & group_bit(ContentGroup::of(f.content_kind)) == 0 {
             return false;
         }
-        if let Some(host) = &self.host
-            && *f.host != **host
-        {
-            return false;
+        if let Some(host) = &self.host {
+            let ok = match host.strip_prefix("*.") {
+                Some(domain) => super::in_domain(&f.host, domain),
+                None => *f.host == **host,
+            };
+            if !ok {
+                return false;
+            }
         }
         if let Some(client) = &self.client
             && f.client.as_deref() != Some(client.as_str())
@@ -169,5 +173,13 @@ mod tests {
         let filter = CompiledFilter::compile(&spec);
         assert!(filter.matches(&flow(Scheme::Https, "a.com", "/", ContentKind::Json)));
         assert!(!filter.matches(&flow(Scheme::Https, "b.a.com", "/", ContentKind::Json)));
+
+        let domain = CompiledFilter::compile(&FilterSpec {
+            host: Some("*.a.com".into()),
+            ..Default::default()
+        });
+        assert!(domain.matches(&flow(Scheme::Https, "a.com", "/", ContentKind::Json)));
+        assert!(domain.matches(&flow(Scheme::Https, "b.a.com", "/", ContentKind::Json)));
+        assert!(!domain.matches(&flow(Scheme::Https, "ba.com", "/", ContentKind::Json)));
     }
 }

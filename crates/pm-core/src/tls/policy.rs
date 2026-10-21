@@ -1,5 +1,5 @@
-//! Which CONNECT hosts are decrypted, and whose upstream certificate is
-//! accepted unverified. Compiled from [`SslSettings`] host globs.
+//! Which CONNECT hosts and client apps are decrypted, and whose upstream
+//! certificate is accepted unverified. Compiled from [`SslSettings`].
 
 use std::path::Path;
 
@@ -23,6 +23,8 @@ pub struct SslPolicy {
     /// `exclude` and `bypass` together.
     exclude: GlobSet,
     insecure: GlobSet,
+    /// Lower-cased `exclude_apps`.
+    exclude_apps: Vec<String>,
 }
 
 impl SslPolicy {
@@ -32,6 +34,12 @@ impl SslPolicy {
             include: globs(&settings.include)?,
             exclude: globs(exclude)?,
             insecure: globs(&settings.insecure_upstream)?,
+            exclude_apps: settings
+                .exclude_apps
+                .iter()
+                .map(|a| a.trim().to_lowercase())
+                .filter(|a| !a.is_empty())
+                .collect(),
             settings,
         })
     }
@@ -44,6 +52,19 @@ impl SslPolicy {
     pub fn intercepts(&self, host: &str) -> bool {
         let host = normalize(host);
         self.include.is_match(&host) && !self.exclude.is_match(&host)
+    }
+
+    /// True if some app is excluded, so a CONNECT must wait for its client
+    /// to be known before deciding.
+    pub fn has_app_exclusions(&self) -> bool {
+        !self.exclude_apps.is_empty()
+    }
+
+    /// True if the client app (by name or bundle id) is never decrypted.
+    pub fn excludes_app(&self, name: &str, bundle_id: Option<&str>) -> bool {
+        self.exclude_apps
+            .iter()
+            .any(|a| a.eq_ignore_ascii_case(name) || bundle_id.is_some_and(|b| a.eq_ignore_ascii_case(b)))
     }
 
     /// True if `host`'s upstream certificate is accepted without verification.
@@ -134,6 +155,20 @@ mod tests {
         assert!(!policy.intercepts("example.org"));
         assert!(policy.insecure_upstream("SELF-SIGNED.test"));
         assert!(!policy.insecure_upstream("example.com"));
+    }
+
+    #[test]
+    fn apps_are_excluded_by_name_or_bundle_id() {
+        let settings = SslSettings {
+            exclude_apps: vec!["com.tinyspeck.slackmacgap".into(), "curl".into()],
+            ..SslSettings::default()
+        };
+        let policy = SslPolicy::compile(settings).unwrap();
+        assert!(policy.has_app_exclusions());
+        assert!(policy.excludes_app("Slack", Some("com.tinyspeck.slackmacgap")));
+        assert!(policy.excludes_app("CURL", None));
+        assert!(!policy.excludes_app("Safari", Some("com.apple.Safari")));
+        assert!(!SslPolicy::compile(SslSettings::default()).unwrap().has_app_exclusions());
     }
 
     #[test]

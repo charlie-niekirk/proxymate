@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use pm_core::Engine;
 use pm_model::{
-    BodyPart, CaInfo, FilterSpec, FlowDetail, FlowId, FlowSummary, ProxyStatus, RowsPage, SortSpec, SslSettings,
-    ViewDelta, ViewId, ViewInfo,
+    BodyPart, CaInfo, FilterSpec, FlowDetail, FlowId, FlowSummary, ProxyStatus, RowsPage, SidebarSnapshot, SortSpec,
+    SslSettings, SystemProxyStatus, TrustStatus, ViewDelta, ViewId, ViewInfo,
 };
 use tauri::State;
 use tauri::ipc::{Channel, InvokeResponseBody, IpcResponse};
@@ -127,6 +127,65 @@ pub fn add_ssl_bypass(engine: EngineState<'_>, host: String) -> Result<SslSettin
 #[specta::specta]
 pub fn set_insecure_upstream(engine: EngineState<'_>, host: String, allow: bool) -> Result<SslSettings, String> {
     engine.set_insecure_upstream(&host, allow).map_err(|e| e.to_string())
+}
+
+/// Streams the sidebar's Apps and Domains whenever they change.
+#[tauri::command]
+#[specta::specta]
+pub fn subscribe_sidebar(engine: EngineState<'_>, on_snapshot: Channel<SidebarSnapshot>) {
+    engine.subscribe_sidebar(Box::new(move |snapshot| on_snapshot.send(snapshot).is_ok()));
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn set_app_ssl_excluded(engine: EngineState<'_>, app: String, excluded: bool) -> Result<SslSettings, String> {
+    engine.set_app_ssl_excluded(&app, excluded).map_err(|e| e.to_string())
+}
+
+/// Keychain trust plus a real handshake check through the proxy.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_trust_status(engine: EngineState<'_>) -> Result<TrustStatus, String> {
+    Ok(engine.trust_status().await)
+}
+
+/// Installs and trusts the CA; resolves once the macOS prompt is answered.
+#[tauri::command]
+#[specta::specta]
+pub async fn install_ca_trust(engine: EngineState<'_>) -> Result<TrustStatus, String> {
+    engine.install_ca_trust().await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn uninstall_ca_trust(engine: EngineState<'_>) -> Result<TrustStatus, String> {
+    engine.uninstall_ca_trust().await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn get_system_proxy_status(engine: EngineState<'_>) -> Result<SystemProxyStatus, String> {
+    let engine = Arc::clone(&engine);
+    tauri::async_runtime::spawn_blocking(move || engine.system_proxy_status())
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Failures are reported in the returned status, not as an error.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_system_proxy(engine: EngineState<'_>, on: bool) -> Result<SystemProxyStatus, String> {
+    let engine = Arc::clone(&engine);
+    tauri::async_runtime::spawn_blocking(move || engine.set_system_proxy(on))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// `export` lines for a proxied terminal.
+#[tauri::command]
+#[specta::specta]
+pub fn get_terminal_env(engine: EngineState<'_>) -> String {
+    engine.terminal_env()
 }
 
 /// Bytes sent to the webview as an `ArrayBuffer`. specta has no type for

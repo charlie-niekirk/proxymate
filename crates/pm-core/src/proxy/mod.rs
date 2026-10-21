@@ -40,6 +40,7 @@ pub use sniff::{Sniffed, classify};
 pub use tee::TeeBody;
 
 use crate::Engine;
+use crate::client::PeerClient;
 use crate::io::content::kind_from_content_type;
 use crate::recorder::{FlowRecorder, content_encoding};
 
@@ -100,8 +101,8 @@ pub(crate) fn spawn(engine: Weak<Engine>, listener: TcpListener) -> std::io::Res
         loop {
             tokio::select! {
                 accepted = listener.accept() => match accepted {
-                    Ok((stream, _peer)) => {
-                        tokio::spawn(serve_connection(ctx.clone(), stream));
+                    Ok((stream, peer)) => {
+                        tokio::spawn(serve_connection(ctx.clone(), stream, peer));
                     }
                     // Out of file descriptors and the like: back off briefly.
                     Err(_) => tokio::time::sleep(Duration::from_millis(50)).await,
@@ -134,7 +135,7 @@ fn upstream_client() -> UpstreamClient {
         .build(connector)
 }
 
-async fn serve_connection(ctx: Arc<ProxyCtx>, mut stream: TcpStream) {
+async fn serve_connection(ctx: Arc<ProxyCtx>, mut stream: TcpStream, peer: SocketAddr) {
     match sniff::sniff(&stream).await {
         Some(kind) if kind.is_http() => {}
         Some(Sniffed::Garbage) => {
@@ -147,7 +148,11 @@ async fn serve_connection(ctx: Arc<ProxyCtx>, mut stream: TcpStream) {
         _ => return,
     }
     let _ = stream.set_nodelay(true);
-    let service = service_fn(move |req| handle(ctx.clone(), req));
+    let client = match ctx.engine.upgrade() {
+        Some(engine) => PeerClient::spawn(&engine, peer, ctx.addr.port()),
+        None => PeerClient::unknown(),
+    };
+    let service = service_fn(move |req| handle(ctx.clone(), client.clone(), req));
     let _ = hyper::server::conn::http1::Builder::new()
         .preserve_header_case(true)
         .half_close(false)
@@ -156,12 +161,16 @@ async fn serve_connection(ctx: Arc<ProxyCtx>, mut stream: TcpStream) {
         .await;
 }
 
-async fn handle(ctx: Arc<ProxyCtx>, req: Request<Incoming>) -> Result<Response<ProxyBody>, Infallible> {
+async fn handle(
+    ctx: Arc<ProxyCtx>,
+    client: Arc<PeerClient>,
+    req: Request<Incoming>,
+) -> Result<Response<ProxyBody>, Infallible> {
     if req.method() == Method::CONNECT {
-        return Ok(mitm::connect(ctx, req).await);
+        return Ok(mitm::connect(ctx, client, req).await);
     }
     let response = match req.uri().scheme_str() {
-        Some("http") if !targets_self(req.uri(), ctx.addr) => forward(&ctx, req).await,
+        Some("http") if !targets_self(req.uri(), ctx.addr) => forward(&ctx, &client, req).await,
         Some("http") | None => info_page(ctx.addr),
         Some(_) => text_response(
             StatusCode::NOT_IMPLEMENTED,
@@ -171,7 +180,7 @@ async fn handle(ctx: Arc<ProxyCtx>, req: Request<Incoming>) -> Result<Response<P
     Ok(response)
 }
 
-async fn forward(ctx: &ProxyCtx, req: Request<Incoming>) -> Response<ProxyBody> {
+async fn forward(ctx: &ProxyCtx, client: &Arc<PeerClient>, req: Request<Incoming>) -> Response<ProxyBody> {
     let recorder = ctx.engine.upgrade().and_then(|engine| {
         let uri = req.uri();
         let origin = Origin {
@@ -181,6 +190,7 @@ async fn forward(ctx: &ProxyCtx, req: Request<Incoming>) -> Response<ProxyBody> 
             url: uri.to_string(),
             tls: TlsStatus::None,
             tls_info: None,
+            client: client.clone(),
         };
         record_request(&engine, &req, origin)
     });
@@ -222,6 +232,8 @@ struct Origin {
     url: String,
     tls: TlsStatus,
     tls_info: Option<TlsInfo>,
+    /// The app the connection came from.
+    client: Arc<PeerClient>,
 }
 
 /// Starts recording `req`, unless recording is paused.
@@ -265,7 +277,7 @@ fn record_request(engine: &Arc<Engine>, req: &Request<Incoming>, origin: Origin)
     };
     let mut detail = detail;
     detail.request_body.encoding = content_encoding(&detail.request.headers);
-    engine.begin_flow(summary, detail)
+    origin.client.begin_flow(engine, summary, detail)
 }
 
 fn response_head(resp: &Response<Incoming>) -> ResponseHead {
