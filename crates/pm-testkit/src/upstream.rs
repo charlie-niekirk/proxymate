@@ -45,6 +45,8 @@ pub fn pattern_byte(i: u64) -> u8 {
 /// - `/echo`: the request body back, with the request's content type.
 /// - `/version`: the request's HTTP version, e.g. `HTTP/2.0`.
 /// - `/zoo`: the zoo fixture names; `/zoo/{name}`: that fixture (see [`crate::zoo`]).
+/// - `/ws`: a WebSocket echo server (h1 only; see [`crate::stream`]).
+/// - `/sse?count=N&interval_ms=M`: a slow `text/event-stream`.
 pub struct Upstream {
     addr: SocketAddr,
     task: JoinHandle<()>,
@@ -59,6 +61,7 @@ impl Upstream {
                 tokio::spawn(async move {
                     let _ = hyper::server::conn::http1::Builder::new()
                         .serve_connection(TokioIo::new(stream), service_fn(route))
+                        .with_upgrades()
                         .await;
                 });
             }
@@ -82,13 +85,15 @@ impl Drop for Upstream {
     }
 }
 
-type TestBody = http_body_util::combinators::UnsyncBoxBody<Bytes, Infallible>;
+pub(crate) type TestBody = http_body_util::combinators::UnsyncBoxBody<Bytes, Infallible>;
 
 pub(crate) async fn route(req: Request<Incoming>) -> Result<Response<TestBody>, Infallible> {
     let path = req.uri().path().to_owned();
     let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
     let response = match segments.as_slice() {
         ["json"] => with_type(full(JSON_BODY), "application/json"),
+        ["ws"] => crate::stream::websocket(req),
+        ["sse"] => crate::stream::sse(&req),
         ["version"] => with_type(full(format!("{:?}", req.version())), "text/plain"),
         ["status", code] => {
             let status = code.parse().ok().and_then(|c| StatusCode::from_u16(c).ok());

@@ -31,7 +31,8 @@ Run these from the repo root unless noted.
 | Run the app with the perf probe | `PROXYMATE_SYNTH_FLOWS=100000 VITE_PM_PERF_PROBE=1 npm run tauri dev`. Scroll and filter timings print in the terminal as `[perf-probe]` |
 | Run the app with Auto Select on | `VITE_PM_AUTO_SELECT=1 npm run tauri dev`. New traffic is selected and inspected without a click (for verifying from a shell) |
 | Headless proxy | `cargo run -p proxymate-cli -- serve [PORT]`. Logs each finished flow |
-| Test upstream by hand | `cargo run -p pm-testkit --bin upstream`, then `curl -x http://127.0.0.1:9090 http://127.0.0.1:<port>/json` |
+| Test upstream by hand | `cargo run -p pm-testkit --bin upstream`, then `curl -x http://127.0.0.1:9090 http://127.0.0.1:<port>/json`. It also serves a WebSocket echo at `/ws` and a slow event stream at `/sse?count=N&interval_ms=M` |
+| WebSocket client through the proxy | `cargo run -p pm-testkit --bin ws-client -- ws://127.0.0.1:<port>/ws` (CONNECT; `--absolute` for absolute form) or `wss://localhost:<port>/ws` against the TLS upstream. `--count`, `--interval-ms`, `--server-close` |
 | TLS test upstream (h2 + h1) | `cargo run -p pm-testkit --bin upstream -- --tls` prints its port and CA file. Start the app with `PROXYMATE_EXTRA_UPSTREAM_CA=<that file>`, then `curl -x http://127.0.0.1:9090 --cacert ~/Library/Application\ Support/Proxymate/ca/proxymate-ca.pem https://localhost:<port>/json --http2 -v` |
 | Open the app on a response tab | `VITE_PM_RESPONSE_TAB=TLS` (or `Timing`, …), for screenshots from a shell |
 | Drive the app from a shell | Start with `VITE_PM_REMOTE=1`, then `curl -d '{"select":3,"requestTab":"Body"}' localhost:1420/__pm_remote` (also `responseTab`, `viewer: {kind, viewer}`, `theme`). See `src/dev/remote.ts` |
@@ -58,17 +59,17 @@ Run the same checks locally before pushing.
 
 ```
 crates/pm-model      pure types (serde + specta): FlowSummary, FlowRow, FilterSpec, SortSpec, ViewDelta, ...
-crates/pm-core       headless Engine: proxy/ (h1 forward proxy, mitm.rs: CONNECT, MITM, h2, passthrough), tls/ (CA, leaf
-                     cache, SSL policy, upstream verifier), recorder (per-flow capture), ingest (event thread),
-                     store/ (arena + views, sidebar counts, segments, bodies, details), io/ (content kind, decoding),
-                     client (loopback peer → app), trust (handshake check), integration (the OS-facing Engine
-                     methods), synth; later rules/
+crates/pm-core       headless Engine: proxy/ (h1 forward proxy, mitm.rs: CONNECT, MITM, h2, passthrough, ws.rs: WebSocket
+                     relay), tls/ (CA, leaf cache, SSL policy, upstream verifier), recorder (per-flow capture),
+                     ingest (event thread), store/ (arena + views, sidebar counts, segments, bodies, details,
+                     messages: WS/SSE logs), io/ (content kind, decoding, sse parser), client (loopback peer → app),
+                     trust (handshake check), integration (the OS-facing Engine methods), synth; later rules/
 crates/pm-platform   OS integration traits; macos/ impls, stub.rs elsewhere: fs (private files), sysproxy (backup +
                      restore over a ProxyBackend; networksetup), trust (keychain), procinfo (libproc port scan, app
                      bundles, icons), process (kqueue exit wait)
 crates/pm-mcp        MCP server over Arc<Engine>, empty until M7
-crates/pm-testkit    test upstreams (h1, TLS h1/h2 with a test CA), the body-viewer zoo (fixtures/zoo), proxy and HTTPS clients;
-                     re-export of pm_core::synth
+crates/pm-testkit    test upstreams (h1, TLS h1/h2 with a test CA, WS echo, slow SSE), the body-viewer zoo (fixtures/zoo),
+                     proxy, HTTPS and WebSocket clients; re-export of pm_core::synth
 apps/desktop/src-tauri   thin Tauri adapters (commands.rs), the pmbody:// scheme (body_scheme.rs), window chrome (window.rs)
 apps/desktop/ui          Vite + React 19 + TS strict + Tailwind v4 + shadcn/ui
 apps/cli                 proxymate-cli (headless; `bench` today)

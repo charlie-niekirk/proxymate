@@ -14,7 +14,8 @@
 
 use pm_testkit::{Alpn, TlsUpstream, Upstream, zoo};
 
-const ROUTES: &str = "/json /version /status/{code} /chunked /gzip /br /deflate /zstd /bytes/{n} /echo /zoo/{name}";
+const ROUTES: &str = "/json /version /status/{code} /chunked /gzip /br /deflate /zstd /bytes/{n} /echo /zoo/{name} /ws \
+                      /sse?count=N&interval_ms=M";
 
 #[tokio::main]
 async fn main() {

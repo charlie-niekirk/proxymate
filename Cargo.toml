@@ -44,6 +44,8 @@ http = "1"
 http-body = "1"
 http-body-util = "0.1"
 bytes = "1"
+tokio-tungstenite = { version = "0.30", default-features = false }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 
 # TLS
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }

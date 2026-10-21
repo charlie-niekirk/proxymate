@@ -1,6 +1,7 @@
 //! Flow details: heads, body metadata and where each body lives. A flow in
 //! flight is read from its live recorder; a finished one is postcard-encoded
 //! into the segment files, with an LRU of decoded details in front.
+//! WebSocket and SSE message logs are kept beside them, by flow id.
 
 use std::collections::HashMap;
 use std::io;
@@ -13,6 +14,7 @@ use pm_model::{BodyPart, FlowDetail, FlowId};
 use serde::{Deserialize, Serialize};
 
 use super::blob::BlobRef;
+use super::messages::{SseLog, WsLog};
 use super::segments::{Extent, SegmentStore};
 use crate::recorder::LiveFlow;
 
@@ -42,6 +44,8 @@ pub(crate) struct DetailStore {
     live: Mutex<HashMap<FlowId, Arc<LiveFlow>>>,
     persisted: Mutex<HashMap<FlowId, Extent>>,
     cache: Cache<FlowId, Arc<StoredDetail>>,
+    ws: Mutex<HashMap<FlowId, Arc<WsLog>>>,
+    sse: Mutex<HashMap<FlowId, Arc<SseLog>>>,
 }
 
 impl DetailStore {
@@ -52,6 +56,8 @@ impl DetailStore {
             live: Mutex::new(HashMap::new()),
             persisted: Mutex::new(HashMap::new()),
             cache: Cache::new(CACHE_ENTRIES),
+            ws: Mutex::new(HashMap::new()),
+            sse: Mutex::new(HashMap::new()),
         }
     }
 
@@ -121,9 +127,32 @@ impl DetailStore {
         }
     }
 
+    pub fn add_ws(&self, id: FlowId, log: Arc<WsLog>) {
+        if !self.is_cleared(id) {
+            self.ws.lock().insert(id, log);
+        }
+    }
+
+    pub fn ws(&self, id: FlowId) -> Option<Arc<WsLog>> {
+        self.ws.lock().get(&id).cloned()
+    }
+
+    pub fn add_sse(&self, id: FlowId, log: Arc<SseLog>) {
+        if !self.is_cleared(id) {
+            self.sse.lock().insert(id, log);
+        }
+    }
+
+    pub fn sse(&self, id: FlowId) -> Option<Arc<SseLog>> {
+        self.sse.lock().get(&id).cloned()
+    }
+
     /// Forgets every flow below `base` and deletes the segment files.
     pub fn clear(&self, base: FlowId) {
         self.base.store(base, Ordering::Release);
+        // Every flow so far is below `base`, live ones included.
+        self.ws.lock().clear();
+        self.sse.lock().clear();
         self.live.lock().retain(|&id, _| id >= base);
         self.persisted.lock().clear();
         self.cache.invalidate_all();

@@ -16,6 +16,8 @@ http.workspace = true
 http-body.workspace = true
 http-body-util.workspace = true
 bytes.workspace = true
+futures-util.workspace = true
+tokio-tungstenite = { workspace = true, features = ["handshake"] }
 flate2.workspace = true
 brotli.workspace = true
 zstd.workspace = true

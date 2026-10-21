@@ -7,8 +7,10 @@ import { MethodPill, StatusPill, UrlText } from "@/components/FlowTable/cells";
 import { BodyViewer } from "@/components/BodyViewer/BodyViewer";
 import { KvTable, Placeholder, type Kv } from "@/components/Inspector/KvTable";
 import { RawView } from "@/components/Inspector/RawView";
+import { SsePanel } from "@/components/Inspector/SsePanel";
 import { TimingView } from "@/components/Inspector/TimingView";
 import { TlsView } from "@/components/Inspector/TlsView";
+import { WebSocketPanel } from "@/components/Inspector/WebSocketPanel";
 import { Button } from "@/components/ui/button";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -19,6 +21,7 @@ import { backend } from "@/lib/backend";
 import { formatDuration, formatSize } from "@/lib/flow";
 import { displayHeaderName, queryPairs } from "@/lib/http";
 import { flowKey, sslSettingsKey } from "@/lib/query";
+import { streamKind } from "@/lib/stream";
 import { useUi } from "@/store/ui";
 
 interface Inspected {
@@ -48,6 +51,18 @@ export function DetailPane() {
   }
 
   const { flow, detail } = data;
+  const stream = streamKind(flow, detail);
+  const messages = (
+    <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
+      <ResizablePanel defaultSize="50" minSize={240}>
+        {detail ? <RequestPane flow={flow} detail={detail} /> : <NoDetail />}
+      </ResizablePanel>
+      <ResizableHandle />
+      <ResizablePanel defaultSize="50" minSize={240}>
+        {detail ? <ResponsePane flow={flow} detail={detail} /> : <NoDetail />}
+      </ResizablePanel>
+    </ResizablePanelGroup>
+  );
   return (
     <div className="bg-background flex h-full flex-col" data-testid="inspector">
       <div className="flex h-8 shrink-0 items-center gap-2 border-b px-2" data-selectable>
@@ -78,15 +93,20 @@ export function DetailPane() {
           <BypassButton host={flow.host} />
         </div>
       )}
-      <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
-        <ResizablePanel defaultSize="50" minSize={240}>
-          {detail ? <RequestPane flow={flow} detail={detail} /> : <NoDetail />}
-        </ResizablePanel>
-        <ResizableHandle />
-        <ResizablePanel defaultSize="50" minSize={240}>
-          {detail ? <ResponsePane flow={flow} detail={detail} /> : <NoDetail />}
-        </ResizablePanel>
-      </ResizablePanelGroup>
+      {stream === null ? (
+        messages
+      ) : (
+        // WebSocket frames and SSE events get the lower part of the inspector.
+        <ResizablePanelGroup orientation="vertical" className="min-h-0 flex-1">
+          <ResizablePanel defaultSize="40" minSize={96} className="flex flex-col">
+            {messages}
+          </ResizablePanel>
+          <ResizableHandle />
+          <ResizablePanel defaultSize="60" minSize={120}>
+            {stream === "websocket" ? <WebSocketPanel key={flow.id} id={flow.id} /> : <SsePanel key={flow.id} id={flow.id} />}
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      )}
     </div>
   );
 }
@@ -135,7 +155,8 @@ function ResponsePane({ flow, detail }: Inspected & { detail: FlowDetail_Seriali
   const tab = useUi((s) => s.responseTab);
   const setTab = useUi((s) => s.setResponseTab);
   const { response, response_body: info, error, tls } = detail;
-  const finished = flow.state !== "active";
+  // A 101 has no body: the connection carries WebSocket messages instead.
+  const finished = flow.state !== "active" || response?.status === 101;
   // The upstream presented a certificate but the handshake failed: offer to
   // accept it unverified (self-signed dev servers and the like).
   const certRejected = flow.state === "failed" && flow.tls === "intercepted" && !!tls && tls.version === "" && tls.chain.length > 0;

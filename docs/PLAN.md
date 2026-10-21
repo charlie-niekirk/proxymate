@@ -56,6 +56,7 @@ apps/cli                 proxymate-cli serve|mcp-stdio|gen-flows|bench (headless
 - **Flow summaries.** `FlowSummary` (about 200 B) lives in an in-memory `Vec`. Hosts, apps and content types are interned.
 - **Bodies.** Bodies of 8 KB or less are inlined. Larger bodies are stored still content-encoded in 256 MB rotating segment files under `~/Library/Application Support/Proxymate/live/<uuid>/`. They are decoded only when viewed.
 - **Flow detail.** `FlowDetail` is postcard-encoded into the segments, with a moka LRU in front of them. A flow still in flight is read from its live recorder instead.
+- **Message logs (M6).** WebSocket messages and server-sent events live in per-flow logs beside the detail, not inside it, so a long-lived connection never makes its detail slow to load. They are paged through the engine (`websocket_messages`, `websocket_payload`, `sse_events`) with direction and text filters evaluated in Rust. WebSocket payloads are capped at 1 MB each; those over 1 KB spill to the segment files. SSE event data is capped at 1 MB per event.
 - **Live directory lifetime.** Clear deletes the segment files and quit deletes the directory. Each live directory holds an exclusive file lock, so the next launch sweeps directories left behind by a crash or a signal.
 - **Caps.**
   - Body capture is capped at 64 MB. Above that the recorded copy is truncated, but forwarding is never affected.
@@ -114,7 +115,9 @@ We build our own engine and use hudsucker only as a reading reference. Its handl
    - Strip `Sec-WebSocket-Extensions` so frames stay uncompressed.
    - On `101`, wrap both upgraded connections and relay the frames, recording direction, opcode, size and time.
    - Payloads are capped at 1 MB.
-7. **Streaming.** Bodies are tee'd by default, so SSE and LLM token streams stay live in the UI.
+   - Handled on every h1 path: absolute-form `ws://`, plain HTTP inside a CONNECT, and `wss://` inside the MITM (the upstream h1 connection is taken over by the upgrade; the next request redials).
+   - The flow's scheme is `ws`/`wss`, its status pill reads "Active" while open, and the close (code, reason, which side) is recorded; a connection that drops without a close frame is recorded as `1006`.
+7. **Streaming.** Bodies are tee'd by default, so SSE and LLM token streams stay live in the UI. A `text/event-stream` response is also parsed incrementally into events (id, event, data, retry), each timestamped as it completes.
 8. **Port.** Listen on 9090. If it's taken, try 9091–9099 and show the port in use.
 9. **Proxied terminal.** "Copy terminal env" sets `HTTP(S)_PROXY`, `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE` and `CURL_CA_BUNDLE`.
 
@@ -123,7 +126,9 @@ We build our own engine and use hudsucker only as a reading reference. Its handl
 - TLS 1.0/1.1 upstreams fail, with a clear error.
 - h2c is recorded but deferred.
 - HTTPS in absolute form (`GET https://…` sent to the proxy) is refused with 501; clients must use CONNECT.
-- WebSocket upgrades inside decrypted HTTPS aren't relayed until M6.
+- WebSocket messages are reassembled and re-framed, so fragmentation on the wire may differ from what the peer sent. Pings are forwarded and also answered by the proxy, so a pinging side may see two pongs.
+- A compressed (`Content-Encoding`) event stream is parsed once it is complete, without per-event times.
+- The flow table's Status column shows `101` for a closed WebSocket; the close code and reason are in the WebSocket panel.
 - HTTP/1.1 header names are forwarded with their original case, but recorded lower-cased (hyper doesn't expose its case map) and shown in Title-Case.
 
 ## Rules engine

@@ -11,18 +11,18 @@ use std::time::Duration;
 
 use parking_lot::{Mutex, RwLock};
 use pm_model::{
-    BodyPart, CaInfo, FilterSpec, FlowDetail, FlowId, FlowSummary, ProxyStatus, RowsPage, SortSpec, SslSettings,
-    ViewDelta, ViewId, ViewInfo,
+    BodyPart, CaInfo, FilterSpec, FlowDetail, FlowId, FlowState, FlowSummary, ProxyStatus, RowsPage, SortSpec, SsePage,
+    SslSettings, ViewDelta, ViewId, ViewInfo, WsPage, WsQuery,
 };
 use rustls::pki_types::CertificateDer;
 
 use crate::Error;
 use crate::ingest::{self, FlowEvent, IngestTx};
 use crate::integration::Platform;
-use crate::io::decode;
+use crate::io::{decode, sse};
 use crate::proxy::{self, ProxyConfig, ProxyHandle};
-use crate::recorder::FlowRecorder;
-use crate::store::{DetailStore, SegmentStore, Store};
+use crate::recorder::{FlowRecorder, is_event_stream};
+use crate::store::{DetailStore, SegmentStore, Store, page_events, sse_event};
 use crate::tls::{CertAuthority, SslPolicy, TlsContext};
 
 const SSL_SETTINGS_FILE: &str = "ssl.json";
@@ -244,6 +244,59 @@ impl Engine {
         let body = self.body(id, part, decode)?;
         std::fs::write(path, &body.bytes)?;
         Ok(body.bytes.len() as u64)
+    }
+
+    /// A window of a WebSocket flow's messages, filtered by `query`. A flow
+    /// that never became a WebSocket (the upgrade was refused) has none.
+    pub fn websocket_messages(&self, id: FlowId, query: &WsQuery, start: u32, count: u32) -> Result<WsPage, Error> {
+        match self.details.ws(id) {
+            Some(log) => Ok(log.page(&self.details.segments, query, start, count)?),
+            None if self.get_flow(id).is_some() => Ok(WsPage {
+                total: 0,
+                len: 0,
+                start,
+                messages: Vec::new(),
+                open: false,
+                close: None,
+            }),
+            None => Err(Error::UnknownFlow(id)),
+        }
+    }
+
+    /// The recorded payload of one WebSocket message (at most 1 MB).
+    pub fn websocket_payload(&self, id: FlowId, index: u32) -> Result<Vec<u8>, Error> {
+        let log = self.details.ws(id).ok_or(Error::UnknownFlow(id))?;
+        log.payload(&self.details.segments, index)?
+            .ok_or(Error::UnknownMessage(id, index))
+    }
+
+    /// A window of the events of a `text/event-stream` response matching
+    /// `text`. Uncompressed streams are parsed live as they arrive; a
+    /// compressed one is decoded and parsed once it is complete, without
+    /// per-event times.
+    pub fn sse_events(&self, id: FlowId, text: &str, start: u32, count: u32) -> Result<SsePage, Error> {
+        if let Some(log) = self.details.sse(id) {
+            return Ok(log.page(text, start, count));
+        }
+        let stored = self.details.get(id)?.ok_or(Error::UnknownFlow(id))?;
+        let open = self.get_flow(id).is_some_and(|f| f.state == FlowState::Active);
+        let is_stream = stored
+            .detail
+            .response
+            .as_ref()
+            .is_some_and(|r| is_event_stream(&r.headers));
+        let events = match is_stream && !open {
+            true => match self.body(id, BodyPart::Response, true) {
+                Ok(body) => sse::parse_all(&body.bytes)
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, e)| sse_event(i as u32, None, e))
+                    .collect(),
+                Err(_) => Vec::new(),
+            },
+            false => Vec::new(),
+        };
+        Ok(page_events(&events, text, start, count, open))
     }
 
     /// Drops every flow and deletes their bodies. Flows still in flight are

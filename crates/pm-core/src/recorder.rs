@@ -1,20 +1,25 @@
 //! Per-flow recording. A [`FlowRecorder`] is how traffic handlers (the
-//! proxy now; replay and WebSockets later) report a flow: heads and body
-//! chunks go into the live detail and the body captures, summary changes go
-//! to the ingest thread as small events.
+//! proxy now; replay later) report a flow: heads and body chunks go into
+//! the live detail and the body captures, summary changes go to the ingest
+//! thread as small events. A WebSocket flow records its messages through a
+//! [`WsRecorder`]; an event-stream response is parsed into events as its
+//! body streams.
 
 use std::io;
 use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
-use pm_model::{BodyPart, ContentKind, FlowDetail, FlowId, FlowState, ResponseHead, Timing};
+use pm_model::{
+    BodyPart, ContentKind, FlowDetail, FlowId, FlowState, ResponseHead, Timing, WsClose, WsDirection, WsOpcode,
+};
 
 use crate::Engine;
 use crate::ingest::FlowEvent;
 use crate::io::content::{self, GRAPHQL_MAX, SNIFF_LEN};
 use crate::io::decode;
-use crate::store::{Capture, SegmentStore, StoredDetail};
+use crate::proxy::now_ms;
+use crate::store::{Capture, SegmentStore, SseLog, StoredDetail, WsLog};
 
 /// Size updates for a streaming body go out at most this often.
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
@@ -59,6 +64,8 @@ struct LiveState {
     graphql_op: Option<Arc<str>>,
     /// Set once the flow has finished and been persisted.
     finished: Option<Arc<StoredDetail>>,
+    /// Events parsed from a `text/event-stream` response so far.
+    sse: Option<Arc<SseLog>>,
 }
 
 impl FlowRecorder {
@@ -80,6 +87,7 @@ impl FlowRecorder {
                 request_detected: false,
                 graphql_op: None,
                 finished: None,
+                sse: None,
             }),
         });
         engine.details().add_live(flow.clone());
@@ -122,6 +130,15 @@ impl FlowRecorder {
             state.detail.timing.ttfb_ms = Some(ms(now - sent));
             state.response_at = Some(now);
             state.detail.response_body.encoding = content_encoding(&head.headers);
+            // A compressed stream is parsed when asked for instead.
+            if is_event_stream(&head.headers)
+                && state.detail.response_body.encoding.is_none()
+                && let Some(engine) = self.flow.engine.upgrade()
+            {
+                let log = Arc::new(SseLog::new());
+                engine.details().add_sse(self.flow.id, log.clone());
+                state.sse = Some(log);
+            }
             state.detail.response = Some(head);
             content::flow_kind(state.detail.request_body.kind, content_kind)
         };
@@ -146,6 +163,11 @@ impl FlowRecorder {
             return;
         }
         state.capture_mut(part).push(data, &details.segments);
+        if part == BodyPart::Response
+            && let Some(sse) = &state.sse
+        {
+            sse.push(data, now_ms());
+        }
         if state.last_progress.elapsed() >= PROGRESS_INTERVAL {
             state.last_progress = Instant::now();
             let (req_size, resp_size) = (state.request.size, state.response.size);
@@ -219,7 +241,28 @@ impl FlowRecorder {
         self.finish(FlowState::Tunnel, None);
     }
 
+    /// Switches the flow to a WebSocket once the upstream has answered
+    /// `101`: from here on it records messages, and stays Active until
+    /// [`WsRecorder::closed`].
+    pub fn websocket(&self) -> WsRecorder {
+        let log = Arc::new(WsLog::new());
+        if let Some(engine) = self.flow.engine.upgrade() {
+            engine.details().add_ws(self.flow.id, log.clone());
+        }
+        self.flow.state.lock().detail.request_body.complete = true;
+        WsRecorder {
+            flow: self.clone(),
+            log,
+        }
+    }
+
     fn finish(&self, end_state: FlowState, error: Option<String>) {
+        self.finish_with(end_state, error, None);
+    }
+
+    /// Finishes the flow. `sizes` overrides the summary's (request,
+    /// response) byte counts, which otherwise come from the body captures.
+    fn finish_with(&self, end_state: FlowState, error: Option<String>, sizes: Option<(u64, u64)>) {
         let Some(engine) = self.flow.engine.upgrade() else {
             return;
         };
@@ -257,7 +300,11 @@ impl FlowRecorder {
                 response_body: state.response.finish(&details.segments),
             });
             state.finished = Some(stored.clone());
-            (stored, state.request.size, state.response.size, content)
+            if let Some(sse) = &state.sse {
+                sse.finish();
+            }
+            let (req_size, resp_size) = sizes.unwrap_or((state.request.size, state.response.size));
+            (stored, req_size, resp_size, content)
         };
         let _ = details.persist(self.flow.id, stored);
         if let Some(content) = content {
@@ -276,6 +323,47 @@ impl FlowRecorder {
         if let Some(engine) = self.flow.engine.upgrade() {
             engine.ingest().send(event);
         }
+    }
+}
+
+/// Records the messages of one WebSocket flow. Cheap to clone.
+#[derive(Clone)]
+pub struct WsRecorder {
+    flow: FlowRecorder,
+    log: Arc<WsLog>,
+}
+
+impl WsRecorder {
+    /// Records one message as it is relayed. `payload` is the whole message
+    /// (the close reason, for a close frame); only the first 1 MB is kept.
+    pub fn message(&self, direction: WsDirection, opcode: WsOpcode, payload: &[u8], close_code: Option<u16>) {
+        let Some(engine) = self.flow.flow.engine.upgrade() else {
+            return;
+        };
+        let details = engine.details();
+        let id = self.flow.flow.id;
+        if details.is_cleared(id) {
+            return;
+        }
+        self.log
+            .push(&details.segments, direction, opcode, payload, close_code, now_ms());
+        engine.ingest().send(FlowEvent::WsMsg {
+            id,
+            direction,
+            len: payload.len() as u64,
+        });
+    }
+
+    /// Finishes the flow: completed with how it closed, or failed with
+    /// `error` (a protocol or I/O error on either side).
+    pub fn closed(&self, close: Option<WsClose>, error: Option<String>) {
+        self.log.close(close);
+        let state = if error.is_some() {
+            FlowState::Failed
+        } else {
+            FlowState::Completed
+        };
+        self.flow.finish_with(state, error, Some(self.log.totals()));
     }
 }
 
@@ -394,6 +482,13 @@ fn header_value<'a>(headers: &'a [pm_model::Header], name: &str) -> Option<&'a s
         .iter()
         .find(|h| h.name.eq_ignore_ascii_case(name))
         .map(|h| h.value.as_str())
+}
+
+/// True for a `text/event-stream` response (server-sent events).
+pub(crate) fn is_event_stream(headers: &[pm_model::Header]) -> bool {
+    header_value(headers, "content-type")
+        .and_then(|v| v.split(';').next())
+        .is_some_and(|mime| mime.trim().eq_ignore_ascii_case("text/event-stream"))
 }
 
 /// The `Content-Encoding` header, if any, lower-cased.
