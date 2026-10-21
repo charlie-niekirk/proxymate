@@ -4,8 +4,9 @@ use std::sync::Arc;
 
 use pm_core::Engine;
 use pm_model::{
-    BodyPart, CaInfo, FilterSpec, FlowDetail, FlowId, FlowSummary, ProxyStatus, RowsPage, SidebarSnapshot, SortSpec,
-    SsePage, SslSettings, SystemProxyStatus, TrustStatus, ViewDelta, ViewId, ViewInfo, WsPage, WsQuery,
+    BodyPart, BreakpointId, BreakpointInfo, BreakpointResolution, CaInfo, FilterSpec, FlowDetail, FlowId, FlowSummary,
+    PresetKind, ProxyStatus, RowsPage, Rule, RuleId, RuleSettings, RuleTestResult, SidebarSnapshot, SortSpec, SsePage,
+    SslSettings, SystemProxyStatus, TrustStatus, ViewDelta, ViewId, ViewInfo, WsPage, WsQuery,
 };
 use tauri::State;
 use tauri::ipc::{Channel, InvokeResponseBody, IpcResponse};
@@ -255,6 +256,123 @@ pub async fn set_system_proxy(engine: EngineState<'_>, on: bool) -> Result<Syste
 #[specta::specta]
 pub fn get_terminal_env(engine: EngineState<'_>) -> String {
     engine.terminal_env()
+}
+
+// ---- Rules ----
+
+/// Every rule, in evaluation order.
+#[tauri::command]
+#[specta::specta]
+pub fn list_rules(engine: EngineState<'_>) -> Vec<Rule> {
+    engine.rules()
+}
+
+/// Saves a new rule at the end of the list (a fresh id is assigned).
+#[tauri::command]
+#[specta::specta]
+pub fn create_rule(engine: EngineState<'_>, rule: Rule) -> Result<Rule, String> {
+    engine.create_rule(rule).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn update_rule(engine: EngineState<'_>, rule: Rule) -> Result<Rule, String> {
+    engine.update_rule(rule).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn set_rule_enabled(engine: EngineState<'_>, id: RuleId, enabled: bool) -> Result<Rule, String> {
+    engine.set_rule_enabled(&id, enabled).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn delete_rule(engine: EngineState<'_>, id: RuleId) -> Result<(), String> {
+    engine.delete_rule(&id).map_err(|e| e.to_string())
+}
+
+/// Deletes every agent-created rule; returns how many.
+#[tauri::command]
+#[specta::specta]
+pub fn delete_agent_rules(engine: EngineState<'_>) -> Result<u32, String> {
+    engine.delete_agent_rules().map_err(|e| e.to_string())
+}
+
+/// Puts the listed rules first, in that order.
+#[tauri::command]
+#[specta::specta]
+pub fn reorder_rules(engine: EngineState<'_>, ids: Vec<RuleId>) -> Result<Vec<Rule>, String> {
+    engine.reorder_rules(&ids).map_err(|e| e.to_string())
+}
+
+/// Compiles a rule without saving it; the error says what's wrong.
+#[tauri::command]
+#[specta::specta]
+pub fn validate_rule(engine: EngineState<'_>, rule: Rule) -> Result<(), String> {
+    engine.validate_rule(&rule).map_err(|e| e.to_string())
+}
+
+/// An unsaved rule pre-filled from a flow by a preset.
+#[tauri::command]
+#[specta::specta]
+pub fn draft_rule(engine: EngineState<'_>, flow: FlowId, preset: PresetKind) -> Result<Rule, String> {
+    engine.draft_rule(flow, preset).map_err(|e| e.to_string())
+}
+
+/// Dry run of a rule against a recorded flow.
+#[tauri::command]
+#[specta::specta]
+pub async fn test_rule(engine: EngineState<'_>, rule: Rule, flow: FlowId) -> Result<RuleTestResult, String> {
+    engine.test_rule(&rule, flow).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn get_rule_settings(engine: EngineState<'_>) -> RuleSettings {
+    engine.rule_settings()
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn set_rule_settings(engine: EngineState<'_>, settings: RuleSettings) -> Result<RuleSettings, String> {
+    engine.set_rule_settings(settings).map_err(|e| e.to_string())
+}
+
+// ---- Breakpoints ----
+
+#[tauri::command]
+#[specta::specta]
+pub fn list_breakpoints(engine: EngineState<'_>) -> Vec<BreakpointInfo> {
+    engine.breakpoints()
+}
+
+/// Streams the breakpoint queue whenever it changes.
+#[tauri::command]
+#[specta::specta]
+pub fn subscribe_breakpoints(engine: EngineState<'_>, on_queue: Channel<Vec<BreakpointInfo>>) {
+    engine.subscribe_breakpoints(Box::new(move |queue| on_queue.send(queue).is_ok()));
+}
+
+/// A paused message's (decoded) body as a raw `ArrayBuffer`.
+#[tauri::command]
+#[specta::specta]
+pub fn get_breakpoint_body(engine: EngineState<'_>, id: BreakpointId) -> Result<RawBytes, String> {
+    engine
+        .breakpoint_body(id)
+        .map(|bytes| RawBytes(tauri::ipc::Response::new(bytes)))
+        .map_err(|e| e.to_string())
+}
+
+/// Continues, aborts or answers a paused flow. The first resolution wins.
+#[tauri::command]
+#[specta::specta]
+pub fn resolve_breakpoint(
+    engine: EngineState<'_>,
+    id: BreakpointId,
+    resolution: BreakpointResolution,
+) -> Result<(), String> {
+    engine.resolve_breakpoint(id, resolution).map_err(|e| e.to_string())
 }
 
 /// Bytes sent to the webview as an `ArrayBuffer`. specta has no type for

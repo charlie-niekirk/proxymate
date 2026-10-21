@@ -2,6 +2,7 @@ import { create } from "zustand";
 
 import type { ContentGroup, ContentKind, FilterSpec_Deserialize, ProtocolFilter, SortSpec } from "@/bindings";
 import type { ViewerId } from "@/components/BodyViewer/registry";
+import type { Rule } from "@/lib/rules";
 
 export interface ViewStats {
   len: number;
@@ -32,6 +33,14 @@ interface UiState {
   /** Body viewer the user picked per content kind; sticks across flows. */
   viewerByKind: Partial<Record<ContentKind, ViewerId>>;
   certWizardOpen: boolean;
+  /**
+   * The Rules Editor: open or not, and what it shows. `draft` is an unsaved
+   * rule (from a preset or "New"); otherwise `ruleId` names a saved one.
+   */
+  rulesEditor: { open: boolean; ruleId: string | null; draft: Rule | null; seq: number };
+  breakpointsOpen: boolean;
+  /** The breakpoint shown in the Breakpoint Editor. */
+  selectedBreakpoint: number | null;
 
   setText(text: string): void;
   setProtocol(protocol: ProtocolFilter): void;
@@ -47,6 +56,10 @@ interface UiState {
   setResponseTab(tab: ResponseTab): void;
   setViewer(kind: ContentKind, viewer: ViewerId): void;
   setCertWizardOpen(open: boolean): void;
+  openRulesEditor(target?: { ruleId?: string | null; draft?: Rule | null }): void;
+  closeRulesEditor(): void;
+  setBreakpointsOpen(open: boolean): void;
+  selectBreakpoint(id: number | null): void;
 }
 
 export const useUi = create<UiState>()((set) => ({
@@ -60,6 +73,9 @@ export const useUi = create<UiState>()((set) => ({
   responseTab: "Body",
   viewerByKind: {},
   certWizardOpen: false,
+  rulesEditor: { open: false, ruleId: null, draft: null, seq: 0 },
+  breakpointsOpen: false,
+  selectedBreakpoint: null,
 
   setText: (text) => set((s) => ({ filter: { ...s.filter, text } })),
   setProtocol: (protocol) => set((s) => ({ filter: { ...s.filter, protocol } })),
@@ -81,4 +97,17 @@ export const useUi = create<UiState>()((set) => ({
   setResponseTab: (responseTab) => set({ responseTab }),
   setViewer: (kind, viewer) => set((s) => ({ viewerByKind: { ...s.viewerByKind, [kind]: viewer } })),
   setCertWizardOpen: (certWizardOpen) => set({ certWizardOpen }),
+  openRulesEditor: (target = {}) =>
+    set((s) => ({
+      rulesEditor: {
+        open: true,
+        draft: target.draft ?? null,
+        ruleId: target.draft ? null : target.ruleId !== undefined ? target.ruleId : s.rulesEditor.ruleId,
+        // Remounts the form, so a new draft never inherits the last one's edits.
+        seq: s.rulesEditor.seq + 1,
+      },
+    })),
+  closeRulesEditor: () => set((s) => ({ rulesEditor: { ...s.rulesEditor, open: false, draft: null } })),
+  setBreakpointsOpen: (breakpointsOpen) => set({ breakpointsOpen }),
+  selectBreakpoint: (selectedBreakpoint) => set({ selectedBreakpoint }),
 }));

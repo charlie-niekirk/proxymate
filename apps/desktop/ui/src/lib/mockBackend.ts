@@ -1,6 +1,8 @@
 import type {
   BodyPart,
+  BreakpointInfo_Serialize,
   CaInfo,
+  FlowRules_Serialize,
   ContentGroup,
   ContentKind,
   FilterSpec_Deserialize,
@@ -18,6 +20,7 @@ import type {
   WsMessage_Serialize,
 } from "@/bindings";
 import type { Backend } from "@/lib/backend";
+import { GLOBAL_THROTTLE_RULE_ID, emptyMatcher, matcherSummary, normalizeRule, type Rule } from "@/lib/rules";
 
 /** A fully specified mock flow with bodies (the dev zoo, see `dev/zoo.ts`). */
 export interface MockFlow {
@@ -65,7 +68,7 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
       (i * 37) % 900,
       0,
       (i * 131) % 90_000,
-      false,
+      !connect && i % 41 === 5,
       https && !connect && i % 3 !== 0 ? "HTTP/2" : "HTTP/1.1",
       tunnel ? "passthrough" : pinned ? "likely_pinned" : https ? "intercepted" : "none",
       !connect && kinds[(i * 5) % kinds.length] === "graphql" ? "GetViewer" : null,
@@ -104,6 +107,39 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
 
   const views = new Map<number, number[]>();
   let nextView = 0;
+
+  let rules: Rule[] = [
+    {
+      id: GLOBAL_THROTTLE_RULE_ID,
+      name: "Network conditions",
+      enabled: false,
+      order: -1_000_000,
+      origin: { kind: "preset", preset: "throttle" },
+      matcher: emptyMatcher(),
+      actions: [{ type: "Throttle", download_kbps: 780, upload_kbps: 330, latency_ms: 100 }],
+    },
+    {
+      id: "mock-agent-rule",
+      name: "Mock checkout (agent)",
+      enabled: true,
+      order: 1,
+      origin: { kind: "agent", client: "claude-code", session: null, created_at_ms: now },
+      matcher: { ...emptyMatcher(), host: { kind: "exact", value: "api.stripe.com", case_insensitive: false } },
+      actions: [{ type: "SetStatus", status: 503 }],
+    },
+  ];
+  let ruleSettings = { breakpoint_timeout_secs: 300 };
+  // Dev only: `?breakpoint` seeds a paused request, for the Breakpoint Editor.
+  let breakpoints: BreakpointInfo_Serialize[] =
+    typeof window !== "undefined" && new URLSearchParams(window.location.search).has("breakpoint") ? [mockBreakpoint(now)] : [];
+  let onBreakpoints: ((q: BreakpointInfo_Serialize[]) => void) | null = null;
+  const pushBreakpoints = () => onBreakpoints?.(breakpoints);
+  const sorted = () => [...rules].sort((a, b) => a.order - b.order);
+  const findRule = (id: string) => {
+    const rule = rules.find((r) => r.id === id);
+    if (!rule) throw new Error(`no rule with id ${id}`);
+    return rule;
+  };
 
   const GROUPS: Record<ContentKind, ContentGroup> = {
     none: "other", json: "json", xml: "xml", html: "document", formurlencoded: "form", multipart: "form",
@@ -227,6 +263,7 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
           mime: f[9] === "json" ? "application/json" : "text/plain",
         },
         error: f[17] === "likely_pinned" ? "The client rejected the Proxymate certificate. It sent an unknown_ca alert." : null,
+        rules: mockFlowRules(f[15], id),
         tls,
         timing: {
           dns_ms: id % 4 === 0 ? 3.2 : null,
@@ -360,6 +397,134 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
       sysproxy = { ...sysproxy, enabled: on, services: on ? ["Wi-Fi"] : [], error: null };
       return sysproxy;
     },
+    async listRules() {
+      return sorted();
+    },
+    async createRule(rule) {
+      const created = normalizeRule({
+        ...(rule as Rule),
+        id: crypto.randomUUID(),
+        order: Math.max(0, ...rules.map((r) => r.order)) + 1,
+      });
+      rules = [...rules, created];
+      return created;
+    },
+    async updateRule(rule) {
+      findRule(rule.id);
+      const updated = normalizeRule(rule as Rule);
+      rules = rules.map((r) => (r.id === rule.id ? updated : r));
+      return updated;
+    },
+    async setRuleEnabled(id, enabled) {
+      const updated = { ...findRule(id), enabled };
+      rules = rules.map((r) => (r.id === id ? updated : r));
+      return updated;
+    },
+    async deleteRule(id) {
+      if (id.startsWith("builtin-")) throw new Error(`the built-in rule ${id} can't be deleted`);
+      findRule(id);
+      rules = rules.filter((r) => r.id !== id);
+    },
+    async deleteAgentRules() {
+      const before = rules.length;
+      rules = rules.filter((r) => r.origin.kind !== "agent");
+      return before - rules.length;
+    },
+    async reorderRules(ids) {
+      const user = sorted().filter((r) => !r.id.startsWith("builtin-"));
+      const ordered = [...ids.map((id) => user.find((r) => r.id === id)).filter((r): r is Rule => !!r), ...user.filter((r) => !ids.includes(r.id))];
+      rules = [...rules.filter((r) => r.id.startsWith("builtin-")), ...ordered.map((r, i) => ({ ...r, order: i + 1 }))];
+      return sorted();
+    },
+    async validateRule(rule) {
+      for (const p of [rule.matcher.host, rule.matcher.path, rule.matcher.client_app]) {
+        if (p?.kind === "regex") {
+          try {
+            new RegExp(p.value);
+          } catch (e) {
+            throw new Error(`rule ${JSON.stringify(rule.name)}, pattern: invalid regex: ${String(e)}`, { cause: e });
+          }
+        }
+      }
+    },
+    async draftRule(flow, preset) {
+      await ready;
+      const f = flows[flow];
+      if (!f) throw new Error(`unknown flow ${flow}`);
+      const target = `${f[3]} ${f[4]}${f[6]}`;
+      const base: Rule = {
+        id: "",
+        name: "",
+        enabled: true,
+        order: 0,
+        origin: { kind: "preset", preset },
+        matcher: {
+          ...emptyMatcher(),
+          methods: [f[3]],
+          host: { kind: "exact", value: f[4], case_insensitive: false },
+          path: { kind: "exact", value: f[6], case_insensitive: false },
+        },
+        actions: [],
+      };
+      switch (preset) {
+        case "map_local":
+          return {
+            ...base,
+            name: `Map Local · ${target}`,
+            actions: [{ type: "MapLocal", source: { kind: "inline", body: mockBody(f[9]) }, status: f[8] ?? 200, headers: [], content_type: f[9] === "json" ? "application/json" : "text/plain" }],
+          };
+        case "breakpoint":
+          return { ...base, name: `Breakpoint · ${target}`, actions: [{ type: "Breakpoint", request: true, response: false }] };
+        default:
+          return {
+            ...base,
+            name: `Rewrite · ${target}`,
+            actions: [{ type: "SetHeader", phase: "response", name: "X-Proxymate-Rewrite", value: "1" }],
+          };
+      }
+    },
+    async testRule(rule, flow) {
+      await ready;
+      const f = flows[flow];
+      if (!f) throw new Error(`unknown flow ${flow}`);
+      const r = normalizeRule(rule as Rule);
+      const host = r.matcher.host;
+      const hostOk = !host || (host.kind === "exact" ? host.value === f[4] : hostMatches(f[4], host.value));
+      const methodOk = r.matcher.methods.length === 0 || r.matcher.methods.includes(f[3]);
+      const detail = await this.getFlowDetail(flow);
+      const matched = hostOk && methodOk;
+      return {
+        matched,
+        mismatch: matched ? null : !hostOk ? `host ${f[4]} doesn't match` : `method ${f[3]} doesn't match`,
+        response_matched: matched ? true : null,
+        request: detail!.request,
+        request_body: null,
+        response: detail!.response,
+        response_body: mockBody(f[9]),
+        notes: matched ? [`(mock) would apply to ${matcherSummary(r.matcher)}`] : [],
+      };
+    },
+    async getRuleSettings() {
+      return ruleSettings;
+    },
+    async setRuleSettings(settings) {
+      ruleSettings = settings;
+      return settings;
+    },
+    async subscribeBreakpoints(cb) {
+      onBreakpoints = cb;
+      setTimeout(pushBreakpoints, 0);
+    },
+    async getBreakpointBody(id) {
+      const bp = breakpoints.find((b) => b.id === id);
+      if (!bp) throw new Error(`no breakpoint ${id}`);
+      return new TextEncoder().encode(JSON.stringify({ email: "you@example.com", amount: 4200 }, null, 2)).buffer as ArrayBuffer;
+    },
+    async resolveBreakpoint(id) {
+      if (!breakpoints.some((b) => b.id === id)) throw new Error(`breakpoint ${id} was already resolved`);
+      breakpoints = breakpoints.filter((b) => b.id !== id);
+      pushBreakpoints();
+    },
     async getTerminalEnv() {
       const proxy = "http://127.0.0.1:9090";
       return [
@@ -470,6 +635,43 @@ function mockCert(subject: string, issuer: string, san: string[]) {
     not_after: "2026-10-30T23:59:59Z",
     san,
     sha256: "AB12".repeat(16),
+  };
+}
+
+/** Applied rules for mock flows marked edited. */
+function mockFlowRules(edited: boolean, id: number): FlowRules_Serialize {
+  const applied: FlowRules_Serialize["applied"] = edited
+    ? [
+        { rule_id: "mock-rewrite", name: "Add debug header", origin: { kind: "user" }, phase: "response" },
+        ...(id % 2 === 0
+          ? [{ rule_id: "mock-agent-rule", name: "Mock checkout (agent)", origin: { kind: "agent" as const, client: "claude-code", session: null, created_at_ms: 0 }, phase: "response" as const }]
+          : []),
+      ]
+    : [];
+  return { applied, rewrite_skipped: null, breakpoint_timeout: false, mocked: false };
+}
+
+function mockBreakpoint(now: number): BreakpointInfo_Serialize {
+  return {
+    id: 1,
+    flow_id: 3,
+    phase: "request",
+    rule_id: "mock-bp",
+    rule_name: "Breakpoint · POST api.stripe.com/v1/charges",
+    paused_at_ms: now,
+    deadline_ms: now + 300_000,
+    request: {
+      method: "POST",
+      url: "https://api.stripe.com/v1/charges?expand=customer",
+      version: "HTTP/2",
+      headers: [
+        { name: "content-type", value: "application/json" },
+        { name: "authorization", value: "Bearer sk_test_mock" },
+        { name: "user-agent", value: "curl/8.7.1" },
+      ],
+    },
+    response: null,
+    body: { size: 48, editable: true, note: null },
   };
 }
 

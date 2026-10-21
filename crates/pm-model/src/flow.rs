@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
@@ -13,7 +14,7 @@ use crate::tls::TlsStatus;
 pub type FlowId = u32;
 
 /// URL scheme of a flow as seen by the client.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Scheme {
     Http,

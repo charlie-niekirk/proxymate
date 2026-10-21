@@ -22,6 +22,7 @@ use crate::integration::Platform;
 use crate::io::{decode, sse};
 use crate::proxy::{self, ProxyConfig, ProxyHandle};
 use crate::recorder::{FlowRecorder, is_event_stream};
+use crate::rules::Rules;
 use crate::store::{DetailStore, SegmentStore, Store, page_events, sse_event};
 use crate::tls::{CertAuthority, SslPolicy, TlsContext};
 
@@ -37,7 +38,8 @@ pub type DeltaSink = Box<dyn FnMut(ViewDelta) -> bool + Send>;
 #[derive(Debug, Clone, Default)]
 pub struct EngineConfig {
     /// Root for live segment files (`<data_dir>/live/<uuid>/`), the CA
-    /// (`<data_dir>/ca/`) and `ssl.json`. Defaults to a `proxymate`
+    /// (`<data_dir>/ca/`), `ssl.json` and `app.sqlite` (rules; in memory
+    /// without a data dir). Defaults to a `proxymate`
     /// directory under the system temp dir.
     pub data_dir: Option<PathBuf>,
     /// DER certificates trusted for upstream TLS on top of the OS trust
@@ -73,6 +75,7 @@ pub struct Engine {
     /// Write-locked across a read-modify-write of the settings.
     ssl: RwLock<Arc<SslPolicy>>,
     pub(crate) platform: Platform,
+    pub(crate) rules: Rules,
 }
 
 #[derive(Default)]
@@ -92,6 +95,9 @@ impl Engine {
     /// Creates an engine and starts its ingest thread and 20 Hz delta
     /// publisher thread, which stop when the last `Arc<Engine>` is dropped.
     pub fn with_config(config: EngineConfig) -> Arc<Engine> {
+        // Without a data directory (tests, throwaway engines) rules live
+        // in memory, so engines never share them through the temp dir.
+        let rules = Rules::load(config.data_dir.as_deref());
         let root = config
             .data_dir
             .unwrap_or_else(|| std::env::temp_dir().join("proxymate"));
@@ -132,6 +138,7 @@ impl Engine {
             extra_roots,
             tls: RwLock::new(Arc::new(tls)),
             ssl: RwLock::new(Arc::new(policy)),
+            rules,
         });
         let weak = Arc::downgrade(&engine);
         std::thread::Builder::new()
@@ -472,6 +479,7 @@ impl Engine {
     /// and headless tools.
     pub fn publish_tick(&self) {
         self.publish_sidebar();
+        self.rules.breakpoints.publish();
         let mut sinks = self.sinks.lock();
         if sinks.is_empty() {
             return;

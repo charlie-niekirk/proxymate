@@ -106,6 +106,12 @@
   --graphql: oklch(0.74 0.15 330);
   --graphql-bg: oklch(0.74 0.15 330 / 15%);
 
+  /* ---- rules (Edited column, rule badges; AI = agent-created) ---- */
+  --rule: var(--m-patch);
+  --rule-bg: var(--m-patch-bg);
+  --rule-agent: oklch(0.8 0.12 185);
+  --rule-agent-bg: oklch(0.8 0.12 185 / 15%);
+
   /* ---- TLS (SSL column, inspector) ---- */
   --ssl-passthrough: var(--s-tunnel);
   --ssl-pinned: var(--s-4xx);
@@ -228,6 +234,9 @@
 
   --graphql: oklch(0.5 0.18 330);
   --graphql-bg: oklch(0.5 0.18 330 / 12%);
+
+  --rule-agent: oklch(0.5 0.12 185);
+  --rule-agent-bg: oklch(0.5 0.12 185 / 12%);
 
   --url-scheme: oklch(0.6 0.01 270);
   --url-host: oklch(0.2 0.004 270);

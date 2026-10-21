@@ -46,6 +46,22 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::get_system_proxy_status,
             commands::set_system_proxy,
             commands::get_terminal_env,
+            commands::list_rules,
+            commands::create_rule,
+            commands::update_rule,
+            commands::set_rule_enabled,
+            commands::delete_rule,
+            commands::delete_agent_rules,
+            commands::reorder_rules,
+            commands::validate_rule,
+            commands::draft_rule,
+            commands::test_rule,
+            commands::get_rule_settings,
+            commands::set_rule_settings,
+            commands::list_breakpoints,
+            commands::subscribe_breakpoints,
+            commands::get_breakpoint_body,
+            commands::resolve_breakpoint,
         ])
         // Sizes are u64 but stay far below 2^53.
         .dangerously_cast_bigints_to_number()

@@ -1,8 +1,10 @@
+import { BreakpointEditor } from "@/components/Breakpoints/BreakpointEditor";
 import { CertWizard } from "@/components/CertWizard";
 import { DetailPane } from "@/components/DetailPane";
 import { FilterBar } from "@/components/FilterBar";
 import { FlowTable } from "@/components/FlowTable/FlowTable";
 import { Footer } from "@/components/Footer";
+import { RulesEditor } from "@/components/Rules/RulesEditor";
 import { Sidebar } from "@/components/Sidebar";
 import { Toolbar } from "@/components/Toolbar";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
@@ -37,6 +39,8 @@ export function AppShell() {
       </ResizablePanel>
     </ResizablePanelGroup>
     <CertWizard />
+    <RulesEditor />
+    <BreakpointEditor />
     </>
   );
 }

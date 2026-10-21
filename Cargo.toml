@@ -26,7 +26,8 @@ pm-testkit = { path = "crates/pm-testkit" }
 
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
-specta = { version = "=2.0.0-rc.26", features = ["derive"] }
+specta = { version = "=2.0.0-rc.26", features = ["derive", "serde_json"] }
+schemars = "1"
 specta-typescript = "0.0.13"
 tauri-specta = { version = "=2.0.0-rc.26", features = ["derive", "typescript"] }
 tauri = { version = "2.12", features = ["macos-private-api"] }
@@ -57,6 +58,12 @@ time = { version = "0.3", features = ["formatting"] }
 ring = "0.17"
 gethostname = "1"
 globset = "0.4"
+
+# Rules
+regex = "1"
+arc-swap = "1"
+dashmap = "6"
+rusqlite = { version = "0.37", features = ["bundled"] }
 
 # Storage and decoding
 postcard = { version = "1", default-features = false, features = ["use-std"] }

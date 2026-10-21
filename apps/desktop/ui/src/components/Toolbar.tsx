@@ -1,8 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
-import { Bot, Circle, Gauge, OctagonPause, Plus, Settings, ShieldAlert, Trash2, type LucideIcon } from "lucide-react";
+import { Bot, Circle, ListChecks, Plus, Settings, ShieldAlert, Trash2, type LucideIcon } from "lucide-react";
 
 import type { ProxyStatus_Serialize } from "@/bindings";
+import { BreakpointBadge } from "@/components/Breakpoints/BreakpointBadge";
 import { CertificateMenu } from "@/components/CertificateMenu";
+import { ThrottleMenu } from "@/components/Rules/ThrottleMenu";
 import { SystemProxyMenu } from "@/components/SystemProxyMenu";
 import { Button } from "@/components/ui/button";
 import { useTrustStatus } from "@/hooks/useTrustStatus";
@@ -68,8 +70,9 @@ export function Toolbar() {
         <ListeningStatus status={status} />
       </div>
 
-      <ToolButton icon={Gauge} label="Throttle" milestone="M5" />
-      <ToolButton icon={OctagonPause} label="Breakpoints" milestone="M5" />
+      <RulesButton />
+      <ThrottleMenu />
+      <BreakpointBadge />
       <Separator orientation="vertical" className="mx-1 !h-5" />
       <TrustWarning listening={!!status?.listening} />
       <SystemProxyMenu />
@@ -77,6 +80,20 @@ export function Toolbar() {
       <ToolButton icon={Bot} label="MCP server" milestone="M7" />
       <ToolButton icon={Settings} label="Settings" milestone="M10" />
     </header>
+  );
+}
+
+function RulesButton() {
+  const open = useUi((s) => s.openRulesEditor);
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button variant="ghost" size="icon" aria-label="Rules" onClick={() => open()} data-testid="rules-button">
+          <ListChecks />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>Rules: Map Local, rewrites, breakpoints, Map Remote, block</TooltipContent>
+    </Tooltip>
   );
 }
 

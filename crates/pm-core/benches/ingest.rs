@@ -49,6 +49,7 @@ fn detail(flow: &FlowSummary) -> FlowDetail {
         error: None,
         tls: None,
         timing: Default::default(),
+        rules: Default::default(),
     }
 }
 

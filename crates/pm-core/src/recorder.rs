@@ -11,7 +11,8 @@ use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 use pm_model::{
-    BodyPart, ContentKind, FlowDetail, FlowId, FlowState, ResponseHead, Timing, WsClose, WsDirection, WsOpcode,
+    AppliedRule, BodyPart, ContentKind, FlowDetail, FlowId, FlowState, RequestHead, ResponseHead, Timing, WsClose,
+    WsDirection, WsOpcode,
 };
 
 use crate::Engine;
@@ -66,6 +67,8 @@ struct LiveState {
     finished: Option<Arc<StoredDetail>>,
     /// Events parsed from a `text/event-stream` response so far.
     sse: Option<Arc<SseLog>>,
+    /// A `Block` rule answered: the flow ends as Blocked, not Completed.
+    blocked: bool,
 }
 
 impl FlowRecorder {
@@ -88,6 +91,7 @@ impl FlowRecorder {
                 graphql_op: None,
                 finished: None,
                 sse: None,
+                blocked: false,
             }),
         });
         engine.details().add_live(flow.clone());
@@ -147,6 +151,88 @@ impl FlowRecorder {
             status,
             content_kind,
         });
+    }
+
+    /// Replaces the recorded request head with what rules (or a
+    /// breakpoint) turned it into: the flow shows what was sent.
+    pub fn request_head(&self, head: RequestHead) {
+        let mut state = self.flow.state.lock();
+        if state.finished.is_some() {
+            return;
+        }
+        state.detail.request_body.encoding = content_encoding(&head.headers);
+        state.detail.request = head;
+    }
+
+    /// The request head as recorded so far (after rewrites).
+    pub fn request_snapshot(&self) -> Option<RequestHead> {
+        Some(self.flow.state.lock().detail.request.clone())
+    }
+
+    /// Records rules that changed the flow, and marks it edited.
+    pub fn rules_applied(&self, applied: Vec<AppliedRule>) {
+        if applied.is_empty() {
+            return;
+        }
+        {
+            let mut state = self.flow.state.lock();
+            if state.finished.is_some() {
+                return;
+            }
+            let rules = &mut state.detail.rules.applied;
+            for rule in applied {
+                if !rules.iter().any(|r| r.rule_id == rule.rule_id && r.phase == rule.phase) {
+                    rules.push(rule);
+                }
+            }
+        }
+        self.send(FlowEvent::Edited { id: self.flow.id });
+    }
+
+    /// A body action or breakpoint couldn't touch a body; it went through
+    /// unchanged.
+    pub fn rewrite_skipped(&self, reason: impl Into<String>) {
+        let reason = reason.into();
+        let mut state = self.flow.state.lock();
+        let skipped = &mut state.detail.rules.rewrite_skipped;
+        match skipped {
+            Some(existing) if !existing.contains(&reason) => {
+                existing.push_str("; ");
+                existing.push_str(&reason);
+            }
+            Some(_) => {}
+            None => *skipped = Some(reason),
+        }
+    }
+
+    /// The flow is held at a breakpoint (the violet Paused pill), or goes on.
+    pub fn paused(&self, paused: bool) {
+        let state = if paused { FlowState::Paused } else { FlowState::Active };
+        self.send(FlowEvent::State {
+            id: self.flow.id,
+            state,
+        });
+    }
+
+    /// A breakpoint timed out; the flow went on unmodified.
+    pub fn breakpoint_timeout(&self) {
+        self.flow.state.lock().detail.rules.breakpoint_timeout = true;
+    }
+
+    /// The response came from Map Local or a breakpoint, not the upstream.
+    pub fn mocked(&self) {
+        self.flow.state.lock().detail.rules.mocked = true;
+    }
+
+    /// A `Block` rule answered with a status: the flow ends Blocked.
+    pub fn blocked(&self) {
+        self.flow.state.lock().blocked = true;
+    }
+
+    /// A `Block` rule (or a breakpoint's Abort) reset the connection.
+    pub fn reset(&self, reason: impl Into<String>, blocked: bool) {
+        let state = if blocked { FlowState::Blocked } else { FlowState::Failed };
+        self.finish(state, Some(reason.into()));
     }
 
     /// Tees one chunk of a body.
@@ -268,7 +354,7 @@ impl FlowRecorder {
         };
         let details = engine.details();
         let duration_ms = self.flow.started.elapsed().as_millis().min(u32::MAX as u128) as u32;
-        let (stored, req_size, resp_size, content) = {
+        let (stored, req_size, resp_size, content, end_state) = {
             let mut state = self.flow.state.lock();
             if state.finished.is_some() {
                 return;
@@ -288,6 +374,11 @@ impl FlowRecorder {
             if end_state == FlowState::Completed {
                 state.detail.response_body.complete = true;
             }
+            let end_state = if end_state == FlowState::Completed && state.blocked {
+                FlowState::Blocked
+            } else {
+                end_state
+            };
             state.detail.error = error;
             if let Some(response_at) = state.response_at {
                 state.detail.timing.transfer_ms = Some(ms(response_at.elapsed()));
@@ -304,7 +395,7 @@ impl FlowRecorder {
                 sse.finish();
             }
             let (req_size, resp_size) = sizes.unwrap_or((state.request.size, state.response.size));
-            (stored, req_size, resp_size, content)
+            (stored, req_size, resp_size, content, end_state)
         };
         let _ = details.persist(self.flow.id, stored);
         if let Some(content) = content {

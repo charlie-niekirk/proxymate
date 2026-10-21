@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::mpsc::SyncSender;
 
-use pm_model::{FilterSpec, FlowId, FlowSummary, RowsPage, SortSpec, ViewDelta, ViewId, ViewInfo};
+use pm_model::{FilterSpec, FlowId, FlowState, FlowSummary, RowsPage, SortSpec, ViewDelta, ViewId, ViewInfo};
 
 pub(crate) use blob::Capture;
 pub(crate) use detail::{DetailStore, StoredDetail};
@@ -129,6 +129,13 @@ impl Store {
                     f.duration_ms = Some(duration_ms);
                     f.req_size = req_size;
                     f.resp_size = resp_size;
+                }),
+                FlowEvent::Edited { id } => self.modify(id, first_new, |f| f.edited = true),
+                FlowEvent::State { id, state } => self.modify(id, first_new, |f| {
+                    // A late "continue" must not revive a finished flow.
+                    if matches!(f.state, FlowState::Active | FlowState::Paused) {
+                        f.state = state;
+                    }
                 }),
                 FlowEvent::Clear => {
                     self.base = self.next_id();
