@@ -36,7 +36,7 @@ crates/pm-model     pure types (serde + specta + schemars): Flow*, Rule/Matcher/
 crates/pm-core      headless Engine: proxy/, tls/, store/, rules/, io/ (har, curl, session) — no Tauri dep
 crates/pm-platform  OS traits + cfg impls: sysproxy, trust, procinfo, netif, simctl (macos/ linux/ windows/)
 crates/pm-mcp       rmcp server over Arc<Engine>: Streamable HTTP (axum) + stdio bridge
-crates/pm-testkit   test upstreams (h1/h2 TLS, WS echo, SSE, slow/huge bodies), test CA, synthetic flow generator
+crates/pm-testkit   test upstreams (h1/h2 TLS, WS echo, SSE, slow/huge bodies), test CA; re-exports the synthetic flow generator (which lives in pm-core::synth so the app and CLI can seed data)
 apps/desktop/src-tauri   thin Tauri adapters → Engine; also `proxymate mcp-stdio`, `--sysproxy-guardian`
 apps/desktop/ui          Vite + React 19 + TS
 apps/cli                 proxymate-cli serve|mcp-stdio|gen-flows|bench (headless, CI/agents)

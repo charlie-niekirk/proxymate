@@ -1,0 +1,16 @@
+{
+  "name": "proxymate",
+  "private": true,
+  "workspaces": ["apps/desktop/ui"],
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "npm run dev -w @proxymate/ui",
+    "build": "npm run build -w @proxymate/ui",
+    "typecheck": "npm run typecheck -w @proxymate/ui",
+    "lint": "npm run lint -w @proxymate/ui",
+    "test": "npm run test -w @proxymate/ui"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.12.4"
+  }
+}

@@ -1,0 +1,34 @@
+[package]
+name = "proxymate-desktop"
+description = "Proxymate desktop app: thin Tauri adapters over the pm-core Engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+default-run = "proxymate"
+
+[[bin]]
+name = "proxymate"
+path = "src/main.rs"
+
+[lib]
+name = "proxymate_desktop"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build.workspace = true
+
+[dependencies]
+pm-core.workspace = true
+pm-model.workspace = true
+serde.workspace = true
+specta.workspace = true
+specta-typescript.workspace = true
+tauri.workspace = true
+tauri-specta.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+window-vibrancy.workspace = true
+
+[lints]
+workspace = true

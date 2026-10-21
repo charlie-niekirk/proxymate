@@ -1,0 +1,16 @@
+[package]
+name = "pm-core"
+description = "Headless Proxymate engine: proxy, TLS, flow store and views, rules, import/export. No Tauri dependency."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+pm-model.workspace = true
+parking_lot.workspace = true
+rayon.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

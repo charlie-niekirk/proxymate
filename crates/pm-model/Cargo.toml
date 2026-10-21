@@ -1,0 +1,17 @@
+[package]
+name = "pm-model"
+description = "Pure data types shared by the engine, the Tauri adapters, the UI bindings and MCP"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+specta.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

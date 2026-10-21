@@ -1,0 +1,192 @@
+/*
+ * Design tokens. Two groups, both plain CSS variables set per [data-theme]:
+ *   1. shadcn/ui variables (--background, --primary, ...) consumed by src/components/ui.
+ *   2. Proxymate app tokens: --m-* (HTTP methods), --s-* (status / flow state),
+ *      --url-* (colourised URL parts), --selection-*, --pane-*.
+ * Pills use a tinted *-bg with the saturated foreground (>= 4.5:1 contrast).
+ * Dark is the primary theme; the light values get a full pass in M10.
+ */
+
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* ---- shadcn/ui ---- */
+  --radius: 0.375rem;
+  --background: oklch(0.185 0.004 270);
+  --foreground: oklch(0.93 0.004 270);
+  --card: oklch(0.21 0.004 270);
+  --card-foreground: var(--foreground);
+  --popover: oklch(0.23 0.005 270);
+  --popover-foreground: var(--foreground);
+  --primary: oklch(0.72 0.17 50);
+  --primary-foreground: oklch(0.18 0.02 50);
+  --secondary: oklch(0.27 0.005 270);
+  --secondary-foreground: var(--foreground);
+  --muted: oklch(0.25 0.004 270);
+  --muted-foreground: oklch(0.66 0.01 270);
+  --accent: oklch(0.29 0.006 270);
+  --accent-foreground: var(--foreground);
+  --destructive: oklch(0.65 0.2 25);
+  --border: oklch(1 0 0 / 9%);
+  --input: oklch(1 0 0 / 12%);
+  --ring: oklch(0.72 0.17 50 / 60%);
+  --chart-1: oklch(0.7 0.15 250);
+  --chart-2: oklch(0.72 0.17 150);
+  --chart-3: oklch(0.75 0.16 70);
+  --chart-4: oklch(0.68 0.18 300);
+  --chart-5: oklch(0.65 0.2 25);
+  --sidebar: oklch(0.2 0.004 270);
+  --sidebar-foreground: oklch(0.86 0.005 270);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: oklch(1 0 0 / 8%);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: oklch(0 0 0 / 35%);
+  --sidebar-ring: var(--ring);
+
+  /* ---- panes ---- */
+  --pane-toolbar: oklch(0.215 0.004 270);
+  --pane-table: oklch(0.17 0.004 270);
+  --pane-row-alt: oklch(1 0 0 / 2.5%);
+  --pane-row-hover: oklch(1 0 0 / 5%);
+  --pane-header: oklch(0.205 0.004 270);
+
+  /* ---- selection (orange, Proxyman-style) ---- */
+  --selection-bg: oklch(0.62 0.17 48);
+  --selection-fg: oklch(0.99 0 0);
+  --selection-inactive-bg: oklch(0.62 0.17 48 / 35%);
+
+  /* ---- HTTP methods ---- */
+  --m-get: oklch(0.76 0.13 245);
+  --m-get-bg: oklch(0.76 0.13 245 / 16%);
+  --m-post: oklch(0.78 0.16 150);
+  --m-post-bg: oklch(0.78 0.16 150 / 16%);
+  --m-put: oklch(0.79 0.15 65);
+  --m-put-bg: oklch(0.79 0.15 65 / 16%);
+  --m-patch: oklch(0.76 0.15 300);
+  --m-patch-bg: oklch(0.76 0.15 300 / 16%);
+  --m-delete: oklch(0.72 0.18 25);
+  --m-delete-bg: oklch(0.72 0.18 25 / 16%);
+  --m-head: oklch(0.79 0.11 190);
+  --m-head-bg: oklch(0.79 0.11 190 / 16%);
+  --m-options: var(--m-head);
+  --m-options-bg: var(--m-head-bg);
+  --m-connect: oklch(0.72 0.01 270);
+  --m-connect-bg: oklch(0.72 0.01 270 / 14%);
+  --m-other: var(--m-connect);
+  --m-other-bg: var(--m-connect-bg);
+
+  /* ---- status codes ---- */
+  --s-1xx: oklch(0.74 0.03 250);
+  --s-1xx-bg: oklch(0.74 0.03 250 / 15%);
+  --s-2xx: oklch(0.78 0.16 150);
+  --s-2xx-bg: oklch(0.78 0.16 150 / 15%);
+  --s-3xx: oklch(0.8 0.12 205);
+  --s-3xx-bg: oklch(0.8 0.12 205 / 15%);
+  --s-4xx: oklch(0.82 0.15 80);
+  --s-4xx-bg: oklch(0.82 0.15 80 / 16%);
+  --s-5xx: oklch(0.72 0.18 25);
+  --s-5xx-bg: oklch(0.72 0.18 25 / 16%);
+
+  /* ---- flow states ---- */
+  --s-active: oklch(0.82 0.15 80);
+  --s-active-bg: oklch(0.82 0.15 80 / 16%);
+  --s-paused: oklch(0.76 0.15 300);
+  --s-paused-bg: oklch(0.76 0.15 300 / 16%);
+  --s-failed: oklch(0.72 0.18 25);
+  --s-blocked: oklch(0.7 0.01 270);
+  --s-blocked-bg: oklch(0.7 0.01 270 / 14%);
+  --s-tunnel: var(--s-blocked);
+  --s-tunnel-bg: var(--s-blocked-bg);
+
+  /* ---- colourised URL ---- */
+  --url-scheme: oklch(0.58 0.01 270);
+  --url-host: oklch(0.96 0.005 270);
+  --url-port: oklch(0.58 0.01 270);
+  --url-path: oklch(0.8 0.008 270);
+  --url-query: oklch(0.7 0.07 245);
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+
+  --background: oklch(0.99 0 0);
+  --foreground: oklch(0.2 0.004 270);
+  --card: oklch(1 0 0);
+  --card-foreground: var(--foreground);
+  --popover: oklch(1 0 0);
+  --popover-foreground: var(--foreground);
+  --primary: oklch(0.62 0.18 48);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.95 0.002 270);
+  --secondary-foreground: var(--foreground);
+  --muted: oklch(0.96 0.002 270);
+  --muted-foreground: oklch(0.5 0.01 270);
+  --accent: oklch(0.94 0.003 270);
+  --accent-foreground: var(--foreground);
+  --destructive: oklch(0.58 0.22 27);
+  --border: oklch(0 0 0 / 10%);
+  --input: oklch(0 0 0 / 14%);
+  --ring: oklch(0.62 0.18 48 / 50%);
+  --sidebar: oklch(0.96 0.002 270);
+  --sidebar-foreground: oklch(0.3 0.005 270);
+  --sidebar-accent: oklch(0 0 0 / 6%);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: oklch(0 0 0 / 10%);
+
+  --pane-toolbar: oklch(0.97 0.002 270);
+  --pane-table: oklch(1 0 0);
+  --pane-row-alt: oklch(0 0 0 / 2.5%);
+  --pane-row-hover: oklch(0 0 0 / 4%);
+  --pane-header: oklch(0.975 0.002 270);
+
+  --selection-bg: oklch(0.66 0.17 48);
+  --selection-fg: oklch(1 0 0);
+  --selection-inactive-bg: oklch(0.66 0.17 48 / 25%);
+
+  --m-get: oklch(0.5 0.15 250);
+  --m-get-bg: oklch(0.5 0.15 250 / 12%);
+  --m-post: oklch(0.5 0.14 150);
+  --m-post-bg: oklch(0.5 0.14 150 / 12%);
+  --m-put: oklch(0.52 0.14 55);
+  --m-put-bg: oklch(0.52 0.14 55 / 12%);
+  --m-patch: oklch(0.5 0.17 300);
+  --m-patch-bg: oklch(0.5 0.17 300 / 12%);
+  --m-delete: oklch(0.52 0.2 25);
+  --m-delete-bg: oklch(0.52 0.2 25 / 12%);
+  --m-head: oklch(0.5 0.1 195);
+  --m-head-bg: oklch(0.5 0.1 195 / 12%);
+  --m-connect: oklch(0.5 0.01 270);
+  --m-connect-bg: oklch(0.5 0.01 270 / 10%);
+
+  --s-1xx: oklch(0.5 0.03 250);
+  --s-1xx-bg: oklch(0.5 0.03 250 / 12%);
+  --s-2xx: oklch(0.5 0.14 150);
+  --s-2xx-bg: oklch(0.5 0.14 150 / 12%);
+  --s-3xx: oklch(0.5 0.1 210);
+  --s-3xx-bg: oklch(0.5 0.1 210 / 12%);
+  --s-4xx: oklch(0.55 0.14 70);
+  --s-4xx-bg: oklch(0.55 0.14 70 / 14%);
+  --s-5xx: oklch(0.52 0.2 25);
+  --s-5xx-bg: oklch(0.52 0.2 25 / 12%);
+  --s-active: oklch(0.55 0.14 70);
+  --s-active-bg: oklch(0.55 0.14 70 / 14%);
+  --s-paused: oklch(0.5 0.17 300);
+  --s-paused-bg: oklch(0.5 0.17 300 / 12%);
+  --s-failed: oklch(0.52 0.2 25);
+  --s-blocked: oklch(0.5 0.01 270);
+  --s-blocked-bg: oklch(0.5 0.01 270 / 10%);
+
+  --url-scheme: oklch(0.6 0.01 270);
+  --url-host: oklch(0.2 0.004 270);
+  --url-port: oklch(0.6 0.01 270);
+  --url-path: oklch(0.38 0.006 270);
+  --url-query: oklch(0.5 0.1 250);
+}
+
+/* macOS: the window is transparent and the sidebar shows NSVisualEffectView
+ * vibrancy; Linux/Windows keep the solid --sidebar fallback. */
+[data-platform="macos"] {
+  --sidebar: transparent;
+}
