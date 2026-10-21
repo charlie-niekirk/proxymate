@@ -8,6 +8,34 @@ publish.workspace = true
 
 [dependencies]
 pm-core.workspace = true
+pm-model.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+schemars.workspace = true
+parking_lot.workspace = true
+tokio = { workspace = true, features = ["io-std", "process"] }
+http.workspace = true
+uuid.workspace = true
+base64 = "0.23"
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
+tokio-util = "0.7"
+# Pinned: the server, the stdio bridge and the tests all speak through it.
+# No TLS feature for reqwest: every connection is plain HTTP to loopback.
+rmcp = { version = "=3.6.0", default-features = false, features = [
+  "server",
+  "client",
+  "transport-streamable-http-server",
+  "transport-streamable-http-client-reqwest",
+  "transport-io",
+] }
+
+[dev-dependencies]
+pm-testkit.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+hyper.workspace = true
+hyper-util.workspace = true
+http-body-util.workspace = true
+bytes.workspace = true
 
 [lints]
 workspace = true

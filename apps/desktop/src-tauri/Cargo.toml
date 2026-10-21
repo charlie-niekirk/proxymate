@@ -21,6 +21,8 @@ tauri-build.workspace = true
 [dependencies]
 pm-core.workspace = true
 pm-model.workspace = true
+pm-mcp.workspace = true
+pm-platform.workspace = true
 serde.workspace = true
 specta.workspace = true
 specta-typescript.workspace = true

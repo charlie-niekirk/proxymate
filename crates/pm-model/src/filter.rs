@@ -1,3 +1,4 @@
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
@@ -79,8 +80,9 @@ pub struct SortSpec {
 
 /// What a view shows. Shared by the filter row, the sidebar and (from M7) MCP.
 ///
-/// `text` is the search box. Until the filter DSL parser lands it is matched as
-/// a case-insensitive substring of `host + path + query`.
+/// `text` is the search box, in the filter DSL (`pm-core/src/store/query.rs`:
+/// `host:*.example.com status:4xx dur>500 …`); plain words are matched as a
+/// case-insensitive substring of `host + path + query`.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Type)]
 pub struct FilterSpec {
     pub text: String,
@@ -92,6 +94,20 @@ pub struct FilterSpec {
     pub host: Option<String>,
     /// Restrict to one client app (sidebar Apps selection).
     pub client: Option<String>,
+}
+
+/// Where a deep search looks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchScope {
+    /// `host[:port]/path?query`.
+    Url,
+    RequestHeaders,
+    ResponseHeaders,
+    /// Decoded, the first 1 MB.
+    RequestBody,
+    /// Decoded, the first 1 MB.
+    ResponseBody,
 }
 
 #[cfg(test)]

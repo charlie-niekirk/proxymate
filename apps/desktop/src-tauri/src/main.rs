@@ -3,8 +3,10 @@
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.first().map(String::as_str) == Some("--sysproxy-guardian") {
-        std::process::exit(proxymate_desktop::run_guardian(&args[1..]));
+    match args.first().map(String::as_str) {
+        Some("--sysproxy-guardian") => std::process::exit(proxymate_desktop::run_guardian(&args[1..])),
+        Some("mcp-stdio") => std::process::exit(proxymate_desktop::run_mcp_stdio(&args[1..])),
+        _ => {}
     }
     proxymate_desktop::run();
 }

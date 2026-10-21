@@ -19,6 +19,10 @@ import {
   type FilterSpec_Deserialize,
   type FlowDetail_Serialize,
   type FlowSummary_Serialize,
+  type McpAuditPage_Serialize,
+  type McpSettings,
+  type McpStatus_Deserialize,
+  type McpStatus_Serialize,
   type ProxyStatus_Serialize,
   type RowsPage_Serialize,
   type SidebarSnapshot_Deserialize,
@@ -110,6 +114,8 @@ export interface Backend {
   testRule(rule: Rule_Deserialize, flow: number): Promise<RuleTestResult_Serialize>;
   getRuleSettings(): Promise<RuleSettings>;
   setRuleSettings(settings: RuleSettings): Promise<RuleSettings>;
+  /** The rule list, pushed now and whenever the UI or an agent changes it. */
+  subscribeRules(onRules: (rules: Rule_Serialize[]) => void): Promise<void>;
 
   // ---- Breakpoints (M5) ----
   /** The paused-flow queue, pushed now and whenever it changes. */
@@ -140,6 +146,20 @@ export interface Backend {
   setAndroidProxy(serial: string, on: boolean): Promise<AndroidStatus_Serialize>;
   /** Copies the CA to the device's Downloads; resolves to the path there. */
   pushAndroidCert(serial: string): Promise<string>;
+
+  // ---- MCP (M7) ----
+  getMcpStatus(): Promise<McpStatus_Serialize>;
+  /** Settings, where it serves and connected clients, pushed on change. */
+  subscribeMcp(onStatus: (status: McpStatus_Serialize) => void): Promise<void>;
+  /** Starts or stops the server, or flips read-only (clients see the tool list change). */
+  setMcpSettings(settings: McpSettings): Promise<McpSettings>;
+  /** The bearer token clients send. */
+  getMcpToken(): Promise<string>;
+  /** A new token; clients using the old one are refused from then on. */
+  regenerateMcpToken(): Promise<string>;
+  /** Tool calls older than `before` (newest first). */
+  getMcpAudit(before: number | null, limit: number): Promise<McpAuditPage_Serialize>;
+  clearMcpAudit(): Promise<void>;
 }
 
 type Result<T> = { status: "ok"; data: T } | { status: "error"; error: string };
@@ -211,6 +231,11 @@ const tauriBackend: Backend = {
   testRule: (rule, flow) => unwrap(commands.testRule(rule, flow)),
   getRuleSettings: () => commands.getRuleSettings(),
   setRuleSettings: (settings) => unwrap(commands.setRuleSettings(settings)),
+  subscribeRules: async (onRules) => {
+    const channel = new Channel<Rule_Serialize[]>();
+    channel.onmessage = onRules;
+    await commands.subscribeRules(channel as unknown as Channel<Rule_Deserialize[]>);
+  },
   subscribeBreakpoints: async (onQueue) => {
     // The channel carries what Rust serializes; the binding names the other shape.
     const channel = new Channel<BreakpointInfo_Serialize[]>();
@@ -236,6 +261,19 @@ const tauriBackend: Backend = {
   getAndroidStatus: () => unwrap(commands.getAndroidStatus()),
   setAndroidProxy: (serial, on) => unwrap(commands.setAndroidProxy(serial, on)),
   pushAndroidCert: (serial) => unwrap(commands.pushAndroidCert(serial)),
+  getMcpStatus: () => commands.getMcpStatus(),
+  subscribeMcp: async (onStatus) => {
+    const channel = new Channel<McpStatus_Serialize>();
+    channel.onmessage = onStatus;
+    await commands.subscribeMcp(channel as unknown as Channel<McpStatus_Deserialize>);
+  },
+  setMcpSettings: (settings) => unwrap(commands.setMcpSettings(settings)),
+  getMcpToken: () => commands.getMcpToken(),
+  regenerateMcpToken: () => unwrap(commands.regenerateMcpToken()),
+  getMcpAudit: (before, limit) => unwrap(commands.getMcpAudit(before, limit)),
+  clearMcpAudit: async () => {
+    await unwrap(commands.clearMcpAudit());
+  },
 };
 
 function pickBackend(): Backend {

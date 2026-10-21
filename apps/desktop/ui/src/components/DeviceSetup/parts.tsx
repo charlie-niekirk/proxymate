@@ -52,8 +52,20 @@ export function ProgressCheck({ progress, who, flows }: { progress: Progress; wh
   }
 }
 
-/** Monospace text with a copy button. */
-export function CopyField({ value, label, multiline }: { value: string; label?: string; multiline?: boolean }) {
+/** Monospace text with a copy button. `display` shows something else (e.g. a masked secret) but copies `value`. */
+export function CopyField({
+  value,
+  display,
+  label,
+  multiline,
+  testId,
+}: {
+  value: string;
+  display?: string;
+  label?: string;
+  multiline?: boolean;
+  testId?: string;
+}) {
   const [copied, setCopied] = useState(false);
   const copy = () =>
     void navigator.clipboard?.writeText(value).then(() => {
@@ -63,11 +75,11 @@ export function CopyField({ value, label, multiline }: { value: string; label?: 
   return (
     <div className="bg-muted/50 flex items-start gap-1 rounded-md border px-2 py-1">
       {multiline ? (
-        <pre className="min-w-0 flex-1 overflow-x-auto py-0.5 font-mono text-[11px] leading-4">{value}</pre>
+        <pre className="min-w-0 flex-1 overflow-x-auto py-0.5 font-mono text-[11px] leading-4">{display ?? value}</pre>
       ) : (
-        <code className="min-w-0 flex-1 truncate py-0.5 font-mono text-[11px]">{value}</code>
+        <code className="min-w-0 flex-1 truncate py-0.5 font-mono text-[11px]">{display ?? value}</code>
       )}
-      <Button variant="ghost" size="icon-xs" aria-label={label ?? "Copy"} onClick={copy} className="-mr-1">
+      <Button variant="ghost" size="icon-xs" aria-label={label ?? "Copy"} onClick={copy} className="-mr-1" data-testid={testId}>
         {copied ? <CircleCheck className="text-[var(--s-2xx)]" /> : <Copy />}
       </Button>
     </div>

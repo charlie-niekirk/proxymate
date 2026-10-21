@@ -8,6 +8,7 @@ mod blob;
 mod detail;
 mod filter;
 mod messages;
+mod query;
 mod segments;
 mod sidebar;
 mod view;
@@ -22,6 +23,7 @@ pub(crate) use blob::Capture;
 pub(crate) use detail::{DetailStore, StoredDetail};
 pub use filter::CompiledFilter;
 pub(crate) use messages::{SseLog, WsLog, page_events, sse_event};
+pub use query::FlowQuery;
 pub(crate) use segments::SegmentStore;
 pub use sidebar::{SidebarCounts, in_domain, registrable_domain};
 pub use view::View;
@@ -41,6 +43,11 @@ pub struct Store {
 impl Store {
     pub fn total(&self) -> u32 {
         self.flows.len() as u32
+    }
+
+    /// The id of the oldest flow still in the store.
+    pub fn first_id(&self) -> FlowId {
+        self.base
     }
 
     /// The id the next appended flow must carry.

@@ -62,7 +62,7 @@ apps/cli                 proxymate-cli serve|mcp-stdio|gen-flows|bench (headless
   - Body capture is capped at 64 MB. Above that the recorded copy is truncated, but forwarding is never affected.
   - Flows are capped at 250k with ring eviction. Pinned flows are kept.
 - **Sessions.** A saved session (`.proxymate`) is a single SQLite file. A `BlobBackend` trait lets the same store and view code read live segments, saved sessions and imported HARs.
-- **App database.** `app.sqlite` (rusqlite, WAL) holds rules, settings, the SSL include/exclude lists, the LAN client allow-list and the MCP audit log.
+- **App database.** `app.sqlite` (rusqlite, WAL) holds rules, settings, the SSL include/exclude lists, the LAN client allow-list and (M7) the MCP settings, bearer token and audit log (`mcp_audit` table).
   - The SSL lists (include, exclude, bypass, insecure upstream) still live in `<data_dir>/ssl.json` (M2).
   - (M9) The LAN client allow-list is a `devices` table (ip, nickname, allowed); LAN access on/off and the chosen interface are the `lan` settings row. Like the rules, they stay in memory for an engine without a data dir.
 
@@ -70,7 +70,7 @@ apps/cli                 proxymate-cli serve|mcp-stdio|gen-flows|bench (headless
 - **Views.** Each `View` holds `{CompiledFilter, SortSpec, indices: Vec<u32>}` and is maintained incrementally as flows arrive and change.
 - **Refilter speed.** A full refilter is a linear scan of the summaries (rayon above 50k), with a target under 10 ms.
 - **Deep filters.** Header and body predicates run as a cancellable background job that streams matching ids into the view.
-- **Filter DSL.** One handwritten parser is shared by the search box, the chips and MCP. Example: `host:*.example.com method:POST status:4xx ct:json app:Safari dur>500 size>1mb -host:*.google.com "text"`.
+- **Filter DSL.** One handwritten parser (`store/query.rs`, M7) is shared by the search box and MCP. Example: `host:*.example.com method:POST status:4xx ct:json app:Safari dur>500 size>1mb -host:*.google.com "text"`.
 
 ## Proxy engine (pm-core)
 
@@ -217,31 +217,37 @@ We build our own engine and use hudsucker only as a reading reference. Its handl
 
 ## MCP server (pm-mcp, rmcp)
 - **Transport.**
-  - Streamable HTTP on `127.0.0.1:9095/mcp`.
-  - Each install gets its own bearer token, and the Origin/Host headers are checked to block DNS rebinding.
-  - Settings has a copy button for `claude mcp add --transport http proxymate … --header "Authorization: Bearer …"`.
-- **Stdio bridge.** `proxymate mcp-stdio` relays to the HTTP endpoint and launches the app if it isn't running.
-- **Headless.** `proxymate-cli serve --mcp` runs everything without the UI, for CI.
-- **Read-only mode.** The mutating tools disappear from `tools/list` and the server sends `tools/list_changed`.
+  - Streamable HTTP on `127.0.0.1:9095/mcp` (rmcp `=3.6.0`, mounted in axum). `PROXYMATE_MCP_PORT` overrides the port; a taken port is retried every 5 s and the reason shown in Settings.
+  - Each install gets its own bearer token (32 random bytes, in `app.sqlite`; regenerable). rmcp checks `Host` (loopback names only) and `Origin` (none, or a loopback page such as the Inspector's), which blocks DNS rebinding.
+  - (M7) Only the protocol versions that still have `initialize` and sessions (up to 2025-11-25) are offered: the session carries the client's name, `tools/list_changed` and resource subscriptions. The 2026-07-28 stateless lifecycle is a follow-up.
+  - (M7) A session idle for 5 minutes is closed (one-shot clients rarely send `DELETE`); the client re-initializes on its next request. The toolbar counts open sessions.
+  - Settings has a copy button for `claude mcp add --transport http proxymate … --header "Authorization: Bearer …"` and for the `mcpServers` JSON.
+- **Stdio bridge.** `proxymate mcp-stdio` (and `proxymate-cli mcp-stdio`) reads the token from `app.sqlite` in the app's data dir and relays JSON-RPC to the HTTP endpoint (rmcp's stdio transport on one side, its HTTP client transport on the other). If nothing listens it runs `open -g -b dev.proxymate.desktop` once and retries for 10 s.
+- **Headless.** `proxymate-cli serve --mcp[=PORT]` runs everything without the UI, for CI.
+- **Read-only mode.** The mutating tools disappear from `tools/list`, every session gets `tools/list_changed`, and a mutating call is refused (and logged as refused).
   - Every tool carries `readOnlyHint`/`destructiveHint` annotations.
-  - Every call goes into the audit log with the client name.
+  - Every call goes into the audit log (`app.sqlite`, newest 10,000 kept) with the client name from `initialize`, the arguments (cut at 4 KB), the outcome and the time taken.
+- **Tool schemas.** Built from the parameter structs' schemars derives, which embed the `pm-model` rule and breakpoint types; nullable types and bare `true` schemas are rewritten so stricter clients accept them.
+- **Filter DSL (M7).** `pm-core/src/store/query.rs`: `host: path: method: scheme: status: ct: app: state: is:edited dur size reqsize id`, `-` negation, quoted phrases, bare words search the URL. MCP parses strictly (unknown keys are errors); the search box parses leniently (a term that doesn't parse is text). Autocomplete is M10.
 - **Read tools:**
   - `get_status`, `list_flows{filter?, since_id?, limit, cursor, sort}`.
-  - `search_flows{query, regex?, scopes}`.
-  - `get_flow{id, include}`, `get_flow_body{id, part, decode, format, json_pointer?, offset, max_bytes}`.
-  - `get_websocket_messages`, `wait_for_flow{filter, timeout_ms, after_id}`.
-  - `export_curl`, `export_har`, `list_rules`, `get_rule`, `list_breakpoints`, `get_breakpoint`.
+  - `search_flows{query, regex?, scopes, filter?}`: URL, headers and decoded bodies (first 1 MB), newest first, 2,000 flows per call, with snippets.
+  - `get_flow{id, include}`, `get_flow_body{id, part, decode, format, json_pointer?, offset, max_bytes}` (64 KB by default, 1 MB at most).
+  - `get_websocket_messages`, `wait_for_flow{filter, timeout_ms, after_id, include_active}`.
+  - `list_rules`, `get_rule`, `list_breakpoints`, `get_breakpoint`.
+  - `export_curl`, `export_har`: with M8.
 - **Write tools:**
-  - `replay_flow{id, modify?, apply_rules, wait}`, `send_request`.
-  - `create_rule`, `update_rule`, `set_rule_enabled`, `delete_rule`, `delete_agent_rules`.
-  - Sugar tools: `create_map_local`, `create_breakpoint`, `create_rewrite`.
-  - `resolve_breakpoint{id, continue|abort|respond, edits}`, `set_recording`, `clear_flows`.
+  - `create_rule`, `update_rule`, `set_rule_enabled`, `delete_rule`, `delete_agent_rules`. Rules agents create get `origin: Agent{client, session, created_at_ms}`.
+  - Sugar tools: `create_map_local`, `create_breakpoint`, `create_rewrite`, targeting a URL pattern (`https://api.example.com/v1/*`) or a recorded flow (`flow_id`).
+  - `resolve_breakpoint{id, resolution}`, `set_recording`, `clear_flows`.
+  - `replay_flow{id, modify?, apply_rules, wait}`, `send_request`: with M8.
 - **Resources:**
-  - `proxymate://status`, `proxymate://rules`.
-  - `proxymate://breakpoints`, which is subscribable and notifies on every hit.
+  - `proxymate://status`, `proxymate://rules` (updated when rules change).
+  - `proxymate://breakpoints`, which is subscribable and notifies on every hit (hits within one 50 ms publisher tick share a notification).
   - Templates: `proxymate://flows/{id}`, `…/request/body`, `…/response/body`, `…/ws`.
 - **Prompts.** `investigate_failures` and `mock_endpoint`.
-- **In the UI.** Agent rules show an "AI · <client>" badge, and there's a "Remove all agent rules" button. The toolbar shows an MCP indicator with the number of connected clients.
+- **In the UI.** Agent rules show an "AI · <client>" badge, and there's a "Remove all agent rules" button. The toolbar shows an MCP indicator with the number of connected clients. Settings › MCP has the enable and read-only switches, the copy buttons, token regeneration, connected clients and the audit log. The engine pushes rule changes (`subscribe_rules`), so the Rules Editor follows edits agents make.
+- **Engine.** The breakpoint queue, the rule list and the MCP status each push to any number of subscribers (`notify.rs`), so the UI and every MCP session can watch.
 
 ## UI (apps/desktop/ui)
 

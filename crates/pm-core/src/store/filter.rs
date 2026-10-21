@@ -1,13 +1,13 @@
 //! Compiled form of a [`FilterSpec`], evaluated against summaries only.
 
-use std::cell::RefCell;
-
 use pm_model::{ContentGroup, FilterSpec, FlowSummary, ProtocolFilter};
+
+use super::query::FlowQuery;
 
 #[derive(Debug, Clone, Default)]
 pub struct CompiledFilter {
-    /// Lower-cased search text; empty matches everything.
-    needle: Vec<u8>,
+    /// The search box, in the filter DSL (plain words search the URL).
+    query: FlowQuery,
     protocol: ProtocolFilter,
     /// Bitmask over `ContentGroup as u16`; zero means all.
     content_mask: u16,
@@ -19,7 +19,7 @@ impl CompiledFilter {
     pub fn compile(spec: &FilterSpec) -> Self {
         let content_mask = spec.content.iter().fold(0u16, |mask, group| mask | group_bit(*group));
         CompiledFilter {
-            needle: spec.text.trim().to_ascii_lowercase().into_bytes(),
+            query: FlowQuery::parse_lenient(&spec.text),
             protocol: spec.protocol,
             content_mask,
             host: spec.host.clone().filter(|h| !h.is_empty()),
@@ -29,7 +29,7 @@ impl CompiledFilter {
 
     /// True if the filter accepts every flow, so views can skip evaluation.
     pub fn is_match_all(&self) -> bool {
-        self.needle.is_empty()
+        self.query.is_empty()
             && self.protocol == ProtocolFilter::All
             && self.content_mask == 0
             && self.host.is_none()
@@ -63,29 +63,7 @@ impl CompiledFilter {
         {
             return false;
         }
-        self.needle.is_empty() || self.url_contains_needle(f)
-    }
-
-    /// Matches against `host[:port]path[?query]` as one string, so a needle
-    /// may span parts (e.g. `stripe.com/v1`). Reuses a per-thread buffer.
-    fn url_contains_needle(&self, f: &FlowSummary) -> bool {
-        thread_local! {
-            static URL: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
-        }
-        URL.with_borrow_mut(|url| {
-            url.clear();
-            url.extend_from_slice(f.host.as_bytes());
-            if !f.is_default_port() {
-                url.push(b':');
-                url.extend_from_slice(f.port.to_string().as_bytes());
-            }
-            url.extend_from_slice(f.path.as_bytes());
-            if !f.query.is_empty() {
-                url.push(b'?');
-                url.extend_from_slice(f.query.as_bytes());
-            }
-            contains_ignore_ascii_case(url, &self.needle)
-        })
+        self.query.matches(f)
     }
 }
 

@@ -1,10 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
-import { Bot, Circle, ListChecks, Plus, Settings, ShieldAlert, Trash2, type LucideIcon } from "lucide-react";
+import { Circle, ListChecks, Plus, Settings, ShieldAlert, Trash2, type LucideIcon } from "lucide-react";
 
 import type { ProxyStatus_Serialize } from "@/bindings";
 import { BreakpointBadge } from "@/components/Breakpoints/BreakpointBadge";
 import { CertificateMenu } from "@/components/CertificateMenu";
 import { ThrottleMenu } from "@/components/Rules/ThrottleMenu";
+import { McpIndicator } from "@/components/Settings/McpIndicator";
 import { SystemProxyMenu } from "@/components/SystemProxyMenu";
 import { Button } from "@/components/ui/button";
 import { useTrustStatus } from "@/hooks/useTrustStatus";
@@ -77,9 +78,23 @@ export function Toolbar() {
       <TrustWarning listening={!!status?.listening} />
       <SystemProxyMenu />
       <CertificateMenu />
-      <ToolButton icon={Bot} label="MCP server" milestone="M7" />
-      <ToolButton icon={Settings} label="Settings" milestone="M10" />
+      <McpIndicator />
+      <SettingsButton />
     </header>
+  );
+}
+
+function SettingsButton() {
+  const open = useUi((s) => s.openSettings);
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button variant="ghost" size="icon" aria-label="Settings" onClick={() => open()} data-testid="settings-button">
+          <Settings />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>Settings</TooltipContent>
+    </Tooltip>
   );
 }
 

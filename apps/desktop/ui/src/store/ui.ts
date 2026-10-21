@@ -16,6 +16,9 @@ export type ResponseTab = "Header" | "Body" | "Raw" | "TLS" | "Timing";
 /** Device Setup Wizard tabs. */
 export type DeviceTab = "simulator" | "iphone" | "android" | "emulator";
 
+/** Settings pages; more arrive with M10. */
+export type SettingsPage = "mcp";
+
 export interface FilterTiming {
   /** Engine refilter time reported by Rust. */
   engineMs: number;
@@ -46,6 +49,7 @@ interface UiState {
   selectedBreakpoint: number | null;
   deviceSetupOpen: boolean;
   deviceTab: DeviceTab;
+  settings: { open: boolean; page: SettingsPage };
 
   setText(text: string): void;
   setProtocol(protocol: ProtocolFilter): void;
@@ -67,6 +71,8 @@ interface UiState {
   selectBreakpoint(id: number | null): void;
   setDeviceSetupOpen(open: boolean): void;
   setDeviceTab(tab: DeviceTab): void;
+  openSettings(page?: SettingsPage): void;
+  closeSettings(): void;
 }
 
 export const useUi = create<UiState>()((set) => ({
@@ -85,6 +91,7 @@ export const useUi = create<UiState>()((set) => ({
   selectedBreakpoint: null,
   deviceSetupOpen: false,
   deviceTab: "simulator",
+  settings: { open: false, page: "mcp" },
 
   setText: (text) => set((s) => ({ filter: { ...s.filter, text } })),
   setProtocol: (protocol) => set((s) => ({ filter: { ...s.filter, protocol } })),
@@ -121,4 +128,6 @@ export const useUi = create<UiState>()((set) => ({
   selectBreakpoint: (selectedBreakpoint) => set({ selectedBreakpoint }),
   setDeviceSetupOpen: (deviceSetupOpen) => set({ deviceSetupOpen }),
   setDeviceTab: (deviceTab) => set({ deviceTab }),
+  openSettings: (page) => set((s) => ({ settings: { open: true, page: page ?? s.settings.page } })),
+  closeSettings: () => set((s) => ({ settings: { ...s.settings, open: false } })),
 }));

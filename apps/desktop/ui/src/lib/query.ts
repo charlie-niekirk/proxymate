@@ -29,3 +29,5 @@ export const ruleSettingsKey = ["rule-settings"] as const;
 export const deviceAccessKey = ["device-access"] as const;
 export const simulatorKey = ["simulator"] as const;
 export const androidKey = ["android"] as const;
+export const mcpTokenKey = ["mcp-token"] as const;
+export const mcpAuditKey = ["mcp-audit"] as const;

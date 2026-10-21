@@ -5,12 +5,12 @@
 //!   waits on the app with `process::wait_for_exit` (M4)
 //! - `trust`: CA install/uninstall in the user trust store (M4)
 //! - `procinfo`: peer port → pid → app bundle, name and icon (M4)
-//! - `process`: pid liveness and exit waits (M4)
+//! - `process`: pid liveness and exit waits (M4); launching the app (M7)
 //! - `netif`: LAN interface addresses for device setup (M9)
 //! - `simctl`: iOS Simulator root-cert install (M9)
 //! - `adb`: Android emulator proxy and CA push (M9)
 //! - `command`: the process runner `simctl` and `adb` are tested through (M9)
-//! - `fs`: private files (the CA key) (M2)
+//! - `fs`: private files (the CA key) (M2); the app data dir (M7)
 
 pub mod adb;
 pub mod command;

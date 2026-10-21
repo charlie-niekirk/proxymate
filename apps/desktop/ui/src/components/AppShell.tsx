@@ -7,6 +7,7 @@ import { FilterBar } from "@/components/FilterBar";
 import { FlowTable } from "@/components/FlowTable/FlowTable";
 import { Footer } from "@/components/Footer";
 import { RulesEditor } from "@/components/Rules/RulesEditor";
+import { SettingsDialog } from "@/components/Settings/SettingsDialog";
 import { Sidebar } from "@/components/Sidebar";
 import { Toolbar } from "@/components/Toolbar";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
@@ -44,6 +45,7 @@ export function AppShell() {
     <RulesEditor />
     <BreakpointEditor />
     <DeviceSetupSheet />
+    <SettingsDialog />
     <DeviceAllowPrompt />
     </>
   );

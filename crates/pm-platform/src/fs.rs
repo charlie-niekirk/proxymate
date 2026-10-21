@@ -1,4 +1,4 @@
-//! Files only the current user may read.
+//! Files only the current user may read, and where the app keeps its data.
 
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -32,6 +32,23 @@ pub fn temp_sibling(path: &Path) -> PathBuf {
     let mut name = path.file_name().unwrap_or_default().to_os_string();
     name.push(format!(".tmp-{}-{n}", std::process::id()));
     path.with_file_name(name)
+}
+
+/// The app's data directory, as the desktop app resolves it (Tauri's data
+/// dir plus `Proxymate`), for processes started without the app: the
+/// `mcp-stdio` bridge reads the MCP token from there.
+pub fn app_data_dir() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let base = if cfg!(target_os = "macos") {
+        home?.join("Library/Application Support")
+    } else if cfg!(windows) {
+        PathBuf::from(std::env::var_os("APPDATA")?)
+    } else {
+        std::env::var_os("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .or_else(|| home.map(|h| h.join(".local/share")))?
+    };
+    Some(base.join("Proxymate"))
 }
 
 #[cfg(test)]

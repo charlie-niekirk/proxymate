@@ -3,7 +3,7 @@ import type { ViewerId } from "@/components/BodyViewer/registry";
 import { bridge } from "@/dev/bridge";
 import { openPreset, setThrottle } from "@/lib/actions";
 import { THROTTLE_PRESETS } from "@/lib/rules";
-import { useUi, type DeviceTab, type RequestTab, type ResponseTab } from "@/store/ui";
+import { useUi, type DeviceTab, type RequestTab, type ResponseTab, type SettingsPage } from "@/store/ui";
 
 /**
  * Dev only (`VITE_PM_REMOTE=1`): polls the Vite server's `/__pm_remote`
@@ -44,6 +44,8 @@ interface Command {
   breakpointAction?: { execute?: MessageEdits_Deserialize; abort?: boolean };
   /** Opens device setup on this tab; `null` closes it. */
   deviceTab?: DeviceTab | null;
+  settings?: SettingsPage | null;
+  scrollTo?: string;
   /** Clicks the element with this `data-testid`, e.g. `simulator-install`. */
   click?: string;
 }
@@ -57,6 +59,14 @@ async function apply(cmd: Command) {
   if (cmd.deviceTab !== undefined) {
     if (cmd.deviceTab) ui.setDeviceTab(cmd.deviceTab);
     ui.setDeviceSetupOpen(cmd.deviceTab !== null);
+  }
+  if (cmd.settings !== undefined) {
+    if (cmd.settings) ui.openSettings(cmd.settings);
+    else ui.closeSettings();
+  }
+  if (cmd.scrollTo) {
+    const id = cmd.scrollTo;
+    setTimeout(() => document.querySelector(`[data-testid="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "end" }), 100);
   }
   if (cmd.click) {
     // After this tick's state changes have rendered.

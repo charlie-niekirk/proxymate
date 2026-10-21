@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use pm_core::{Engine, EngineConfig, ProxyConfig, synth};
+use pm_model::MCP_DEFAULT_PORT;
 use tauri::Manager;
 
 /// The tauri-specta builder: the single list of commands, shared by the
@@ -73,6 +74,14 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::get_android_status,
             commands::set_android_proxy,
             commands::push_android_cert,
+            commands::subscribe_rules,
+            commands::get_mcp_status,
+            commands::subscribe_mcp,
+            commands::set_mcp_settings,
+            commands::get_mcp_token,
+            commands::regenerate_mcp_token,
+            commands::get_mcp_audit,
+            commands::clear_mcp_audit,
         ])
         // Sizes are u64 but stay far below 2^53.
         .dangerously_cast_bigints_to_number()
@@ -118,6 +127,10 @@ pub fn run() {
             builder.mount_events(app);
             let engine = start_engine(app.path().data_dir().ok());
             install_exit_guards(&engine);
+            // MCP follows its settings (enabled, read-only) from here on.
+            let port = env_or("PROXYMATE_MCP_PORT", MCP_DEFAULT_PORT);
+            let mcp_engine = engine.clone();
+            tauri::async_runtime::spawn(async move { pm_mcp::spawn_managed(mcp_engine, port).await });
             app.manage(engine);
             if let Some(main) = app.get_webview_window("main") {
                 window::style_main_window(&main);
@@ -165,6 +178,39 @@ pub fn run_guardian(args: &[String]) -> i32 {
         }
     }
 }
+
+/// `proxymate mcp-stdio [--port N]`: relays a stdio MCP client to the
+/// running app's endpoint, starting the app first if nothing listens.
+pub fn run_mcp_stdio(args: &[String]) -> i32 {
+    let port = args
+        .iter()
+        .position(|a| a == "--port")
+        .and_then(|i| args.get(i + 1))
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(MCP_DEFAULT_PORT);
+    let Some(data_dir) = pm_platform::fs::app_data_dir() else {
+        eprintln!("proxymate mcp-stdio: can't find the app's data directory");
+        return 1;
+    };
+    let config = pm_mcp::bridge::BridgeConfig {
+        addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, port)),
+        data_dir,
+        launch: Some(Box::new(|| {
+            pm_platform::process::launch_app(BUNDLE_ID).map_err(std::io::Error::other)
+        })),
+    };
+    let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+    match runtime.block_on(pm_mcp::bridge::run(config)) {
+        Ok(()) => 0,
+        Err(err) => {
+            eprintln!("proxymate mcp-stdio: {err}");
+            1
+        }
+    }
+}
+
+/// `identifier` in `tauri.conf.json`.
+const BUNDLE_ID: &str = "dev.proxymate.desktop";
 
 /// Starts the engine and the proxy on 9090 (or the next free port up to
 /// 9099). A proxy that can't bind is reported in the toolbar, not fatal.

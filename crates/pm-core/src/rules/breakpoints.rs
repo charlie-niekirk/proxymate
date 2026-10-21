@@ -5,19 +5,19 @@
 //! unmodified after the timeout from the rule settings.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use dashmap::DashMap;
-use parking_lot::Mutex;
 use pm_model::{BreakpointId, BreakpointInfo, BreakpointResolution};
 use tokio::sync::oneshot;
 
 use super::RuleError;
+use crate::notify::Notifier;
 
 /// Receives the breakpoint queue whenever it changes. Returning `false`
 /// unsubscribes.
-pub type BreakpointSink = Box<dyn FnMut(Vec<BreakpointInfo>) -> bool + Send>;
+pub type BreakpointSink = crate::notify::Sink<Vec<BreakpointInfo>>;
 
 struct Pending {
     info: BreakpointInfo,
@@ -33,12 +33,10 @@ pub(crate) enum Outcome {
 pub(crate) struct BreakpointManager {
     pending: DashMap<BreakpointId, Pending>,
     next: AtomicU32,
-    /// Bumped on every change; the publisher compares it with `published`.
-    version: AtomicU64,
-    published: AtomicU64,
     /// 0 waits forever.
     timeout_secs: AtomicU32,
-    sink: Mutex<Option<BreakpointSink>>,
+    /// The UI and every MCP session watching `proxymate://breakpoints`.
+    subscribers: Notifier<Vec<BreakpointInfo>>,
 }
 
 impl BreakpointManager {
@@ -46,10 +44,8 @@ impl BreakpointManager {
         BreakpointManager {
             pending: DashMap::new(),
             next: AtomicU32::new(1),
-            version: AtomicU64::new(0),
-            published: AtomicU64::new(0),
             timeout_secs: AtomicU32::new(timeout_secs),
-            sink: Mutex::new(None),
+            subscribers: Notifier::new(),
         }
     }
 
@@ -126,29 +122,19 @@ impl BreakpointManager {
         self.pending.get(&id).map(|p| p.body.clone())
     }
 
+    /// Adds a subscriber; it gets the queue on the next tick and whenever
+    /// it changes.
     pub fn subscribe(&self, sink: BreakpointSink) {
-        *self.sink.lock() = Some(sink);
-        // Force a first push.
-        self.published.store(u64::MAX, Ordering::Relaxed);
+        self.subscribers.subscribe(sink);
     }
 
     /// Part of the publisher tick: pushes the queue if it changed.
     pub fn publish(&self) {
-        let mut sink = self.sink.lock();
-        let Some(send) = sink.as_mut() else {
-            return;
-        };
-        let version = self.version.load(Ordering::Acquire);
-        if self.published.swap(version, Ordering::AcqRel) == version {
-            return;
-        }
-        if !send(self.list()) {
-            *sink = None;
-        }
+        self.subscribers.publish(|| self.list());
     }
 
     fn changed(&self) {
-        self.version.fetch_add(1, Ordering::AcqRel);
+        self.subscribers.changed();
     }
 }
 

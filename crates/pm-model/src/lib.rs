@@ -8,6 +8,7 @@ mod detail;
 mod device;
 mod filter;
 mod flow;
+mod mcp;
 mod platform;
 mod rules;
 mod stream;
@@ -19,8 +20,9 @@ pub use device::{
     AndroidDevice, AndroidStatus, DeviceAccess, DeviceClient, DeviceDecision, DevicesSnapshot, LanInterface,
     LocalActivity, SimDevice, SimInstallResult, SimulatorStatus,
 };
-pub use filter::{ContentGroup, FilterSpec, ProtocolFilter, SortDir, SortKey, SortSpec};
+pub use filter::{ContentGroup, FilterSpec, ProtocolFilter, SearchScope, SortDir, SortKey, SortSpec};
 pub use flow::{ContentKind, FlowId, FlowState, FlowSummary, Scheme};
+pub use mcp::{MCP_DEFAULT_PORT, McpAuditEntry, McpAuditPage, McpCallOutcome, McpClient, McpSettings, McpStatus};
 pub use platform::{AppCount, DomainNode, HostCount, KeychainTrust, SidebarSnapshot, SystemProxyStatus, TrustStatus};
 pub use rules::{
     Action, AppliedRule, BlockMode, BreakpointBody, BreakpointId, BreakpointInfo, BreakpointResolution, FlowRules,
