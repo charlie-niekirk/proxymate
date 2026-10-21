@@ -26,6 +26,12 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::clear_flows,
             commands::set_recording,
             commands::get_proxy_status,
+            commands::get_ca_info,
+            commands::regenerate_ca,
+            commands::get_ssl_settings,
+            commands::set_ssl_settings,
+            commands::add_ssl_bypass,
+            commands::set_insecure_upstream,
         ])
         // Sizes are u64 but stay far below 2^53.
         .dangerously_cast_bigints_to_number()
@@ -73,9 +79,12 @@ pub fn run() {
 ///
 /// For UI and performance work, `PROXYMATE_SYNTH_FLOWS` seeds synthetic
 /// flows and `PROXYMATE_SYNTH_RATE` adds that many live ones per second.
+/// `PROXYMATE_EXTRA_UPSTREAM_CA` names a PEM file of extra CAs to trust for
+/// upstreams (e.g. the pm-testkit CA, or a corporate CA).
 fn start_engine(data_dir: Option<std::path::PathBuf>) -> Arc<Engine> {
     let engine = Engine::with_config(EngineConfig {
         data_dir: data_dir.map(|dir| dir.join("Proxymate")),
+        extra_upstream_roots: extra_upstream_roots(),
     });
     if let Err(err) = tauri::async_runtime::block_on(engine.start_proxy(ProxyConfig::default())) {
         eprintln!("{err}");
@@ -89,6 +98,16 @@ fn start_engine(data_dir: Option<std::path::PathBuf>) -> Arc<Engine> {
         synth::spawn_live(Arc::downgrade(&engine), rate, 2);
     }
     engine
+}
+
+fn extra_upstream_roots() -> Vec<Vec<u8>> {
+    let Some(path) = std::env::var_os("PROXYMATE_EXTRA_UPSTREAM_CA") else {
+        return Vec::new();
+    };
+    pm_core::tls::certs_from_pem_file(path.as_ref()).unwrap_or_else(|err| {
+        eprintln!("PROXYMATE_EXTRA_UPSTREAM_CA: {err}");
+        Vec::new()
+    })
 }
 
 fn env_or<T: std::str::FromStr>(key: &str, default: T) -> T {

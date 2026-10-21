@@ -103,7 +103,7 @@ fn contains_ignore_ascii_case(haystack: &[u8], needle: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pm_model::{ContentKind, FlowState, Scheme};
+    use pm_model::{ContentKind, FlowState, HttpVersion, Scheme, TlsStatus};
 
     fn flow(scheme: Scheme, host: &str, path: &str, kind: ContentKind) -> FlowSummary {
         FlowSummary {
@@ -123,6 +123,8 @@ mod tests {
             req_size: 0,
             resp_size: 0,
             edited: false,
+            http_version: HttpVersion::Http11,
+            tls: TlsStatus::None,
         }
     }
 

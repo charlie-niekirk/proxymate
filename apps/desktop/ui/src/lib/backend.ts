@@ -3,12 +3,14 @@ import { Channel, isTauri } from "@tauri-apps/api/core";
 import {
   commands,
   type BodyPart,
+  type CaInfo,
   type FilterSpec_Deserialize,
   type FlowDetail_Serialize,
   type FlowSummary_Serialize,
   type ProxyStatus_Serialize,
   type RowsPage_Serialize,
   type SortSpec,
+  type SslSettings,
   type ViewDelta,
   type ViewInfo,
 } from "@/bindings";
@@ -29,6 +31,14 @@ export interface Backend {
   clearFlows(): Promise<void>;
   setRecording(on: boolean): Promise<ProxyStatus_Serialize>;
   getProxyStatus(): Promise<ProxyStatus_Serialize>;
+  getCaInfo(): Promise<CaInfo>;
+  regenerateCa(): Promise<CaInfo>;
+  getSslSettings(): Promise<SslSettings>;
+  setSslSettings(settings: SslSettings): Promise<SslSettings>;
+  /** Stops decrypting `host`: new CONNECTs to it are tunnelled. */
+  addSslBypass(host: string): Promise<SslSettings>;
+  /** Accepts `host`'s upstream certificate without verification. */
+  setInsecureUpstream(host: string, allow: boolean): Promise<SslSettings>;
 }
 
 type Result<T> = { status: "ok"; data: T } | { status: "error"; error: string };
@@ -58,6 +68,12 @@ const tauriBackend: Backend = {
   clearFlows: () => commands.clearFlows(),
   setRecording: (on) => commands.setRecording(on),
   getProxyStatus: () => commands.getProxyStatus(),
+  getCaInfo: () => commands.getCaInfo(),
+  regenerateCa: () => unwrap(commands.regenerateCa()),
+  getSslSettings: () => commands.getSslSettings(),
+  setSslSettings: (settings) => unwrap(commands.setSslSettings(settings)),
+  addSslBypass: (host) => unwrap(commands.addSslBypass(host)),
+  setInsecureUpstream: (host, allow) => unwrap(commands.setInsecureUpstream(host, allow)),
 };
 
 /**

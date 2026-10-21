@@ -1,16 +1,17 @@
 import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { ArrowDown, ArrowUp, Lock, MoreHorizontal, PencilLine } from "lucide-react";
+import { ArrowDown, ArrowUp, MoreHorizontal, PencilLine } from "lucide-react";
 import { memo, useCallback, useEffect, useRef, type KeyboardEvent } from "react";
 
 import { useFlowView } from "@/hooks/useFlowView";
 import { backend } from "@/lib/backend";
-import { formatDuration, formatSize, formatTime, type Row } from "@/lib/flow";
+import { formatDuration, formatSize, formatTime, versionLabel, type Row } from "@/lib/flow";
 import { proxyStatusKey } from "@/lib/query";
+import { sslTitle } from "@/lib/tls";
 import { cn } from "@/lib/utils";
 import { useUi } from "@/store/ui";
 
-import { MethodPill, StateDot, StatusPill, UrlText } from "./cells";
+import { MethodPill, SslIcon, StateDot, StatusPill, UrlText } from "./cells";
 import { COLUMNS, GRID_TEMPLATE, ROW_HEIGHT, type Column } from "./columns";
 
 const HEADER_HEIGHT = 22;
@@ -205,8 +206,11 @@ function RowCells({ row }: { row: Row }) {
       <div className={cn(cell, "justify-end tabular-nums")}>{formatDuration(row.durationMs)}</div>
       <div className={cn(cell, "justify-end tabular-nums", dim)}>{formatSize(row.reqSize)}</div>
       <div className={cn(cell, "justify-end tabular-nums")}>{formatSize(row.respSize)}</div>
-      <div className={cn(cell, "justify-center", dim)}>
-        {(row.scheme === "https" || row.scheme === "wss") && row.state !== "tunnel" && <Lock className="size-3" />}
+      <div className={cn(cell, "justify-center", dim)} title={row.httpVersion}>
+        {versionLabel(row.httpVersion)}
+      </div>
+      <div className={cn(cell, "justify-center", dim)} title={sslTitle(row.tls)}>
+        <SslIcon tls={row.tls} />
       </div>
       <div className={cn(cell, "justify-center")}>
         {row.edited && <PencilLine className="size-3 text-[var(--m-patch)] group-data-[selected=true]/row:text-selection-foreground" />}

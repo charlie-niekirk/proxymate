@@ -3,7 +3,9 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
+use crate::detail::HttpVersion;
 use crate::flow::{ContentKind, FlowId, FlowState, FlowSummary, Scheme};
+use crate::tls::TlsStatus;
 
 /// Handle to a live, filtered and sorted view over a flow store.
 pub type ViewId = u32;
@@ -42,7 +44,8 @@ pub struct ViewInfo {
 /// One flow table row in a compact positional form (a JSON array on the wire).
 ///
 /// Field order: `id, state, scheme, method, host, port, path, query, status,
-/// content_kind, client, started_at_ms, duration_ms, req_size, resp_size, edited`.
+/// content_kind, client, started_at_ms, duration_ms, req_size, resp_size, edited,
+/// http_version, tls`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct FlowRow(
     pub FlowId,
@@ -61,6 +64,8 @@ pub struct FlowRow(
     pub u64,
     pub u64,
     pub bool,
+    pub HttpVersion,
+    pub TlsStatus,
 );
 
 impl From<&FlowSummary> for FlowRow {
@@ -82,6 +87,8 @@ impl From<&FlowSummary> for FlowRow {
             f.req_size,
             f.resp_size,
             f.edited,
+            f.http_version,
+            f.tls,
         )
     }
 }
@@ -119,11 +126,13 @@ mod tests {
             req_size: 0,
             resp_size: 1024,
             edited: false,
+            http_version: HttpVersion::Http2,
+            tls: TlsStatus::Intercepted,
         };
         let json = serde_json::to_string(&FlowRow::from(&summary)).unwrap();
         assert_eq!(
             json,
-            r#"[7,"completed","https","GET","api.example.com",443,"/v1/users","page=2",200,"json","Safari",1.5,42,0,1024,false]"#
+            r#"[7,"completed","https","GET","api.example.com",443,"/v1/users","page=2",200,"json","Safari",1.5,42,0,1024,false,"HTTP/2","intercepted"]"#
         );
     }
 }

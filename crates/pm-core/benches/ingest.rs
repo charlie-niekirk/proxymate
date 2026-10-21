@@ -20,6 +20,7 @@ const BODY: &[u8] = br#"{"id":42,"name":"proxymate","tags":["fast","small"],"ok"
 fn engine_with_views() -> Arc<Engine> {
     let engine = Engine::with_config(EngineConfig {
         data_dir: Some(std::env::temp_dir().join("proxymate-bench")),
+        ..Default::default()
     });
     engine.create_view(FilterSpec::default(), SortSpec::default());
     engine.create_view(
@@ -46,6 +47,8 @@ fn detail(flow: &FlowSummary) -> FlowDetail {
         request_body: BodyInfo::default(),
         response_body: BodyInfo::default(),
         error: None,
+        tls: None,
+        timing: Default::default(),
     }
 }
 

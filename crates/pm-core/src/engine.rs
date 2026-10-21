@@ -11,8 +11,10 @@ use std::time::Duration;
 
 use parking_lot::{Mutex, RwLock};
 use pm_model::{
-    BodyPart, FilterSpec, FlowDetail, FlowId, FlowSummary, ProxyStatus, RowsPage, SortSpec, ViewDelta, ViewId, ViewInfo,
+    BodyPart, CaInfo, FilterSpec, FlowDetail, FlowId, FlowSummary, ProxyStatus, RowsPage, SortSpec, SslSettings,
+    ViewDelta, ViewId, ViewInfo,
 };
+use rustls::pki_types::CertificateDer;
 
 use crate::Error;
 use crate::ingest::{self, FlowEvent, IngestTx};
@@ -20,6 +22,9 @@ use crate::io::decode;
 use crate::proxy::{self, ProxyConfig, ProxyHandle};
 use crate::recorder::FlowRecorder;
 use crate::store::{DetailStore, SegmentStore, Store};
+use crate::tls::{CertAuthority, SslPolicy, TlsContext};
+
+const SSL_SETTINGS_FILE: &str = "ssl.json";
 
 /// Deltas are published at 20 Hz.
 pub const PUBLISH_INTERVAL: Duration = Duration::from_millis(50);
@@ -30,9 +35,13 @@ pub type DeltaSink = Box<dyn FnMut(ViewDelta) -> bool + Send>;
 
 #[derive(Debug, Clone, Default)]
 pub struct EngineConfig {
-    /// Root for live segment files (`<data_dir>/live/<uuid>/`). Defaults to
-    /// a `proxymate` directory under the system temp dir.
+    /// Root for live segment files (`<data_dir>/live/<uuid>/`), the CA
+    /// (`<data_dir>/ca/`) and `ssl.json`. Defaults to a `proxymate`
+    /// directory under the system temp dir.
     pub data_dir: Option<PathBuf>,
+    /// DER certificates trusted for upstream TLS on top of the OS trust
+    /// store, e.g. a test CA or a corporate CA the OS doesn't know.
+    pub extra_upstream_roots: Vec<Vec<u8>>,
 }
 
 /// A body as returned to the inspector.
@@ -52,6 +61,11 @@ pub struct Engine {
     recording: AtomicBool,
     proxy: Mutex<ProxyState>,
     interned: Mutex<HashSet<Arc<str>>>,
+    root: PathBuf,
+    extra_roots: Vec<CertificateDer<'static>>,
+    tls: RwLock<Arc<TlsContext>>,
+    /// Write-locked across a read-modify-write of the settings.
+    ssl: RwLock<Arc<SslPolicy>>,
 }
 
 #[derive(Default)]
@@ -74,6 +88,29 @@ impl Engine {
         let root = config
             .data_dir
             .unwrap_or_else(|| std::env::temp_dir().join("proxymate"));
+        let extra_roots: Vec<CertificateDer<'static>> = config
+            .extra_upstream_roots
+            .into_iter()
+            .map(CertificateDer::from)
+            .collect();
+        let ca = CertAuthority::load_or_create(&root.join("ca")).unwrap_or_else(|err| {
+            // An unreadable CA directory must not stop the proxy; HTTPS then
+            // uses a throwaway CA that no client trusts yet.
+            eprintln!("proxymate: can't load the CA from {}: {err}", root.join("ca").display());
+            let dir = std::env::temp_dir().join(format!("proxymate-ca-{}", std::process::id()));
+            CertAuthority::create(&dir).expect("create a throwaway CA")
+        });
+        let tls = TlsContext::new(ca, extra_roots.clone()).expect("TLS configuration");
+        let settings = SslPolicy::load(&root.join(SSL_SETTINGS_FILE)).unwrap_or_else(|err| {
+            eprintln!("proxymate: {err}; using the default SSL settings");
+            SslSettings::default()
+        });
+        let policy = SslPolicy::compile(settings)
+            .or_else(|err| {
+                eprintln!("proxymate: {err}; using the default SSL settings");
+                SslPolicy::compile(SslSettings::default())
+            })
+            .expect("default SSL settings compile");
         let (tx, rx) = std::sync::mpsc::channel();
         let engine = Arc::new(Engine {
             store: RwLock::new(Store::default()),
@@ -83,6 +120,10 @@ impl Engine {
             recording: AtomicBool::new(true),
             proxy: Mutex::new(ProxyState::Stopped),
             interned: Mutex::new(HashSet::new()),
+            root,
+            extra_roots,
+            tls: RwLock::new(Arc::new(tls)),
+            ssl: RwLock::new(Arc::new(policy)),
         });
         let weak = Arc::downgrade(&engine);
         std::thread::Builder::new()
@@ -225,6 +266,72 @@ impl Engine {
     pub fn shutdown(&self) {
         *self.proxy.lock() = ProxyState::Stopped;
         self.details.segments.remove_all();
+    }
+
+    /// The root CA clients must trust for HTTPS decryption.
+    pub fn ca_info(&self) -> CaInfo {
+        self.tls.read().ca.info().clone()
+    }
+
+    /// Replaces the root CA (and so every leaf). Clients must trust the new
+    /// one; connections already open keep their certificates.
+    pub fn regenerate_ca(&self) -> Result<CaInfo, Error> {
+        let ca = CertAuthority::create(&self.root.join("ca")).map_err(|e| Error::Tls(e.to_string()))?;
+        let tls = TlsContext::new(ca, self.extra_roots.clone()).map_err(|e| Error::Tls(e.to_string()))?;
+        let info = tls.ca.info().clone();
+        *self.tls.write() = Arc::new(tls);
+        Ok(info)
+    }
+
+    pub fn ssl_settings(&self) -> SslSettings {
+        self.ssl.read().settings().clone()
+    }
+
+    /// Validates, saves and applies new SSL settings. New CONNECTs use them
+    /// straight away.
+    pub fn set_ssl_settings(&self, settings: SslSettings) -> Result<SslSettings, Error> {
+        self.update_ssl(|s| *s = settings)
+    }
+
+    /// Stops decrypting `host` (e.g. an app that pins its certificates).
+    pub fn add_ssl_bypass(&self, host: &str) -> Result<SslSettings, Error> {
+        let host = host.trim().trim_end_matches('.').to_ascii_lowercase();
+        self.update_ssl(|s| {
+            if !s.bypass.contains(&host) {
+                s.bypass.push(host);
+            }
+        })
+    }
+
+    /// Accepts (or stops accepting) `host`'s upstream certificate without
+    /// verification, e.g. a dev server with a self-signed certificate.
+    pub fn set_insecure_upstream(&self, host: &str, allow: bool) -> Result<SslSettings, Error> {
+        let host = host.trim().trim_end_matches('.').to_ascii_lowercase();
+        self.update_ssl(|s| {
+            s.insecure_upstream.retain(|h| *h != host);
+            if allow {
+                s.insecure_upstream.push(host);
+            }
+        })
+    }
+
+    fn update_ssl(&self, change: impl FnOnce(&mut SslSettings)) -> Result<SslSettings, Error> {
+        let mut current = self.ssl.write();
+        let mut settings = current.settings().clone();
+        change(&mut settings);
+        let policy = SslPolicy::compile(settings)?;
+        policy.save(&self.root.join(SSL_SETTINGS_FILE))?;
+        let settings = policy.settings().clone();
+        *current = Arc::new(policy);
+        Ok(settings)
+    }
+
+    pub(crate) fn tls(&self) -> Arc<TlsContext> {
+        self.tls.read().clone()
+    }
+
+    pub(crate) fn ssl_policy(&self) -> Arc<SslPolicy> {
+        self.ssl.read().clone()
     }
 
     pub fn create_view(&self, filter: FilterSpec, sort: SortSpec) -> ViewInfo {

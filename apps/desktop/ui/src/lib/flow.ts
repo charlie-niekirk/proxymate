@@ -1,4 +1,4 @@
-import type { ContentKind, FlowRow_Serialize, FlowState, Scheme } from "@/bindings";
+import type { ContentKind, FlowRow_Serialize, FlowState, HttpVersion, Scheme, TlsStatus } from "@/bindings";
 
 /** A decoded `FlowRow` tuple. Field order mirrors `pm_model::FlowRow`. */
 export interface Row {
@@ -18,6 +18,8 @@ export interface Row {
   reqSize: number;
   respSize: number;
   edited: boolean;
+  httpVersion: HttpVersion;
+  tls: TlsStatus;
 }
 
 export function decodeRow(t: FlowRow_Serialize): Row {
@@ -38,6 +40,8 @@ export function decodeRow(t: FlowRow_Serialize): Row {
     reqSize: t[13],
     respSize: t[14],
     edited: t[15],
+    httpVersion: t[16],
+    tls: t[17],
   };
 }
 
@@ -105,6 +109,25 @@ export function statusLabel(status: number | null, state: FlowState): string {
     case "completed":
       return status === null ? "—" : String(status);
   }
+}
+
+/** Short protocol label for the table: `h2`, `1.1`, `1.0`. */
+export function versionLabel(version: HttpVersion): string {
+  switch (version) {
+    case "HTTP/2":
+      return "h2";
+    case "HTTP/1.1":
+      return "1.1";
+    case "HTTP/1.0":
+      return "1.0";
+  }
+}
+
+export function formatMs(ms: number | null): string {
+  if (ms === null) return "—";
+  if (ms < 1) return `${ms.toFixed(2)} ms`;
+  if (ms < 100) return `${ms.toFixed(1)} ms`;
+  return `${Math.round(ms)} ms`;
 }
 
 export function formatSize(bytes: number): string {

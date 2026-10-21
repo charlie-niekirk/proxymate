@@ -32,6 +32,8 @@ Run these from the repo root unless noted.
 | Run the app with Auto Select on | `VITE_PM_AUTO_SELECT=1 npm run tauri dev`. New traffic is selected and inspected without a click (for verifying from a shell) |
 | Headless proxy | `cargo run -p proxymate-cli -- serve [PORT]`. Logs each finished flow |
 | Test upstream by hand | `cargo run -p pm-testkit --bin upstream`, then `curl -x http://127.0.0.1:9090 http://127.0.0.1:<port>/json` |
+| TLS test upstream (h2 + h1) | `cargo run -p pm-testkit --bin upstream -- --tls` prints its port and CA file. Start the app with `PROXYMATE_EXTRA_UPSTREAM_CA=<that file>`, then `curl -x http://127.0.0.1:9090 --cacert ~/Library/Application\ Support/Proxymate/ca/proxymate-ca.pem https://localhost:<port>/json --http2 -v` |
+| Open the app on a response tab | `VITE_PM_RESPONSE_TAB=TLS` (or `Timing`, …), for screenshots from a shell |
 | UI only, in a browser | `npm run dev` (http://localhost:1420, in-memory mock backend) |
 | Rust format / lint / test | `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` |
 | UI typecheck / lint / test / build | `npm run typecheck`, `npm run lint`, `npm run test`, `npm run build` |
@@ -50,11 +52,12 @@ Run the same checks locally before pushing.
 
 ```
 crates/pm-model      pure types (serde + specta): FlowSummary, FlowRow, FilterSpec, SortSpec, ViewDelta, ...
-crates/pm-core       headless Engine: proxy/ (h1 forward proxy), recorder (per-flow capture), ingest (event thread),
-                     store/ (arena + views, segments, bodies, details), io/ (content kind, decoding), synth; later tls/, rules/
-crates/pm-platform   OS integration traits + cfg impls (sysproxy, trust, procinfo, ...), empty until M4
+crates/pm-core       headless Engine: proxy/ (h1 forward proxy, mitm.rs: CONNECT, MITM, h2, passthrough), tls/ (CA, leaf
+                     cache, SSL policy, upstream verifier), recorder (per-flow capture), ingest (event thread),
+                     store/ (arena + views, segments, bodies, details), io/ (content kind, decoding), synth; later rules/
+crates/pm-platform   OS integration traits + cfg impls (fs: private files; sysproxy, trust, procinfo, ... from M4)
 crates/pm-mcp        MCP server over Arc<Engine>, empty until M7
-crates/pm-testkit    test upstreams and proxy clients (h1 now), later the test CA; re-export of pm_core::synth
+crates/pm-testkit    test upstreams (h1, TLS h1/h2 with a test CA), proxy and HTTPS clients; re-export of pm_core::synth
 apps/desktop/src-tauri   thin Tauri adapters (commands.rs) + window chrome (window.rs)
 apps/desktop/ui          Vite + React 19 + TS strict + Tailwind v4 + shadcn/ui
 apps/cli                 proxymate-cli (headless; `bench` today)
@@ -116,4 +119,5 @@ Targets:
 - The app starts the proxy on 127.0.0.1:9090, falling back to 9091–9099. The toolbar shows the bound port, or why it couldn't bind.
 - Synthetic data is opt-in: `PROXYMATE_SYNTH_FLOWS` seeds flows and `PROXYMATE_SYNTH_RATE` adds that many live ones per second. Both default to 0. Keep `synth` for tests and benches.
 - Live segment files live under `~/Library/Application Support/Proxymate/live/<uuid>/`. Clear and quit delete them; the next launch sweeps any left by a crash.
+- HTTPS: the CA is `<data dir>/ca/proxymate-ca.pem` (key `proxymate-ca-key.pem`, mode 0600) and the SSL lists are `<data dir>/ssl.json`. Upstreams are verified with the OS trust store plus `EngineConfig::extra_upstream_roots` (`PROXYMATE_EXTRA_UPSTREAM_CA` in the app and CLI). Give each test engine its own `data_dir` so tests don't share a CA.
 - Integration tests are in `crates/pm-core/tests/`, using `pm-testkit` upstreams and clients. Tests that need their own process (RSS, environment variables) get their own file.

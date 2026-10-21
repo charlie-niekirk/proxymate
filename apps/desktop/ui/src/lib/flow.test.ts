@@ -2,16 +2,18 @@ import { describe, expect, it } from "vitest";
 
 import type { FlowRow_Serialize } from "@/bindings";
 
-import { decodeRow, formatDuration, formatSize, methodToken, statusLabel, statusToken, urlParts } from "./flow";
+import { decodeRow, formatDuration, formatMs, formatSize, methodToken, statusLabel, statusToken, urlParts, versionLabel } from "./flow";
 
 const tuple: FlowRow_Serialize = [
   7, "completed", "https", "GET", "api.example.com", 443, "/v1/users", "page=2", 404, "json", "Safari", 1.5, 42, 0, 1024, true,
+  "HTTP/2", "intercepted",
 ];
 
 describe("decodeRow", () => {
   it("maps the positional tuple to named fields", () => {
     const row = decodeRow(tuple);
     expect(row).toMatchObject({ id: 7, method: "GET", host: "api.example.com", status: 404, contentKind: "json", edited: true });
+    expect(row).toMatchObject({ httpVersion: "HTTP/2", tls: "intercepted" });
   });
 });
 
@@ -57,5 +59,13 @@ describe("formatters", () => {
     expect(formatDuration(null)).toBe("—");
     expect(formatDuration(42)).toBe("42 ms");
     expect(formatDuration(1500)).toBe("1.50 s");
+    expect(formatMs(0.25)).toBe("0.25 ms");
+    expect(formatMs(12.34)).toBe("12.3 ms");
+    expect(formatMs(250.6)).toBe("251 ms");
+  });
+
+  it("labels HTTP versions compactly", () => {
+    expect(versionLabel("HTTP/2")).toBe("h2");
+    expect(versionLabel("HTTP/1.1")).toBe("1.1");
   });
 });

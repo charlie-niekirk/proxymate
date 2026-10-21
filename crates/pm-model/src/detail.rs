@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use crate::flow::FlowId;
+use crate::tls::{Timing, TlsInfo};
 
 /// One header line. h1 names arrive lower-cased from the parser; the proxy
 /// still forwards them with their original case.
@@ -76,7 +77,7 @@ pub struct BodyInfo {
 
 /// Everything about one flow beyond its summary: heads, body metadata and
 /// errors. Loaded on demand for the inspector.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct FlowDetail {
     pub id: FlowId,
     pub request: RequestHead,
@@ -85,6 +86,9 @@ pub struct FlowDetail {
     pub response_body: BodyInfo,
     /// Why the flow failed, if it did.
     pub error: Option<String>,
+    /// Present for HTTPS flows that went through the MITM.
+    pub tls: Option<TlsInfo>,
+    pub timing: Timing,
 }
 
 /// Which body of a flow.

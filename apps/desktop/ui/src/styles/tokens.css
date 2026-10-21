@@ -2,7 +2,8 @@
  * Design tokens. Two groups, both plain CSS variables set per [data-theme]:
  *   1. shadcn/ui variables (--background, --primary, ...) consumed by src/components/ui.
  *   2. Proxymate app tokens: --m-* (HTTP methods), --s-* (status / flow state),
- *      --url-* (colourised URL parts), --selection-*, --pane-*, --syntax-* (bodies).
+ *      --url-* (colourised URL parts), --selection-*, --pane-*, --syntax-* (bodies),
+ *      --ssl-* (SSL column), --timing-* (Timing tab phases).
  * Pills use a tinted *-bg with the saturated foreground (>= 4.5:1 contrast).
  * Dark is the primary theme; the light values get a full pass in M10.
  */
@@ -99,6 +100,18 @@
   --s-blocked-bg: oklch(0.7 0.01 270 / 14%);
   --s-tunnel: var(--s-blocked);
   --s-tunnel-bg: var(--s-blocked-bg);
+
+  /* ---- TLS (SSL column, inspector) ---- */
+  --ssl-passthrough: var(--s-tunnel);
+  --ssl-pinned: var(--s-4xx);
+  --ssl-pinned-bg: var(--s-4xx-bg);
+
+  /* ---- Timing tab phases ---- */
+  --timing-dns: var(--chart-1);
+  --timing-connect: var(--chart-2);
+  --timing-tls: var(--chart-4);
+  --timing-wait: var(--chart-3);
+  --timing-receive: var(--m-head);
 
   /* ---- colourised URL ---- */
   --url-scheme: oklch(0.58 0.01 270);

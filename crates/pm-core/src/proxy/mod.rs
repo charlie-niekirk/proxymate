@@ -1,12 +1,13 @@
-//! The HTTP/1.1 forward proxy.
+//! The proxy listener.
 //!
 //! Each accepted connection is sniffed, then served by hyper with header
 //! case preserved. Absolute-form requests are forwarded through a pooled
-//! upstream client and recorded; CONNECT is tunnelled without recording
-//! until HTTPS interception lands in M2; origin-form requests are addressed
-//! to the proxy itself and get a short info page (the onboarding server is
-//! M9).
+//! upstream client and recorded; CONNECT goes to [`mitm`], which decrypts
+//! or tunnels it; origin-form requests are addressed to the proxy itself
+//! and get a short info page (the onboarding server is M9).
 
+mod io;
+mod mitm;
 mod sniff;
 mod tee;
 
@@ -21,7 +22,7 @@ use bytes::Bytes;
 use http::header::{self, HeaderMap, HeaderName, HeaderValue};
 use http::{Method, Request, Response, StatusCode, Uri, Version};
 use http_body_util::combinators::UnsyncBoxBody;
-use http_body_util::{BodyExt, Empty, Full};
+use http_body_util::{BodyExt, Full};
 use hyper::body::Incoming;
 use hyper::service::service_fn;
 use hyper_util::client::legacy::Client;
@@ -29,7 +30,7 @@ use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use pm_model::{
     BodyInfo, BodyPart, ContentKind, FlowDetail, FlowState, FlowSummary, Header, HttpVersion, RequestHead,
-    ResponseHead, Scheme,
+    ResponseHead, Scheme, Timing, TlsInfo, TlsStatus,
 };
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
@@ -157,24 +158,38 @@ async fn serve_connection(ctx: Arc<ProxyCtx>, mut stream: TcpStream) {
 
 async fn handle(ctx: Arc<ProxyCtx>, req: Request<Incoming>) -> Result<Response<ProxyBody>, Infallible> {
     if req.method() == Method::CONNECT {
-        return Ok(tunnel(req).await);
+        return Ok(mitm::connect(ctx, req).await);
     }
     let response = match req.uri().scheme_str() {
         Some("http") if !targets_self(req.uri(), ctx.addr) => forward(&ctx, req).await,
         Some("http") | None => info_page(ctx.addr),
         Some(_) => text_response(
             StatusCode::NOT_IMPLEMENTED,
-            "Proxymate: HTTPS in absolute form arrives with HTTPS interception (M2). Use CONNECT.\n",
+            "Proxymate: send HTTPS requests through a CONNECT tunnel.\n",
         ),
     };
     Ok(response)
 }
 
 async fn forward(ctx: &ProxyCtx, req: Request<Incoming>) -> Response<ProxyBody> {
-    let recorder = ctx.engine.upgrade().and_then(|engine| record_request(&engine, &req));
+    let recorder = ctx.engine.upgrade().and_then(|engine| {
+        let uri = req.uri();
+        let origin = Origin {
+            scheme: Scheme::Http,
+            host: uri.host().unwrap_or_default().to_owned(),
+            port: uri.port_u16().unwrap_or(80),
+            url: uri.to_string(),
+            tls: TlsStatus::None,
+            tls_info: None,
+        };
+        record_request(&engine, &req, origin)
+    });
     let (mut parts, body) = req.into_parts();
     strip_hop_by_hop(&mut parts.headers);
     let body = TeeBody::new(body, recorder.clone(), BodyPart::Request);
+    if let Some(recorder) = &recorder {
+        recorder.request_sent();
+    }
     let upstream = match ctx.client.request(Request::from_parts(parts, body)).await {
         Ok(response) => response,
         Err(err) => {
@@ -198,17 +213,27 @@ async fn forward(ctx: &ProxyCtx, req: Request<Incoming>) -> Response<ProxyBody> 
     Response::from_parts(parts, body.map_err(BoxError::from).boxed_unsync())
 }
 
+/// Where a recorded request went, beyond what its head says.
+struct Origin {
+    scheme: Scheme,
+    host: String,
+    port: u16,
+    /// The absolute URL, as shown in the inspector.
+    url: String,
+    tls: TlsStatus,
+    tls_info: Option<TlsInfo>,
+}
+
 /// Starts recording `req`, unless recording is paused.
-fn record_request(engine: &Arc<Engine>, req: &Request<Incoming>) -> Option<FlowRecorder> {
+fn record_request(engine: &Arc<Engine>, req: &Request<Incoming>, origin: Origin) -> Option<FlowRecorder> {
     let uri = req.uri();
-    let host = uri.host().unwrap_or_default();
     let summary = FlowSummary {
         id: 0,
         state: FlowState::Active,
-        scheme: Scheme::Http,
+        scheme: origin.scheme,
         method: req.method().as_str().into(),
-        host: host.into(),
-        port: uri.port_u16().unwrap_or(80),
+        host: origin.host.as_str().into(),
+        port: origin.port,
         path: uri.path().to_owned(),
         query: uri.query().unwrap_or_default().to_owned(),
         status: None,
@@ -219,13 +244,15 @@ fn record_request(engine: &Arc<Engine>, req: &Request<Incoming>) -> Option<FlowR
         req_size: 0,
         resp_size: 0,
         edited: false,
+        http_version: version(req.version()),
+        tls: origin.tls,
     };
     let headers = headers(req.headers());
     let detail = FlowDetail {
         id: 0,
         request: RequestHead {
             method: req.method().to_string(),
-            url: uri.to_string(),
+            url: origin.url,
             version: version(req.version()),
             headers,
         },
@@ -233,6 +260,8 @@ fn record_request(engine: &Arc<Engine>, req: &Request<Incoming>) -> Option<FlowR
         request_body: BodyInfo::default(),
         response_body: BodyInfo::default(),
         error: None,
+        tls: origin.tls_info,
+        timing: Timing::default(),
     };
     let mut detail = detail;
     detail.request_body.encoding = content_encoding(&detail.request.headers);
@@ -289,6 +318,10 @@ fn strip_hop_by_hop(headers: &mut HeaderMap) {
     for name in listed {
         headers.remove(name);
     }
+    // `te: trailers` must reach h2 upstreams: gRPC requires it.
+    let te_trailers = headers
+        .get(header::TE)
+        .is_some_and(|v| v.as_bytes().eq_ignore_ascii_case(b"trailers"));
     for name in [
         header::CONNECTION,
         header::PROXY_AUTHORIZATION,
@@ -302,36 +335,9 @@ fn strip_hop_by_hop(headers: &mut HeaderMap) {
     for name in ["keep-alive", "proxy-connection"] {
         headers.remove(name);
     }
-}
-
-/// CONNECT: open a TCP tunnel and splice bytes. Not recorded until M2.
-async fn tunnel(req: Request<Incoming>) -> Response<ProxyBody> {
-    let Some(authority) = req.uri().authority().map(|a| a.to_string()) else {
-        return text_response(StatusCode::BAD_REQUEST, "Proxymate: CONNECT needs host:port\n");
-    };
-    let upstream = match tokio::time::timeout(CONNECT_TIMEOUT, TcpStream::connect(&authority)).await {
-        Ok(Ok(stream)) => stream,
-        Ok(Err(err)) => {
-            return text_response(
-                StatusCode::BAD_GATEWAY,
-                &format!("Proxymate: can't reach {authority}: {err}\n"),
-            );
-        }
-        Err(_) => {
-            return text_response(
-                StatusCode::GATEWAY_TIMEOUT,
-                &format!("Proxymate: {authority} timed out\n"),
-            );
-        }
-    };
-    tokio::spawn(async move {
-        if let Ok(upgraded) = hyper::upgrade::on(req).await {
-            let mut client = TokioIo::new(upgraded);
-            let mut upstream = upstream;
-            let _ = tokio::io::copy_bidirectional(&mut client, &mut upstream).await;
-        }
-    });
-    Response::new(Empty::new().map_err(|never| match never {}).boxed_unsync())
+    if te_trailers {
+        headers.insert(header::TE, HeaderValue::from_static("trailers"));
+    }
 }
 
 /// True if `uri` points at this proxy's own listener, which would loop.
@@ -408,6 +414,14 @@ mod tests {
         headers.insert(header::ACCEPT, HeaderValue::from_static("*/*"));
         strip_hop_by_hop(&mut headers);
         assert_eq!(headers.keys().map(|k| k.as_str()).collect::<Vec<_>>(), vec!["accept"]);
+
+        let mut headers = HeaderMap::new();
+        headers.insert(header::TE, HeaderValue::from_static("trailers"));
+        strip_hop_by_hop(&mut headers);
+        assert_eq!(headers.get(header::TE).unwrap(), "trailers");
+        headers.insert(header::TE, HeaderValue::from_static("gzip"));
+        strip_hop_by_hop(&mut headers);
+        assert!(headers.get(header::TE).is_none());
     }
 
     #[test]
