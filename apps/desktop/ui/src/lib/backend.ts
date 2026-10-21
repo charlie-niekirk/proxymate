@@ -3,6 +3,14 @@ import { Channel, isTauri } from "@tauri-apps/api/core";
 import {
   commands,
   type BodyPart,
+  type BreakpointInfo_Deserialize,
+  type BreakpointInfo_Serialize,
+  type BreakpointResolution_Deserialize,
+  type PresetKind,
+  type Rule_Deserialize,
+  type Rule_Serialize,
+  type RuleSettings,
+  type RuleTestResult_Serialize,
   type CaInfo,
   type FilterSpec_Deserialize,
   type FlowDetail_Serialize,
@@ -75,6 +83,35 @@ export interface Backend {
   setSystemProxy(on: boolean): Promise<SystemProxyStatus_Serialize>;
   /** `export` lines for a proxied terminal. */
   getTerminalEnv(): Promise<string>;
+
+  // ---- Rules (M5) ----
+  /** Every rule, in evaluation order (built-in ones included). */
+  listRules(): Promise<Rule_Serialize[]>;
+  /** Saves a new rule at the end; the id is assigned by the engine. */
+  createRule(rule: Rule_Deserialize): Promise<Rule_Serialize>;
+  updateRule(rule: Rule_Deserialize): Promise<Rule_Serialize>;
+  setRuleEnabled(id: string, enabled: boolean): Promise<Rule_Serialize>;
+  deleteRule(id: string): Promise<void>;
+  /** Deletes every agent-created rule; resolves to how many. */
+  deleteAgentRules(): Promise<number>;
+  /** Puts the listed rules first, in that order. */
+  reorderRules(ids: string[]): Promise<Rule_Serialize[]>;
+  /** Rejects with the compile error if the rule is invalid. */
+  validateRule(rule: Rule_Deserialize): Promise<void>;
+  /** An unsaved rule pre-filled from a flow by a preset. */
+  draftRule(flow: number, preset: PresetKind): Promise<Rule_Serialize>;
+  /** Dry run of a rule against a recorded flow (computed in Rust). */
+  testRule(rule: Rule_Deserialize, flow: number): Promise<RuleTestResult_Serialize>;
+  getRuleSettings(): Promise<RuleSettings>;
+  setRuleSettings(settings: RuleSettings): Promise<RuleSettings>;
+
+  // ---- Breakpoints (M5) ----
+  /** The paused-flow queue, pushed now and whenever it changes. */
+  subscribeBreakpoints(onQueue: (queue: BreakpointInfo_Serialize[]) => void): Promise<void>;
+  /** A paused message's decoded body. */
+  getBreakpointBody(id: number): Promise<ArrayBuffer>;
+  /** Continue (with edits), abort or answer; the first resolution wins. */
+  resolveBreakpoint(id: number, resolution: BreakpointResolution_Deserialize): Promise<void>;
 }
 
 type Result<T> = { status: "ok"; data: T } | { status: "error"; error: string };
@@ -130,6 +167,32 @@ const tauriBackend: Backend = {
   getSystemProxyStatus: () => unwrap(commands.getSystemProxyStatus()),
   setSystemProxy: (on) => unwrap(commands.setSystemProxy(on)),
   getTerminalEnv: () => commands.getTerminalEnv(),
+  listRules: () => commands.listRules(),
+  createRule: (rule) => unwrap(commands.createRule(rule)),
+  updateRule: (rule) => unwrap(commands.updateRule(rule)),
+  setRuleEnabled: (id, enabled) => unwrap(commands.setRuleEnabled(id, enabled)),
+  deleteRule: async (id) => {
+    await unwrap(commands.deleteRule(id));
+  },
+  deleteAgentRules: () => unwrap(commands.deleteAgentRules()),
+  reorderRules: (ids) => unwrap(commands.reorderRules(ids)),
+  validateRule: async (rule) => {
+    await unwrap(commands.validateRule(rule));
+  },
+  draftRule: (flow, preset) => unwrap(commands.draftRule(flow, preset)),
+  testRule: (rule, flow) => unwrap(commands.testRule(rule, flow)),
+  getRuleSettings: () => commands.getRuleSettings(),
+  setRuleSettings: (settings) => unwrap(commands.setRuleSettings(settings)),
+  subscribeBreakpoints: async (onQueue) => {
+    // The channel carries what Rust serializes; the binding names the other shape.
+    const channel = new Channel<BreakpointInfo_Serialize[]>();
+    channel.onmessage = onQueue;
+    await commands.subscribeBreakpoints(channel as unknown as Channel<BreakpointInfo_Deserialize[]>);
+  },
+  getBreakpointBody: async (id) => (await unwrap(commands.getBreakpointBody(id))) as ArrayBuffer,
+  resolveBreakpoint: async (id, resolution) => {
+    await unwrap(commands.resolveBreakpoint(id, resolution));
+  },
 };
 
 function pickBackend(): Backend {

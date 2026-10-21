@@ -5,15 +5,17 @@
 //! upstream client and recorded; CONNECT goes to [`mitm`], which decrypts
 //! or tunnels it; origin-form requests are addressed to the proxy itself
 //! and get a short info page (the onboarding server is M9). WebSocket
-//! handshakes on either path switch to the [`ws`] relay.
+//! handshakes on either path switch to the [`ws`] relay; every other
+//! request goes through [`exchange`], which applies the rules.
 
+mod body;
+mod exchange;
 mod io;
 mod mitm;
 mod sniff;
 mod tee;
 mod ws;
 
-use std::convert::Infallible;
 use std::error::Error as StdError;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::ops::RangeInclusive;
@@ -41,6 +43,9 @@ use tokio::sync::watch;
 pub use sniff::{Sniffed, classify};
 pub use tee::TeeBody;
 
+use body::RuleBody;
+use exchange::{Exchange, Route};
+
 use crate::Engine;
 use crate::client::PeerClient;
 use crate::io::content::kind_from_content_type;
@@ -48,9 +53,31 @@ use crate::recorder::{FlowRecorder, content_encoding};
 
 type BoxError = Box<dyn StdError + Send + Sync>;
 type ProxyBody = UnsyncBoxBody<Bytes, BoxError>;
-type UpstreamClient = Client<HttpConnector, TeeBody<Incoming>>;
+/// A request body on its way upstream, recorded as it goes.
+type UpstreamBody = TeeBody<RuleBody>;
+type UpstreamClient = Client<HttpConnector, UpstreamBody>;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// A service error: hyper closes the connection (h1) or resets the stream
+/// (h2) instead of answering. How a `Block` rule's reset and a
+/// breakpoint's Abort reach the client.
+#[derive(Debug)]
+pub(crate) struct Reset(String);
+
+impl Reset {
+    pub fn new(reason: impl Into<String>) -> Reset {
+        Reset(reason.into())
+    }
+}
+
+impl std::fmt::Display for Reset {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl StdError for Reset {}
 
 /// Where the proxy listens.
 #[derive(Debug, Clone)]
@@ -167,22 +194,25 @@ async fn handle(
     ctx: Arc<ProxyCtx>,
     client: Arc<PeerClient>,
     req: Request<Incoming>,
-) -> Result<Response<ProxyBody>, Infallible> {
+) -> Result<Response<ProxyBody>, Reset> {
     if req.method() == Method::CONNECT {
         return Ok(mitm::connect(ctx, client, req).await);
     }
-    let response = match req.uri().scheme_str() {
+    match req.uri().scheme_str() {
         Some("http") if !targets_self(req.uri(), ctx.addr) => forward(&ctx, &client, req).await,
-        Some("http") | None => info_page(ctx.addr),
-        Some(_) => text_response(
+        Some("http") | None => Ok(info_page(ctx.addr)),
+        Some(_) => Ok(text_response(
             StatusCode::NOT_IMPLEMENTED,
             "Proxymate: send HTTPS requests through a CONNECT tunnel.\n",
-        ),
-    };
-    Ok(response)
+        )),
+    }
 }
 
-async fn forward(ctx: &ProxyCtx, client: &Arc<PeerClient>, mut req: Request<Incoming>) -> Response<ProxyBody> {
+async fn forward(
+    ctx: &ProxyCtx,
+    client: &Arc<PeerClient>,
+    mut req: Request<Incoming>,
+) -> Result<Response<ProxyBody>, Reset> {
     let websocket = ws::is_upgrade(&req);
     let recorder = ctx.engine.upgrade().and_then(|engine| {
         let uri = req.uri();
@@ -197,14 +227,29 @@ async fn forward(ctx: &ProxyCtx, client: &Arc<PeerClient>, mut req: Request<Inco
         };
         record_request(&engine, &req, origin)
     });
-    let client_upgrade = websocket.then(|| hyper::upgrade::on(&mut req));
-    let (mut parts, body) = req.into_parts();
-    if websocket {
-        ws::prepare_request(&mut parts.headers);
-    } else {
-        strip_hop_by_hop(&mut parts.headers);
+    if !websocket {
+        let uri = req.uri();
+        let exchange = Exchange {
+            ctx,
+            route: Route::Forward,
+            peer: client,
+            recorder,
+            scheme: Scheme::Http,
+            host: uri
+                .host()
+                .unwrap_or_default()
+                .trim_start_matches('[')
+                .trim_end_matches(']')
+                .to_owned(),
+            port: uri.port_u16().unwrap_or(80),
+        };
+        return exchange.run(req).await;
     }
-    let body = TeeBody::new(body, recorder.clone(), BodyPart::Request);
+    // Rules don't apply to WebSocket handshakes (yet).
+    let client_upgrade = hyper::upgrade::on(&mut req);
+    let (mut parts, body) = req.into_parts();
+    ws::prepare_request(&mut parts.headers);
+    let body = TeeBody::new(RuleBody::stream(body), recorder.clone(), BodyPart::Request);
     if let Some(recorder) = &recorder {
         recorder.request_sent();
     }
@@ -215,25 +260,23 @@ async fn forward(ctx: &ProxyCtx, client: &Arc<PeerClient>, mut req: Request<Inco
             if let Some(recorder) = &recorder {
                 recorder.fail(message.clone());
             }
-            return text_response(
+            return Ok(text_response(
                 StatusCode::BAD_GATEWAY,
                 &format!("Proxymate: upstream error: {message}\n"),
-            );
+            ));
         }
     };
     if let Some(recorder) = &recorder {
         let content_kind = content_kind(upstream.headers());
         recorder.response(response_head(&upstream), content_kind);
     }
-    if let Some(client_upgrade) = client_upgrade
-        && upstream.status() == StatusCode::SWITCHING_PROTOCOLS
-    {
-        return ws::switch(recorder, client_upgrade, upstream);
+    if upstream.status() == StatusCode::SWITCHING_PROTOCOLS {
+        return Ok(ws::switch(recorder, client_upgrade, upstream));
     }
     let (mut parts, body) = upstream.into_parts();
     strip_hop_by_hop(&mut parts.headers);
     let body = TeeBody::new(body, recorder, BodyPart::Response);
-    Response::from_parts(parts, body.map_err(BoxError::from).boxed_unsync())
+    Ok(Response::from_parts(parts, body.map_err(BoxError::from).boxed_unsync()))
 }
 
 /// Where a recorded request went, beyond what its head says.
@@ -288,13 +331,14 @@ fn record_request(engine: &Arc<Engine>, req: &Request<Incoming>, origin: Origin)
         error: None,
         tls: origin.tls_info,
         timing: Timing::default(),
+        rules: Default::default(),
     };
     let mut detail = detail;
     detail.request_body.encoding = content_encoding(&detail.request.headers);
     origin.client.begin_flow(engine, summary, detail)
 }
 
-fn response_head(resp: &Response<Incoming>) -> ResponseHead {
+fn response_head<B>(resp: &Response<B>) -> ResponseHead {
     let status = resp.status();
     let reason = resp
         .extensions()
@@ -308,6 +352,24 @@ fn response_head(resp: &Response<Incoming>) -> ResponseHead {
         version: version(resp.version()),
         headers: headers(resp.headers()),
     }
+}
+
+/// A response head built from parts (rules and breakpoints).
+fn head_of(status: u16, headers: &HeaderMap, version: Version) -> ResponseHead {
+    ResponseHead {
+        status,
+        reason: StatusCode::from_u16(status)
+            .ok()
+            .and_then(|s| s.canonical_reason())
+            .unwrap_or_default()
+            .to_owned(),
+        version: self::version(version),
+        headers: headers_of(headers),
+    }
+}
+
+pub(crate) fn headers_of(map: &HeaderMap) -> Vec<Header> {
+    headers(map)
 }
 
 fn headers(map: &HeaderMap) -> Vec<Header> {

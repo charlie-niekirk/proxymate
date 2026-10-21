@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ArrowDown, ArrowUp, MoreHorizontal, PencilLine } from "lucide-react";
-import { memo, useCallback, useEffect, useRef, type KeyboardEvent } from "react";
+import { memo, useCallback, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 
 import { AppIcon } from "@/components/AppIcon";
+import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { useFlowView } from "@/hooks/useFlowView";
 import { backend } from "@/lib/backend";
 import { formatDuration, formatSize, formatTime, versionLabel, type Row } from "@/lib/flow";
@@ -14,6 +15,7 @@ import { useUi } from "@/store/ui";
 
 import { MethodPill, SslIcon, StateDot, StatusPill, UrlText } from "./cells";
 import { COLUMNS, GRID_TEMPLATE, ROW_HEIGHT, type Column } from "./columns";
+import { FlowContextMenu } from "./FlowContextMenu";
 
 const HEADER_HEIGHT = 22;
 const MIN_TABLE_WIDTH = 1000;
@@ -31,6 +33,9 @@ export function FlowTable() {
   const autoScroll = useUi((s) => s.autoScroll);
   const scrollRef = useRef<HTMLDivElement>(null);
   const selectedIndex = useRef<number | null>(null);
+  // The row under a right-click: set by the row, read by the menu trigger.
+  const pressedRow = useRef<Row | null>(null);
+  const [menuRow, setMenuRow] = useState<Row | null>(null);
 
   // eslint-disable-next-line react-hooks/incompatible-library -- TanStack Virtual is not compiler-safe; it re-renders through our version state.
   const virtualizer = useVirtualizer({
@@ -63,6 +68,26 @@ export function FlowTable() {
     [select],
   );
 
+  const onRowContextMenu = useCallback(
+    (index: number, row: Row | undefined) => {
+      pressedRow.current = row ?? null;
+      selectedIndex.current = index;
+      select(row?.id ?? null);
+    },
+    [select],
+  );
+
+  // Rows bubble their right-click first; outside a row there is no menu.
+  const onTableContextMenu = (e: MouseEvent) => {
+    const row = pressedRow.current;
+    pressedRow.current = null;
+    if (!row) {
+      e.preventDefault();
+      return;
+    }
+    setMenuRow(row);
+  };
+
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
     e.preventDefault();
@@ -74,31 +99,37 @@ export function FlowTable() {
   };
 
   return (
-    <div
-      ref={scrollRef}
-      tabIndex={0}
-      onKeyDown={onKeyDown}
-      className="bg-pane-table relative h-full overflow-auto outline-none"
-      data-testid="flow-table"
-    >
-      <div className="relative" style={{ height: virtualizer.getTotalSize(), minWidth: MIN_TABLE_WIDTH }}>
-        <Header />
-        {items.map((item) => {
-          const row = cache?.get(item.index);
-          return (
-            <FlowRowView
-              key={item.key}
-              index={item.index}
-              start={item.start}
-              row={row}
-              selected={row !== undefined && row.id === selectedId}
-              onClick={onRowClick}
-            />
-          );
-        })}
-      </div>
-      {len === 0 && <EmptyState />}
-    </div>
+    <ContextMenu>
+      <ContextMenuTrigger asChild onContextMenu={onTableContextMenu}>
+        <div
+          ref={scrollRef}
+          tabIndex={0}
+          onKeyDown={onKeyDown}
+          className="bg-pane-table relative h-full overflow-auto outline-none"
+          data-testid="flow-table"
+        >
+          <div className="relative" style={{ height: virtualizer.getTotalSize(), minWidth: MIN_TABLE_WIDTH }}>
+            <Header />
+            {items.map((item) => {
+              const row = cache?.get(item.index);
+              return (
+                <FlowRowView
+                  key={item.key}
+                  index={item.index}
+                  start={item.start}
+                  row={row}
+                  selected={row !== undefined && row.id === selectedId}
+                  onClick={onRowClick}
+                  onContextMenu={onRowContextMenu}
+                />
+              );
+            })}
+          </div>
+          {len === 0 && <EmptyState />}
+        </div>
+      </ContextMenuTrigger>
+      <FlowContextMenu row={menuRow} />
+    </ContextMenu>
   );
 }
 
@@ -161,15 +192,18 @@ interface FlowRowViewProps {
   row: Row | undefined;
   selected: boolean;
   onClick: (index: number, row: Row | undefined) => void;
+  onContextMenu: (index: number, row: Row | undefined) => void;
 }
 
 const cell = "flex min-w-0 items-center px-1.5";
 
-const FlowRowView = memo(function FlowRowView({ index, start, row, selected, onClick }: FlowRowViewProps) {
+const FlowRowView = memo(function FlowRowView({ index, start, row, selected, onClick, onContextMenu }: FlowRowViewProps) {
   return (
     <div
       data-selected={selected}
-      onMouseDown={() => onClick(index, row)}
+      data-flow-id={row?.id}
+      onMouseDown={(e) => e.button === 0 && onClick(index, row)}
+      onContextMenu={() => onContextMenu(index, row)}
       className={cn(
         "group/row absolute top-0 left-0 grid w-full font-mono text-[11.5px] leading-none",
         index % 2 === 1 && "bg-[var(--pane-row-alt)]",
@@ -215,7 +249,12 @@ function RowCells({ row }: { row: Row }) {
         <SslIcon tls={row.tls} />
       </div>
       <div className={cn(cell, "justify-center")}>
-        {row.edited && <PencilLine className="size-3 text-[var(--m-patch)] group-data-[selected=true]/row:text-selection-foreground" />}
+        {row.edited && (
+          <PencilLine
+            aria-label="Changed by a rule"
+            className="size-3 text-[var(--rule)] group-data-[selected=true]/row:text-selection-foreground"
+          />
+        )}
       </div>
       <div className={cn(cell, "justify-center opacity-0 group-hover/row:opacity-60")}>
         <MoreHorizontal className="size-3" />

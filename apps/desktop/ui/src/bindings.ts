@@ -52,9 +52,144 @@ export const commands = {
 	setSystemProxy: (on: boolean) => typedError<SystemProxyStatus_Serialize, string>(__TAURI_INVOKE("set_system_proxy", { on })),
 	/**  `export` lines for a proxied terminal. */
 	getTerminalEnv: () => __TAURI_INVOKE<string>("get_terminal_env"),
+	/**  Every rule, in evaluation order. */
+	listRules: () => __TAURI_INVOKE<Rule_Serialize[]>("list_rules"),
+	/**  Saves a new rule at the end of the list (a fresh id is assigned). */
+	createRule: (rule: Rule_Deserialize) => typedError<Rule_Serialize, string>(__TAURI_INVOKE("create_rule", { rule })),
+	updateRule: (rule: Rule_Deserialize) => typedError<Rule_Serialize, string>(__TAURI_INVOKE("update_rule", { rule })),
+	setRuleEnabled: (id: string, enabled: boolean) => typedError<Rule_Serialize, string>(__TAURI_INVOKE("set_rule_enabled", { id, enabled })),
+	deleteRule: (id: string) => typedError<null, string>(__TAURI_INVOKE("delete_rule", { id })),
+	/**  Deletes every agent-created rule; returns how many. */
+	deleteAgentRules: () => typedError<number, string>(__TAURI_INVOKE("delete_agent_rules")),
+	/**  Puts the listed rules first, in that order. */
+	reorderRules: (ids: string[]) => typedError<Rule_Serialize[], string>(__TAURI_INVOKE("reorder_rules", { ids })),
+	/**  Compiles a rule without saving it; the error says what's wrong. */
+	validateRule: (rule: Rule_Deserialize) => typedError<null, string>(__TAURI_INVOKE("validate_rule", { rule })),
+	/**  An unsaved rule pre-filled from a flow by a preset. */
+	draftRule: (flow: number, preset: PresetKind) => typedError<Rule_Serialize, string>(__TAURI_INVOKE("draft_rule", { flow, preset })),
+	/**  Dry run of a rule against a recorded flow. */
+	testRule: (rule: Rule_Deserialize, flow: number) => typedError<RuleTestResult_Serialize, string>(__TAURI_INVOKE("test_rule", { rule, flow })),
+	getRuleSettings: () => __TAURI_INVOKE<RuleSettings>("get_rule_settings"),
+	setRuleSettings: (settings: RuleSettings) => typedError<RuleSettings, string>(__TAURI_INVOKE("set_rule_settings", { settings })),
+	listBreakpoints: () => __TAURI_INVOKE<BreakpointInfo_Serialize[]>("list_breakpoints"),
+	/**  Streams the breakpoint queue whenever it changes. */
+	subscribeBreakpoints: (onQueue: Channel<BreakpointInfo_Deserialize[]>) => __TAURI_INVOKE<void>("subscribe_breakpoints", { onQueue }),
+	/**  A paused message's (decoded) body as a raw `ArrayBuffer`. */
+	getBreakpointBody: (id: number) => typedError<unknown, string>(__TAURI_INVOKE("get_breakpoint_body", { id })),
+	/**  Continues, aborts or answers a paused flow. The first resolution wins. */
+	resolveBreakpoint: (id: number, resolution: BreakpointResolution_Deserialize) => typedError<null, string>(__TAURI_INVOKE("resolve_breakpoint", { id, resolution })),
 };
 
 /* Types */
+/**  One step of a rule. Actions of all matching rules run in rule order. */
+export type Action = Action_Serialize | Action_Deserialize;
+
+/**  One step of a rule. Actions of all matching rules run in rule order. */
+export type Action_Deserialize = 
+/**  Replaces every value of the header (adds it if missing). */
+{ type: "SetHeader"; phase: Phase; name: string; value: string } | { type: "RemoveHeader"; phase: Phase; name: string } | 
+/**  Rewrites the matching part of each value of a header. */
+{ type: "ReplaceHeaderValue"; phase: Phase; name: string; pattern: Pattern_Deserialize; replacement: string } | 
+/**  Replaces every value of a query parameter (adds it if missing). */
+{ type: "SetQuery"; name: string; value: string } | { type: "RemoveQuery"; name: string } | 
+/**  Find and replace in a text body (decoded first). */
+{ type: "ReplaceBody"; phase: Phase; pattern: Pattern_Deserialize; replacement: string } | 
+/**  Replaces the whole body. */
+{ type: "SetBody"; phase: Phase; body: string; 
+/**  Also sets `Content-Type`. */
+content_type?: string | null } | 
+/**
+ *  Sets the value at a JSON pointer (RFC 6901) in a JSON body. Missing
+ *  object members are created; `-` appends to an array.
+ */
+{ type: "JsonSet"; phase: Phase; pointer: string; value: Value } | { type: "JsonRemove"; phase: Phase; pointer: string } | 
+/**  Response only. */
+{ type: "SetStatus"; status: number } | 
+/**
+ *  Answers without contacting the upstream. Response-phase actions
+ *  still run on the answer.
+ */
+{ type: "MapLocal"; source: MapLocalSource; status: number; headers?: Header[]; 
+/**
+ *  `Content-Type` of the answer; guessed from a file's extension if
+ *  unset.
+ */
+content_type?: string | null } | 
+/**
+ *  Sends the request to another origin (and optionally path). If
+ *  several rules map a request, the last one wins.
+ */
+{ type: "MapRemote"; scheme?: Scheme | null; host?: string | null; port?: number | null; 
+/**  Replaces the path (the query is kept). */
+path?: string | null; 
+/**  Keep the original `Host` header instead of the new origin's. */
+preserve_host?: boolean } | 
+/**
+ *  Pauses the flow for editing in the Breakpoint Editor (or by an
+ *  agent). The request breakpoint fires after every request rewrite.
+ */
+{ type: "Breakpoint"; request: boolean; response: boolean } | { type: "Delay"; phase: Phase; ms: number } | 
+/**
+ *  Shapes bandwidth with a token bucket; 0 means unlimited. Latency is
+ *  added before the response.
+ */
+{ type: "Throttle"; download_kbps: number; upload_kbps: number; latency_ms: number } | 
+/**  Stops the flow. */
+{ type: "Block"; mode: BlockMode };
+
+/**  One step of a rule. Actions of all matching rules run in rule order. */
+export type Action_Serialize = 
+/**  Replaces every value of the header (adds it if missing). */
+{ type: "SetHeader"; phase: Phase; name: string; value: string } | { type: "RemoveHeader"; phase: Phase; name: string } | 
+/**  Rewrites the matching part of each value of a header. */
+{ type: "ReplaceHeaderValue"; phase: Phase; name: string; pattern: Pattern_Serialize; replacement: string } | 
+/**  Replaces every value of a query parameter (adds it if missing). */
+{ type: "SetQuery"; name: string; value: string } | { type: "RemoveQuery"; name: string } | 
+/**  Find and replace in a text body (decoded first). */
+{ type: "ReplaceBody"; phase: Phase; pattern: Pattern_Serialize; replacement: string } | 
+/**  Replaces the whole body. */
+{ type: "SetBody"; phase: Phase; body: string; 
+/**  Also sets `Content-Type`. */
+content_type: string | null } | 
+/**
+ *  Sets the value at a JSON pointer (RFC 6901) in a JSON body. Missing
+ *  object members are created; `-` appends to an array.
+ */
+{ type: "JsonSet"; phase: Phase; pointer: string; value: Value } | { type: "JsonRemove"; phase: Phase; pointer: string } | 
+/**  Response only. */
+{ type: "SetStatus"; status: number } | 
+/**
+ *  Answers without contacting the upstream. Response-phase actions
+ *  still run on the answer.
+ */
+{ type: "MapLocal"; source: MapLocalSource; status: number; headers: Header[]; 
+/**
+ *  `Content-Type` of the answer; guessed from a file's extension if
+ *  unset.
+ */
+content_type: string | null } | 
+/**
+ *  Sends the request to another origin (and optionally path). If
+ *  several rules map a request, the last one wins.
+ */
+{ type: "MapRemote"; scheme: Scheme | null; host: string | null; port: number | null; 
+/**  Replaces the path (the query is kept). */
+path: string | null; 
+/**  Keep the original `Host` header instead of the new origin's. */
+preserve_host: boolean } | 
+/**
+ *  Pauses the flow for editing in the Breakpoint Editor (or by an
+ *  agent). The request breakpoint fires after every request rewrite.
+ */
+{ type: "Breakpoint"; request: boolean; response: boolean } | { type: "Delay"; phase: Phase; ms: number } | 
+/**
+ *  Shapes bandwidth with a token bucket; 0 means unlimited. Latency is
+ *  added before the response.
+ */
+{ type: "Throttle"; download_kbps: number; upload_kbps: number; latency_ms: number } | 
+/**  Stops the flow. */
+{ type: "Block"; mode: BlockMode };
+
 /**  One client app in the sidebar, with its flow count. */
 export type AppCount = AppCount_Serialize | AppCount_Deserialize;
 
@@ -77,6 +212,31 @@ export type AppCount_Serialize = {
 	has_icon: boolean,
 	count: number,
 };
+
+/**  A rule that changed a flow, recorded on the flow. */
+export type AppliedRule = AppliedRule_Serialize | AppliedRule_Deserialize;
+
+/**  A rule that changed a flow, recorded on the flow. */
+export type AppliedRule_Deserialize = {
+	rule_id: string,
+	name: string,
+	origin: RuleOrigin_Deserialize,
+	phase: Phase,
+};
+
+/**  A rule that changed a flow, recorded on the flow. */
+export type AppliedRule_Serialize = {
+	rule_id: string,
+	name: string,
+	origin: RuleOrigin_Serialize,
+	phase: Phase,
+};
+
+export type BlockMode = 
+/**  Answers with this status and a short text body. */
+{ kind: "status"; status: number } | 
+/**  Closes the connection (h1) or resets the stream (h2). */
+{ kind: "reset" };
 
 /**
  *  What was seen and recorded of one body. The bytes themselves are fetched
@@ -142,6 +302,93 @@ export type BodyInfo_Serialize = {
 
 /**  Which body of a flow. */
 export type BodyPart = "request" | "response";
+
+export type BreakpointBody = BreakpointBody_Serialize | BreakpointBody_Deserialize;
+
+export type BreakpointBody_Deserialize = {
+	/**  Bytes held, decoded. */
+	size: number,
+	/**
+	 *  False above 16 MB, for a body that wasn't buffered, or one that
+	 *  couldn't be decoded: then only the head can be edited.
+	 */
+	editable: boolean,
+	/**  Why the body can't be edited, if it can't. */
+	note?: string | null,
+};
+
+export type BreakpointBody_Serialize = {
+	/**  Bytes held, decoded. */
+	size: number,
+	/**
+	 *  False above 16 MB, for a body that wasn't buffered, or one that
+	 *  couldn't be decoded: then only the head can be edited.
+	 */
+	editable: boolean,
+	/**  Why the body can't be edited, if it can't. */
+	note: string | null,
+};
+
+export type BreakpointInfo = BreakpointInfo_Serialize | BreakpointInfo_Deserialize;
+
+export type BreakpointInfo_Deserialize = {
+	id: number,
+	/**  The flow, if it is being recorded. */
+	flow_id?: number | null,
+	phase: Phase,
+	rule_id: string,
+	rule_name: string,
+	/**  Milliseconds since the Unix epoch. */
+	paused_at_ms: number | null,
+	/**  When the flow continues on its own; `None` waits forever. */
+	deadline_ms?: number | null,
+	/**  The request as it will be sent (after request rewrites). */
+	request: RequestHead,
+	/**  The response as it will be returned (response phase only). */
+	response?: ResponseHead | null,
+	/**  The paused message's body (decoded), fetched separately. */
+	body: BreakpointBody_Deserialize,
+};
+
+export type BreakpointInfo_Serialize = {
+	id: number,
+	/**  The flow, if it is being recorded. */
+	flow_id: number | null,
+	phase: Phase,
+	rule_id: string,
+	rule_name: string,
+	/**  Milliseconds since the Unix epoch. */
+	paused_at_ms: number | null,
+	/**  When the flow continues on its own; `None` waits forever. */
+	deadline_ms: number | null,
+	/**  The request as it will be sent (after request rewrites). */
+	request: RequestHead,
+	/**  The response as it will be returned (response phase only). */
+	response: ResponseHead | null,
+	/**  The paused message's body (decoded), fetched separately. */
+	body: BreakpointBody_Serialize,
+};
+
+/**  How to let a paused flow go on. */
+export type BreakpointResolution = BreakpointResolution_Serialize | BreakpointResolution_Deserialize;
+
+/**  How to let a paused flow go on. */
+export type BreakpointResolution_Deserialize = 
+/**  Send it on, with any edits. */
+{ action: "continue"; edits?: MessageEdits_Deserialize | null } | 
+/**  Close the connection (h1) or reset the stream (h2). */
+{ action: "abort" } | 
+/**  Answer the client with this response instead. */
+{ action: "respond"; status: number; headers?: Header[]; body?: string };
+
+/**  How to let a paused flow go on. */
+export type BreakpointResolution_Serialize = 
+/**  Send it on, with any edits. */
+{ action: "continue"; edits: MessageEdits_Serialize | null } | 
+/**  Close the connection (h1) or reset the stream (h2). */
+{ action: "abort" } | 
+/**  Answer the client with this response instead. */
+{ action: "respond"; status: number; headers: Header[]; body: string };
 
 /**  The Proxymate root CA, for the certificate popover and wizard. */
 export type CaInfo = {
@@ -268,6 +515,8 @@ export type FlowDetail_Deserialize = {
 	/**  Present for HTTPS flows that went through the MITM. */
 	tls?: TlsInfo_Deserialize | null,
 	timing: Timing_Deserialize,
+	/**  What rules did to the flow. */
+	rules?: FlowRules_Deserialize,
 };
 
 /**
@@ -285,6 +534,8 @@ export type FlowDetail_Serialize = {
 	/**  Present for HTTPS flows that went through the MITM. */
 	tls: TlsInfo_Serialize | null,
 	timing: Timing_Serialize,
+	/**  What rules did to the flow. */
+	rules: FlowRules_Serialize,
 };
 
 /**
@@ -313,6 +564,46 @@ export type FlowRow_Deserialize = [number, FlowState, Scheme, string, string, nu
  *  http_version, tls, graphql_op`.
  */
 export type FlowRow_Serialize = [number, FlowState, Scheme, string, string, number, string, string, number | null, ContentKind, string | null, number | null, number | null, number, number, boolean, HttpVersion, TlsStatus, string | null];
+
+/**
+ *  What rules did to one flow. Drives the Edited column and the
+ *  inspector's rule badges.
+ */
+export type FlowRules = FlowRules_Serialize | FlowRules_Deserialize;
+
+/**
+ *  What rules did to one flow. Drives the Edited column and the
+ *  inspector's rule badges.
+ */
+export type FlowRules_Deserialize = {
+	applied: AppliedRule_Deserialize[],
+	/**
+	 *  Set when a body action or breakpoint couldn't touch a body (over
+	 *  the buffering cap, or undecodable); the body was forwarded as is.
+	 */
+	rewrite_skipped?: string | null,
+	/**  A breakpoint timed out and the flow continued unmodified. */
+	breakpoint_timeout: boolean,
+	/**  The response came from Map Local or a breakpoint, not the upstream. */
+	mocked: boolean,
+};
+
+/**
+ *  What rules did to one flow. Drives the Edited column and the
+ *  inspector's rule badges.
+ */
+export type FlowRules_Serialize = {
+	applied: AppliedRule_Serialize[],
+	/**
+	 *  Set when a body action or breakpoint couldn't touch a body (over
+	 *  the buffering cap, or undecodable); the body was forwarded as is.
+	 */
+	rewrite_skipped: string | null,
+	/**  A breakpoint timed out and the flow continued unmodified. */
+	breakpoint_timeout: boolean,
+	/**  The response came from Map Local or a breakpoint, not the upstream. */
+	mocked: boolean,
+};
 
 /**  Lifecycle state of a flow. Drives the state dot and the status pill colour. */
 export type FlowState = 
@@ -434,6 +725,163 @@ export type KeychainTrust = "trusted" | "not_trusted" |
 /**  No trust store integration on this OS yet. */
 "unsupported";
 
+/**  A query parameter or header condition. */
+export type KvMatch = KvMatch_Serialize | KvMatch_Deserialize;
+
+/**  A query parameter or header condition. */
+export type KvMatch_Deserialize = {
+	name: string,
+	/**
+	 *  `None`: the name only has to be present. Otherwise some value of it
+	 *  must match.
+	 */
+	value?: Pattern_Deserialize | null,
+	/**  Inverts the condition: the name is absent, or no value matches. */
+	negate?: boolean,
+};
+
+/**  A query parameter or header condition. */
+export type KvMatch_Serialize = {
+	name: string,
+	/**
+	 *  `None`: the name only has to be present. Otherwise some value of it
+	 *  must match.
+	 */
+	value: Pattern_Serialize | null,
+	/**  Inverts the condition: the name is absent, or no value matches. */
+	negate: boolean,
+};
+
+export type MapLocalSource = { kind: "inline"; body: string } | { kind: "file"; path: string } | 
+/**
+ *  Serves files under `root`. The request path is tried in full, then
+ *  with leading segments dropped (`/api/v1/a.json` → `v1/a.json` →
+ *  `a.json`); a path ending in `/` serves `index.html`.
+ */
+{ kind: "directory"; root: string };
+
+/**
+ *  What a rule applies to. Every field that is set must match; empty lists
+ *  and `None` match anything. The request part decides whether the rule
+ *  runs at all; `response` only gates its response-phase actions.
+ */
+export type Matcher = Matcher_Serialize | Matcher_Deserialize;
+
+/**
+ *  What a rule applies to. Every field that is set must match; empty lists
+ *  and `None` match anything. The request part decides whether the rule
+ *  runs at all; `response` only gates its response-phase actions.
+ */
+export type Matcher_Deserialize = {
+	/**  Upper-case methods, e.g. `["GET", "POST"]`. Empty matches any. */
+	methods?: string[],
+	scheme?: Scheme | null,
+	/**
+	 *  Matched against the host without the port. A glob `*.example.com`
+	 *  also matches `example.com`.
+	 */
+	host?: Pattern_Deserialize | null,
+	port?: number | null,
+	/**
+	 *  Matched against the path without the query, e.g. `/api/users`. In
+	 *  globs `*` also crosses `/`.
+	 */
+	path?: Pattern_Deserialize | null,
+	query?: KvMatch_Deserialize[],
+	/**  Header names are case-insensitive. */
+	headers?: KvMatch_Deserialize[],
+	/**  The client app's name (e.g. `Safari`, `curl`). */
+	client_app?: Pattern_Deserialize | null,
+	response?: ResponseMatcher_Deserialize | null,
+};
+
+/**
+ *  What a rule applies to. Every field that is set must match; empty lists
+ *  and `None` match anything. The request part decides whether the rule
+ *  runs at all; `response` only gates its response-phase actions.
+ */
+export type Matcher_Serialize = {
+	/**  Upper-case methods, e.g. `["GET", "POST"]`. Empty matches any. */
+	methods: string[],
+	scheme: Scheme | null,
+	/**
+	 *  Matched against the host without the port. A glob `*.example.com`
+	 *  also matches `example.com`.
+	 */
+	host: Pattern_Serialize | null,
+	port: number | null,
+	/**
+	 *  Matched against the path without the query, e.g. `/api/users`. In
+	 *  globs `*` also crosses `/`.
+	 */
+	path: Pattern_Serialize | null,
+	query: KvMatch_Serialize[],
+	/**  Header names are case-insensitive. */
+	headers: KvMatch_Serialize[],
+	/**  The client app's name (e.g. `Safari`, `curl`). */
+	client_app: Pattern_Serialize | null,
+	response: ResponseMatcher_Serialize | null,
+};
+
+/**  Edits to a paused message. Unset fields stay as they are. */
+export type MessageEdits = MessageEdits_Serialize | MessageEdits_Deserialize;
+
+/**  Edits to a paused message. Unset fields stay as they are. */
+export type MessageEdits_Deserialize = {
+	/**  Request only. */
+	method?: string | null,
+	/**  Request only: an absolute URL. Another origin is dialled directly. */
+	url?: string | null,
+	/**  Response only. */
+	status?: number | null,
+	/**  Replaces every header. */
+	headers?: Header[] | null,
+	/**  Replaces the body (sent identity-encoded). */
+	body?: string | null,
+};
+
+/**  Edits to a paused message. Unset fields stay as they are. */
+export type MessageEdits_Serialize = {
+	/**  Request only. */
+	method: string | null,
+	/**  Request only: an absolute URL. Another origin is dialled directly. */
+	url: string | null,
+	/**  Response only. */
+	status: number | null,
+	/**  Replaces every header. */
+	headers: Header[] | null,
+	/**  Replaces the body (sent identity-encoded). */
+	body: string | null,
+};
+
+/**  A string pattern. */
+export type Pattern = Pattern_Serialize | Pattern_Deserialize;
+
+export type PatternKind = "exact" | 
+/**  `*` any run of characters, `?` one, `[abc]` a class, `{a,b}` either. */
+"glob" | 
+/**  Rust `regex` syntax, unanchored. Compiled with a size limit. */
+"regex";
+
+/**  A string pattern. */
+export type Pattern_Deserialize = {
+	kind: PatternKind,
+	value: string,
+	case_insensitive?: boolean,
+};
+
+/**  A string pattern. */
+export type Pattern_Serialize = {
+	kind: PatternKind,
+	value: string,
+	case_insensitive: boolean,
+};
+
+/**  Which message an action changes. */
+export type Phase = "request" | "response";
+
+export type PresetKind = "map_local" | "breakpoint" | "rewrite" | "map_remote" | "block" | "throttle";
+
 /**  Protocol chip in the filter row. */
 export type ProtocolFilter = "all" | "http" | "https" | "websocket";
 
@@ -476,6 +924,25 @@ export type ResponseHead = {
 	headers: Header[],
 };
 
+/**  Gates the response phase of a rule. */
+export type ResponseMatcher = ResponseMatcher_Serialize | ResponseMatcher_Deserialize;
+
+/**  Gates the response phase of a rule. */
+export type ResponseMatcher_Deserialize = {
+	/**  Inclusive ranges, e.g. `[{from: 400, to: 599}]`. Empty matches any. */
+	status?: StatusRange[],
+	/**  Matched against the `Content-Type` header (with parameters). */
+	content_type?: Pattern_Deserialize | null,
+};
+
+/**  Gates the response phase of a rule. */
+export type ResponseMatcher_Serialize = {
+	/**  Inclusive ranges, e.g. `[{from: 400, to: 599}]`. Empty matches any. */
+	status: StatusRange[],
+	/**  Matched against the `Content-Type` header (with parameters). */
+	content_type: Pattern_Serialize | null,
+};
+
 /**  A window of rows returned by `get_rows(view, start, count)`. */
 export type RowsPage = RowsPage_Serialize | RowsPage_Deserialize;
 
@@ -495,6 +962,108 @@ export type RowsPage_Serialize = {
 	/**  View length at the time of the read. */
 	len: number,
 	rows: FlowRow_Serialize[],
+};
+
+export type Rule = Rule_Serialize | Rule_Deserialize;
+
+/**
+ *  Who created a rule. Agent rules show an "AI · client" badge and can be
+ *  removed together.
+ */
+export type RuleOrigin = RuleOrigin_Serialize | RuleOrigin_Deserialize;
+
+/**
+ *  Who created a rule. Agent rules show an "AI · client" badge and can be
+ *  removed together.
+ */
+export type RuleOrigin_Deserialize = { kind: "user" } | 
+/**  Pre-filled from a flow by a preset (or built in, like the throttle). */
+{ kind: "preset"; preset: PresetKind } | 
+/**  Created by an MCP client. */
+{ kind: "agent"; client: string; session?: string | null; 
+/**  Milliseconds since the Unix epoch. */
+created_at_ms: number | null };
+
+/**
+ *  Who created a rule. Agent rules show an "AI · client" badge and can be
+ *  removed together.
+ */
+export type RuleOrigin_Serialize = { kind: "user" } | 
+/**  Pre-filled from a flow by a preset (or built in, like the throttle). */
+{ kind: "preset"; preset: PresetKind } | 
+/**  Created by an MCP client. */
+{ kind: "agent"; client: string; session: string | null; 
+/**  Milliseconds since the Unix epoch. */
+created_at_ms: number | null };
+
+/**  Rule-related settings, kept in `app.sqlite`. */
+export type RuleSettings = {
+	/**
+	 *  How long a breakpoint waits before the flow continues unmodified;
+	 *  0 waits forever.
+	 */
+	breakpoint_timeout_secs: number,
+};
+
+/**  The dry run of one rule against a recorded flow. */
+export type RuleTestResult = RuleTestResult_Serialize | RuleTestResult_Deserialize;
+
+/**  The dry run of one rule against a recorded flow. */
+export type RuleTestResult_Deserialize = {
+	/**  The request matcher matched. */
+	matched: boolean,
+	/**  Why the request matcher didn't match, if it didn't. */
+	mismatch?: string | null,
+	/**  Whether the response matcher matched (`None` without a response). */
+	response_matched?: boolean | null,
+	/**  The request after the rule's request phase. */
+	request: RequestHead,
+	request_body?: string | null,
+	/**  The response after the rule's response phase, or Map Local's. */
+	response?: ResponseHead | null,
+	response_body?: string | null,
+	/**  What else would happen: blocked, mapped, paused, delayed… */
+	notes: string[],
+};
+
+/**  The dry run of one rule against a recorded flow. */
+export type RuleTestResult_Serialize = {
+	/**  The request matcher matched. */
+	matched: boolean,
+	/**  Why the request matcher didn't match, if it didn't. */
+	mismatch: string | null,
+	/**  Whether the response matcher matched (`None` without a response). */
+	response_matched: boolean | null,
+	/**  The request after the rule's request phase. */
+	request: RequestHead,
+	request_body: string | null,
+	/**  The response after the rule's response phase, or Map Local's. */
+	response: ResponseHead | null,
+	response_body: string | null,
+	/**  What else would happen: blocked, mapped, paused, delayed… */
+	notes: string[],
+};
+
+export type Rule_Deserialize = {
+	id: string,
+	name: string,
+	enabled: boolean,
+	/**  Rules run in ascending `order`; every matching rule runs. */
+	order: number,
+	origin: RuleOrigin_Deserialize,
+	matcher: Matcher_Deserialize,
+	actions: Action_Deserialize[],
+};
+
+export type Rule_Serialize = {
+	id: string,
+	name: string,
+	enabled: boolean,
+	/**  Rules run in ascending `order`; every matching rule runs. */
+	order: number,
+	origin: RuleOrigin_Serialize,
+	matcher: Matcher_Serialize,
+	actions: Action_Serialize[],
 };
 
 /**  URL scheme of a flow as seen by the client. */
@@ -660,6 +1229,11 @@ export type SslSettings_Serialize = {
 	exclude_apps: string[],
 };
 
+export type StatusRange = {
+	from: number,
+	to: number,
+};
+
 /**  Whether the OS proxy points at Proxymate. */
 export type SystemProxyStatus = SystemProxyStatus_Serialize | SystemProxyStatus_Deserialize;
 
@@ -820,6 +1394,8 @@ export type TrustStatus_Serialize = {
 	/**  Why verification failed, if it did. */
 	detail: string | null,
 };
+
+export type Value = null | boolean | number | string | Value[] | { [key in string]: Value };
 
 /**
  *  Per-tick change notification for one view, published at 20 Hz.

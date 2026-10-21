@@ -41,6 +41,7 @@ if (import.meta.env.DEV) {
   if (select !== null) useUi.getState().select(Number(select));
   const requestTab = params.get("requestTab") as RequestTab | null;
   if (requestTab) useUi.getState().setRequestTab(requestTab);
+  if (params.has("rules")) useUi.getState().openRulesEditor();
 }
 
 if (import.meta.env.DEV && import.meta.env.VITE_PM_REMOTE) {
@@ -53,9 +54,16 @@ if (filterText) {
   useUi.getState().setText(filterText);
 }
 
-// Dev only: open the certificate wizard at launch, for screenshots.
+// Dev only: open the certificate wizard, the Rules Editor or the Breakpoint
+// Editor at launch, for screenshots (`VITE_PM_OPEN=cert-wizard|rules|breakpoints`).
 if (import.meta.env.DEV && import.meta.env.VITE_PM_OPEN === "cert-wizard") {
   useUi.getState().setCertWizardOpen(true);
+}
+if (import.meta.env.DEV && import.meta.env.VITE_PM_OPEN === "rules") {
+  useUi.getState().openRulesEditor();
+}
+if (import.meta.env.DEV && import.meta.env.VITE_PM_OPEN === "breakpoints") {
+  useUi.getState().setBreakpointsOpen(true);
 }
 
 if (import.meta.env.DEV && import.meta.env.VITE_PM_PERF_PROBE) {

@@ -33,7 +33,7 @@ Design cues from Proxyman's dashboard:
 The Cargo workspace uses edition 2024, plus an npm workspace for the UI.
 ```
 crates/pm-model     pure types (serde + specta + schemars): Flow*, Rule/Matcher/Action, FilterSpec, Settings
-crates/pm-core      headless Engine: proxy/, tls/, store/, rules/, io/ (har, curl, session) — no Tauri dep
+crates/pm-core      headless Engine: proxy/, tls/, store/, rules/ (compile, eval, local, breakpoints, app.sqlite), io/ (har, curl, session) — no Tauri dep
 crates/pm-platform  OS traits + cfg impls: sysproxy, trust, procinfo, netif, simctl (macos/ linux/ windows/)
 crates/pm-mcp       rmcp server over Arc<Engine>: Streamable HTTP (axum) + stdio bridge
 crates/pm-testkit   test upstreams (h1/h2 TLS, WS echo, SSE, slow/huge bodies), test CA; re-exports the synthetic flow generator (which lives in pm-core::synth so the app and CLI can seed data)
@@ -84,8 +84,9 @@ apps/cli                 proxymate-cli serve|mcp-stdio|gen-flows|bench (headless
 | Cert generation | rcgen |
 | Leaf cert cache | moka |
 | WebSockets | tokio-tungstenite |
-| Content decoding | flate2, brotli and zstd, run synchronously on stored bodies when the inspector asks (decoding is never on the forwarding path; M5 may add async-compression for streaming rewrites) |
+| Content decoding | flate2, brotli and zstd, run synchronously on stored bodies when the inspector asks, and on bodies buffered for a rewrite or breakpoint (M5; up to 32 MB, so no async-compression) |
 | Rule matching | regex (with `size_limit`) and globset |
+| App database | rusqlite (bundled SQLite, WAL) |
 | Concurrency | arc-swap, parking_lot, rayon |
 | QR codes | qrcode |
 | Network interfaces | if-addrs |
@@ -132,37 +133,45 @@ We build our own engine and use hudsucker only as a reading reference. Its handl
 - HTTP/1.1 header names are forwarded with their original case, but recorded lower-cased (hyper doesn't expose its case map) and shown in Title-Case.
 
 ## Rules engine
-- **Data model.** A `Rule` has `{id, name, enabled, order, origin: User|Preset|Agent{client, session, created_at}, matcher, actions[]}`.
+- **Data model.** A `Rule` has `{id, name, enabled, order, origin: User|Preset{preset}|Agent{client, session, created_at_ms}, matcher, actions[]}` (`pm-model/src/rules.rs`, serde + specta + schemars so the M7 MCP schemas are the same types).
 - **Matcher.** Matches on methods, scheme, host, port, path, query and header KV matches (each can be negated), client app, and an optional response matcher (status ranges, content-type).
-  - Patterns can be Exact, Glob or Regex, each with a case-insensitive flag.
+  - Patterns can be Exact, Glob or Regex, each with a case-insensitive flag. Exact and globs match the whole value; regexes are unanchored. In globs `*` crosses `/`, and a host glob `*.example.com` also matches `example.com`.
 - **Actions:**
   - Headers: `SetHeader`, `RemoveHeader`, `ReplaceHeaderValue`.
   - Query: `SetQuery`, `RemoveQuery`.
-  - Body: `ReplaceBody`, `SetBody`, `JsonSet`, `JsonRemove` (by JSON pointer).
+  - Body: `ReplaceBody`, `SetBody`, `JsonSet`, `JsonRemove` (by JSON pointer; `JsonSet` creates missing members, `-` appends).
   - Status: `SetStatus`.
-  - Routing: `MapLocal` (an inline body, a file, or a directory root mapped by path suffix) and `MapRemote`.
-  - Flow control: `Breakpoint{request,response}`, `Delay`, `Throttle` (token bucket), `Block` (a status code or a connection reset).
+  - Routing: `MapLocal` (an inline body, a file, or a directory root mapped by path suffix: the whole path is tried, then with leading segments dropped; `..` never leaves the root) and `MapRemote`.
+  - Flow control: `Breakpoint{request,response}`, `Delay`, `Throttle` (token bucket, kbps down/up plus latency), `Block` (a status code or a connection reset: h1 closes the connection, h2 resets the stream).
+  - Header, body and delay actions carry a `phase` (request or response).
 - **Compilation.** Rules compile to a `CompiledRuleSet`, which is swapped in atomically with ArcSwap.
+  - Every pattern becomes a byte regex (globs via globset) built with `RegexBuilder::size_limit` (256 KB compiled, 4096 characters of source). Errors name the rule, the field and the reason ("rule "x", host: invalid regex: unclosed group").
   - A host `RegexSet` prefilters candidate rules.
-  - Regexes that agents supply are compiled with a size limit.
+  - Every rule is compiled on save, enabled or not, so a broken rule is never stored.
   - Each flow snapshots the rule set when it starts.
-- **Evaluation order:**
+- **Persistence.** `app.sqlite` (rusqlite, bundled, WAL) in the data dir holds the rules (one JSON document per row, so new action fields need no migration) and the rule settings. An engine without a data dir keeps them in memory. The SSL lists stay in `ssl.json` for now.
+- **Evaluation order** (`pm-core/src/rules/eval.rs`, applied on the wire by `pm-core/src/proxy/exchange.rs`):
   1. **Request phase.** All matching rules run in `order`; this is not first-match.
-     - `Block` stops the flow.
+     - A `Block` in any matching rule stops the flow before any rewrite.
      - Header, query and body rewrites apply in sequence.
-     - If several `MapRemote` rules match, the last one wins.
-     - `MapLocal` is terminal: it skips the upstream, but response-phase actions still run.
+     - If several `MapRemote` rules match, the last one wins. It is applied before the breakpoint, so the breakpoint shows the final URL. Another HTTPS origin is reached over a new HTTP/1.1 TLS connection (there is no pooled HTTPS client).
+     - Request delays add up; the last `Throttle` wins.
+     - `MapLocal` is terminal: the first one wins, it skips the upstream (and the request breakpoint, since nothing is sent), but response-phase actions still run on its answer.
      - The request breakpoint fires **last**, so the user edits exactly what will be sent.
-  2. **Response phase.** Gated by the response matcher: rewrites run, then the response breakpoint.
-  3. **Recording.** Each flow records which rules applied. That drives the Edited column and the badges.
+  2. **Response phase.** Gated by the response matcher (against the response as it arrived): rewrites run, then the response breakpoint, then response delays and the throttle's latency.
+  3. **Recording.** Each flow records which rules applied (`FlowDetail.rules`: applied rules with their phase, `rewrite_skipped`, `breakpoint_timeout`, `mocked`) and sets `edited`. That drives the Edited column and the inspector badges. The recorded request and response are what was sent after rules, not the originals (keeping both is a follow-up).
+  - Rules don't apply to WebSocket handshakes yet.
 - **Breakpoints.**
   - `BreakpointManager` keeps a `DashMap<BpId, Pending{snapshot, oneshot::Sender<Resolution>}>`.
-  - A resolution is `Continue{edits}`, `Abort` or `Respond`.
-  - The timeout defaults to 300 s, then the flow continues unmodified.
-  - The UI and MCP can both resolve a breakpoint. The first to resolve wins.
-- **Body policy.** By default bodies stream. If any body action or breakpoint applies, the body is buffered up to 32 MB, decoded, transformed, and re-sent identity-encoded with a fresh Content-Length.
-  - A body over the cap is forwarded untouched and the flow is marked `rewrite_skipped`.
-- **Presets.** "Map Local…", "Breakpoint…" and "Rewrite…" in the flow context menu create pre-filled rules. The rules editor has a "Test against selected flow" dry run, computed in Rust.
+  - A resolution is `Continue{edits}`, `Abort` or `Respond`. Edits can change the method, URL (another origin is dialled directly), status, headers and body.
+  - The timeout comes from the rule settings: 300 s by default, 0 waits forever. On timeout the flow continues unmodified and is marked `breakpoint_timeout`.
+  - The UI and MCP can both resolve a breakpoint. The first to resolve wins; later ones get "already resolved".
+  - Bodies up to 16 MB can be edited; above that only the head. A paused flow shows the violet Paused pill; other h2 streams on the connection keep flowing. If the client goes away while paused, the flow fails.
+  - The queue is pushed to the UI on the publisher tick whenever it changes.
+- **Body policy.** By default bodies stream. If any body action or breakpoint applies, the body is buffered up to 32 MB, decoded, transformed, and re-sent identity-encoded with a fresh Content-Length (h1 chunking is dropped). Decoding is synchronous on the stored bytes (no async-compression).
+  - A body over the cap is forwarded untouched (what was read, then the rest of the stream) and the flow is marked `rewrite_skipped`; so is a body that can't be decoded.
+- **Presets.** "Map Local…", "Breakpoint…" and "Rewrite…" in the flow context menu create pre-filled rules (`Engine::draft_rule`, matching the flow's method, host and path). The rules editor has a "Test against selected flow" dry run (`Engine::test_rule`), computed in Rust with the proxy's own evaluator.
+- **Throttle.** The toolbar's network conditions are the built-in rule `builtin-throttle`: it matches everything, sits ahead of every other rule, is disabled by default and can't be deleted.
 
 ## macOS integration (pm-platform)
 - **CA trust.**

@@ -51,6 +51,15 @@ pub(crate) enum FlowEvent {
         req_size: u64,
         resp_size: u64,
     },
+    /// A rule changed the flow (the Edited column).
+    Edited {
+        id: FlowId,
+    },
+    /// The flow paused at a breakpoint, or went on.
+    State {
+        id: FlowId,
+        state: FlowState,
+    },
     /// The client app behind the flow's connection became known.
     ClientResolved {
         id: FlowId,

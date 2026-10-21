@@ -17,7 +17,6 @@
 //! the CONNECT is recorded as "likely pinned". Plain HTTP inside a CONNECT
 //! is served as HTTP.
 
-use std::convert::Infallible;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -44,10 +43,11 @@ use tokio::net::TcpStream;
 use tokio_rustls::client::TlsStream as ClientTls;
 use tokio_rustls::{LazyConfigAcceptor, TlsConnector};
 
+use super::exchange::{Exchange, Route};
 use super::io::{Counters, Counting, Prefixed};
 use super::{
-    BoxError, CONNECT_TIMEOUT, Origin, ProxyBody, ProxyCtx, TeeBody, content_kind, error_chain, forward, headers,
-    now_ms, record_request, response_head, strip_hop_by_hop, text_response, ws,
+    BoxError, CONNECT_TIMEOUT, Origin, ProxyBody, ProxyCtx, Reset, RuleBody, TeeBody, UpstreamBody, content_kind,
+    error_chain, forward, headers, now_ms, record_request, response_head, strip_hop_by_hop, text_response, ws,
 };
 use crate::Engine;
 use crate::client::PeerClient;
@@ -66,12 +66,10 @@ const TUNNEL_PROGRESS_INTERVAL: Duration = Duration::from_millis(500);
 /// client app to be known before deciding (a scan takes a few ms).
 const CLIENT_WAIT: Duration = Duration::from_millis(500);
 
-type UpstreamBody = TeeBody<Incoming>;
-
 /// Where the CONNECT asked to go.
 #[derive(Clone)]
-struct Target {
-    host: String,
+pub(super) struct Target {
+    pub(super) host: String,
     port: u16,
     head: RequestHead,
     /// The app the CONNECT came from.
@@ -455,6 +453,7 @@ fn record_connect(
         error: None,
         tls: tls_info,
         timing: Timing::default(),
+        rules: Default::default(),
     };
     target.peer.begin_flow(engine, summary, detail)
 }
@@ -488,9 +487,9 @@ where
             match format!("http://{authority}{pq}").parse::<Uri>() {
                 Ok(uri) => {
                     *req.uri_mut() = uri;
-                    Ok::<_, Infallible>(forward(&ctx, &peer, req).await)
+                    forward(&ctx, &peer, req).await
                 }
-                Err(_) => Ok(text_response(
+                Err(_) => Ok::<_, Reset>(text_response(
                     StatusCode::BAD_REQUEST,
                     "Proxymate: bad request target\n",
                 )),
@@ -712,9 +711,9 @@ async fn handshake(up: Upstream) -> Result<Sender, String> {
 }
 
 /// One intercepted client connection and its upstream.
-struct MitmConn {
+pub(super) struct MitmConn {
     ctx: Arc<ProxyCtx>,
-    target: Target,
+    pub(super) target: Target,
     dial: Dial,
     info: TlsInfo,
     /// Why there is no upstream; every request gets the 502 page.
@@ -731,7 +730,7 @@ struct Slot {
 }
 
 impl MitmConn {
-    async fn handle(self: Arc<Self>, mut req: Request<Incoming>) -> Result<Response<ProxyBody>, Infallible> {
+    async fn handle(self: Arc<Self>, mut req: Request<Incoming>) -> Result<Response<ProxyBody>, Reset> {
         self.requests.fetch_add(1, Ordering::Relaxed);
         let authority = request_authority(&req, &self.target);
         // WebSockets only arrive over h1: the h2 server doesn't offer
@@ -754,6 +753,22 @@ impl MitmConn {
             };
             record_request(&engine, &req, origin)
         });
+        if !websocket {
+            let exchange = Exchange {
+                ctx: &self.ctx,
+                route: Route::Mitm(&self),
+                peer: &self.target.peer,
+                recorder,
+                scheme: Scheme::Https,
+                host: authority
+                    .host()
+                    .trim_start_matches('[')
+                    .trim_end_matches(']')
+                    .to_owned(),
+                port: authority.port_u16().unwrap_or(443),
+            };
+            return exchange.run(req).await;
+        }
         if let Some(failure) = &self.failure {
             if let Some(recorder) = &recorder {
                 let mut slot = self.slot.lock().await;
@@ -766,19 +781,16 @@ impl MitmConn {
             return Ok(error_page(&self.target.host, failure));
         }
 
-        let client_upgrade = websocket.then(|| hyper::upgrade::on(&mut req));
+        // Rules don't apply to WebSocket handshakes (yet).
+        let client_upgrade = hyper::upgrade::on(&mut req);
         let (mut parts, body) = req.into_parts();
-        if websocket {
-            ws::prepare_request(&mut parts.headers);
-        } else {
-            strip_hop_by_hop(&mut parts.headers);
-        }
+        ws::prepare_request(&mut parts.headers);
         let pq = parts
             .uri
             .path_and_query()
             .cloned()
             .unwrap_or_else(|| PathAndQuery::from_static("/"));
-        let body = TeeBody::new(body, recorder.clone(), BodyPart::Request);
+        let body = TeeBody::new(RuleBody::stream(body), recorder.clone(), BodyPart::Request);
         let upstream = match self.send(parts, pq, authority, body, recorder.as_ref()).await {
             Ok(response) => response,
             Err(message) => {
@@ -791,9 +803,7 @@ impl MitmConn {
         if let Some(recorder) = &recorder {
             recorder.response(response_head(&upstream), content_kind(upstream.headers()));
         }
-        if let Some(client_upgrade) = client_upgrade
-            && upstream.status() == StatusCode::SWITCHING_PROTOCOLS
-        {
+        if upstream.status() == StatusCode::SWITCHING_PROTOCOLS {
             return Ok(ws::switch(recorder, client_upgrade, upstream));
         }
         let (mut parts, body) = upstream.into_parts();
@@ -804,7 +814,7 @@ impl MitmConn {
 
     /// Sends one request upstream, reconnecting if the upstream closed the
     /// connection since the last one.
-    async fn send(
+    pub(super) async fn send(
         &self,
         mut parts: http::request::Parts,
         pq: PathAndQuery,
@@ -813,6 +823,15 @@ impl MitmConn {
         recorder: Option<&FlowRecorder>,
     ) -> Result<Response<Incoming>, String> {
         let mut slot = self.slot.lock().await;
+        if let Some(failure) = &self.failure {
+            // No upstream: the flow fails with why, after the setup timing.
+            if let Some(recorder) = recorder
+                && let Some(timing) = slot.timing.take()
+            {
+                recorder.connection_timing(&timing);
+            }
+            return Err(failure.clone());
+        }
         if slot.sender.as_ref().is_none_or(Sender::is_closed) {
             let up = self.dial.connect().await.map_err(|f| f.message)?;
             if (up.alpn.as_deref() == Some(H2)) != self.client_h2 {
@@ -894,8 +913,58 @@ fn request_authority(req: &Request<Incoming>, target: &Target) -> Authority {
         .unwrap_or_else(|| Authority::from_static("unknown"))
 }
 
+/// Sends one request over a new TLS connection to `host:port` (HTTP/1.1),
+/// for requests a rule or breakpoint sent to another HTTPS origin.
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn send_direct(
+    ctx: &ProxyCtx,
+    host: &str,
+    port: u16,
+    mut parts: http::request::Parts,
+    pq: PathAndQuery,
+    authority: Authority,
+    body: UpstreamBody,
+    recorder: Option<&FlowRecorder>,
+) -> Result<Response<Incoming>, String> {
+    let Some(engine) = ctx.engine.upgrade() else {
+        return Err("Proxymate is shutting down".into());
+    };
+    let dial = Dial {
+        tls: engine.tls(),
+        host: host.to_owned(),
+        port,
+        sni: None,
+        offered: vec![HTTP11.to_vec()],
+        insecure: engine.ssl_policy().insecure_upstream(host),
+    };
+    drop(engine);
+    let up = dial.connect().await.map_err(|f| f.message)?;
+    if let Some(recorder) = recorder {
+        recorder.connection_timing(&up.timing);
+    }
+    let Sender::H1(mut sender) = handshake(up).await? else {
+        return Err("the upstream picked HTTP/2 without being offered it".into());
+    };
+    parts.uri = Uri::from(pq);
+    parts.version = http::Version::HTTP_11;
+    if !parts.headers.contains_key(header::HOST)
+        && let Ok(value) = HeaderValue::from_str(authority.as_str())
+    {
+        parts.headers.insert(header::HOST, value);
+    }
+    let failed = |e: hyper::Error| format!("The upstream request failed: {}", error_chain(&e));
+    sender.ready().await.map_err(failed)?;
+    if let Some(recorder) = recorder {
+        recorder.request_sent();
+    }
+    sender
+        .send_request(Request::from_parts(parts, body))
+        .await
+        .map_err(failed)
+}
+
 /// The 502 page for an upstream that couldn't be reached securely.
-fn error_page(host: &str, message: &str) -> Response<ProxyBody> {
+pub(super) fn error_page(host: &str, message: &str) -> Response<ProxyBody> {
     let html = format!(
         "<!doctype html><html><head><meta charset=\"utf-8\"><title>Proxymate: can't reach {host}</title>\
          <style>body{{font:15px -apple-system,system-ui,sans-serif;max-width:640px;margin:12vh auto;padding:0 24px;\

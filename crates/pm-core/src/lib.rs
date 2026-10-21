@@ -1,8 +1,7 @@
 //! Headless Proxymate engine.
 //!
 //! Adapters (Tauri commands, MCP tools, the CLI) talk only to [`Engine`].
-//! Planned modules: `rules/` (M5); `io/` grows HAR, cURL and
-//! sessions in M8.
+//! `io/` grows HAR, cURL and sessions in M8.
 
 mod client;
 mod engine;
@@ -11,6 +10,7 @@ mod integration;
 pub mod io;
 pub mod proxy;
 mod recorder;
+pub mod rules;
 pub mod store;
 pub mod synth;
 pub mod tls;
@@ -21,6 +21,7 @@ pub use engine::{BodyBytes, DeltaSink, Engine, EngineConfig, PUBLISH_INTERVAL};
 pub use integration::SidebarSink;
 pub use proxy::ProxyConfig;
 pub use recorder::{BodyEnd, FlowRecorder, WsRecorder};
+pub use rules::{BreakpointSink, RuleError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -42,4 +43,6 @@ pub enum Error {
     Settings(#[from] tls::PolicyError),
     #[error(transparent)]
     Platform(#[from] pm_platform::PlatformError),
+    #[error(transparent)]
+    Rule(#[from] rules::RuleError),
 }

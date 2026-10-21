@@ -7,6 +7,7 @@ import { MethodPill, StatusPill, UrlText } from "@/components/FlowTable/cells";
 import { BodyViewer } from "@/components/BodyViewer/BodyViewer";
 import { KvTable, Placeholder, type Kv } from "@/components/Inspector/KvTable";
 import { RawView } from "@/components/Inspector/RawView";
+import { RuleBadges } from "@/components/Inspector/RuleBadges";
 import { SsePanel } from "@/components/Inspector/SsePanel";
 import { TimingView } from "@/components/Inspector/TimingView";
 import { TlsView } from "@/components/Inspector/TlsView";
@@ -80,6 +81,7 @@ export function DetailPane() {
         </span>
         {(flow.tls === "intercepted" || flow.tls === "likely_pinned") && <BypassButton host={flow.host} compact />}
       </div>
+      {detail && <RuleBadges rules={detail.rules} />}
       {flow.tls === "likely_pinned" && (
         <div
           className="flex shrink-0 items-center gap-2 border-b bg-[var(--ssl-pinned-bg)] px-2 py-1.5 text-xs"

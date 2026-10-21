@@ -140,6 +140,13 @@ Targets:
 - HTTPS: the CA is `<data dir>/ca/proxymate-ca.pem` (key `proxymate-ca-key.pem`, mode 0600) and the SSL lists are `<data dir>/ssl.json`. Upstreams are verified with the OS trust store plus `EngineConfig::extra_upstream_roots` (`PROXYMATE_EXTRA_UPSTREAM_CA` in the app and CLI). Give each test engine its own `data_dir` so tests don't share a CA.
 - Integration tests are in `crates/pm-core/tests/`, using `pm-testkit` upstreams and clients. Tests that need their own process (RSS, environment variables) get their own file.
 
+**Rules and breakpoints (M5)**
+- One rule system: a `Matcher` plus ordered `Action`s (`pm-model/src/rules.rs`). Presets only pre-fill rules (`Engine::draft_rule`). The evaluation order is in `docs/PLAN.md` and `rules/eval.rs`; its unit matrix is `rules/tests.rs`, the end-to-end matrix `crates/pm-core/tests/rules.rs`.
+- Every non-WebSocket request goes through `proxy/exchange.rs`. With no matching rule it streams exactly as before; keep that path allocation-free.
+- Rules live in `<data dir>/app.sqlite` (in memory without a data dir, so tests never share rules). Mutations go through `Engine::change_rules`: validate, save, swap the `CompiledRuleSet`.
+- Patterns compile with a size limit; never compile a user or agent regex without `rules::compile::compile_pattern`.
+- A service error (`proxy::Reset`) is how a Block reset or a breakpoint Abort reaches the client: h1 closes, h2 resets the stream.
+
 **macOS integration (M4)**
 - Tests never change the machine's settings. System proxy logic is tested in `pm-platform` against a fake `ProxyBackend`; trust tests only read the keychain. Real keychain and proxy changes need the user's OK.
 - System proxy: `networksetup` per active service, with a backup in `<data dir>/sysproxy-backup.json` written first. The app spawns `proxymate --sysproxy-guardian <pid> --data-dir <dir>`, which restores after a crash or SIGKILL (about 0.25 s). A stale backup is restored at launch. Only settings that still point at us are put back.

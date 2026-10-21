@@ -1,5 +1,7 @@
+import type { PresetKind } from "@/bindings";
 import { backend } from "@/lib/backend";
-import { caInfoKey, proxyStatusKey, queryClient, sslSettingsKey, systemProxyKey, trustStatusKey } from "@/lib/query";
+import { caInfoKey, proxyStatusKey, queryClient, rulesKey, sslSettingsKey, systemProxyKey, trustStatusKey } from "@/lib/query";
+import { GLOBAL_THROTTLE_RULE_ID, curlCommand, normalizeRule, withThrottle, type Rule, type ThrottlePreset } from "@/lib/rules";
 import { useUi } from "@/store/ui";
 
 /** Clears every flow. The view's structural delta then empties the table. */
@@ -53,4 +55,72 @@ export async function setAppSslExcluded(app: string, excluded: boolean) {
 /** Copies `export HTTPS_PROXY=… NODE_EXTRA_CA_CERTS=…` for a terminal. */
 export async function copyTerminalEnv() {
   await navigator.clipboard.writeText(await backend.getTerminalEnv());
+}
+
+// ---- Rules ----
+
+/** Refetches the rules list after a change. */
+export async function refreshRules() {
+  await queryClient.invalidateQueries({ queryKey: rulesKey });
+}
+
+/**
+ * "Map Local…", "Breakpoint…", "Rewrite…": a rule pre-filled from the flow
+ * (in Rust), opened unsaved in the Rules Editor.
+ */
+export async function openPreset(flow: number, preset: PresetKind) {
+  const draft = normalizeRule(await backend.draftRule(flow, preset));
+  useUi.getState().select(flow);
+  useUi.getState().openRulesEditor({ draft });
+}
+
+/** Saves a rule (new if it has no id); resolves to the saved rule. */
+export async function saveRule(rule: Rule): Promise<Rule> {
+  const saved = rule.id ? await backend.updateRule(rule) : await backend.createRule(rule);
+  await refreshRules();
+  return normalizeRule(saved);
+}
+
+export async function deleteRule(id: string) {
+  await backend.deleteRule(id);
+  await refreshRules();
+}
+
+export async function setRuleEnabled(id: string, enabled: boolean) {
+  await backend.setRuleEnabled(id, enabled);
+  await refreshRules();
+}
+
+export async function reorderRules(ids: string[]) {
+  queryClient.setQueryData(rulesKey, await backend.reorderRules(ids));
+}
+
+export async function deleteAgentRules(): Promise<number> {
+  const n = await backend.deleteAgentRules();
+  await refreshRules();
+  return n;
+}
+
+/** Switches the toolbar's network conditions (the built-in throttle rule). */
+export async function setThrottle(preset: ThrottlePreset | null) {
+  const rules = await backend.listRules();
+  const rule = rules.find((r) => r.id === GLOBAL_THROTTLE_RULE_ID);
+  if (!rule) return;
+  await backend.updateRule(withThrottle(normalizeRule(rule), preset));
+  await refreshRules();
+}
+
+// ---- Flow menu ----
+
+export async function copyFlowUrl(flow: number) {
+  const detail = await backend.getFlowDetail(flow);
+  const summary = detail ? null : await backend.getFlow(flow);
+  const url = detail?.request.url ?? (summary ? `${summary.scheme}://${summary.host}${summary.path}${summary.query ? `?${summary.query}` : ""}` : "");
+  if (url) await navigator.clipboard.writeText(url);
+}
+
+/** A client-side stub without bodies; the full exporter is M8. */
+export async function copyFlowCurl(flow: number) {
+  const detail = await backend.getFlowDetail(flow);
+  if (detail) await navigator.clipboard.writeText(curlCommand(detail));
 }

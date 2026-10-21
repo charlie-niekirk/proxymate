@@ -1,12 +1,14 @@
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use crate::flow::{ContentKind, FlowId};
+use crate::rules::FlowRules;
 use crate::tls::{Timing, TlsInfo};
 
 /// One header line. h1 names arrive lower-cased from the parser; the proxy
 /// still forwards them with their original case.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, JsonSchema)]
 pub struct Header {
     pub name: String,
     pub value: String,
@@ -21,7 +23,7 @@ impl Header {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type, JsonSchema)]
 pub enum HttpVersion {
     #[serde(rename = "HTTP/1.0")]
     Http10,
@@ -41,7 +43,7 @@ impl HttpVersion {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, JsonSchema)]
 pub struct RequestHead {
     pub method: String,
     /// Absolute URL as the client asked for it.
@@ -50,7 +52,7 @@ pub struct RequestHead {
     pub headers: Vec<Header>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, JsonSchema)]
 pub struct ResponseHead {
     pub status: u16,
     /// Reason phrase from the status line, or the canonical one.
@@ -96,6 +98,9 @@ pub struct FlowDetail {
     /// Present for HTTPS flows that went through the MITM.
     pub tls: Option<TlsInfo>,
     pub timing: Timing,
+    /// What rules did to the flow.
+    #[serde(default)]
+    pub rules: FlowRules,
 }
 
 /// Which body of a flow.

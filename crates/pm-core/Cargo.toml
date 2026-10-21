@@ -13,7 +13,7 @@ parking_lot.workspace = true
 rayon.workspace = true
 thiserror.workspace = true
 serde.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["fs"] }
 hyper.workspace = true
 hyper-util.workspace = true
 http.workspace = true
@@ -38,11 +38,15 @@ ring.workspace = true
 gethostname.workspace = true
 globset.workspace = true
 serde_json.workspace = true
+regex.workspace = true
+arc-swap.workspace = true
+dashmap.workspace = true
+rusqlite.workspace = true
 
 [dev-dependencies]
 pm-testkit.workspace = true
 criterion.workspace = true
-tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "test-util"] }
 
 [[bench]]
 name = "ingest"
