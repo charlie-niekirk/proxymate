@@ -1,0 +1,51 @@
+[workspace]
+resolver = "3"
+members = [
+  "crates/pm-model",
+  "crates/pm-core",
+  "crates/pm-platform",
+  "crates/pm-mcp",
+  "crates/pm-testkit",
+  "apps/cli",
+  "apps/desktop/src-tauri",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "UNLICENSED"
+repository = "https://github.com/charlie-niekirk/proxymate"
+publish = false
+
+[workspace.dependencies]
+pm-model = { path = "crates/pm-model" }
+pm-core = { path = "crates/pm-core" }
+pm-platform = { path = "crates/pm-platform" }
+pm-mcp = { path = "crates/pm-mcp" }
+pm-testkit = { path = "crates/pm-testkit" }
+
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = "1"
+specta = { version = "=2.0.0-rc.26", features = ["derive"] }
+specta-typescript = "0.0.13"
+tauri-specta = { version = "=2.0.0-rc.26", features = ["derive", "typescript"] }
+tauri = { version = "2.12", features = ["macos-private-api"] }
+tauri-build = { version = "2" }
+window-vibrancy = "0.8"
+parking_lot = "0.13"
+rayon = "1"
+thiserror = "2"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+# rustls and the decompressors are unusably slow at opt-level 0.
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
