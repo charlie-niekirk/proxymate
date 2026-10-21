@@ -27,6 +27,12 @@ pub(crate) enum FlowEvent {
         status: u16,
         content_kind: ContentKind,
     },
+    /// Body detection finished (or improved on the header's guess).
+    Content {
+        id: FlowId,
+        content_kind: ContentKind,
+        graphql_op: Option<Arc<str>>,
+    },
     Progress {
         id: FlowId,
         req_size: u64,

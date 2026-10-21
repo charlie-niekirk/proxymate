@@ -22,6 +22,8 @@ zstd.workspace = true
 rustls.workspace = true
 tokio-rustls.workspace = true
 rcgen.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true

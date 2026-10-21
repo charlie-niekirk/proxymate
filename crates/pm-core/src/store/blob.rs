@@ -8,6 +8,7 @@ use std::io;
 use serde::{Deserialize, Serialize};
 
 use super::segments::{Extent, SegmentStore};
+use crate::io::content::SNIFF_LEN;
 
 /// Bodies up to this size are stored inside the flow detail.
 pub(crate) const INLINE_MAX: usize = 8 * 1024;
@@ -52,6 +53,8 @@ pub(crate) struct Capture {
     pub captured: u64,
     /// Bytes were dropped: over the cap, or a segment write failed.
     pub truncated: bool,
+    /// The first [`SNIFF_LEN`] bytes, kept in memory for content detection.
+    pub head: Vec<u8>,
 }
 
 impl Capture {
@@ -65,6 +68,10 @@ impl Capture {
         if keep.len() < data.len() {
             self.truncated = true;
         }
+        if self.head.len() < SNIFF_LEN {
+            let n = keep.len().min(SNIFF_LEN - self.head.len());
+            self.head.extend_from_slice(&keep[..n]);
+        }
         self.buf.extend_from_slice(keep);
         self.captured += keep.len() as u64;
         if self.buf.len() >= SPILL_CHUNK {
@@ -74,6 +81,7 @@ impl Capture {
 
     /// Writes out what is left and returns where the body lives.
     pub fn finish(&mut self, segments: &SegmentStore) -> BlobRef {
+        self.head = Vec::new();
         if self.extents.is_empty() {
             if self.buf.is_empty() {
                 return BlobRef::Empty;
@@ -125,6 +133,7 @@ mod tests {
         let mut capture = Capture::default();
         capture.push(b"{\"ok\":", &segs);
         capture.push(b"true}", &segs);
+        assert_eq!(capture.head, b"{\"ok\":true}");
         assert_eq!(capture.finish(&segs), BlobRef::Inline(b"{\"ok\":true}".to_vec()));
         let _ = std::fs::remove_dir_all(root);
     }
@@ -138,6 +147,7 @@ mod tests {
             capture.push(chunk, &segs);
         }
         assert_eq!(capture.snapshot(&segs).unwrap(), body);
+        assert_eq!(capture.head, &body[..SNIFF_LEN]);
         let blob = capture.finish(&segs);
         assert!(matches!(&blob, BlobRef::Segments(e) if e.len() == 4));
         assert_eq!(blob.read(&segs).unwrap(), body);

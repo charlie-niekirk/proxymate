@@ -102,6 +102,9 @@ const SITES: &[Site] = &[
     },
 ];
 
+/// Operation names for synthetic GraphQL flows.
+const GRAPHQL_OPS: &[&str] = &["GetViewer", "ListPullRequests", "UpdateTodo", "SearchRepositories"];
+
 const METHODS: &[(&str, u32)] = &[
     ("GET", 70),
     ("POST", 16),
@@ -195,6 +198,9 @@ impl Generator {
             0
         };
         self.clock_ms += 1.0 + self.below(40) as f64;
+        let content_kind = site.kinds[self.below(site.kinds.len() as u64) as usize];
+        let graphql_op = (content_kind == ContentKind::GraphQl)
+            .then(|| Arc::from(GRAPHQL_OPS[self.below(GRAPHQL_OPS.len() as u64) as usize]));
         FlowSummary {
             id: 0,
             state: FlowState::Active,
@@ -205,7 +211,7 @@ impl Generator {
             path: path.to_owned(),
             query,
             status: None,
-            content_kind: site.kinds[self.below(site.kinds.len() as u64) as usize],
+            content_kind,
             client: Some(self.clients[site_idx].clone()),
             started_at_ms: self.clock_ms,
             duration_ms: None,
@@ -222,6 +228,7 @@ impl Generator {
             } else {
                 TlsStatus::None
             },
+            graphql_op,
         }
     }
 
@@ -242,6 +249,7 @@ impl Generator {
             flow.path = String::from("/");
             flow.query.clear();
             flow.content_kind = ContentKind::None;
+            flow.graphql_op = None;
         } else {
             flow.state = FlowState::Completed;
             let i = self.weighted(STATUSES.iter().map(|(_, w)| *w));

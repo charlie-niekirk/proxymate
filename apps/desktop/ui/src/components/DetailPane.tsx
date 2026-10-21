@@ -4,7 +4,7 @@ import { useState, type ReactNode } from "react";
 
 import type { FlowDetail_Serialize, FlowSummary_Serialize } from "@/bindings";
 import { MethodPill, StatusPill, UrlText } from "@/components/FlowTable/cells";
-import { BodyView } from "@/components/Inspector/BodyView";
+import { BodyViewer } from "@/components/BodyViewer/BodyViewer";
 import { KvTable, Placeholder, type Kv } from "@/components/Inspector/KvTable";
 import { RawView } from "@/components/Inspector/RawView";
 import { TimingView } from "@/components/Inspector/TimingView";
@@ -52,7 +52,7 @@ export function DetailPane() {
     <div className="bg-background flex h-full flex-col" data-testid="inspector">
       <div className="flex h-8 shrink-0 items-center gap-2 border-b px-2" data-selectable>
         <MethodPill method={flow.method} />
-        <UrlText row={flow} className="min-w-0 flex-1 text-xs" />
+        <UrlText row={flow} operation={flow.graphql_op} className="min-w-0 flex-1 text-xs" />
         <StatusPill status={flow.status} state={flow.state} />
         <span
           className="text-muted-foreground rounded-sm border px-1 font-mono text-2xs leading-4"
@@ -100,16 +100,24 @@ function RequestPane({ flow, detail }: Inspected & { detail: FlowDetail_Serializ
   const headers: Kv = request.headers.map((h) => [displayHeaderName(h.name), h.value]);
   return (
     <MessageTabs title="Request" tabs={["Header", "Query", "Body", "Raw"]} value={tab} onChange={setTab}>
-      <TabsContent value="Header">
+      <ScrollTab value="Header">
         <KvTable rows={headers} />
-      </TabsContent>
-      <TabsContent value="Query">
+      </ScrollTab>
+      <ScrollTab value="Query">
         {query.length ? <KvTable rows={query} /> : <Placeholder text="No query parameters" />}
-      </TabsContent>
-      <TabsContent value="Body">
-        <BodyView id={flow.id} part="request" info={info} finished={finished} />
-      </TabsContent>
-      <TabsContent value="Raw">
+      </ScrollTab>
+      <FillTab value="Body">
+        <BodyViewer
+          key={`${flow.id}-request`}
+          id={flow.id}
+          part="request"
+          info={info}
+          finished={finished}
+          headers={request.headers}
+          url={request.url}
+        />
+      </FillTab>
+      <FillTab value="Raw">
         <RawView
           id={flow.id}
           part="request"
@@ -118,7 +126,7 @@ function RequestPane({ flow, detail }: Inspected & { detail: FlowDetail_Serializ
           info={info}
           finished={finished}
         />
-      </TabsContent>
+      </FillTab>
     </MessageTabs>
   );
 }
@@ -146,13 +154,25 @@ function ResponsePane({ flow, detail }: Inspected & { detail: FlowDetail_Seriali
           {formatSize(flow.resp_size)} received through the tunnel.
         </div>
       )}
-      <TabsContent value="Header">
+      <ScrollTab value="Header">
         {response ? <KvTable rows={response.headers.map((h) => [displayHeaderName(h.name), h.value])} /> : noResponse}
-      </TabsContent>
-      <TabsContent value="Body">
-        {response ? <BodyView id={flow.id} part="response" info={info} finished={finished} /> : noResponse}
-      </TabsContent>
-      <TabsContent value="Raw">
+      </ScrollTab>
+      <FillTab value="Body">
+        {response ? (
+          <BodyViewer
+            key={`${flow.id}-response`}
+            id={flow.id}
+            part="response"
+            info={info}
+            finished={finished}
+            headers={response.headers}
+            url={detail.request.url}
+          />
+        ) : (
+          noResponse
+        )}
+      </FillTab>
+      <FillTab value="Raw">
         {response ? (
           <RawView
             id={flow.id}
@@ -165,13 +185,13 @@ function ResponsePane({ flow, detail }: Inspected & { detail: FlowDetail_Seriali
         ) : (
           noResponse
         )}
-      </TabsContent>
-      <TabsContent value="TLS">
+      </FillTab>
+      <ScrollTab value="TLS">
         <TlsView flow={flow} detail={detail} />
-      </TabsContent>
-      <TabsContent value="Timing">
+      </ScrollTab>
+      <ScrollTab value="Timing">
         <TimingView flow={flow} timing={detail.timing} />
-      </TabsContent>
+      </ScrollTab>
     </MessageTabs>
   );
 }
@@ -243,8 +263,26 @@ function MessageTabs<T extends string>({
           ))}
         </TabsList>
       </div>
-      <ScrollArea className="min-h-0 flex-1">{children}</ScrollArea>
+      <div className="flex min-h-0 flex-1 flex-col">{children}</div>
     </Tabs>
+  );
+}
+
+/** A tab whose content scrolls as a whole (headers, TLS, timing). */
+function ScrollTab({ value, children }: { value: string; children: ReactNode }) {
+  return (
+    <TabsContent value={value} className="min-h-0 flex-1">
+      <ScrollArea className="h-full">{children}</ScrollArea>
+    </TabsContent>
+  );
+}
+
+/** A tab that fills the pane and scrolls itself (body viewers, Raw). */
+function FillTab({ value, children }: { value: string; children: ReactNode }) {
+  return (
+    <TabsContent value={value} className="min-h-0 flex-1">
+      {children}
+    </TabsContent>
   );
 }
 

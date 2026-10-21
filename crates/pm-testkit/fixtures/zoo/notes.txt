@@ -1,0 +1,3 @@
+Proxymate zoo — plain text fixture.
+
+Lines keep their breaks, tabs	stay	tabs, and Unicode survives: café, naïve, 日本語, ✓.

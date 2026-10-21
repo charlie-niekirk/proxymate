@@ -1,6 +1,7 @@
 //! Proxymate desktop app. Every command here is a thin adapter over
 //! [`pm_core::Engine`]; no engine logic lives in this crate.
 
+mod body_scheme;
 mod commands;
 mod window;
 
@@ -24,6 +25,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::subscribe_view,
             commands::get_flow_detail,
             commands::get_body,
+            commands::save_body,
             commands::clear_flows,
             commands::set_recording,
             commands::get_proxy_status,
@@ -64,7 +66,18 @@ pub fn run() {
     export_bindings(&builder);
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(builder.invoke_handler())
+        .manage(body_scheme::BodyCache::default())
+        .register_asynchronous_uri_scheme_protocol(body_scheme::SCHEME, |ctx, request, responder| {
+            let app = ctx.app_handle().clone();
+            // Reading and decoding a body can take a while; keep it off the main thread.
+            tauri::async_runtime::spawn_blocking(move || {
+                let engine = app.state::<Arc<Engine>>();
+                let cache = app.state::<body_scheme::BodyCache>();
+                responder.respond(body_scheme::handle(&engine, &cache, &request));
+            });
+        })
         .register_asynchronous_uri_scheme_protocol("pmicon", |ctx, request, responder| {
             let engine = ctx.app_handle().state::<Arc<Engine>>().inner().clone();
             let name = percent_decode(request.uri().path().trim_start_matches('/'));

@@ -47,6 +47,52 @@ pub fn decode(encoding: &str, body: &[u8]) -> Result<Vec<u8>, DecodeError> {
     Ok(data)
 }
 
+/// Decodes as much of the start of `body` as it can, up to `limit` bytes,
+/// for sniffing. `body` may be a truncated stream; errors just end the
+/// output early, and an unknown coding yields nothing.
+pub fn decode_prefix(encoding: &str, body: &[u8], limit: usize) -> Vec<u8> {
+    let codings: Vec<String> = encoding.rsplit(',').map(|c| c.trim().to_ascii_lowercase()).collect();
+    let mut data = body.to_vec();
+    for (i, coding) in codings.iter().enumerate() {
+        // Inner layers only need enough output to fill the outer ones.
+        let cap = if i + 1 == codings.len() { limit } else { usize::MAX / 2 };
+        data = match coding.as_str() {
+            "" | "identity" => data,
+            "gzip" | "x-gzip" => read_some(flate2::read::MultiGzDecoder::new(&data[..]), cap),
+            "deflate" => {
+                let zlib = read_some(flate2::read::ZlibDecoder::new(&data[..]), cap);
+                if zlib.is_empty() {
+                    read_some(flate2::read::DeflateDecoder::new(&data[..]), cap)
+                } else {
+                    zlib
+                }
+            }
+            "br" => read_some(brotli::Decompressor::new(&data[..], 64 * 1024), cap),
+            "zstd" => match zstd::stream::read::Decoder::new(&data[..]) {
+                Ok(decoder) => read_some(decoder, cap),
+                Err(_) => Vec::new(),
+            },
+            _ => return Vec::new(),
+        };
+    }
+    data.truncate(limit);
+    data
+}
+
+/// Reads until `cap` bytes, the end, or the first error.
+fn read_some(mut reader: impl Read, cap: usize) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut buf = [0u8; 8192];
+    while out.len() < cap {
+        match reader.read(&mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => out.extend_from_slice(&buf[..n]),
+        }
+    }
+    out.truncate(cap);
+    out
+}
+
 /// HTTP `deflate` is meant to be zlib-wrapped, but plenty of servers send a
 /// raw deflate stream; accept both.
 fn inflate(data: &[u8]) -> Result<Vec<u8>, DecodeError> {
@@ -107,6 +153,18 @@ mod tests {
     fn stacked_codings_are_undone_in_reverse() {
         let twice = gzip(&gzip(BODY));
         assert_eq!(decode("gzip, gzip", &twice).unwrap(), BODY);
+    }
+
+    #[test]
+    fn prefixes_decode_from_truncated_streams() {
+        let body: Vec<u8> = (0..200_000u32).flat_map(|i| i.to_le_bytes()).collect();
+        let encoded = gzip(&body);
+        assert_eq!(decode_prefix("gzip", &encoded, 1000), &body[..1000]);
+        let half = decode_prefix("gzip", &encoded[..encoded.len() / 2], usize::MAX);
+        assert!(!half.is_empty() && body.starts_with(&half));
+        assert_eq!(decode_prefix("gzip, gzip", &gzip(&gzip(BODY)), 5), &BODY[..5]);
+        assert!(decode_prefix("compress", BODY, 10).is_empty());
+        assert!(decode_prefix("gzip", b"not gzip", 10).is_empty());
     }
 
     #[test]

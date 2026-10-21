@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="0; url=http://zoo.invalid/html-refresh">
+<title>Proxymate zoo page</title>
+<link rel="stylesheet" href="http://zoo.invalid/html-style.css">
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; margin: 24px; color: #1f2933; background: #fffdf7; }
+  h1 { color: #c2410c; font-size: 22px; }
+  table { border-collapse: collapse; } td, th { border: 1px solid #d0d7de; padding: 4px 8px; }
+  .note { background: #fef3c7; padding: 8px; border-radius: 6px; }
+  @import url("http://zoo.invalid/html-import.css");
+</style>
+<script>document.documentElement.dataset.pwned = "head-script"; fetch("http://zoo.invalid/html-fetch");</script>
+</head>
+<body onload="document.body.dataset.pwned = 'onload'">
+<h1>Proxymate zoo page</h1>
+<p class="note">This page tries to run scripts and load remote resources. The preview must do neither.</p>
+<table>
+  <tr><th>Fixture</th><th>Kind</th></tr>
+  <tr><td>nested.json</td><td>JSON</td></tr>
+  <tr><td>page.html</td><td>HTML</td></tr>
+</table>
+<p><a href="http://zoo.invalid/html-link">A link</a></p>
+<img src="http://zoo.invalid/html-image.png" alt="remote image" onerror="document.body.dataset.pwned = 'onerror'">
+<iframe src="http://zoo.invalid/html-frame" title="remote frame"></iframe>
+<form action="http://zoo.invalid/html-form" method="post"><input name="q" value="x"><button>Send</button></form>
+<script src="http://zoo.invalid/html-script.js"></script>
+<script>window.parent.postMessage("pwned", "*"); document.body.dataset.pwned = "body-script";</script>
+</body>
+</html>

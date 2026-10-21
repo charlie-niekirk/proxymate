@@ -34,6 +34,10 @@ Run these from the repo root unless noted.
 | Test upstream by hand | `cargo run -p pm-testkit --bin upstream`, then `curl -x http://127.0.0.1:9090 http://127.0.0.1:<port>/json` |
 | TLS test upstream (h2 + h1) | `cargo run -p pm-testkit --bin upstream -- --tls` prints its port and CA file. Start the app with `PROXYMATE_EXTRA_UPSTREAM_CA=<that file>`, then `curl -x http://127.0.0.1:9090 --cacert ~/Library/Application\ Support/Proxymate/ca/proxymate-ca.pem https://localhost:<port>/json --http2 -v` |
 | Open the app on a response tab | `VITE_PM_RESPONSE_TAB=TLS` (or `Timing`, …), for screenshots from a shell |
+| Drive the app from a shell | Start with `VITE_PM_REMOTE=1`, then `curl -d '{"select":3,"requestTab":"Body"}' localhost:1420/__pm_remote` (also `responseTab`, `viewer: {kind, viewer}`, `theme`). See `src/dev/remote.ts` |
+| Body-viewer zoo through the proxy | `cargo run -p pm-testkit --bin upstream -- --zoo [127.0.0.1:9090]` sends one flow per fixture in `crates/pm-testkit/fixtures/zoo/` |
+| Zoo in the browser UI | `npm run dev`, then open `http://localhost:1420/?zoo` (mock backend serving the zoo; `&select=<id>&theme=light&requestTab=Body`) |
+| Viewer snapshots + preview safety (Playwright) | `npm run e2e` (first time: `npx -w @proxymate/ui playwright install webkit chromium`). `-- --update-snapshots` after an intended visual change; `PM_E2E_PORT` picks the dev server port (default 1425) |
 | Open the app with the cert wizard / a search | `VITE_PM_OPEN=cert-wizard`, `VITE_PM_FILTER=<text>` (dev only, for screenshots) |
 | Run the app as the system proxy | `PROXYMATE_SYSTEM_PROXY=1 npm run tauri dev`. Changes the real macOS proxy settings: restored on quit, on signals, and by the guardian after `kill -9` |
 | UI only, in a browser | `npm run dev` (http://localhost:1420, in-memory mock backend) |
@@ -46,7 +50,7 @@ Run these from the repo root unless noted.
 
 CI (`.github/workflows/ci.yml`):
 - Rust: `fmt --check`, `clippy -D warnings`, `test` and a bindings-drift check, on macOS and Linux.
-- UI: `typecheck`, `lint`, `vitest` and `build`.
+- UI: `typecheck`, `lint`, `vitest`, `build` and Playwright (`e2e`, pixel snapshots off on Linux: baselines are macOS-only for now).
 
 Run the same checks locally before pushing.
 
@@ -63,8 +67,9 @@ crates/pm-platform   OS integration traits; macos/ impls, stub.rs elsewhere: fs 
                      restore over a ProxyBackend; networksetup), trust (keychain), procinfo (libproc port scan, app
                      bundles, icons), process (kqueue exit wait)
 crates/pm-mcp        MCP server over Arc<Engine>, empty until M7
-crates/pm-testkit    test upstreams (h1, TLS h1/h2 with a test CA), proxy and HTTPS clients; re-export of pm_core::synth
-apps/desktop/src-tauri   thin Tauri adapters (commands.rs) + window chrome (window.rs)
+crates/pm-testkit    test upstreams (h1, TLS h1/h2 with a test CA), the body-viewer zoo (fixtures/zoo), proxy and HTTPS clients;
+                     re-export of pm_core::synth
+apps/desktop/src-tauri   thin Tauri adapters (commands.rs), the pmbody:// scheme (body_scheme.rs), window chrome (window.rs)
 apps/desktop/ui          Vite + React 19 + TS strict + Tailwind v4 + shadcn/ui
 apps/cli                 proxymate-cli (headless; `bench` today)
 ```
@@ -112,6 +117,12 @@ Targets:
 **Colours**
 - Every colour is a token in `src/styles/tokens.css`: shadcn variables plus `--m-*` (methods), `--s-*` (status and state), `--url-*` and `--selection-*`. Don't hard-code colours in components.
 - Dark is the primary theme; light gets a full pass in M10.
+
+**Body viewers** (`src/components/BodyViewer/`)
+- `registry.ts` maps each `ContentKind` to its viewers, best first. Add a viewer there and in `Viewer.tsx`.
+- Media, images, PDFs and fonts load from `backend.bodyUrl` (`pmbody://` in the app, blob URLs in the mock); text viewers get decoded bytes over IPC.
+- Big work runs in workers: JSON parsing/formatting above 256 KB, and prettier (lazy-loaded) for Beautify.
+- The HTML preview must stay sandboxed (no `allow-scripts`), URL-stripped and under `PREVIEW_CSP` (`lib/body/htmlPreview.ts`); `e2e/security.spec.ts` checks it.
 
 **The flow table**
 - It is a custom div grid virtualised with TanStack Virtual, at a fixed 22 px row height. Do not swap in shadcn's DataTable.

@@ -26,7 +26,12 @@ specta.workspace = true
 specta-typescript.workspace = true
 tauri.workspace = true
 tauri-specta.workspace = true
+tauri-plugin-dialog = "2"
+parking_lot.workspace = true
 tokio = { workspace = true, features = ["signal"] }
+
+[dev-dependencies]
+pm-testkit.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 window-vibrancy.workspace = true

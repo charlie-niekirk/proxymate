@@ -2,7 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import App from "@/App";
-import { useUi, type ResponseTab } from "@/store/ui";
+import { useUi, type RequestTab, type ResponseTab } from "@/store/ui";
 import "@/styles/index.css";
 
 // Lets tokens.css switch the sidebar to vibrancy on macOS.
@@ -26,6 +26,25 @@ if (import.meta.env.DEV && import.meta.env.VITE_PM_AUTO_SELECT) {
 const responseTab = import.meta.env.DEV ? (import.meta.env.VITE_PM_RESPONSE_TAB as ResponseTab | undefined) : undefined;
 if (responseTab) {
   useUi.getState().setResponseTab(responseTab);
+}
+
+// Dev only: `?theme=light`, `?select=<flow id>` and `?requestTab=Body` set up a
+// view for the Playwright viewer snapshots (with `?zoo`, see lib/backend.ts).
+if (import.meta.env.DEV) {
+  const params = new URLSearchParams(window.location.search);
+  const theme = params.get("theme");
+  if (theme === "light" || theme === "dark") {
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.classList.toggle("dark", theme === "dark");
+  }
+  const select = params.get("select");
+  if (select !== null) useUi.getState().select(Number(select));
+  const requestTab = params.get("requestTab") as RequestTab | null;
+  if (requestTab) useUi.getState().setRequestTab(requestTab);
+}
+
+if (import.meta.env.DEV && import.meta.env.VITE_PM_REMOTE) {
+  void import("@/dev/remote").then((m) => m.runRemote());
 }
 
 // Dev only: start with this search text (e.g. a host), for screenshots.

@@ -29,8 +29,18 @@ export interface Backend {
   getFlow(id: number): Promise<FlowSummary_Serialize | null>;
   subscribe(view: number, onDelta: (delta: ViewDelta) => void): Promise<void>;
   getFlowDetail(id: number): Promise<FlowDetail_Serialize | null>;
-  /** Body bytes; with `decoded`, content-encoding undone (rejects if that fails). */
-  getBody(id: number, part: BodyPart, decoded: boolean): Promise<ArrayBuffer>;
+  /**
+   * Body bytes; with `decoded`, content-encoding undone (rejects if that
+   * fails). With `max`, only the first `max` bytes.
+   */
+  getBody(id: number, part: BodyPart, decoded: boolean, max?: number | null): Promise<ArrayBuffer>;
+  /**
+   * A URL serving the body with its detected Content-Type, for `<img>`,
+   * `<video>`, PDF frames and fonts (`pmbody://` in the app).
+   */
+  bodyUrl(id: number, part: BodyPart, decoded: boolean): Promise<string>;
+  /** Asks where to save a body and writes it; resolves to the path, or null if cancelled. */
+  saveBody(id: number, part: BodyPart, decoded: boolean, fileName: string): Promise<string | null>;
   clearFlows(): Promise<void>;
   setRecording(on: boolean): Promise<ProxyStatus_Serialize>;
   getProxyStatus(): Promise<ProxyStatus_Serialize>;
@@ -66,6 +76,9 @@ async function unwrap<T>(result: Promise<Result<T>>): Promise<T> {
   return r.data;
 }
 
+/** The `pmbody://` scheme (see src-tauri `body_scheme.rs`); WebView2 needs the http form. */
+const BODY_ORIGIN = navigator.userAgent.includes("Windows") ? "http://pmbody.localhost" : "pmbody://localhost";
+
 const tauriBackend: Backend = {
   createView: (filter, sort) => commands.createView(filter, sort),
   setFilter: (view, filter) => unwrap(commands.setFilter(view, filter)),
@@ -81,7 +94,9 @@ const tauriBackend: Backend = {
   getFlowDetail: (id) => unwrap(commands.getFlowDetail(id)),
   // `get_body` answers with a raw ipc::Response, which arrives as an ArrayBuffer;
   // the binding can only say `unknown`.
-  getBody: async (id, part, decoded) => (await unwrap(commands.getBody(id, part, decoded))) as ArrayBuffer,
+  getBody: async (id, part, decoded, max = null) => (await unwrap(commands.getBody(id, part, decoded, max))) as ArrayBuffer,
+  bodyUrl: async (id, part, decoded) => `${BODY_ORIGIN}/live/${id}/${part}${decoded ? "?decoded=1" : ""}`,
+  saveBody: (id, part, decoded, fileName) => unwrap(commands.saveBody(id, part, decoded, fileName)),
   clearFlows: () => commands.clearFlows(),
   setRecording: (on) => commands.setRecording(on),
   getProxyStatus: () => commands.getProxyStatus(),
@@ -105,8 +120,18 @@ const tauriBackend: Backend = {
   getTerminalEnv: () => commands.getTerminalEnv(),
 };
 
+function pickBackend(): Backend {
+  if (isTauri()) return tauriBackend;
+  // Dev only: `?zoo` serves the body-viewer fixtures (crates/pm-testkit/fixtures/zoo)
+  // instead of synthetic rows, for the Playwright viewer tests.
+  if (import.meta.env.DEV && new URLSearchParams(window.location.search).has("zoo")) {
+    return createMockBackend(0, import("@/dev/zoo").then((m) => m.loadZoo()));
+  }
+  return createMockBackend(100_000);
+}
+
 /**
  * The Tauri backend inside the app; an in-memory mock in a plain browser
  * (`npm run dev` on its own) and in tests.
  */
-export const backend: Backend = isTauri() ? tauriBackend : createMockBackend(100_000);
+export const backend: Backend = pickBackend();

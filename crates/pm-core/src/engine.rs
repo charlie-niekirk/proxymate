@@ -55,6 +55,8 @@ pub struct BodyBytes {
     /// The `Content-Encoding` that was undone, if decoding was asked for
     /// and the body was encoded.
     pub decoded_from: Option<String>,
+    /// True if only the first `max` bytes were asked for and there are more.
+    pub cut: bool,
 }
 
 pub struct Engine {
@@ -193,7 +195,13 @@ impl Engine {
     /// The captured bytes of one body. With `decode`, a content-encoded
     /// body (gzip, br, deflate, zstd) is decoded first.
     pub fn body(&self, id: FlowId, part: BodyPart, decode: bool) -> Result<BodyBytes, Error> {
-        let bytes = self.details.body(id, part)?.ok_or(Error::UnknownFlow(id))?;
+        self.body_head(id, part, decode, None)
+    }
+
+    /// Like [`Engine::body`], but at most the first `max` bytes (decoded,
+    /// with `decode`), so a huge body can be previewed cheaply.
+    pub fn body_head(&self, id: FlowId, part: BodyPart, decode: bool, max: Option<usize>) -> Result<BodyBytes, Error> {
+        let mut bytes = self.details.body(id, part)?.ok_or(Error::UnknownFlow(id))?;
         let encoding = if decode {
             self.details.get(id)?.and_then(|stored| match part {
                 BodyPart::Request => stored.detail.request_body.encoding.clone(),
@@ -202,16 +210,40 @@ impl Engine {
         } else {
             None
         };
-        match encoding {
-            Some(encoding) if !bytes.is_empty() => Ok(BodyBytes {
-                bytes: decode::decode(&encoding, &bytes)?,
-                decoded_from: Some(encoding),
-            }),
-            _ => Ok(BodyBytes {
-                bytes,
-                decoded_from: None,
-            }),
+        let (bytes, decoded_from) = match (encoding, max) {
+            (Some(encoding), None) if !bytes.is_empty() => (decode::decode(&encoding, &bytes)?, Some(encoding)),
+            (Some(encoding), Some(max)) if !bytes.is_empty() => {
+                let head = decode::decode_prefix(&encoding, &bytes, max.saturating_add(1));
+                if head.is_empty() {
+                    // Report why it didn't decode.
+                    decode::decode(&encoding, &bytes)?;
+                }
+                (head, Some(encoding))
+            }
+            _ => {
+                if let Some(max) = max {
+                    bytes.truncate(max.saturating_add(1));
+                }
+                (bytes, None)
+            }
+        };
+        let mut bytes = bytes;
+        let cut = max.is_some_and(|max| bytes.len() > max);
+        if let Some(max) = max {
+            bytes.truncate(max);
         }
+        Ok(BodyBytes {
+            bytes,
+            decoded_from,
+            cut,
+        })
+    }
+
+    /// Writes one body (decoded, with `decode`) to `path`.
+    pub fn save_body(&self, id: FlowId, part: BodyPart, decode: bool, path: &std::path::Path) -> Result<u64, Error> {
+        let body = self.body(id, part, decode)?;
+        std::fs::write(path, &body.bytes)?;
+        Ok(body.bytes.len() as u64)
     }
 
     /// Drops every flow and deletes their bodies. Flows still in flight are

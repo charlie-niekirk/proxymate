@@ -18,8 +18,14 @@ export const commands = {
 	/**
 	 *  A body's bytes as a raw `ArrayBuffer`, not JSON. With `decoded`, a
 	 *  content-encoded body is decoded first; decoding errors are returned.
+	 *  With `max`, only the first `max` bytes are sent.
 	 */
-	getBody: (id: number, part: BodyPart, decoded: boolean) => typedError<unknown, string>(__TAURI_INVOKE("get_body", { id, part, decoded })),
+	getBody: (id: number, part: BodyPart, decoded: boolean, max: number | null) => typedError<unknown, string>(__TAURI_INVOKE("get_body", { id, part, decoded, max })),
+	/**
+	 *  Asks where to save a body (decoded, with `decoded`) and writes it there.
+	 *  Returns the path, or `None` if the user cancelled.
+	 */
+	saveBody: (id: number, part: BodyPart, decoded: boolean, fileName: string) => typedError<string | null, string>(__TAURI_INVOKE("save_body", { id, part, decoded, fileName })),
 	clearFlows: () => __TAURI_INVOKE<void>("clear_flows"),
 	setRecording: (on: boolean) => __TAURI_INVOKE<ProxyStatus_Serialize>("set_recording", { on }),
 	getProxyStatus: () => __TAURI_INVOKE<ProxyStatus_Serialize>("get_proxy_status"),
@@ -89,6 +95,17 @@ export type BodyInfo_Deserialize = {
 	encoding?: string | null,
 	/**  False while the body is still streaming, or if it was cut short. */
 	complete: boolean,
+	/**
+	 *  What the body holds, from its `Content-Type`, magic bytes and a text
+	 *  heuristic. `None` until the body has been seen.
+	 */
+	kind: ContentKind,
+	/**
+	 *  The MIME type the body is served as for previews (`pmbody://`): the
+	 *  sniffed format when the bytes contradict the header, else the
+	 *  header's type without parameters.
+	 */
+	mime?: string | null,
 };
 
 /**
@@ -106,6 +123,17 @@ export type BodyInfo_Serialize = {
 	encoding: string | null,
 	/**  False while the body is still streaming, or if it was cut short. */
 	complete: boolean,
+	/**
+	 *  What the body holds, from its `Content-Type`, magic bytes and a text
+	 *  heuristic. `None` until the body has been seen.
+	 */
+	kind: ContentKind,
+	/**
+	 *  The MIME type the body is served as for previews (`pmbody://`): the
+	 *  sniffed format when the bytes contradict the header, else the
+	 *  header's type without parameters.
+	 */
+	mime: string | null,
 };
 
 /**  Which body of a flow. */
@@ -144,10 +172,12 @@ export type CertSummary = {
 export type ContentGroup = "json" | "form" | "xml" | "js" | "css" | "graphql" | "document" | "media" | "other";
 
 /**
- *  Detected kind of the (response, else request) body.
+ *  Detected kind of a body (`pm-core/src/io/content.rs`).
  * 
- *  Detection lands in M3 (`pm-core/src/io/content.rs`); the summary stores the
- *  result so the filter chips can use it without touching bodies.
+ *  The summary stores the flow's kind (the request's for GraphQL operations
+ *  and form posts, else the response's, else the request's) so the filter
+ *  chips can use it without touching bodies. Formats within a kind (PNG vs
+ *  WebP, MP4 vs WebM) are in [`crate::BodyInfo::mime`].
  */
 export type ContentKind = 
 /**  No body, or not detected yet. */
@@ -258,7 +288,7 @@ export type FlowDetail_Serialize = {
  * 
  *  Field order: `id, state, scheme, method, host, port, path, query, status,
  *  content_kind, client, started_at_ms, duration_ms, req_size, resp_size, edited,
- *  http_version, tls`.
+ *  http_version, tls, graphql_op`.
  */
 export type FlowRow = FlowRow_Serialize | FlowRow_Deserialize;
 
@@ -267,18 +297,18 @@ export type FlowRow = FlowRow_Serialize | FlowRow_Deserialize;
  * 
  *  Field order: `id, state, scheme, method, host, port, path, query, status,
  *  content_kind, client, started_at_ms, duration_ms, req_size, resp_size, edited,
- *  http_version, tls`.
+ *  http_version, tls, graphql_op`.
  */
-export type FlowRow_Deserialize = [number, FlowState, Scheme, string, string, number, string, string, number | null, ContentKind, string | null, number | null, number | null, number, number, boolean, HttpVersion, TlsStatus];
+export type FlowRow_Deserialize = [number, FlowState, Scheme, string, string, number, string, string, number | null, ContentKind, string | null, number | null, number | null, number, number, boolean, HttpVersion, TlsStatus, string | null];
 
 /**
  *  One flow table row in a compact positional form (a JSON array on the wire).
  * 
  *  Field order: `id, state, scheme, method, host, port, path, query, status,
  *  content_kind, client, started_at_ms, duration_ms, req_size, resp_size, edited,
- *  http_version, tls`.
+ *  http_version, tls, graphql_op`.
  */
-export type FlowRow_Serialize = [number, FlowState, Scheme, string, string, number, string, string, number | null, ContentKind, string | null, number | null, number | null, number, number, boolean, HttpVersion, TlsStatus];
+export type FlowRow_Serialize = [number, FlowState, Scheme, string, string, number, string, string, number | null, ContentKind, string | null, number | null, number | null, number, number, boolean, HttpVersion, TlsStatus, string | null];
 
 /**  Lifecycle state of a flow. Drives the state dot and the status pill colour. */
 export type FlowState = 
@@ -334,6 +364,8 @@ export type FlowSummary_Deserialize = {
 	/**  Protocol the client spoke (mirrored upstream for HTTPS). */
 	http_version: HttpVersion,
 	tls: TlsStatus,
+	/**  Operation name of a GraphQL request, shown in the URL column. */
+	graphql_op?: string | null,
 };
 
 /**
@@ -371,6 +403,8 @@ export type FlowSummary_Serialize = {
 	/**  Protocol the client spoke (mirrored upstream for HTTPS). */
 	http_version: HttpVersion,
 	tls: TlsStatus,
+	/**  Operation name of a GraphQL request, shown in the URL column. */
+	graphql_op: string | null,
 };
 
 /**

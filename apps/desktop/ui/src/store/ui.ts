@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
-import type { ContentGroup, FilterSpec_Deserialize, ProtocolFilter, SortSpec } from "@/bindings";
+import type { ContentGroup, ContentKind, FilterSpec_Deserialize, ProtocolFilter, SortSpec } from "@/bindings";
+import type { ViewerId } from "@/components/BodyViewer/registry";
 
 export interface ViewStats {
   len: number;
@@ -28,6 +29,8 @@ interface UiState {
   autoScroll: boolean;
   requestTab: RequestTab;
   responseTab: ResponseTab;
+  /** Body viewer the user picked per content kind; sticks across flows. */
+  viewerByKind: Partial<Record<ContentKind, ViewerId>>;
   certWizardOpen: boolean;
 
   setText(text: string): void;
@@ -42,6 +45,7 @@ interface UiState {
   setAutoScroll(on: boolean): void;
   setRequestTab(tab: RequestTab): void;
   setResponseTab(tab: ResponseTab): void;
+  setViewer(kind: ContentKind, viewer: ViewerId): void;
   setCertWizardOpen(open: boolean): void;
 }
 
@@ -54,6 +58,7 @@ export const useUi = create<UiState>()((set) => ({
   autoScroll: false,
   requestTab: "Header",
   responseTab: "Body",
+  viewerByKind: {},
   certWizardOpen: false,
 
   setText: (text) => set((s) => ({ filter: { ...s.filter, text } })),
@@ -74,5 +79,6 @@ export const useUi = create<UiState>()((set) => ({
   setAutoScroll: (autoScroll) => set({ autoScroll }),
   setRequestTab: (requestTab) => set({ requestTab }),
   setResponseTab: (responseTab) => set({ responseTab }),
+  setViewer: (kind, viewer) => set((s) => ({ viewerByKind: { ...s.viewerByKind, [kind]: viewer } })),
   setCertWizardOpen: (certWizardOpen) => set({ certWizardOpen }),
 }));

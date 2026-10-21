@@ -57,14 +57,17 @@ pub enum FlowState {
     Tunnel,
 }
 
-/// Detected kind of the (response, else request) body.
+/// Detected kind of a body (`pm-core/src/io/content.rs`).
 ///
-/// Detection lands in M3 (`pm-core/src/io/content.rs`); the summary stores the
-/// result so the filter chips can use it without touching bodies.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
+/// The summary stores the flow's kind (the request's for GraphQL operations
+/// and form posts, else the response's, else the request's) so the filter
+/// chips can use it without touching bodies. Formats within a kind (PNG vs
+/// WebP, MP4 vs WebM) are in [`crate::BodyInfo::mime`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, Type)]
 #[serde(rename_all = "lowercase")]
 pub enum ContentKind {
     /// No body, or not detected yet.
+    #[default]
     None,
     Json,
     Xml,
@@ -118,6 +121,8 @@ pub struct FlowSummary {
     /// Protocol the client spoke (mirrored upstream for HTTPS).
     pub http_version: HttpVersion,
     pub tls: TlsStatus,
+    /// Operation name of a GraphQL request, shown in the URL column.
+    pub graphql_op: Option<Arc<str>>,
 }
 
 impl FlowSummary {
