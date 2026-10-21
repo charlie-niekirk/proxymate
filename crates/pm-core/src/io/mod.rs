@@ -1,6 +1,10 @@
-//! Body interpretation: content detection, decoding and event-stream
-//! parsing. HAR, cURL and session import/export join this module in M8.
+//! Body interpretation (content detection, decoding, event-stream
+//! parsing) and the file formats: cURL commands, HAR 1.2 and saved
+//! `.proxymate` sessions.
 
 pub mod content;
+pub mod curl;
 pub mod decode;
+pub mod har;
+pub mod session;
 pub mod sse;

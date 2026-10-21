@@ -43,6 +43,7 @@ pub fn pattern_byte(i: u64) -> u8 {
 /// - `/gzip`, `/br`, `/deflate`, `/zstd`: [`JSON_BODY`] content-encoded.
 /// - `/bytes/{n}`: `n` pattern bytes, generated while streaming.
 /// - `/echo`: the request body back, with the request's content type.
+/// - `/inspect`: JSON of the request as received: method, URI, headers, body.
 /// - `/version`: the request's HTTP version, e.g. `HTTP/2.0`.
 /// - `/zoo`: the zoo fixture names; `/zoo/{name}`: that fixture (see [`crate::zoo`]).
 /// - `/ws`: a WebSocket echo server (h1 only; see [`crate::stream`]).
@@ -156,6 +157,23 @@ pub(crate) async fn route(req: Request<Incoming>) -> Result<Response<TestBody>, 
                 response.headers_mut().insert(header::CONTENT_TYPE, ct);
             }
             response
+        }
+        ["inspect"] => {
+            let (parts, body) = req.into_parts();
+            let body = body.collect().await.map(|b| b.to_bytes()).unwrap_or_default();
+            let headers: serde_json::Map<String, serde_json::Value> = parts
+                .headers
+                .iter()
+                .map(|(n, v)| (n.as_str().to_owned(), String::from_utf8_lossy(v.as_bytes()).into()))
+                .collect();
+            let echo = serde_json::json!({
+                "method": parts.method.as_str(),
+                "uri": parts.uri.to_string(),
+                "headers": headers,
+                "body": String::from_utf8_lossy(&body),
+                "body_len": body.len(),
+            });
+            with_type(full(echo.to_string()), "application/json")
         }
         _ => status_only(StatusCode::NOT_FOUND),
     };

@@ -43,6 +43,7 @@ export function BodyViewer({
   // Flows recorded before detection ran (or still streaming) fall back to the header.
   const kind: ContentKind = info.kind !== "none" ? info.kind : info.size > 0 ? fallbackKind(contentType) : "none";
   const preferred = useUi((s) => s.viewerByKind[kind]);
+  const store = useUi((s) => s.store);
   const setViewer = useUi((s) => s.setViewer);
   const viewer = pickViewer(kind, preferred);
   const def = VIEWERS[viewer];
@@ -63,7 +64,7 @@ export function BodyViewer({
 
   const save = () => {
     setSaveError(null);
-    backend.saveBody(id, part, true, suggestedFileName(url, mime, part)).catch((e: unknown) => setSaveError(String(e)));
+    backend.saveBody(store, id, part, true, suggestedFileName(url, mime, part)).catch((e: unknown) => setSaveError(String(e)));
   };
   const loaded = def.source === "bytes" ? body : bodyUrl;
   const bytes = body.data?.bytes ?? null;

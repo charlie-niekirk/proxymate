@@ -62,6 +62,10 @@ apps/cli                 proxymate-cli serve|mcp-stdio|gen-flows|bench (headless
   - Body capture is capped at 64 MB. Above that the recorded copy is truncated, but forwarding is never affected.
   - Flows are capped at 250k with ring eviction. Pinned flows are kept.
 - **Sessions.** A saved session (`.proxymate`) is a single SQLite file. A `BlobBackend` trait lets the same store and view code read live segments, saved sessions and imported HARs.
+  - (M8) Tables: `meta` (format, version, saved time, app version), `flows` (the summary fields as columns, enums as their serde names; the `FlowDetail` as a postcard blob; the WebSocket message list and parsed SSE events as zstd'd postcard blobs), `bodies` (zstd, still content-encoded) and `messages` (WebSocket payloads, zstd). Flow ids are renumbered `0..n` in the order saved.
+  - (M8) Saves run on a background thread with progress, into a temporary file in the target directory that replaces the target only once complete. HAR exports stream one entry per line the same way.
+  - (M8) Every opened document is its own store (`StoreId`; the live capture is `LIVE_STORE` = 0): a `Store` for summaries and views, and a `SqliteBackend` for details, bodies and message logs (`SegmentBackend` is the live one). A document's view ids are `store << 24 | n`, so view calls need no store; flow calls take one (`Engine::*_in(store, …)`, and the Tauri commands' `store` argument). An imported HAR is converted into the same tables in an in-memory SQLite database.
+  - (M8) `pmbody://localhost/<store>/<flow>/<part>` serves any store (`live` or a document's id).
 - **App database.** `app.sqlite` (rusqlite, WAL) holds rules, settings, the SSL include/exclude lists, the LAN client allow-list and the MCP audit log.
   - The SSL lists (include, exclude, bypass, insecure upstream) still live in `<data_dir>/ssl.json` (M2).
   - (M9) The LAN client allow-list is a `devices` table (ip, nickname, allowed); LAN access on/off and the chosen interface are the `lan` settings row. Like the rules, they stay in memory for an engine without a data dir.
@@ -232,7 +236,7 @@ We build our own engine and use hudsucker only as a reading reference. Its handl
   - `get_websocket_messages`, `wait_for_flow{filter, timeout_ms, after_id}`.
   - `export_curl`, `export_har`, `list_rules`, `get_rule`, `list_breakpoints`, `get_breakpoint`.
 - **Write tools:**
-  - `replay_flow{id, modify?, apply_rules, wait}`, `send_request`.
+  - `replay_flow{id, modify?, apply_rules, wait}`, `send_request`. Both wrap `Engine::send(RequestSpec, SendOpts) -> FlowId` (M8): `request_spec(store, id, editable)` gives the recorded request to modify, `SendOpts{apply_rules, wait, origin: User | Agent{client}}` the rest; `har_json` and `curl_command` back `export_har` and `export_curl`.
   - `create_rule`, `update_rule`, `set_rule_enabled`, `delete_rule`, `delete_agent_rules`.
   - Sugar tools: `create_map_local`, `create_breakpoint`, `create_rewrite`.
   - `resolve_breakpoint{id, continue|abort|respond, edits}`, `set_recording`, `clear_flows`.
@@ -284,6 +288,12 @@ We build our own engine and use hudsucker only as a reading reference. Its handl
   - Request | Response split, with tabs Header, Query, Cookies, Body, Raw, JSON, Form, Hex, Preview, Timing and TLS. Timing and TLS sit in the Response pane; the URL bar shows the HTTP version.
   - A WebSocket frame panel and an SSE event list.
 - **Footer.** Clear, Filter, Auto Select, "n/m rows selected", ↑↓ throughput and deep-search progress.
+- **Replay and documents (M8).**
+  - `Engine::send` runs the request through the same `proxy/exchange.rs` pipeline as proxied traffic (rules on or off), from a client that is Proxymate itself: plain HTTP on the pooled client, HTTPS over a one-off HTTP/1.1 TLS connection (no pooled HTTPS client). The flow is recorded even while recording is paused, its summary carries `sent_by` (`FlowRow`'s last field), and the URL column shows a "Replay" (or "AI") badge.
+  - Replay sends the recorded bytes as they were (still content-encoded); Edit & Replay opens Compose with the body decoded and `Content-Encoding` dropped. Host, Content-Length and hop-by-hop headers are derived when sending. WebSocket flows can't be sent yet.
+  - Copy as cURL (`io/curl.rs`) single-quotes everything, turns an `Accept-Encoding` curl can decode into `--compressed`, sends text bodies with `--data-raw` and binary or content-encoded ones with `--data-binary @-` from embedded base64 (or a file the user saves first, above 256 KB).
+  - HAR 1.2 (`io/har.rs`, our own serde types) reads Chrome's `_webSocketMessages`, `_resourceType`, `_error`, base64 bodies and h2 pseudo-headers (dropped). Imported bodies are the decoded text the HAR holds, so they are stored without a content-encoding.
+  - Opened documents show as tabs above the filter row and in the sidebar's Saved section. File → New Request…, Open…, Import HAR…, Save Session… (the active tab, all flows) and Export HAR… (what the table shows); the flow menu's Export HAR… exports that flow.
 - **Windows.** Compose, Rules Editor (drag to reorder, MatcherBuilder, ActionListEditor, dry run), Breakpoint Editor (queue plus editable message with Execute/Abort/Respond), Cert Wizard, Device Setup Wizard (Simulator / iPhone / Android / Android emulator, with QR codes and a live "waiting for device…" state), Settings and Session Manager.
 
 ### Body viewers and previews

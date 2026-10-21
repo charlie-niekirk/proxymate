@@ -36,6 +36,20 @@ function remoteControl(): Plugin {
     name: "pm-remote-control",
     apply: "serve",
     configureServer(server) {
+      // Answers the webview gives back (e.g. a cURL command), latest first.
+      let out = "";
+      server.middlewares.use("/__pm_remote/out", (req, res) => {
+        if (req.method === "POST") {
+          let body = "";
+          req.on("data", (chunk: Buffer) => (body += chunk));
+          req.on("end", () => {
+            out = body;
+            res.end("ok\n");
+          });
+          return;
+        }
+        res.end(out);
+      });
       server.middlewares.use("/__pm_remote", (req, res) => {
         if (req.method === "POST") {
           let body = "";

@@ -130,6 +130,7 @@ mod tests {
             http_version: HttpVersion::Http11,
             tls: TlsStatus::None,
             graphql_op: None,
+            sent_by: None,
         }
     }
 

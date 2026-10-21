@@ -1,15 +1,19 @@
-//! The live flow store: the summary arena plus the views over it, and the
-//! body and detail storage beside it.
+//! Flow stores: the summary arena plus the views over it, and the body and
+//! detail storage beside it. The live capture and every opened document
+//! (a saved session or an imported HAR) each have a [`Store`]; their
+//! details and bodies come from a [`BlobBackend`].
 //!
 //! Flow ids are never reused. `flows[0]` holds id `base`; a clear empties the
 //! arena and moves `base` up to the next id.
 
+mod backend;
 mod blob;
 mod detail;
 mod filter;
 mod messages;
 mod segments;
 mod sidebar;
+mod sqlite;
 mod view;
 
 use std::collections::HashMap;
@@ -18,12 +22,14 @@ use std::sync::mpsc::SyncSender;
 
 use pm_model::{FilterSpec, FlowId, FlowState, FlowSummary, RowsPage, SortSpec, ViewDelta, ViewId, ViewInfo};
 
+pub(crate) use backend::BlobBackend;
 pub(crate) use blob::Capture;
 pub(crate) use detail::{DetailStore, StoredDetail};
 pub use filter::CompiledFilter;
 pub(crate) use messages::{SseLog, WsLog, page_events, sse_event};
 pub(crate) use segments::SegmentStore;
 pub use sidebar::{SidebarCounts, in_domain, registrable_domain};
+pub(crate) use sqlite::{Opened, SavedFlow, SavedWs, SessionWriter, SqliteBackend};
 pub use view::View;
 
 use crate::Error;
@@ -38,7 +44,27 @@ pub struct Store {
     sidebar: SidebarCounts,
 }
 
+/// Views of a document's store have ids `store << VIEW_STORE_SHIFT | n`,
+/// so a view id alone says which store it is over (the live store's are
+/// below `1 << VIEW_STORE_SHIFT`).
+pub const VIEW_STORE_SHIFT: u32 = 24;
+
 impl Store {
+    /// The store of an opened document, holding `flows` (ids `0..n`).
+    pub fn document(store: pm_model::StoreId, flows: Vec<FlowSummary>) -> Store {
+        let mut s = Store {
+            next_view: store << VIEW_STORE_SHIFT,
+            ..Default::default()
+        };
+        s.insert(flows);
+        s
+    }
+
+    /// Every summary, in id order.
+    pub fn flows(&self) -> &[FlowSummary] {
+        &self.flows
+    }
+
     pub fn total(&self) -> u32 {
         self.flows.len() as u32
     }
@@ -248,6 +274,16 @@ impl Store {
             len: view.len(),
             rows: view.rows(&self.flows, start, count),
         })
+    }
+
+    /// The summaries a view shows, in its order.
+    pub fn view_flows(&self, id: ViewId) -> Result<Vec<FlowSummary>, Error> {
+        let view = self.views.get(&id).ok_or(Error::UnknownView(id))?;
+        Ok(view
+            .positions()
+            .iter()
+            .map(|&pos| self.flows[pos as usize].clone())
+            .collect())
     }
 
     pub fn take_delta(&mut self, id: ViewId) -> Option<ViewDelta> {

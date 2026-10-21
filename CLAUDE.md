@@ -35,7 +35,7 @@ Run these from the repo root unless noted.
 | WebSocket client through the proxy | `cargo run -p pm-testkit --bin ws-client -- ws://127.0.0.1:<port>/ws` (CONNECT; `--absolute` for absolute form) or `wss://localhost:<port>/ws` against the TLS upstream. `--count`, `--interval-ms`, `--server-close` |
 | TLS test upstream (h2 + h1) | `cargo run -p pm-testkit --bin upstream -- --tls` prints its port and CA file. Start the app with `PROXYMATE_EXTRA_UPSTREAM_CA=<that file>`, then `curl -x http://127.0.0.1:9090 --cacert ~/Library/Application\ Support/Proxymate/ca/proxymate-ca.pem https://localhost:<port>/json --http2 -v` |
 | Open the app on a response tab | `VITE_PM_RESPONSE_TAB=TLS` (or `Timing`, …), for screenshots from a shell |
-| Drive the app from a shell | Start with `VITE_PM_REMOTE=1`, then `curl -d '{"select":3,"requestTab":"Body"}' localhost:1420/__pm_remote` (also `responseTab`, `viewer: {kind, viewer}`, `theme`). See `src/dev/remote.ts` |
+| Drive the app from a shell | Start with `VITE_PM_REMOTE=1`, then `curl -d '{"select":3,"requestTab":"Body"}' localhost:1420/__pm_remote` (also `responseTab`, `viewer: {kind, viewer}`, `theme`; M8: `replay`, `editReplay`, `compose`, `composeSend`, `store`, `openDocument`, `saveSession`, `exportHar`, and `curl`, whose answer is at `/__pm_remote/out`). See `src/dev/remote.ts` |
 | Body-viewer zoo through the proxy | `cargo run -p pm-testkit --bin upstream -- --zoo [127.0.0.1:9090]` sends one flow per fixture in `crates/pm-testkit/fixtures/zoo/` |
 | Zoo in the browser UI | `npm run dev`, then open `http://localhost:1420/?zoo` (mock backend serving the zoo; `&select=<id>&theme=light&requestTab=Body`) |
 | Viewer snapshots + preview safety (Playwright) | `npm run e2e` (first time: `npx -w @proxymate/ui playwright install webkit chromium`). `-- --update-snapshots` after an intended visual change; `PM_E2E_PORT` picks the dev server port (default 1425) |
@@ -62,10 +62,12 @@ Run the same checks locally before pushing.
 ```
 crates/pm-model      pure types (serde + specta): FlowSummary, FlowRow, FilterSpec, SortSpec, ViewDelta, ...
 crates/pm-core       headless Engine: proxy/ (h1 forward proxy, mitm.rs: CONNECT, MITM, h2, passthrough, ws.rs: WebSocket
-                     relay), tls/ (CA, leaf cache, SSL policy, upstream verifier), recorder (per-flow capture),
-                     ingest (event thread), store/ (arena + views, sidebar counts, segments, bodies, details,
-                     messages: WS/SSE logs), io/ (content kind, decoding, sse parser), client (loopback peer → app),
-                     trust (handshake check), integration (the OS-facing Engine methods), synth; later rules/
+                     relay, send.rs: Engine::send), tls/ (CA, leaf cache, SSL policy, upstream verifier), recorder
+                     (per-flow capture), ingest (event thread), store/ (arena + views, sidebar counts, backend.rs:
+                     BlobBackend, segments, sqlite.rs: session tables + SqliteBackend, bodies, details, messages: WS/SSE
+                     logs), io/ (content kind, decoding, sse parser, curl, har, session), documents (opened sessions and
+                     HARs), replay, client (loopback peer → app), trust (handshake check), integration (the OS-facing
+                     Engine methods), rules/, synth
 crates/pm-platform   OS integration traits; macos/ impls, stub.rs elsewhere: fs (private files), sysproxy (backup +
                      restore over a ProxyBackend; networksetup), trust (keychain), procinfo (libproc port scan, app
                      bundles, icons), process (kqueue exit wait), netif (if-addrs), simctl and adb (over a
@@ -73,7 +75,8 @@ crates/pm-platform   OS integration traits; macos/ impls, stub.rs elsewhere: fs 
 crates/pm-mcp        MCP server over Arc<Engine>, empty until M7
 crates/pm-testkit    test upstreams (h1, TLS h1/h2 with a test CA, WS echo, slow SSE), the body-viewer zoo (fixtures/zoo),
                      proxy, HTTPS and WebSocket clients; re-export of pm_core::synth
-apps/desktop/src-tauri   thin Tauri adapters (commands.rs), the pmbody:// scheme (body_scheme.rs), window chrome (window.rs)
+apps/desktop/src-tauri   thin Tauri adapters (commands.rs), the pmbody:// scheme (body_scheme.rs), window chrome (window.rs),
+                         the menu bar (menu.rs: File items reach the UI as `pm-menu` events)
 apps/desktop/ui          Vite + React 19 + TS strict + Tailwind v4 + shadcn/ui
 apps/cli                 proxymate-cli (headless; `bench` today)
 ```
@@ -162,3 +165,9 @@ Targets:
 - Every accepted connection goes through `Engine::admit` first: loopback and our own addresses pass, LAN IPs wait up to 30 s for the "Allow?" prompt. Tests can't make a non-local peer, so the hold/allow/deny logic is unit-tested on `DeviceRegistry` directly.
 - LAN access rebinds to `0.0.0.0` on the same port. Use `Engine::proxy_addr()` (loopback) for anything this machine connects to, and `display_addr` for what the user sees.
 - Tests never change the machine: no simulator boot or keychain install, no emulator proxy. Real `simctl`/`adb` runs need the user's OK.
+
+**Replay, cURL, HAR and sessions (M8)**
+- `Engine::send(RequestSpec, SendOpts)` is the one way Proxymate sends a request itself (Replay, Compose, MCP). It goes through `proxy/exchange.rs` like proxied traffic; the flow's summary gets `sent_by`.
+- Flow ids are per store. The live capture is `LIVE_STORE` (0); every opened session or HAR is a document store. Flow-level Engine methods have `*_in(store, …)` forms (the live-only ones stay for existing callers); view ids already encode their store. UI code reads the active store from `useUi().store` and puts it in query keys (`flowKey(store, id)`).
+- Golden files are in `crates/pm-core/tests/golden/` (cURL and HAR); rewrite them with `UPDATE_GOLDEN=1 cargo test -p pm-core --lib io::`. The Chrome HAR fixture is `crates/pm-core/tests/fixtures/chrome-devtools.har`.
+- A session's postcard layouts are part of its format: bump `store/sqlite.rs` `VERSION` when `FlowDetail` or the message types change shape.

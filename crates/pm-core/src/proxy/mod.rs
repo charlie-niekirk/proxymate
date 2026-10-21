@@ -15,6 +15,7 @@ mod exchange;
 mod io;
 mod mitm;
 pub mod onboarding;
+mod send;
 mod sniff;
 mod tee;
 mod ws;
@@ -43,6 +44,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{oneshot, watch};
 
+pub use send::APP_CLIENT;
+pub(crate) use send::Sender;
 pub use sniff::{Sniffed, classify};
 pub use tee::TeeBody;
 
@@ -352,6 +355,7 @@ async fn forward(
                 .trim_end_matches(']')
                 .to_owned(),
             port: uri.port_u16().unwrap_or(80),
+            apply_rules: true,
         };
         return exchange.run(req).await;
     }
@@ -425,6 +429,7 @@ fn record_request(engine: &Arc<Engine>, req: &Request<Incoming>, origin: Origin)
         http_version: version(req.version()),
         tls: origin.tls,
         graphql_op: None,
+        sent_by: None,
     };
     let headers = headers(req.headers());
     let detail = FlowDetail {

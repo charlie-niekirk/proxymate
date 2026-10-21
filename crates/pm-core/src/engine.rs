@@ -6,25 +6,26 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, OnceLock, Weak};
 use std::time::Duration;
 
 use parking_lot::{Mutex, RwLock};
 use pm_model::{
-    BodyPart, CaInfo, FilterSpec, FlowDetail, FlowId, FlowState, FlowSummary, ProxyStatus, RowsPage, SortSpec, SsePage,
-    SslSettings, ViewDelta, ViewId, ViewInfo, WsPage, WsQuery,
+    BodyPart, CaInfo, FilterSpec, FlowDetail, FlowId, FlowState, FlowSummary, LIVE_STORE, ProxyStatus, RowsPage,
+    SortSpec, SsePage, SslSettings, StoreId, ViewDelta, ViewId, ViewInfo, WsPage, WsQuery,
 };
 use rustls::pki_types::CertificateDer;
 
 use crate::Error;
 use crate::devices::{self, DeviceRegistry};
+use crate::documents::Documents;
 use crate::ingest::{self, FlowEvent, IngestTx};
 use crate::integration::Platform;
 use crate::io::{decode, sse};
 use crate::proxy::{self, ProxyConfig, ProxyHandle};
 use crate::recorder::{FlowRecorder, is_event_stream};
 use crate::rules::Rules;
-use crate::store::{DetailStore, SegmentStore, Store, page_events, sse_event};
+use crate::store::{BlobBackend, DetailStore, SegmentStore, Store, VIEW_STORE_SHIFT, page_events, sse_event};
 use crate::tls::{CertAuthority, SslPolicy, TlsContext};
 
 const SSL_SETTINGS_FILE: &str = "ssl.json";
@@ -77,6 +78,10 @@ pub struct Engine {
     ssl: RwLock<Arc<SslPolicy>>,
     pub(crate) platform: Platform,
     pub(crate) rules: Rules,
+    /// Opened sessions and HAR imports.
+    pub(crate) docs: Documents,
+    /// `Engine::send`'s client, made on first use.
+    pub(crate) sender: OnceLock<proxy::Sender>,
 }
 
 #[derive(Default)]
@@ -141,6 +146,8 @@ impl Engine {
             tls: RwLock::new(Arc::new(tls)),
             ssl: RwLock::new(Arc::new(policy)),
             rules,
+            docs: Documents::default(),
+            sender: OnceLock::new(),
         });
         let weak = Arc::downgrade(&engine);
         std::thread::Builder::new()
@@ -182,23 +189,45 @@ impl Engine {
 
     /// Starts recording a flow. Returns `None` while recording is paused,
     /// in which case the caller forwards without recording.
-    pub fn begin_flow(self: &Arc<Self>, mut summary: FlowSummary, detail: FlowDetail) -> Option<FlowRecorder> {
+    pub fn begin_flow(self: &Arc<Self>, summary: FlowSummary, detail: FlowDetail) -> Option<FlowRecorder> {
         if !self.is_recording() {
             return None;
         }
+        Some(self.record_flow(summary, detail))
+    }
+
+    /// Starts recording a flow even while recording is paused (a request
+    /// Proxymate sends itself).
+    pub(crate) fn record_flow(self: &Arc<Self>, mut summary: FlowSummary, detail: FlowDetail) -> FlowRecorder {
         summary.method = self.intern(&summary.method);
         summary.host = self.intern(&summary.host);
+        if let Some(client) = &summary.client {
+            summary.client = Some(self.intern(client));
+        }
         let id = self.ingest.start(summary);
-        Some(FlowRecorder::new(id, self, detail))
+        FlowRecorder::new(id, self, detail)
     }
 
     pub fn get_flow(&self, id: FlowId) -> Option<FlowSummary> {
         self.store.read().get(id).cloned()
     }
 
+    /// A flow's summary in any store (`LIVE_STORE` or an opened document).
+    pub fn get_flow_in(&self, store: StoreId, id: FlowId) -> Option<FlowSummary> {
+        match store {
+            LIVE_STORE => self.get_flow(id),
+            _ => self.docs.get(store).ok()?.store.read().get(id).cloned(),
+        }
+    }
+
     /// Heads and body metadata of a flow, live or finished.
     pub fn flow_detail(&self, id: FlowId) -> Result<Option<FlowDetail>, Error> {
-        Ok(self.details.get(id)?.map(|stored| stored.detail.clone()))
+        self.flow_detail_in(LIVE_STORE, id)
+    }
+
+    /// [`Engine::flow_detail`] in any store.
+    pub fn flow_detail_in(&self, store: StoreId, id: FlowId) -> Result<Option<FlowDetail>, Error> {
+        self.with_backend(store, |backend| Ok(backend.detail(id)?))
     }
 
     /// The captured bytes of one body. With `decode`, a content-encoded
@@ -210,47 +239,48 @@ impl Engine {
     /// Like [`Engine::body`], but at most the first `max` bytes (decoded,
     /// with `decode`), so a huge body can be previewed cheaply.
     pub fn body_head(&self, id: FlowId, part: BodyPart, decode: bool, max: Option<usize>) -> Result<BodyBytes, Error> {
-        let mut bytes = self.details.body(id, part)?.ok_or(Error::UnknownFlow(id))?;
-        let encoding = if decode {
-            self.details.get(id)?.and_then(|stored| match part {
-                BodyPart::Request => stored.detail.request_body.encoding.clone(),
-                BodyPart::Response => stored.detail.response_body.encoding.clone(),
-            })
-        } else {
-            None
-        };
-        let (bytes, decoded_from) = match (encoding, max) {
-            (Some(encoding), None) if !bytes.is_empty() => (decode::decode(&encoding, &bytes)?, Some(encoding)),
-            (Some(encoding), Some(max)) if !bytes.is_empty() => {
-                let head = decode::decode_prefix(&encoding, &bytes, max.saturating_add(1));
-                if head.is_empty() {
-                    // Report why it didn't decode.
-                    decode::decode(&encoding, &bytes)?;
-                }
-                (head, Some(encoding))
-            }
-            _ => {
-                if let Some(max) = max {
-                    bytes.truncate(max.saturating_add(1));
-                }
-                (bytes, None)
-            }
-        };
-        let mut bytes = bytes;
-        let cut = max.is_some_and(|max| bytes.len() > max);
-        if let Some(max) = max {
-            bytes.truncate(max);
+        self.body_head_in(LIVE_STORE, id, part, decode, max)
+    }
+
+    /// [`Engine::body_head`] in any store.
+    pub fn body_head_in(
+        &self,
+        store: StoreId,
+        id: FlowId,
+        part: BodyPart,
+        decode: bool,
+        max: Option<usize>,
+    ) -> Result<BodyBytes, Error> {
+        self.with_backend(store, |backend| body_head(backend, id, part, decode, max))
+    }
+
+    /// Runs `f` with the details and bodies of `store`.
+    pub(crate) fn with_backend<R>(
+        &self,
+        store: StoreId,
+        f: impl FnOnce(&dyn BlobBackend) -> Result<R, Error>,
+    ) -> Result<R, Error> {
+        match store {
+            LIVE_STORE => f(&self.details),
+            _ => f(&self.docs.get(store)?.backend),
         }
-        Ok(BodyBytes {
-            bytes,
-            decoded_from,
-            cut,
-        })
     }
 
     /// Writes one body (decoded, with `decode`) to `path`.
     pub fn save_body(&self, id: FlowId, part: BodyPart, decode: bool, path: &std::path::Path) -> Result<u64, Error> {
-        let body = self.body(id, part, decode)?;
+        self.save_body_in(LIVE_STORE, id, part, decode, path)
+    }
+
+    /// [`Engine::save_body`] in any store.
+    pub fn save_body_in(
+        &self,
+        store: StoreId,
+        id: FlowId,
+        part: BodyPart,
+        decode: bool,
+        path: &std::path::Path,
+    ) -> Result<u64, Error> {
+        let body = self.body_head_in(store, id, part, decode, None)?;
         std::fs::write(path, &body.bytes)?;
         Ok(body.bytes.len() as u64)
     }
@@ -258,9 +288,25 @@ impl Engine {
     /// A window of a WebSocket flow's messages, filtered by `query`. A flow
     /// that never became a WebSocket (the upgrade was refused) has none.
     pub fn websocket_messages(&self, id: FlowId, query: &WsQuery, start: u32, count: u32) -> Result<WsPage, Error> {
-        match self.details.ws(id) {
-            Some(log) => Ok(log.page(&self.details.segments, query, start, count)?),
-            None if self.get_flow(id).is_some() => Ok(WsPage {
+        self.websocket_messages_in(LIVE_STORE, id, query, start, count)
+    }
+
+    /// [`Engine::websocket_messages`] in any store.
+    pub fn websocket_messages_in(
+        &self,
+        store: StoreId,
+        id: FlowId,
+        query: &WsQuery,
+        start: u32,
+        count: u32,
+    ) -> Result<WsPage, Error> {
+        let log = self.with_backend(store, |backend| match backend.ws(id)? {
+            Some(log) => Ok(Some(log.page(backend.segments(), query, start, count)?)),
+            None => Ok(None),
+        })?;
+        match log {
+            Some(page) => Ok(page),
+            None if self.get_flow_in(store, id).is_some() => Ok(WsPage {
                 total: 0,
                 len: 0,
                 start,
@@ -274,9 +320,16 @@ impl Engine {
 
     /// The recorded payload of one WebSocket message (at most 1 MB).
     pub fn websocket_payload(&self, id: FlowId, index: u32) -> Result<Vec<u8>, Error> {
-        let log = self.details.ws(id).ok_or(Error::UnknownFlow(id))?;
-        log.payload(&self.details.segments, index)?
-            .ok_or(Error::UnknownMessage(id, index))
+        self.websocket_payload_in(LIVE_STORE, id, index)
+    }
+
+    /// [`Engine::websocket_payload`] in any store.
+    pub fn websocket_payload_in(&self, store: StoreId, id: FlowId, index: u32) -> Result<Vec<u8>, Error> {
+        self.with_backend(store, |backend| {
+            let log = backend.ws(id)?.ok_or(Error::UnknownFlow(id))?;
+            log.payload(backend.segments(), index)?
+                .ok_or(Error::UnknownMessage(id, index))
+        })
     }
 
     /// A window of the events of a `text/event-stream` response matching
@@ -284,18 +337,28 @@ impl Engine {
     /// compressed one is decoded and parsed once it is complete, without
     /// per-event times.
     pub fn sse_events(&self, id: FlowId, text: &str, start: u32, count: u32) -> Result<SsePage, Error> {
-        if let Some(log) = self.details.sse(id) {
+        self.sse_events_in(LIVE_STORE, id, text, start, count)
+    }
+
+    /// [`Engine::sse_events`] in any store.
+    pub fn sse_events_in(
+        &self,
+        store: StoreId,
+        id: FlowId,
+        text: &str,
+        start: u32,
+        count: u32,
+    ) -> Result<SsePage, Error> {
+        if let Some(log) = self.with_backend(store, |backend| Ok(backend.sse(id)?))? {
             return Ok(log.page(text, start, count));
         }
-        let stored = self.details.get(id)?.ok_or(Error::UnknownFlow(id))?;
-        let open = self.get_flow(id).is_some_and(|f| f.state == FlowState::Active);
-        let is_stream = stored
-            .detail
-            .response
-            .as_ref()
-            .is_some_and(|r| is_event_stream(&r.headers));
+        let detail = self.flow_detail_in(store, id)?.ok_or(Error::UnknownFlow(id))?;
+        let open = self
+            .get_flow_in(store, id)
+            .is_some_and(|f| f.state == FlowState::Active);
+        let is_stream = detail.response.as_ref().is_some_and(|r| is_event_stream(&r.headers));
         let events = match is_stream && !open {
-            true => match self.body(id, BodyPart::Response, true) {
+            true => match self.body_head_in(store, id, BodyPart::Response, true, None) {
                 Ok(body) => sse::parse_all(&body.bytes)
                     .into_iter()
                     .enumerate()
@@ -499,39 +562,72 @@ impl Engine {
         self.ssl.read().clone()
     }
 
+    /// A view over the live store.
     pub fn create_view(&self, filter: FilterSpec, sort: SortSpec) -> ViewInfo {
         self.store.write().create_view(filter, sort)
+    }
+
+    /// A view over any store. Its id says which store it is over, so the
+    /// other view methods need no store.
+    pub fn create_view_in(&self, store: StoreId, filter: FilterSpec, sort: SortSpec) -> Result<ViewInfo, Error> {
+        match store {
+            LIVE_STORE => Ok(self.create_view(filter, sort)),
+            _ => Ok(self.docs.get(store)?.store.write().create_view(filter, sort)),
+        }
     }
 
     /// Refilters synchronously and returns the new length, so callers can
     /// fetch rows straight away instead of waiting for the next delta.
     pub fn set_filter(&self, view: ViewId, filter: FilterSpec) -> Result<ViewInfo, Error> {
-        self.store.write().set_filter(view, filter)
+        self.with_view_store(view, |store| store.set_filter(view, filter))
     }
 
     pub fn set_sort(&self, view: ViewId, sort: SortSpec) -> Result<ViewInfo, Error> {
-        self.store.write().set_sort(view, sort)
+        self.with_view_store(view, |store| store.set_sort(view, sort))
     }
 
     pub fn drop_view(&self, view: ViewId) {
         self.sinks.lock().remove(&view);
-        self.store.write().drop_view(view);
+        let _ = self.with_view_store(view, |store| Ok(store.drop_view(view)));
     }
 
     pub fn get_rows(&self, view: ViewId, start: u32, count: u32) -> Result<RowsPage, Error> {
-        self.store.read().rows(view, start, count)
+        match view >> VIEW_STORE_SHIFT {
+            LIVE_STORE => self.store.read().rows(view, start, count),
+            store => self.docs.get(store)?.store.read().rows(view, start, count),
+        }
     }
 
     /// Routes a view's deltas to `sink`, replacing any previous subscriber.
     /// The first delta is structural and goes out on the next tick.
     pub fn subscribe(&self, view: ViewId, sink: DeltaSink) -> Result<(), Error> {
-        self.store
-            .write()
-            .view_mut(view)
-            .ok_or(Error::UnknownView(view))?
-            .mark_structural();
+        self.with_view_store(view, |store| {
+            store.view_mut(view).ok_or(Error::UnknownView(view))?.mark_structural();
+            Ok(())
+        })?;
         self.sinks.lock().insert(view, sink);
         Ok(())
+    }
+
+    /// Drops the delta subscribers whose view fails `keep`.
+    pub(crate) fn sinks_retain(&self, keep: impl Fn(ViewId) -> bool) {
+        self.sinks.lock().retain(|&view, _| keep(view));
+    }
+
+    /// Runs `f` on the store `view` is over, write-locked.
+    pub(crate) fn with_view_store<R>(
+        &self,
+        view: ViewId,
+        f: impl FnOnce(&mut Store) -> Result<R, Error>,
+    ) -> Result<R, Error> {
+        match view >> VIEW_STORE_SHIFT {
+            LIVE_STORE => f(&mut self.store.write()),
+            store => {
+                let doc = self.docs.get(store).map_err(|_| Error::UnknownView(view))?;
+                let mut store = doc.store.write();
+                f(&mut store)
+            }
+        }
     }
 
     /// Publishes one tick: drains each subscribed view's pending change and
@@ -547,7 +643,13 @@ impl Engine {
         }
         let deltas: Vec<ViewDelta> = {
             let mut store = self.store.write();
-            sinks.keys().filter_map(|&view| store.take_delta(view)).collect()
+            sinks
+                .keys()
+                .filter_map(|&view| match view >> VIEW_STORE_SHIFT {
+                    LIVE_STORE => store.take_delta(view),
+                    doc => self.docs.get(doc).ok()?.store.write().take_delta(view),
+                })
+                .collect()
         };
         for delta in deltas {
             let view = delta.view;
@@ -581,6 +683,52 @@ impl Engine {
         interned.insert(s.clone());
         s.clone()
     }
+}
+
+/// A body's bytes from `backend`; see [`Engine::body_head`].
+fn body_head(
+    backend: &dyn BlobBackend,
+    id: FlowId,
+    part: BodyPart,
+    decode: bool,
+    max: Option<usize>,
+) -> Result<BodyBytes, Error> {
+    let mut bytes = backend.body(id, part)?.ok_or(Error::UnknownFlow(id))?;
+    let encoding = if decode {
+        backend.detail(id)?.and_then(|detail| match part {
+            BodyPart::Request => detail.request_body.encoding,
+            BodyPart::Response => detail.response_body.encoding,
+        })
+    } else {
+        None
+    };
+    let (bytes, decoded_from) = match (encoding, max) {
+        (Some(encoding), None) if !bytes.is_empty() => (decode::decode(&encoding, &bytes)?, Some(encoding)),
+        (Some(encoding), Some(max)) if !bytes.is_empty() => {
+            let head = decode::decode_prefix(&encoding, &bytes, max.saturating_add(1));
+            if head.is_empty() {
+                // Report why it didn't decode.
+                decode::decode(&encoding, &bytes)?;
+            }
+            (head, Some(encoding))
+        }
+        _ => {
+            if let Some(max) = max {
+                bytes.truncate(max.saturating_add(1));
+            }
+            (bytes, None)
+        }
+    };
+    let mut bytes = bytes;
+    let cut = max.is_some_and(|max| bytes.len() > max);
+    if let Some(max) = max {
+        bytes.truncate(max);
+    }
+    Ok(BodyBytes {
+        bytes,
+        decoded_from,
+        cut,
+    })
 }
 
 fn publisher_loop(engine: Weak<Engine>) {
