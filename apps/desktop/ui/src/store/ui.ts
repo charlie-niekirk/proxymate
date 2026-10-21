@@ -28,6 +28,7 @@ interface UiState {
   autoScroll: boolean;
   requestTab: RequestTab;
   responseTab: ResponseTab;
+  certWizardOpen: boolean;
 
   setText(text: string): void;
   setProtocol(protocol: ProtocolFilter): void;
@@ -41,6 +42,7 @@ interface UiState {
   setAutoScroll(on: boolean): void;
   setRequestTab(tab: RequestTab): void;
   setResponseTab(tab: ResponseTab): void;
+  setCertWizardOpen(open: boolean): void;
 }
 
 export const useUi = create<UiState>()((set) => ({
@@ -52,6 +54,7 @@ export const useUi = create<UiState>()((set) => ({
   autoScroll: false,
   requestTab: "Header",
   responseTab: "Body",
+  certWizardOpen: false,
 
   setText: (text) => set((s) => ({ filter: { ...s.filter, text } })),
   setProtocol: (protocol) => set((s) => ({ filter: { ...s.filter, protocol } })),
@@ -71,4 +74,5 @@ export const useUi = create<UiState>()((set) => ({
   setAutoScroll: (autoScroll) => set({ autoScroll }),
   setRequestTab: (requestTab) => set({ requestTab }),
   setResponseTab: (responseTab) => set({ responseTab }),
+  setCertWizardOpen: (certWizardOpen) => set({ certWizardOpen }),
 }));

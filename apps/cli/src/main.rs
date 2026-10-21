@@ -123,6 +123,7 @@ fn serve(config: ProxyConfig) -> ExitCode {
         let engine = Engine::with_config(EngineConfig {
             data_dir: std::env::var_os("PROXYMATE_DATA_DIR").map(Into::into),
             extra_upstream_roots,
+            ..Default::default()
         });
         let addr = match engine.start_proxy(config).await {
             Ok(addr) => addr,

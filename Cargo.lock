@@ -2402,6 +2402,7 @@ dependencies = [
  "block2",
  "objc2",
  "objc2-core-foundation",
+ "objc2-core-graphics",
  "objc2-foundation",
  "objc2-quartz-core",
 ]
@@ -2837,6 +2838,20 @@ dependencies = [
 [[package]]
 name = "pm-platform"
 version = "0.1.0"
+dependencies = [
+ "core-foundation",
+ "libc",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-core-graphics",
+ "objc2-foundation",
+ "plist",
+ "security-framework",
+ "security-framework-sys",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
 
 [[package]]
 name = "pm-testkit"
@@ -3003,6 +3018,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-specta",
+ "tokio",
  "window-vibrancy",
 ]
 

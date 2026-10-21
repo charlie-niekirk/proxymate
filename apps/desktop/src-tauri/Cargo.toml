@@ -26,6 +26,7 @@ specta.workspace = true
 specta-typescript.workspace = true
 tauri.workspace = true
 tauri-specta.workspace = true
+tokio = { workspace = true, features = ["signal"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 window-vibrancy.workspace = true

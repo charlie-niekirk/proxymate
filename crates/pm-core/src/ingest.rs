@@ -5,8 +5,8 @@
 //! Ids are allocated and Started events sent under one mutex, so the channel
 //! carries flows in id order and the store can append without reordering.
 
-use std::sync::Weak;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, SyncSender};
+use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
@@ -38,6 +38,11 @@ pub(crate) enum FlowEvent {
         duration_ms: u32,
         req_size: u64,
         resp_size: u64,
+    },
+    /// The client app behind the flow's connection became known.
+    ClientResolved {
+        id: FlowId,
+        client: Arc<str>,
     },
     /// Bulk append with ids already assigned (synthetic data, benches).
     Insert(Vec<FlowSummary>),

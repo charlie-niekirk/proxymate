@@ -85,6 +85,10 @@ pub struct SslSettings {
     pub bypass: Vec<String>,
     /// Hosts whose upstream certificate is accepted without verification.
     pub insecure_upstream: Vec<String>,
+    /// Client apps never decrypted, by bundle id (or name, for tools with no
+    /// bundle). Matching is case-insensitive.
+    #[serde(default)]
+    pub exclude_apps: Vec<String>,
 }
 
 impl Default for SslSettings {
@@ -113,6 +117,7 @@ impl Default for SslSettings {
             exclude: exclude.into_iter().map(String::from).collect(),
             bypass: Vec::new(),
             insecure_upstream: Vec::new(),
+            exclude_apps: Vec::new(),
         }
     }
 }

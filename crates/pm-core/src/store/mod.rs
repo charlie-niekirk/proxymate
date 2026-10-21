@@ -8,6 +8,7 @@ mod blob;
 mod detail;
 mod filter;
 mod segments;
+mod sidebar;
 mod view;
 
 use std::collections::HashMap;
@@ -20,6 +21,7 @@ pub(crate) use blob::Capture;
 pub(crate) use detail::{DetailStore, StoredDetail};
 pub use filter::CompiledFilter;
 pub(crate) use segments::SegmentStore;
+pub use sidebar::{SidebarCounts, in_domain, registrable_domain};
 pub use view::View;
 
 use crate::Error;
@@ -31,6 +33,7 @@ pub struct Store {
     flows: Vec<FlowSummary>,
     views: HashMap<ViewId, View>,
     next_view: ViewId,
+    sidebar: SidebarCounts,
 }
 
 impl Store {
@@ -79,8 +82,11 @@ impl Store {
                 FlowEvent::Insert(batch) => batch.into_iter().for_each(|f| self.push(f)),
                 FlowEvent::Update(batch) => {
                     for flow in batch {
-                        self.modify(flow.id, first_new, |f| *f = flow);
+                        self.modify_identity(flow.id, first_new, |f| *f = flow);
                     }
+                }
+                FlowEvent::ClientResolved { id, client } => {
+                    self.modify_identity(id, first_new, |f| f.client = Some(client));
                 }
                 FlowEvent::Response {
                     id,
@@ -113,6 +119,7 @@ impl Store {
                 FlowEvent::Clear => {
                     self.base = self.next_id();
                     self.flows.clear();
+                    self.sidebar.clear();
                     first_new = 0;
                     for view in self.views.values_mut() {
                         view.rebuild(&[]);
@@ -133,6 +140,7 @@ impl Store {
     fn push(&mut self, flow: FlowSummary) {
         // Ids are allocated and queued under one lock, so they arrive in order.
         debug_assert_eq!(flow.id, self.next_id(), "flows must arrive in id order");
+        self.sidebar.add(&flow);
         self.flows.push(flow);
     }
 
@@ -155,6 +163,28 @@ impl Store {
         for view in self.views.values_mut() {
             view.on_update(pos as u32, &old, new);
         }
+    }
+
+    /// Like [`Store::modify`], for changes that may move the flow to another
+    /// host or client: the sidebar counts follow.
+    fn modify_identity(&mut self, id: FlowId, first_new: usize, change: impl FnOnce(&mut FlowSummary)) {
+        let Some(old) = self.get(id).map(|f| (f.host.clone(), f.client.clone())) else {
+            return;
+        };
+        self.modify(id, first_new, change);
+        if let Some(pos) = id.checked_sub(self.base).map(|p| p as usize)
+            && let Some(new) = self.flows.get(pos)
+        {
+            self.sidebar.change(&old.0, old.1.as_ref(), new);
+        }
+    }
+
+    pub fn sidebar(&self) -> &SidebarCounts {
+        &self.sidebar
+    }
+
+    pub fn sidebar_mut(&mut self) -> &mut SidebarCounts {
+        &mut self.sidebar
     }
 
     pub fn create_view(&mut self, spec: FilterSpec, sort: SortSpec) -> ViewInfo {

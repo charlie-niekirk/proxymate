@@ -4,16 +4,21 @@
 //! Planned modules: `rules/` (M5); `io/` grows HAR, cURL and
 //! sessions in M8.
 
+mod client;
 mod engine;
 mod ingest;
+mod integration;
 pub mod io;
 pub mod proxy;
 mod recorder;
 pub mod store;
 pub mod synth;
 pub mod tls;
+pub mod trust;
 
+pub use client::ClientApp;
 pub use engine::{BodyBytes, DeltaSink, Engine, EngineConfig, PUBLISH_INTERVAL};
+pub use integration::SidebarSink;
 pub use proxy::ProxyConfig;
 pub use recorder::{BodyEnd, FlowRecorder};
 
@@ -33,4 +38,6 @@ pub enum Error {
     Tls(String),
     #[error(transparent)]
     Settings(#[from] tls::PolicyError),
+    #[error(transparent)]
+    Platform(#[from] pm_platform::PlatformError),
 }
