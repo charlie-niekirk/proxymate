@@ -1,5 +1,7 @@
 /**
- * Dev-only performance probe, enabled with `VITE_PM_PERF_PROBE=1 npm run tauri dev`.
+ * Dev-only performance probe, enabled with
+ * `PROXYMATE_SYNTH_FLOWS=100000 VITE_PM_PERF_PROBE=1 npm run tauri dev`
+ * (it waits for 100k rows, which only synthetic seeding provides).
  *
  * Inside the real app it scrolls the flow table and cycles filters, then
  * POSTs the numbers to the Vite dev server, which prints them to the

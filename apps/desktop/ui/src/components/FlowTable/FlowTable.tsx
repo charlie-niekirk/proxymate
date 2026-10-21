@@ -1,9 +1,12 @@
+import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ArrowDown, ArrowUp, Lock, MoreHorizontal, PencilLine } from "lucide-react";
 import { memo, useCallback, useEffect, useRef, type KeyboardEvent } from "react";
 
 import { useFlowView } from "@/hooks/useFlowView";
+import { backend } from "@/lib/backend";
 import { formatDuration, formatSize, formatTime, type Row } from "@/lib/flow";
+import { proxyStatusKey } from "@/lib/query";
 import { cn } from "@/lib/utils";
 import { useUi } from "@/store/ui";
 
@@ -92,10 +95,26 @@ export function FlowTable() {
           );
         })}
       </div>
-      {len === 0 && (
-        <div className="text-muted-foreground absolute inset-0 top-[22px] flex items-center justify-center text-sm">
-          No flows match the current filter
-        </div>
+      {len === 0 && <EmptyState />}
+    </div>
+  );
+}
+
+function EmptyState() {
+  const total = useUi((s) => s.stats.total);
+  const { data: status } = useQuery({ queryKey: proxyStatusKey, queryFn: () => backend.getProxyStatus() });
+  const proxy = status?.listening ?? "127.0.0.1:9090";
+  return (
+    <div className="text-muted-foreground absolute inset-0 top-[22px] flex flex-col items-center justify-center gap-2 text-sm">
+      {total > 0 ? (
+        "No flows match the current filter"
+      ) : (
+        <>
+          <span>Waiting for traffic</span>
+          <code className="bg-muted rounded px-2 py-1 font-mono text-xs" data-selectable>
+            curl -x http://{proxy} http://example.com/
+          </code>
+        </>
       )}
     </div>
   );

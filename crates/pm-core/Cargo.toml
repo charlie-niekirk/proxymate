@@ -11,6 +11,29 @@ pm-model.workspace = true
 parking_lot.workspace = true
 rayon.workspace = true
 thiserror.workspace = true
+serde.workspace = true
+tokio.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+http.workspace = true
+http-body.workspace = true
+http-body-util.workspace = true
+bytes.workspace = true
+postcard.workspace = true
+moka.workspace = true
+uuid.workspace = true
+flate2.workspace = true
+brotli.workspace = true
+zstd.workspace = true
+
+[dev-dependencies]
+pm-testkit.workspace = true
+criterion.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+
+[[bench]]
+name = "ingest"
+harness = false
 
 [lints]
 workspace = true

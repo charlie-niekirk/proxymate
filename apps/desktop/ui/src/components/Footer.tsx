@@ -3,6 +3,7 @@ import { ArrowDownToLine, Filter, Trash2 } from "lucide-react";
 import { SEARCH_INPUT_ID } from "@/components/FilterBar";
 import { Button } from "@/components/ui/button";
 import { Toggle } from "@/components/ui/toggle";
+import { clearFlows } from "@/lib/actions";
 import { useUi } from "@/store/ui";
 
 const nf = new Intl.NumberFormat();
@@ -16,7 +17,7 @@ export function Footer() {
 
   return (
     <footer className="bg-pane-toolbar text-muted-foreground flex h-7 shrink-0 items-center gap-1 border-t px-2 text-xs">
-      <Button variant="ghost" size="sm" disabled title="Clear arrives with the proxy (M1)">
+      <Button variant="ghost" size="sm" onClick={() => void clearFlows()}>
         <Trash2 /> Clear
       </Button>
       <Button variant="ghost" size="sm" onClick={() => document.getElementById(SEARCH_INPUT_ID)?.focus()}>

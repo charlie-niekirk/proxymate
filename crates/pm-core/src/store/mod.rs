@@ -1,23 +1,33 @@
-//! The live flow store: the summary arena plus the views over it.
+//! The live flow store: the summary arena plus the views over it, and the
+//! body and detail storage beside it.
 //!
-//! Bodies, `FlowDetail` segments and eviction arrive in M1; for now a flow's
-//! id is its index in the arena.
+//! Flow ids are never reused. `flows[0]` holds id `base`; a clear empties the
+//! arena and moves `base` up to the next id.
 
+mod blob;
+mod detail;
 mod filter;
+mod segments;
 mod view;
 
 use std::collections::HashMap;
 use std::ops::Range;
+use std::sync::mpsc::SyncSender;
 
 use pm_model::{FilterSpec, FlowId, FlowSummary, RowsPage, SortSpec, ViewDelta, ViewId, ViewInfo};
 
+pub(crate) use blob::Capture;
+pub(crate) use detail::{DetailStore, StoredDetail};
 pub use filter::CompiledFilter;
+pub(crate) use segments::SegmentStore;
 pub use view::View;
 
 use crate::Error;
+use crate::ingest::FlowEvent;
 
 #[derive(Default)]
 pub struct Store {
+    base: FlowId,
     flows: Vec<FlowSummary>,
     views: HashMap<ViewId, View>,
     next_view: ViewId,
@@ -28,38 +38,122 @@ impl Store {
         self.flows.len() as u32
     }
 
+    /// The id the next appended flow must carry.
+    pub fn next_id(&self) -> FlowId {
+        self.base + self.flows.len() as FlowId
+    }
+
     pub fn get(&self, id: FlowId) -> Option<&FlowSummary> {
-        self.flows.get(id as usize)
+        self.flows.get(id.checked_sub(self.base)? as usize)
     }
 
     /// Appends flows, assigning their ids, and updates every view.
     pub fn insert(&mut self, batch: impl IntoIterator<Item = FlowSummary>) -> Range<FlowId> {
-        let first = self.flows.len();
-        for mut flow in batch {
-            flow.id = self.flows.len() as FlowId;
-            self.flows.push(flow);
-        }
-        for view in self.views.values_mut() {
-            view.on_insert(&self.flows, first);
-            view.finish_batch(&self.flows);
-        }
-        first as FlowId..self.flows.len() as FlowId
+        let first = self.next_id();
+        let batch: Vec<FlowSummary> = batch
+            .into_iter()
+            .enumerate()
+            .map(|(i, mut f)| {
+                f.id = first + i as FlowId;
+                f
+            })
+            .collect();
+        self.apply([FlowEvent::Insert(batch)]);
+        first..self.next_id()
     }
 
     /// Replaces existing flows by id and updates every view. Unknown ids are ignored.
     pub fn update(&mut self, batch: impl IntoIterator<Item = FlowSummary>) {
-        for flow in batch {
-            let Some(slot) = self.flows.get_mut(flow.id as usize) else {
-                continue;
-            };
-            let old = std::mem::replace(slot, flow);
-            let new = &self.flows[old.id as usize];
-            for view in self.views.values_mut() {
-                view.on_update(&old, new);
+        self.apply([FlowEvent::Update(batch.into_iter().collect())]);
+    }
+
+    /// Applies one ingest batch. Views see flows appended in this batch once,
+    /// in their final state, and changes to older flows as updates. Returns
+    /// the flush acknowledgements to send once the write lock is released.
+    pub(crate) fn apply(&mut self, events: impl IntoIterator<Item = FlowEvent>) -> Vec<SyncSender<()>> {
+        let mut first_new = self.flows.len();
+        let mut acks = Vec::new();
+        for event in events {
+            match event {
+                FlowEvent::Started(flow) => self.push(flow),
+                FlowEvent::Insert(batch) => batch.into_iter().for_each(|f| self.push(f)),
+                FlowEvent::Update(batch) => {
+                    for flow in batch {
+                        self.modify(flow.id, first_new, |f| *f = flow);
+                    }
+                }
+                FlowEvent::Response {
+                    id,
+                    status,
+                    content_kind,
+                } => self.modify(id, first_new, |f| {
+                    f.status = Some(status);
+                    f.content_kind = content_kind;
+                }),
+                FlowEvent::Progress {
+                    id,
+                    req_size,
+                    resp_size,
+                } => self.modify(id, first_new, |f| {
+                    f.req_size = req_size;
+                    f.resp_size = resp_size;
+                }),
+                FlowEvent::Finished {
+                    id,
+                    state,
+                    duration_ms,
+                    req_size,
+                    resp_size,
+                } => self.modify(id, first_new, |f| {
+                    f.state = state;
+                    f.duration_ms = Some(duration_ms);
+                    f.req_size = req_size;
+                    f.resp_size = resp_size;
+                }),
+                FlowEvent::Clear => {
+                    self.base = self.next_id();
+                    self.flows.clear();
+                    first_new = 0;
+                    for view in self.views.values_mut() {
+                        view.rebuild(&[]);
+                    }
+                }
+                FlowEvent::Flush(ack) => acks.push(ack),
             }
         }
         for view in self.views.values_mut() {
+            if first_new < self.flows.len() {
+                view.on_insert(&self.flows, first_new);
+            }
             view.finish_batch(&self.flows);
+        }
+        acks
+    }
+
+    fn push(&mut self, flow: FlowSummary) {
+        // Ids are allocated and queued under one lock, so they arrive in order.
+        debug_assert_eq!(flow.id, self.next_id(), "flows must arrive in id order");
+        self.flows.push(flow);
+    }
+
+    /// Changes a flow in place. Flows appended earlier in this batch are not
+    /// reported to views yet, so only older ones produce view updates.
+    fn modify(&mut self, id: FlowId, first_new: usize, change: impl FnOnce(&mut FlowSummary)) {
+        let Some(pos) = id.checked_sub(self.base).map(|p| p as usize) else {
+            return;
+        };
+        let Some(slot) = self.flows.get_mut(pos) else {
+            return;
+        };
+        if pos >= first_new {
+            change(slot);
+            return;
+        }
+        let old = slot.clone();
+        change(slot);
+        let new = &self.flows[pos];
+        for view in self.views.values_mut() {
+            view.on_update(pos as u32, &old, new);
         }
     }
 
@@ -228,6 +322,64 @@ mod tests {
         assert_eq!(page.rows.len(), 1_100);
         assert!(page.rows.windows(2).all(|w| w[0].14 >= w[1].14));
         assert!(store.take_delta(view).unwrap().structural);
+    }
+
+    #[test]
+    fn clear_drops_flows_but_never_reuses_ids() {
+        let mut store = store_with(10);
+        let view = store.create_view(FilterSpec::default(), SortSpec::default()).view;
+        store.take_delta(view);
+        store.apply([FlowEvent::Clear]);
+        let delta = store.take_delta(view).unwrap();
+        assert!(delta.structural);
+        assert_eq!((delta.len, delta.total), (0, 0));
+
+        // A late event for a cleared flow is ignored.
+        store.apply([FlowEvent::Finished {
+            id: 3,
+            state: FlowState::Completed,
+            duration_ms: 1,
+            req_size: 0,
+            resp_size: 0,
+        }]);
+        assert_eq!(store.get(3), None);
+
+        let mut generator = Generator::new(1);
+        let ids = store.insert((0..2).map(|_| generator.completed_flow()));
+        assert_eq!(ids, 10..12);
+        assert_eq!(store.get(11).map(|f| f.id), Some(11));
+        let page = store.rows(view, 0, 10).unwrap();
+        assert_eq!(page.rows.iter().map(|r| r.0).collect::<Vec<_>>(), vec![10, 11]);
+    }
+
+    #[test]
+    fn events_for_flows_started_in_the_same_batch_are_folded_in() {
+        let mut store = Store::default();
+        let view = store
+            .create_view(
+                FilterSpec {
+                    content: vec![pm_model::ContentGroup::Json],
+                    ..Default::default()
+                },
+                SortSpec::default(),
+            )
+            .view;
+        store.take_delta(view);
+        let mut flow = Generator::new(2).active_flow();
+        flow.id = 0;
+        flow.content_kind = pm_model::ContentKind::None;
+        store.apply([
+            FlowEvent::Started(flow),
+            FlowEvent::Response {
+                id: 0,
+                status: 200,
+                content_kind: pm_model::ContentKind::Json,
+            },
+        ]);
+        // The flow only matches the JSON chip after its response arrived.
+        let delta = store.take_delta(view).unwrap();
+        assert_eq!((delta.len, delta.appended), (1, 1));
+        assert_eq!(store.get(0).unwrap().status, Some(200));
     }
 
     #[test]

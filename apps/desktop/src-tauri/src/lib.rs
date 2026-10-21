@@ -6,13 +6,8 @@ mod window;
 
 use std::sync::Arc;
 
-use pm_core::{Engine, synth};
+use pm_core::{Engine, EngineConfig, ProxyConfig, synth};
 use tauri::Manager;
-
-/// Synthetic traffic until the proxy lands in M1. Override with
-/// `PROXYMATE_SYNTH_FLOWS` (initial flows) and `PROXYMATE_SYNTH_RATE` (new flows/s).
-const DEFAULT_SYNTH_FLOWS: usize = 100_000;
-const DEFAULT_SYNTH_RATE: u32 = 20;
 
 /// The tauri-specta builder: the single list of commands, shared by the
 /// invoke handler and the TypeScript bindings export.
@@ -26,6 +21,11 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::get_rows,
             commands::get_flow,
             commands::subscribe_view,
+            commands::get_flow_detail,
+            commands::get_body,
+            commands::clear_flows,
+            commands::set_recording,
+            commands::get_proxy_status,
         ])
         // Sizes are u64 but stay far below 2^53.
         .dangerously_cast_bigints_to_number()
@@ -52,21 +52,39 @@ pub fn run() {
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             builder.mount_events(app);
-            app.manage(start_engine());
+            app.manage(start_engine(app.path().data_dir().ok()));
             if let Some(main) = app.get_webview_window("main") {
                 window::style_main_window(&main);
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running Proxymate");
+        .build(tauri::generate_context!())
+        .expect("error while building Proxymate")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                // Removes this session's live segment files.
+                app.state::<Arc<Engine>>().shutdown();
+            }
+        });
 }
 
-fn start_engine() -> Arc<Engine> {
-    let flows = env_or("PROXYMATE_SYNTH_FLOWS", DEFAULT_SYNTH_FLOWS);
-    let rate = env_or("PROXYMATE_SYNTH_RATE", DEFAULT_SYNTH_RATE);
-    let engine = Engine::new();
-    synth::seed(&engine, flows, 1);
+/// Starts the engine and the proxy on 9090 (or the next free port up to
+/// 9099). A proxy that can't bind is reported in the toolbar, not fatal.
+///
+/// For UI and performance work, `PROXYMATE_SYNTH_FLOWS` seeds synthetic
+/// flows and `PROXYMATE_SYNTH_RATE` adds that many live ones per second.
+fn start_engine(data_dir: Option<std::path::PathBuf>) -> Arc<Engine> {
+    let engine = Engine::with_config(EngineConfig {
+        data_dir: data_dir.map(|dir| dir.join("Proxymate")),
+    });
+    if let Err(err) = tauri::async_runtime::block_on(engine.start_proxy(ProxyConfig::default())) {
+        eprintln!("{err}");
+    }
+    let flows = env_or("PROXYMATE_SYNTH_FLOWS", 0usize);
+    let rate = env_or("PROXYMATE_SYNTH_RATE", 0u32);
+    if flows > 0 {
+        synth::seed(&engine, flows, 1);
+    }
     if rate > 0 {
         synth::spawn_live(Arc::downgrade(&engine), rate, 2);
     }

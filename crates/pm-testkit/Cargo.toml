@@ -9,6 +9,16 @@ publish.workspace = true
 [dependencies]
 pm-core.workspace = true
 pm-model.workspace = true
+tokio = { workspace = true, features = ["signal"] }
+hyper.workspace = true
+hyper-util.workspace = true
+http.workspace = true
+http-body.workspace = true
+http-body-util.workspace = true
+bytes.workspace = true
+flate2.workspace = true
+brotli.workspace = true
+zstd.workspace = true
 
 [lints]
 workspace = true

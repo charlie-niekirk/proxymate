@@ -46,14 +46,17 @@ apps/cli                 proxymate-cli serve|mcp-stdio|gen-flows|bench (headless
 
 ### Data path (performance core)
 1. **Per-request tasks.** Each request task emits small `FlowEvent`s (Started, ReqHead, RespHead, BodyProgress, Completed, Failed, WsMsg, ClientResolved) onto an mpsc channel. Body bytes never travel in these events.
-2. **Ingest.** A single writer task batches events (up to 5 ms per batch) and takes one write lock per batch. It updates the summary arena and the live views.
+2. **Ingest.** A single writer thread (`pm-ingest`) batches events (up to 5 ms per batch) and takes one write lock per batch. It updates the summary arena and the live views.
+   - Flow ids are allocated and the Started event queued under one mutex, so events arrive in id order and the arena never reorders. Synthetic inserts use the same channel.
+   - Ids are never reused. A clear empties the arena and moves its base id up; late events for cleared flows are ignored. Views index the arena by position.
 3. **Publish.** A publisher ticks at 20 Hz and sends one `ViewDelta` per view over a `tauri::ipc::Channel`. Each delta carries totals, the appended count, the changed ids and a structural flag.
 4. **UI fetch.** The UI pulls only the visible window with `get_rows(view, start, count)`, which returns compact tuples. Bodies come back as raw `ipc::Response` ArrayBuffers.
 
 ### Storage
 - **Flow summaries.** `FlowSummary` (about 200 B) lives in an in-memory `Vec`. Hosts, apps and content types are interned.
 - **Bodies.** Bodies of 8 KB or less are inlined. Larger bodies are stored still content-encoded in 256 MB rotating segment files under `~/Library/Application Support/Proxymate/live/<uuid>/`. They are decoded only when viewed.
-- **Flow detail.** `FlowDetail` is postcard-encoded into the segments, with a moka LRU in front of them.
+- **Flow detail.** `FlowDetail` is postcard-encoded into the segments, with a moka LRU in front of them. A flow still in flight is read from its live recorder instead.
+- **Live directory lifetime.** Clear deletes the segment files and quit deletes the directory. Each live directory holds an exclusive file lock, so the next launch sweeps directories left behind by a crash or a signal.
 - **Caps.**
   - Body capture is capped at 64 MB. Above that the recorded copy is truncated, but forwarding is never affected.
   - Flows are capped at 250k with ring eviction. Pinned flows are kept.
@@ -79,7 +82,7 @@ apps/cli                 proxymate-cli serve|mcp-stdio|gen-flows|bench (headless
 | Cert generation | rcgen |
 | Leaf cert cache | moka |
 | WebSockets | tokio-tungstenite |
-| Content decoding | async-compression |
+| Content decoding | flate2, brotli and zstd, run synchronously on stored bodies when the inspector asks (decoding is never on the forwarding path; M5 may add async-compression for streaming rewrites) |
 | Rule matching | regex (with `size_limit`) and globset |
 | Concurrency | arc-swap, parking_lot, rayon |
 | QR codes | qrcode |
@@ -116,6 +119,7 @@ We build our own engine and use hudsucker only as a reading reference. Its handl
 - The Raw tab is a reconstruction, not the exact wire bytes.
 - TLS 1.0/1.1 upstreams fail, with a clear error.
 - h2c is recorded but deferred.
+- HTTP/1.1 header names are forwarded with their original case, but recorded lower-cased (hyper doesn't expose its case map) and shown in Title-Case.
 
 ## Rules engine
 - **Data model.** A `Rule` has `{id, name, enabled, order, origin: User|Preset|Agent{client, session, created_at}, matcher, actions[]}`.
@@ -319,7 +323,7 @@ Tokens are CSS variables set per `[data-theme]`. Pills use a tinted background w
 | # | Branch | Scope | Demo / verify |
 |---|---|---|---|
 | M0 | `m0-skeleton` | New GitHub repo; Cargo and npm workspaces; pm-model; Tauri shell with the AppShell; shadcn/ui init with compact theme and tokens.css; overlay title bar and vibrancy; 100k synthetic rows through the real view → Channel → get_rows path; bindings codegen; CI (macOS and Linux); `docs/PLAN.md` and `CLAUDE.md` | `npm run tauri dev` scrolls 100k rows at 60 fps; CI green |
-| M1 | `m1-http-proxy` | HTTP/1.1 forward proxy, live capture, store and segments, ingest and publish, inspector Header/Query/Raw plus a basic JSON pretty view, decoding | `curl -x …` flows appear live; testkit integration tests; ingest bench |
+| M1 | `m1-http-proxy` | HTTP/1.1 forward proxy, live capture, store and segments, ingest and publish, inspector Header/Query/Raw plus a basic JSON pretty view, decoding. CONNECT is tunnelled but not recorded until M2. Synthetic seeding becomes opt-in (`PROXYMATE_SYNTH_FLOWS`) | `curl -x …` flows appear live; testkit integration tests; ingest bench |
 | M2 | `m2-https-h2` | CA, leaf cache, CONNECT, ALPN-mirrored MITM, h2, passthrough lists, pinning detection, TLS and Timing tabs | curl `--http2` shows ALPN h2; tunnel and upstream-error tests |
 | M3 | `m3-body-viewers` | Everything in "Body viewers and previews": content detection, `pmbody://` scheme, JSON pretty and tree, XML/HTML plus sandboxed preview, form, multipart, GraphQL, JS/CSS, images, media, PDF, hex, large-body handling | Fixture flows for every ContentKind render correctly in dark and light; detection unit tests; Playwright visual snapshots per viewer |
 | M4 | `m4-macos-integration` | Cert wizard with handshake verification, system proxy with backup and guardian, app detection and icons, Apps/Domains sidebar | Safari and Chrome decrypt with icons; `kill -9` restores the proxy |

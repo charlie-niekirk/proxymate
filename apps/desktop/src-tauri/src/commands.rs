@@ -3,9 +3,11 @@
 use std::sync::Arc;
 
 use pm_core::Engine;
-use pm_model::{FilterSpec, FlowId, FlowSummary, RowsPage, SortSpec, ViewDelta, ViewId, ViewInfo};
+use pm_model::{
+    BodyPart, FilterSpec, FlowDetail, FlowId, FlowSummary, ProxyStatus, RowsPage, SortSpec, ViewDelta, ViewId, ViewInfo,
+};
 use tauri::State;
-use tauri::ipc::Channel;
+use tauri::ipc::{Channel, InvokeResponseBody, IpcResponse};
 
 type EngineState<'a> = State<'a, Arc<Engine>>;
 
@@ -52,4 +54,57 @@ pub fn subscribe_view(engine: EngineState<'_>, view: ViewId, on_delta: Channel<V
     engine
         .subscribe(view, Box::new(move |delta| on_delta.send(delta).is_ok()))
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn get_flow_detail(engine: EngineState<'_>, id: FlowId) -> Result<Option<FlowDetail>, String> {
+    engine.flow_detail(id).map_err(|e| e.to_string())
+}
+
+/// A body's bytes as a raw `ArrayBuffer`, not JSON. With `decoded`, a
+/// content-encoded body is decoded first; decoding errors are returned.
+#[tauri::command]
+#[specta::specta]
+pub fn get_body(engine: EngineState<'_>, id: FlowId, part: BodyPart, decoded: bool) -> Result<RawBytes, String> {
+    engine
+        .body(id, part, decoded)
+        .map(|body| RawBytes(tauri::ipc::Response::new(body.bytes)))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn clear_flows(engine: EngineState<'_>) {
+    engine.clear();
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn set_recording(engine: EngineState<'_>, on: bool) -> ProxyStatus {
+    engine.set_recording(on);
+    engine.proxy_status()
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn get_proxy_status(engine: EngineState<'_>) -> ProxyStatus {
+    engine.proxy_status()
+}
+
+/// Bytes sent to the webview as an `ArrayBuffer`. specta has no type for
+/// `tauri::ipc::Response`, so the binding says `unknown` and `lib/backend.ts`
+/// narrows it.
+pub struct RawBytes(tauri::ipc::Response);
+
+impl IpcResponse for RawBytes {
+    fn body(self) -> tauri::Result<InvokeResponseBody> {
+        self.0.body()
+    }
+}
+
+impl specta::Type for RawBytes {
+    fn definition(types: &mut specta::Types) -> specta::datatype::DataType {
+        <specta_typescript::Unknown as specta::Type>::definition(types)
+    }
 }

@@ -1,16 +1,25 @@
 //! The `Engine` facade. Tauri commands, MCP tools and the CLI call only this,
 //! so the UI and agents always see the same behaviour.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::net::SocketAddr;
 use std::ops::Range;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use parking_lot::{Mutex, RwLock};
-use pm_model::{FilterSpec, FlowId, FlowSummary, RowsPage, SortSpec, ViewDelta, ViewId, ViewInfo};
+use pm_model::{
+    BodyPart, FilterSpec, FlowDetail, FlowId, FlowSummary, ProxyStatus, RowsPage, SortSpec, ViewDelta, ViewId, ViewInfo,
+};
 
 use crate::Error;
-use crate::store::Store;
+use crate::ingest::{self, FlowEvent, IngestTx};
+use crate::io::decode;
+use crate::proxy::{self, ProxyConfig, ProxyHandle};
+use crate::recorder::FlowRecorder;
+use crate::store::{DetailStore, SegmentStore, Store};
 
 /// Deltas are published at 20 Hz.
 pub const PUBLISH_INTERVAL: Duration = Duration::from_millis(50);
@@ -19,19 +28,67 @@ pub const PUBLISH_INTERVAL: Duration = Duration::from_millis(50);
 /// webview's channel was closed).
 pub type DeltaSink = Box<dyn FnMut(ViewDelta) -> bool + Send>;
 
+#[derive(Debug, Clone, Default)]
+pub struct EngineConfig {
+    /// Root for live segment files (`<data_dir>/live/<uuid>/`). Defaults to
+    /// a `proxymate` directory under the system temp dir.
+    pub data_dir: Option<PathBuf>,
+}
+
+/// A body as returned to the inspector.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BodyBytes {
+    pub bytes: Vec<u8>,
+    /// The `Content-Encoding` that was undone, if decoding was asked for
+    /// and the body was encoded.
+    pub decoded_from: Option<String>,
+}
+
 pub struct Engine {
     store: RwLock<Store>,
     sinks: Mutex<HashMap<ViewId, DeltaSink>>,
+    ingest: IngestTx,
+    details: DetailStore,
+    recording: AtomicBool,
+    proxy: Mutex<ProxyState>,
+    interned: Mutex<HashSet<Arc<str>>>,
+}
+
+#[derive(Default)]
+enum ProxyState {
+    #[default]
+    Stopped,
+    Listening(ProxyHandle),
+    Failed(String),
 }
 
 impl Engine {
-    /// Creates an engine and starts its 20 Hz delta publisher thread, which
-    /// stops when the last `Arc<Engine>` is dropped.
+    /// An engine with the default config. See [`Engine::with_config`].
     pub fn new() -> Arc<Engine> {
+        Engine::with_config(EngineConfig::default())
+    }
+
+    /// Creates an engine and starts its ingest thread and 20 Hz delta
+    /// publisher thread, which stop when the last `Arc<Engine>` is dropped.
+    pub fn with_config(config: EngineConfig) -> Arc<Engine> {
+        let root = config
+            .data_dir
+            .unwrap_or_else(|| std::env::temp_dir().join("proxymate"));
+        let (tx, rx) = std::sync::mpsc::channel();
         let engine = Arc::new(Engine {
             store: RwLock::new(Store::default()),
             sinks: Mutex::new(HashMap::new()),
+            ingest: IngestTx::new(tx),
+            details: DetailStore::new(SegmentStore::new(&root)),
+            recording: AtomicBool::new(true),
+            proxy: Mutex::new(ProxyState::Stopped),
+            interned: Mutex::new(HashSet::new()),
         });
+        let weak = Arc::downgrade(&engine);
+        std::thread::Builder::new()
+            .name("pm-ingest".into())
+            .spawn(move || ingest::ingest_loop(rx, weak))
+            .expect("spawn ingest thread");
         let weak = Arc::downgrade(&engine);
         std::thread::Builder::new()
             .name("pm-publisher".into())
@@ -45,19 +102,129 @@ impl Engine {
         self.store.read().total()
     }
 
-    /// Appends new flows under a single write lock. Ids are assigned here;
-    /// whatever `id` the summaries carry is ignored.
+    /// Appends new flows (synthetic data, benches) and waits until views
+    /// include them. Ids are assigned here; whatever `id` the summaries
+    /// carry is ignored.
     pub fn insert_flows(&self, batch: Vec<FlowSummary>) -> Range<FlowId> {
-        self.store.write().insert(batch)
+        let ids = self.ingest.insert(batch);
+        self.ingest.flush();
+        ids
     }
 
-    /// Replaces existing flows (matched by id) under a single write lock.
+    /// Replaces existing flows (matched by id) and waits until views see it.
     pub fn update_flows(&self, batch: Vec<FlowSummary>) {
-        self.store.write().update(batch);
+        self.ingest.send(FlowEvent::Update(batch));
+        self.ingest.flush();
+    }
+
+    /// Blocks until every flow event emitted so far is in the store.
+    pub fn flush(&self) {
+        self.ingest.flush();
+    }
+
+    /// Starts recording a flow. Returns `None` while recording is paused,
+    /// in which case the caller forwards without recording.
+    pub fn begin_flow(self: &Arc<Self>, mut summary: FlowSummary, detail: FlowDetail) -> Option<FlowRecorder> {
+        if !self.is_recording() {
+            return None;
+        }
+        summary.method = self.intern(&summary.method);
+        summary.host = self.intern(&summary.host);
+        let id = self.ingest.start(summary);
+        Some(FlowRecorder::new(id, self, detail))
     }
 
     pub fn get_flow(&self, id: FlowId) -> Option<FlowSummary> {
         self.store.read().get(id).cloned()
+    }
+
+    /// Heads and body metadata of a flow, live or finished.
+    pub fn flow_detail(&self, id: FlowId) -> Result<Option<FlowDetail>, Error> {
+        Ok(self.details.get(id)?.map(|stored| stored.detail.clone()))
+    }
+
+    /// The captured bytes of one body. With `decode`, a content-encoded
+    /// body (gzip, br, deflate, zstd) is decoded first.
+    pub fn body(&self, id: FlowId, part: BodyPart, decode: bool) -> Result<BodyBytes, Error> {
+        let bytes = self.details.body(id, part)?.ok_or(Error::UnknownFlow(id))?;
+        let encoding = if decode {
+            self.details.get(id)?.and_then(|stored| match part {
+                BodyPart::Request => stored.detail.request_body.encoding.clone(),
+                BodyPart::Response => stored.detail.response_body.encoding.clone(),
+            })
+        } else {
+            None
+        };
+        match encoding {
+            Some(encoding) if !bytes.is_empty() => Ok(BodyBytes {
+                bytes: decode::decode(&encoding, &bytes)?,
+                decoded_from: Some(encoding),
+            }),
+            _ => Ok(BodyBytes {
+                bytes,
+                decoded_from: None,
+            }),
+        }
+    }
+
+    /// Drops every flow and deletes their bodies. Flows still in flight are
+    /// forwarded to the end but no longer recorded. Ids are never reused.
+    pub fn clear(&self) {
+        let base = self.ingest.clear();
+        self.details.clear(base);
+        self.ingest.flush();
+    }
+
+    pub fn set_recording(&self, on: bool) {
+        self.recording.store(on, Ordering::Relaxed);
+    }
+
+    pub fn is_recording(&self) -> bool {
+        self.recording.load(Ordering::Relaxed)
+    }
+
+    /// Binds the proxy listener (the first free port in `config.ports`) and
+    /// serves it on the current tokio runtime. Failure is also kept for
+    /// [`Engine::proxy_status`].
+    pub async fn start_proxy(self: &Arc<Self>, config: ProxyConfig) -> Result<SocketAddr, Error> {
+        let started = match proxy::bind(&config).await {
+            Ok(listener) => proxy::spawn(Arc::downgrade(self), listener),
+            Err(err) => Err(err),
+        };
+        let mut state = self.proxy.lock();
+        match started {
+            Ok(handle) => {
+                let addr = handle.addr;
+                *state = ProxyState::Listening(handle);
+                Ok(addr)
+            }
+            Err(err) => {
+                let ports = format!("{}–{}", config.ports.start(), config.ports.end());
+                let message = format!("can't listen on {} ports {ports}: {err}", config.ip);
+                *state = ProxyState::Failed(message.clone());
+                Err(Error::Proxy(message))
+            }
+        }
+    }
+
+    pub fn proxy_status(&self) -> ProxyStatus {
+        let (listening, error) = match &*self.proxy.lock() {
+            ProxyState::Stopped => (None, None),
+            ProxyState::Listening(handle) => (Some(handle.addr.to_string()), None),
+            ProxyState::Failed(err) => (None, Some(err.clone())),
+        };
+        ProxyStatus {
+            listening,
+            error,
+            recording: self.is_recording(),
+        }
+    }
+
+    /// Stops the proxy and deletes this session's segment files. Call on
+    /// quit: the engine itself may outlive the event loop.
+    pub fn shutdown(&self) {
+        *self.proxy.lock() = ProxyState::Stopped;
+        self.details.segments.remove_all();
     }
 
     pub fn create_view(&self, filter: FilterSpec, sort: SortSpec) -> ViewInfo {
@@ -115,6 +282,29 @@ impl Engine {
                 sinks.remove(&view);
             }
         }
+    }
+
+    /// Applies one ingest batch under a single write lock.
+    pub(crate) fn apply_events(&self, batch: Vec<FlowEvent>) -> Vec<std::sync::mpsc::SyncSender<()>> {
+        self.store.write().apply(batch)
+    }
+
+    pub(crate) fn ingest(&self) -> &IngestTx {
+        &self.ingest
+    }
+
+    pub(crate) fn details(&self) -> &DetailStore {
+        &self.details
+    }
+
+    /// Hosts and methods repeat across flows; share one allocation each.
+    fn intern(&self, s: &Arc<str>) -> Arc<str> {
+        let mut interned = self.interned.lock();
+        if let Some(existing) = interned.get(&**s) {
+            return existing.clone();
+        }
+        interned.insert(s.clone());
+        s.clone()
     }
 }
 

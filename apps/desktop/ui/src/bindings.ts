@@ -14,9 +14,61 @@ export const commands = {
 	getFlow: (id: number) => __TAURI_INVOKE<FlowSummary_Serialize | null>("get_flow", { id }),
 	/**  Streams the view's 20 Hz deltas to the webview until the channel closes. */
 	subscribeView: (view: number, onDelta: Channel<ViewDelta>) => typedError<null, string>(__TAURI_INVOKE("subscribe_view", { view, onDelta })),
+	getFlowDetail: (id: number) => typedError<FlowDetail_Serialize | null, string>(__TAURI_INVOKE("get_flow_detail", { id })),
+	/**
+	 *  A body's bytes as a raw `ArrayBuffer`, not JSON. With `decoded`, a
+	 *  content-encoded body is decoded first; decoding errors are returned.
+	 */
+	getBody: (id: number, part: BodyPart, decoded: boolean) => typedError<unknown, string>(__TAURI_INVOKE("get_body", { id, part, decoded })),
+	clearFlows: () => __TAURI_INVOKE<void>("clear_flows"),
+	setRecording: (on: boolean) => __TAURI_INVOKE<ProxyStatus_Serialize>("set_recording", { on }),
+	getProxyStatus: () => __TAURI_INVOKE<ProxyStatus_Serialize>("get_proxy_status"),
 };
 
 /* Types */
+/**
+ *  What was seen and recorded of one body. The bytes themselves are fetched
+ *  separately (`get_body`), still content-encoded unless decoding is asked for.
+ */
+export type BodyInfo = BodyInfo_Serialize | BodyInfo_Deserialize;
+
+/**
+ *  What was seen and recorded of one body. The bytes themselves are fetched
+ *  separately (`get_body`), still content-encoded unless decoding is asked for.
+ */
+export type BodyInfo_Deserialize = {
+	/**  Bytes that went over the wire, content-encoded. */
+	size: number,
+	/**  Bytes kept by the recorder: `size` capped at the capture limit. */
+	captured: number,
+	/**  True if `size` exceeded the capture limit. Forwarding is unaffected. */
+	truncated: boolean,
+	/**  `Content-Encoding` of the body (e.g. `gzip`, `br`), if any. */
+	encoding?: string | null,
+	/**  False while the body is still streaming, or if it was cut short. */
+	complete: boolean,
+};
+
+/**
+ *  What was seen and recorded of one body. The bytes themselves are fetched
+ *  separately (`get_body`), still content-encoded unless decoding is asked for.
+ */
+export type BodyInfo_Serialize = {
+	/**  Bytes that went over the wire, content-encoded. */
+	size: number,
+	/**  Bytes kept by the recorder: `size` capped at the capture limit. */
+	captured: number,
+	/**  True if `size` exceeded the capture limit. Forwarding is unaffected. */
+	truncated: boolean,
+	/**  `Content-Encoding` of the body (e.g. `gzip`, `br`), if any. */
+	encoding: string | null,
+	/**  False while the body is still streaming, or if it was cut short. */
+	complete: boolean,
+};
+
+/**  Which body of a flow. */
+export type BodyPart = "request" | "response";
+
 /**  Content chip in the filter row. Each group covers one or more [`ContentKind`]s. */
 export type ContentGroup = "json" | "form" | "xml" | "js" | "css" | "graphql" | "document" | "media" | "other";
 
@@ -70,6 +122,40 @@ export type FilterSpec_Serialize = {
 	host: string | null,
 	/**  Restrict to one client app (sidebar Apps selection). */
 	client: string | null,
+};
+
+/**
+ *  Everything about one flow beyond its summary: heads, body metadata and
+ *  errors. Loaded on demand for the inspector.
+ */
+export type FlowDetail = FlowDetail_Serialize | FlowDetail_Deserialize;
+
+/**
+ *  Everything about one flow beyond its summary: heads, body metadata and
+ *  errors. Loaded on demand for the inspector.
+ */
+export type FlowDetail_Deserialize = {
+	id: number,
+	request: RequestHead,
+	response?: ResponseHead | null,
+	request_body: BodyInfo_Deserialize,
+	response_body: BodyInfo_Deserialize,
+	/**  Why the flow failed, if it did. */
+	error?: string | null,
+};
+
+/**
+ *  Everything about one flow beyond its summary: heads, body metadata and
+ *  errors. Loaded on demand for the inspector.
+ */
+export type FlowDetail_Serialize = {
+	id: number,
+	request: RequestHead,
+	response: ResponseHead | null,
+	request_body: BodyInfo_Serialize,
+	response_body: BodyInfo_Serialize,
+	/**  Why the flow failed, if it did. */
+	error: string | null,
 };
 
 /**
@@ -183,8 +269,58 @@ export type FlowSummary_Serialize = {
 	edited: boolean,
 };
 
+/**
+ *  One header line. h1 names arrive lower-cased from the parser; the proxy
+ *  still forwards them with their original case.
+ */
+export type Header = {
+	name: string,
+	value: string,
+};
+
+export type HttpVersion = "HTTP/1.0" | "HTTP/1.1" | "HTTP/2";
+
 /**  Protocol chip in the filter row. */
 export type ProtocolFilter = "all" | "http" | "https" | "websocket";
+
+/**  State of the proxy listener, for the toolbar. */
+export type ProxyStatus = ProxyStatus_Serialize | ProxyStatus_Deserialize;
+
+/**  State of the proxy listener, for the toolbar. */
+export type ProxyStatus_Deserialize = {
+	/**  `ip:port` the proxy listens on, once bound. */
+	listening?: string | null,
+	/**  Why the proxy is not listening, if it failed to start. */
+	error?: string | null,
+	/**  False while recording is paused: traffic is forwarded but not kept. */
+	recording: boolean,
+};
+
+/**  State of the proxy listener, for the toolbar. */
+export type ProxyStatus_Serialize = {
+	/**  `ip:port` the proxy listens on, once bound. */
+	listening: string | null,
+	/**  Why the proxy is not listening, if it failed to start. */
+	error: string | null,
+	/**  False while recording is paused: traffic is forwarded but not kept. */
+	recording: boolean,
+};
+
+export type RequestHead = {
+	method: string,
+	/**  Absolute URL as the client asked for it. */
+	url: string,
+	version: HttpVersion,
+	headers: Header[],
+};
+
+export type ResponseHead = {
+	status: number,
+	/**  Reason phrase from the status line, or the canonical one. */
+	reason: string,
+	version: HttpVersion,
+	headers: Header[],
+};
 
 /**  A window of rows returned by `get_rows(view, start, count)`. */
 export type RowsPage = RowsPage_Serialize | RowsPage_Deserialize;

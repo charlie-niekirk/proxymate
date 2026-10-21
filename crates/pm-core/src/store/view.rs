@@ -1,8 +1,14 @@
 //! Incrementally maintained, filtered and sorted views over the summary arena.
+//!
+//! Views hold arena positions, not flow ids: after a clear the arena restarts
+//! at position 0 while ids keep counting up.
 
 use std::cmp::Ordering;
 
 use pm_model::{FilterSpec, FlowId, FlowRow, FlowSummary, SortDir, SortKey, SortSpec, ViewDelta, ViewId};
+
+/// Index into the summary arena.
+pub type Pos = u32;
 use rayon::prelude::*;
 
 use super::filter::CompiledFilter;
@@ -17,9 +23,9 @@ pub struct View {
     spec: FilterSpec,
     filter: CompiledFilter,
     sort: SortSpec,
-    /// Flow ids in display order.
-    indices: Vec<FlowId>,
-    /// Membership bitset indexed by flow id, for O(1) "is it in the view?".
+    /// Arena positions in display order.
+    indices: Vec<Pos>,
+    /// Membership bitset indexed by position, for O(1) "is it in the view?".
     members: Vec<u64>,
     // Pending delta.
     seq: u32,
@@ -87,20 +93,24 @@ impl View {
     /// Full linear refilter and sort.
     pub fn rebuild(&mut self, flows: &[FlowSummary]) {
         self.indices = if self.filter.is_match_all() {
-            (0..flows.len() as FlowId).collect()
+            (0..flows.len() as Pos).collect()
         } else if flows.len() >= PARALLEL_THRESHOLD {
             flows
                 .par_iter()
-                .filter(|f| self.filter.matches(f))
-                .map(|f| f.id)
+                .enumerate()
+                .filter(|(_, f)| self.filter.matches(f))
+                .map(|(pos, _)| pos as Pos)
                 .collect()
         } else {
-            flows.iter().filter(|f| self.filter.matches(f)).map(|f| f.id).collect()
+            (0..flows.len())
+                .filter(|&pos| self.filter.matches(&flows[pos]))
+                .map(|pos| pos as Pos)
+                .collect()
         };
         self.sort_indices(flows);
         self.members = vec![0; flows.len().div_ceil(64)];
-        for &id in &self.indices {
-            set_bit(&mut self.members, id);
+        for &pos in &self.indices {
+            set_bit(&mut self.members, pos);
         }
         self.needs_rebuild = false;
         self.mark_structural();
@@ -109,10 +119,10 @@ impl View {
     /// Called after `flows[first..]` were appended to the arena.
     pub fn on_insert(&mut self, flows: &[FlowSummary], first: usize) {
         let before = self.indices.len();
-        for f in &flows[first..] {
+        for (pos, f) in flows.iter().enumerate().skip(first) {
             if self.filter.matches(f) {
-                self.indices.push(f.id);
-                set_bit(&mut self.members, f.id);
+                self.indices.push(pos as Pos);
+                set_bit(&mut self.members, pos as Pos);
             }
         }
         let added = (self.indices.len() - before) as u32;
@@ -126,9 +136,9 @@ impl View {
         }
     }
 
-    /// Called after a flow already in the arena was replaced by `new`.
-    pub fn on_update(&mut self, old: &FlowSummary, new: &FlowSummary) {
-        let was = get_bit(&self.members, new.id);
+    /// Called after the flow at `pos` was replaced by `new`.
+    pub fn on_update(&mut self, pos: Pos, old: &FlowSummary, new: &FlowSummary) {
+        let was = get_bit(&self.members, pos);
         let is = self.filter.matches(new);
         match (was, is) {
             (true, true) => {
@@ -181,7 +191,7 @@ impl View {
         let end = start.saturating_add(count as usize).min(self.indices.len());
         self.indices[start..end]
             .iter()
-            .map(|&id| FlowRow::from(&flows[id as usize]))
+            .map(|&pos| FlowRow::from(&flows[pos as usize]))
             .collect()
     }
 
@@ -193,7 +203,7 @@ impl View {
         self.needs_resort = false;
         let SortSpec { key, dir } = self.sort;
         if key == SortKey::Id {
-            // Ids are pushed in arrival order, so indices are already ascending.
+            // Positions are pushed in arrival order, which is id order.
             if dir == SortDir::Asc {
                 self.indices.sort_unstable();
             } else {
@@ -201,7 +211,7 @@ impl View {
             }
             return;
         }
-        let cmp = |a: &FlowId, b: &FlowId| {
+        let cmp = |a: &Pos, b: &Pos| {
             let (fa, fb) = (&flows[*a as usize], &flows[*b as usize]);
             let ord = compare_key(key, fa, fb).then(a.cmp(b));
             if dir == SortDir::Desc { ord.reverse() } else { ord }
@@ -230,14 +240,14 @@ fn compare_key(key: SortKey, a: &FlowSummary, b: &FlowSummary) -> Ordering {
     }
 }
 
-fn set_bit(bits: &mut Vec<u64>, id: FlowId) {
-    let word = id as usize / 64;
+fn set_bit(bits: &mut Vec<u64>, pos: Pos) {
+    let word = pos as usize / 64;
     if word >= bits.len() {
         bits.resize(word + 1, 0);
     }
-    bits[word] |= 1 << (id % 64);
+    bits[word] |= 1 << (pos % 64);
 }
 
-fn get_bit(bits: &[u64], id: FlowId) -> bool {
-    bits.get(id as usize / 64).is_some_and(|w| w & (1 << (id % 64)) != 0)
+fn get_bit(bits: &[u64], pos: Pos) -> bool {
+    bits.get(pos as usize / 64).is_some_and(|w| w & (1 << (pos % 64)) != 0)
 }

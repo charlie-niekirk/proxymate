@@ -7,6 +7,10 @@ export interface ViewStats {
   total: number;
 }
 
+/** Inspector tabs; the choice sticks as the selection changes. */
+export type RequestTab = "Header" | "Query" | "Body" | "Raw";
+export type ResponseTab = "Header" | "Body" | "Raw";
+
 export interface FilterTiming {
   /** Engine refilter time reported by Rust. */
   engineMs: number;
@@ -22,6 +26,8 @@ interface UiState {
   filterTiming: FilterTiming | null;
   /** Keep the newest row in view while traffic arrives. */
   autoScroll: boolean;
+  requestTab: RequestTab;
+  responseTab: ResponseTab;
 
   setText(text: string): void;
   setProtocol(protocol: ProtocolFilter): void;
@@ -33,6 +39,8 @@ interface UiState {
   setStats(stats: ViewStats): void;
   setFilterTiming(timing: FilterTiming): void;
   setAutoScroll(on: boolean): void;
+  setRequestTab(tab: RequestTab): void;
+  setResponseTab(tab: ResponseTab): void;
 }
 
 export const useUi = create<UiState>()((set) => ({
@@ -42,6 +50,8 @@ export const useUi = create<UiState>()((set) => ({
   stats: { len: 0, total: 0 },
   filterTiming: null,
   autoScroll: false,
+  requestTab: "Header",
+  responseTab: "Body",
 
   setText: (text) => set((s) => ({ filter: { ...s.filter, text } })),
   setProtocol: (protocol) => set((s) => ({ filter: { ...s.filter, protocol } })),
@@ -59,4 +69,6 @@ export const useUi = create<UiState>()((set) => ({
   setStats: (stats) => set({ stats }),
   setFilterTiming: (filterTiming) => set({ filterTiming }),
   setAutoScroll: (autoScroll) => set({ autoScroll }),
+  setRequestTab: (requestTab) => set({ requestTab }),
+  setResponseTab: (responseTab) => set({ responseTab }),
 }));
