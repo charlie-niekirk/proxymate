@@ -3,7 +3,8 @@
  *   1. shadcn/ui variables (--background, --primary, ...) consumed by src/components/ui.
  *   2. Proxymate app tokens: --m-* (HTTP methods), --s-* (status / flow state),
  *      --url-* (colourised URL parts), --selection-*, --pane-*, --syntax-* (bodies),
- *      --ssl-* (SSL column), --timing-* (Timing tab phases).
+ *      --ssl-* (SSL column), --timing-* (Timing tab phases), --code-* and --checker-*
+ *      (body viewers).
  * Pills use a tinted *-bg with the saturated foreground (>= 4.5:1 contrast).
  * Dark is the primary theme; the light values get a full pass in M10.
  */
@@ -101,6 +102,10 @@
   --s-tunnel: var(--s-blocked);
   --s-tunnel-bg: var(--s-blocked-bg);
 
+  /* ---- GraphQL operation badge (URL column) ---- */
+  --graphql: oklch(0.74 0.15 330);
+  --graphql-bg: oklch(0.74 0.15 330 / 15%);
+
   /* ---- TLS (SSL column, inspector) ---- */
   --ssl-passthrough: var(--s-tunnel);
   --ssl-pinned: var(--s-4xx);
@@ -120,11 +125,31 @@
   --url-path: oklch(0.8 0.008 270);
   --url-query: oklch(0.7 0.07 245);
 
-  /* ---- body syntax colouring ---- */
+  /* ---- body syntax colouring (CodeMirror, JSON tree, Raw) ---- */
   --syntax-key: oklch(0.76 0.13 245);
   --syntax-string: oklch(0.78 0.14 150);
   --syntax-number: oklch(0.79 0.15 65);
   --syntax-literal: oklch(0.76 0.15 300);
+  --syntax-keyword: oklch(0.74 0.15 330);
+  --syntax-tag: oklch(0.72 0.16 25);
+  --syntax-attr: oklch(0.8 0.12 85);
+  --syntax-comment: oklch(0.58 0.02 270);
+  --syntax-variable: oklch(0.8 0.1 200);
+  --syntax-type: oklch(0.8 0.11 180);
+  --syntax-punct: oklch(0.66 0.01 270);
+  --syntax-meta: oklch(0.66 0.05 270);
+
+  /* ---- body viewers ---- */
+  --code-gutter: oklch(0.2 0.004 270);
+  --code-gutter-fg: oklch(0.5 0.01 270);
+  --code-active-line: oklch(1 0 0 / 3.5%);
+  --code-selection: oklch(0.72 0.17 50 / 28%);
+  --code-match: oklch(0.82 0.15 80 / 30%);
+  --code-match-current: oklch(0.82 0.15 80 / 55%);
+  --code-guide: oklch(1 0 0 / 7%);
+  --code-row-hover: oklch(1 0 0 / 4.5%);
+  --checker-a: oklch(0.27 0.004 270);
+  --checker-b: oklch(0.22 0.004 270);
 }
 
 [data-theme="light"] {
@@ -197,6 +222,9 @@
   --s-blocked: oklch(0.5 0.01 270);
   --s-blocked-bg: oklch(0.5 0.01 270 / 10%);
 
+  --graphql: oklch(0.5 0.18 330);
+  --graphql-bg: oklch(0.5 0.18 330 / 12%);
+
   --url-scheme: oklch(0.6 0.01 270);
   --url-host: oklch(0.2 0.004 270);
   --url-port: oklch(0.6 0.01 270);
@@ -207,6 +235,25 @@
   --syntax-string: oklch(0.5 0.14 150);
   --syntax-number: oklch(0.52 0.14 55);
   --syntax-literal: oklch(0.5 0.17 300);
+  --syntax-keyword: oklch(0.5 0.18 330);
+  --syntax-tag: oklch(0.52 0.18 25);
+  --syntax-attr: oklch(0.52 0.12 70);
+  --syntax-comment: oklch(0.58 0.015 270);
+  --syntax-variable: oklch(0.5 0.1 210);
+  --syntax-type: oklch(0.5 0.1 180);
+  --syntax-punct: oklch(0.45 0.01 270);
+  --syntax-meta: oklch(0.52 0.04 270);
+
+  --code-gutter: oklch(0.975 0.002 270);
+  --code-gutter-fg: oklch(0.6 0.01 270);
+  --code-active-line: oklch(0 0 0 / 3%);
+  --code-selection: oklch(0.66 0.17 48 / 22%);
+  --code-match: oklch(0.82 0.15 80 / 35%);
+  --code-match-current: oklch(0.75 0.16 70 / 55%);
+  --code-guide: oklch(0 0 0 / 8%);
+  --code-row-hover: oklch(0 0 0 / 4%);
+  --checker-a: oklch(0.95 0.002 270);
+  --checker-b: oklch(0.88 0.002 270);
 }
 
 /* macOS: the window is transparent and the sidebar shows NSVisualEffectView

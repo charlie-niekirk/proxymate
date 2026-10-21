@@ -45,7 +45,7 @@ pub struct ViewInfo {
 ///
 /// Field order: `id, state, scheme, method, host, port, path, query, status,
 /// content_kind, client, started_at_ms, duration_ms, req_size, resp_size, edited,
-/// http_version, tls`.
+/// http_version, tls, graphql_op`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct FlowRow(
     pub FlowId,
@@ -66,6 +66,7 @@ pub struct FlowRow(
     pub bool,
     pub HttpVersion,
     pub TlsStatus,
+    pub Option<Arc<str>>,
 );
 
 impl From<&FlowSummary> for FlowRow {
@@ -89,6 +90,7 @@ impl From<&FlowSummary> for FlowRow {
             f.edited,
             f.http_version,
             f.tls,
+            f.graphql_op.clone(),
         )
     }
 }
@@ -128,11 +130,12 @@ mod tests {
             edited: false,
             http_version: HttpVersion::Http2,
             tls: TlsStatus::Intercepted,
+            graphql_op: Some("GetUser".into()),
         };
         let json = serde_json::to_string(&FlowRow::from(&summary)).unwrap();
         assert_eq!(
             json,
-            r#"[7,"completed","https","GET","api.example.com",443,"/v1/users","page=2",200,"json","Safari",1.5,42,0,1024,false,"HTTP/2","intercepted"]"#
+            r#"[7,"completed","https","GET","api.example.com",443,"/v1/users","page=2",200,"json","Safari",1.5,42,0,1024,false,"HTTP/2","intercepted","GetUser"]"#
         );
     }
 }

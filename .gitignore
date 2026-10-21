@@ -22,3 +22,7 @@ apps/desktop/src-tauri/gen/schemas/
 .env
 .env.local
 *.log
+
+# Playwright
+apps/desktop/ui/test-results/
+apps/desktop/ui/playwright-report/

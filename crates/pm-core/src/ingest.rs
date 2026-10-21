@@ -5,8 +5,8 @@
 //! Ids are allocated and Started events sent under one mutex, so the channel
 //! carries flows in id order and the store can append without reordering.
 
-use std::sync::Weak;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, SyncSender};
+use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
@@ -26,6 +26,12 @@ pub(crate) enum FlowEvent {
         id: FlowId,
         status: u16,
         content_kind: ContentKind,
+    },
+    /// Body detection finished (or improved on the header's guess).
+    Content {
+        id: FlowId,
+        content_kind: ContentKind,
+        graphql_op: Option<Arc<str>>,
     },
     Progress {
         id: FlowId,

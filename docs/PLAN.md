@@ -263,19 +263,23 @@ Every body can be viewed as **pretty, syntax-highlighted text**, as a **structur
 
 - **Content detection (in Rust, `pm-core/src/io/content.rs`).**
   - Detection uses the Content-Type header first, then magic-byte sniffing (PNG, JPEG, GIF, WebP, AVIF, ICO, PDF, gzip), then a text heuristic (JSON or XML by first non-space byte).
-  - The result is a `ContentKind` enum: Json, Xml, Html, FormUrlEncoded, Multipart, GraphQL, Javascript, Css, Text, Image{format}, Svg, Video, Audio, Font, Pdf, Binary.
-  - The kind is stored in the summary, so it drives the filter chips too.
+  - The result is a `ContentKind` enum: Json, Xml, Html, FormUrlEncoded, Multipart, GraphQL, Javascript, Css, Text, Image, Svg, Video, Audio, Font, Pdf, Binary.
+    - `ContentKind` stays fieldless (it is `Copy` and a plain string in `FlowRow`); the format within a kind (PNG vs WebP, MP4 vs WebM) is `BodyInfo.mime`, next to the per-body `BodyInfo.kind` (M3).
+    - A binary signature beats any header, so mislabelled bodies follow their bytes. Content-encoded bodies are sniffed after decoding their first 16 KB.
+  - The kind is stored in the summary, so it drives the filter chips too. The flow's kind is the request's for GraphQL operations and form posts, otherwise the response's, falling back to the request's.
+  - GraphQL requests (`{query, variables, operationName}`, batches, persisted queries, GET `?query=`) are recognised in Rust, and the operation name is stored in the summary (`FlowRow`'s last field).
 - **Decoding.** Bodies are decoded (gzip/br/deflate/zstd) on demand. Each inspector shows a "Decoded from br · 12.4 KB → 88.1 KB" note.
-- **Viewer registry (`ui/src/components/BodyViewer/`).** One component per kind. Each pane auto-selects the best viewer and offers a dropdown to override it.
+- **Viewer registry (`ui/src/components/BodyViewer/`).** One component per kind. Each pane auto-selects the best viewer and offers a dropdown to override it; the choice sticks per content kind. The viewers live in the Body tab's dropdown rather than as separate JSON/Form/Hex/Preview tabs.
   - **JSON:**
-    - A Pretty mode (CodeMirror 6 + lang-json with line numbers, folding, bracket matching and in-body search).
+    - A Pretty mode (CodeMirror 6 + lang-json with line numbers, folding, bracket matching and in-body search). Pretty re-indents the text without parsing it into values, so number literals (`1.50`, 64-bit ids) are kept exactly.
     - A **Tree** mode: a virtualised, collapsible tree showing type-coloured values, child counts, and right-click copy for the value, key path and JSON pointer.
     - A JSONPath/pointer filter box.
     - Parsing for large bodies happens in a Web Worker.
   - **XML / HTML:** pretty-printed with highlighting (lang-xml / lang-html). HTML also gets a **Preview** tab: a sandboxed `<iframe sandbox>` with scripts disabled and a CSP that blocks network loads.
+    - The previewed document is also stripped of every remote URL (DOMParser) before rendering, and the iframe carries the CSP as its `csp` attribute: Chromium's preload scanner fetches `<link>`/`<img>` URLs before a meta CSP applies, which matters for WebView2 (M12).
   - **Form URL-encoded:** a decoded key/value table (repeated keys kept in order), with a toggle to switch to raw.
   - **Multipart:** a list of parts showing each part's headers. Each part opens in the right sub-viewer, and file parts that are images render inline.
-  - **GraphQL:** detects `{query, variables, operationName}`. The query is shown highlighted (lang-graphql) next to a JSON viewer for the variables. The operation name appears in the URL column.
+  - **GraphQL:** detects `{query, variables, operationName}`. The query is shown highlighted next to a JSON viewer for the variables. The operation name appears in the URL column. The highlighting is a small CodeMirror stream mode rather than lang-graphql, which would pull in the `graphql` package.
   - **JS / CSS:** shown highlighted, with an optional "Beautify" toggle (prettier standalone, run lazily in a worker).
   - **Images:**
     - Handles PNG, JPEG, GIF (animated), WebP, AVIF, ICO and BMP, plus SVG rendered as `<img>` so its scripts can't run.
@@ -285,10 +289,11 @@ Every body can be viewed as **pretty, syntax-highlighted text**, as a **structur
   - **PDF:** an embedded preview.
   - **Fonts:** a sample-text preview.
   - **Hex:** a virtualised offset/hex/ASCII view for anything binary.
-  - **Raw:** the HTTP message with headers, highlighted with a custom lezer mode.
+  - **Raw:** the HTTP message with headers, highlighted with a custom CodeMirror stream mode.
 - **Delivery to the webview.**
   - A `pmbody://<store>/<flow>/<part>?decoded=1` URI scheme serves the bytes with their real Content-Type. Images, media and PDFs load directly with no base64 and no IPC JSON.
-  - The scheme handler sets `Content-Security-Policy` and `X-Content-Type-Options: nosniff`.
+  - The scheme handler sets `Content-Security-Policy` and `X-Content-Type-Options: nosniff`, answers single `Range` requests with 206 (WebKit needs this for media) and keeps the last few bodies in memory for repeated range reads. `max=N` serves only the head.
+  - Text viewers still load bytes over IPC (`get_body`, which gained `max`); "Save body to file…" is a `save_body` command using tauri-plugin-dialog from Rust.
 - **Large bodies.**
   - Above 2 MB, syntax highlighting falls back to plain text with a "Highlight anyway" button.
   - Above 20 MB, only the first 20 MB is loaded, with a "Load all" button and "Save body to file…".
@@ -304,7 +309,7 @@ Tokens are CSS variables set per `[data-theme]`. Pills use a tinted background w
   - Active: amber with a pulse. Paused: violet. Failed: red outline. Blocked and Tunnel: grey.
 - **URL parts:** scheme dim, host bright, path normal, query dim-accent.
 - **Selection:** orange.
-- **Theme:** dark first, with light mode in M9.
+- **Theme:** dark first, with light mode in M10. The body viewers already use tokens for both (`--syntax-*`, `--code-*`, `--checker-*`).
 
 ## Delivery workflow: one Claude session and one PR per milestone
 - **Repository.** M0 creates a new GitHub repository, private by default, called `proxymate`, with `gh repo create`. It's created under the user's account, and the name and visibility are confirmed when M0 starts.
@@ -362,6 +367,8 @@ Tokens are CSS variables set per `[data-theme]`. Pills use a tinted background w
   - Golden-file tests for HAR and cURL, plus a round trip of a Chrome DevTools HAR.
   - Content-detection unit tests per ContentKind, covering header-less bodies, mislabelled Content-Types and compressed bodies.
 - **Body viewers:** a pm-testkit "zoo" endpoint serves one fixture per ContentKind (JSON, nested and 10 MB JSON, XML, HTML, form, multipart with an image part, GraphQL, JS, CSS, PNG, animated GIF, WebP, SVG with an embedded script, MP4, PDF, font, random binary). Playwright snapshots each viewer in dark and light. The SVG and HTML previews must not execute scripts or make network requests.
+  - The fixtures and `zoo.json` live in `crates/pm-testkit/fixtures/zoo/`. Playwright runs against the UI's mock backend serving the same fixtures (`?zoo`), in WebKit (the app's engine); the preview-safety checks also run in Chromium.
+  - Snapshot baselines are committed for macOS only, so CI on Linux runs the same tests with pixel comparison off. Linux baselines (generated in the Playwright Docker image) are a follow-up.
 - **Performance:**
   - Criterion bench: ingest 100k flows in under 2 s, and refilter or sort in under 10 ms.
   - The UI scrolls 100k rows at 60 fps (checked in the Performance panel).

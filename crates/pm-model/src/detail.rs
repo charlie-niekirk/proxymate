@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use crate::flow::FlowId;
+use crate::flow::{ContentKind, FlowId};
 use crate::tls::{Timing, TlsInfo};
 
 /// One header line. h1 names arrive lower-cased from the parser; the proxy
@@ -73,6 +73,13 @@ pub struct BodyInfo {
     pub encoding: Option<String>,
     /// False while the body is still streaming, or if it was cut short.
     pub complete: bool,
+    /// What the body holds, from its `Content-Type`, magic bytes and a text
+    /// heuristic. `None` until the body has been seen.
+    pub kind: ContentKind,
+    /// The MIME type the body is served as for previews (`pmbody://`): the
+    /// sniffed format when the bytes contradict the header, else the
+    /// header's type without parameters.
+    pub mime: Option<String>,
 }
 
 /// Everything about one flow beyond its summary: heads, body metadata and

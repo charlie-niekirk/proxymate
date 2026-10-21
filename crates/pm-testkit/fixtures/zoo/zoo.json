@@ -1,0 +1,31 @@
+{
+  "comment": "Body-viewer zoo: one fixture per ContentKind. Served by pm-testkit (`/zoo/<name>`) and by the UI's mock backend. See README.md.",
+  "fixtures": [
+    { "name": "json", "file": "nested.json", "type": "application/json; charset=utf-8", "kind": "json" },
+    { "name": "json-gzip", "file": "nested.json", "type": "application/json", "encoding": "gzip", "kind": "json" },
+    { "name": "json-headerless", "file": "nested.json", "kind": "json" },
+    { "name": "json-10mb", "generate": "big-json", "type": "application/json", "kind": "json" },
+    { "name": "xml", "file": "feed.xml", "type": "application/atom+xml", "kind": "xml" },
+    { "name": "html", "file": "page.html", "type": "text/html; charset=utf-8", "kind": "html" },
+    { "name": "form", "method": "POST", "request": { "file": "form.txt", "type": "application/x-www-form-urlencoded" }, "status": 201, "file": "ok.json", "type": "application/json", "kind": "formurlencoded" },
+    { "name": "multipart", "method": "POST", "request": { "file": "upload.multipart", "type": "multipart/form-data; boundary=----ProxymateZooBoundary7MA4YWxk" }, "status": 201, "file": "ok.json", "type": "application/json", "kind": "multipart" },
+    { "name": "graphql", "method": "POST", "request": { "file": "graphql-request.json", "type": "application/json" }, "file": "graphql-response.json", "type": "application/graphql-response+json", "kind": "graphql", "graphql_op": "GetRepository" },
+    { "name": "js", "file": "app.min.js", "type": "text/javascript", "kind": "javascript" },
+    { "name": "css", "file": "styles.min.css", "type": "text/css", "kind": "css" },
+    { "name": "text", "file": "notes.txt", "type": "text/plain; charset=utf-8", "kind": "text" },
+    { "name": "png", "file": "image.png", "type": "image/png", "kind": "image" },
+    { "name": "jpeg-exif", "file": "photo.jpg", "type": "image/jpeg", "kind": "image" },
+    { "name": "gif-animated", "file": "animated.gif", "type": "image/gif", "kind": "image" },
+    { "name": "webp", "file": "image.webp", "type": "image/webp", "kind": "image" },
+    { "name": "avif", "file": "image.avif", "type": "image/avif", "kind": "image" },
+    { "name": "ico", "file": "favicon.ico", "type": "image/x-icon", "kind": "image" },
+    { "name": "bmp", "file": "image.bmp", "type": "image/bmp", "kind": "image" },
+    { "name": "png-mislabelled", "file": "image.png", "type": "application/json", "kind": "image" },
+    { "name": "svg-script", "file": "logo.svg", "type": "image/svg+xml", "kind": "svg" },
+    { "name": "mp4", "file": "clip.mp4", "type": "video/mp4", "kind": "video" },
+    { "name": "mp3", "file": "tone.mp3", "type": "audio/mpeg", "kind": "audio" },
+    { "name": "pdf", "file": "document.pdf", "type": "application/pdf", "kind": "pdf" },
+    { "name": "font", "file": "font.woff2", "type": "font/woff2", "kind": "font" },
+    { "name": "binary", "file": "random.bin", "type": "application/octet-stream", "kind": "binary" }
+  ]
+}

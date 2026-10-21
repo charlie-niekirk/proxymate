@@ -1,4 +1,5 @@
 import type {
+  BodyPart,
   CaInfo,
   ContentGroup,
   ContentKind,
@@ -13,15 +14,25 @@ import type {
 } from "@/bindings";
 import type { Backend } from "@/lib/backend";
 
+/** A fully specified mock flow with bodies (the dev zoo, see `dev/zoo.ts`). */
+export interface MockFlow {
+  row: FlowRow_Serialize;
+  detail: FlowDetail_Serialize;
+  bodies: Record<BodyPart, { raw: Uint8Array; decoded: Uint8Array }>;
+}
+
 /**
  * Browser-only stand-in for the engine, so the UI runs under plain Vite and in
  * tests. Static data, no live traffic, no sorting. The real logic is in Rust.
+ * With `fixtures`, those flows replace the `count` synthetic ones.
  */
-export function createMockBackend(count: number): Backend {
+export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>): Backend {
   let recording = true;
   const status = (): ProxyStatus_Serialize => ({ listening: "127.0.0.1:9090", error: null, recording });
   const hosts = ["api.github.com", "www.google.com", "api.stripe.com", "slack.com", "localhost", "i.ytimg.com"];
   const kinds: ContentKind[] = ["json", "html", "javascript", "image", "css", "xml", "graphql", "none"];
+  const full = new Map<number, MockFlow>();
+  const urls = new Map<string, string>();
   const methods = ["GET", "GET", "GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"];
   const statuses = [200, 200, 200, 201, 204, 304, 404, 500];
   const now = Date.now();
@@ -51,7 +62,13 @@ export function createMockBackend(count: number): Backend {
       false,
       https && !connect && i % 3 !== 0 ? "HTTP/2" : "HTTP/1.1",
       tunnel ? "passthrough" : pinned ? "likely_pinned" : https ? "intercepted" : "none",
+      !connect && kinds[(i * 5) % kinds.length] === "graphql" ? "GetViewer" : null,
     ];
+  });
+  const ready = (fixtures ?? Promise.resolve(null)).then((zoo) => {
+    if (!zoo) return;
+    flows = zoo.map((f) => f.row);
+    for (const f of zoo) full.set(f.row[0], f);
   });
   let ssl: SslSettings = { include: ["*"], exclude: ["*.apple.com", "ocsp*"], bypass: [], insecure_upstream: [] };
   const ca: CaInfo = {
@@ -65,8 +82,12 @@ export function createMockBackend(count: number): Backend {
   const views = new Map<number, number[]>();
   let nextView = 0;
 
-  const groupOf = (k: ContentKind): ContentGroup =>
-    k === "javascript" ? "js" : k === "html" ? "document" : k === "image" ? "media" : k === "none" ? "other" : (k as ContentGroup);
+  const GROUPS: Record<ContentKind, ContentGroup> = {
+    none: "other", json: "json", xml: "xml", html: "document", formurlencoded: "form", multipart: "form",
+    graphql: "graphql", javascript: "js", css: "css", text: "document", image: "media", svg: "media",
+    video: "media", audio: "media", font: "media", pdf: "document", binary: "other",
+  };
+  const groupOf = (k: ContentKind): ContentGroup => GROUPS[k];
 
   function refilter(filter: FilterSpec_Deserialize): number[] {
     const text = filter.text.trim().toLowerCase();
@@ -89,33 +110,39 @@ export function createMockBackend(count: number): Backend {
 
   return {
     async createView(filter: FilterSpec_Deserialize) {
+      await ready;
       const start = performance.now();
       const view = ++nextView;
       views.set(view, refilter(filter));
       return info(view, start);
     },
     async setFilter(view, filter) {
+      await ready;
       const start = performance.now();
       views.set(view, refilter(filter));
       return info(view, start);
     },
     async setSort(view) {
+      await ready;
       return info(view, performance.now());
     },
     async dropView(view) {
+      await ready;
       views.delete(view);
     },
     async getRows(view, start, n) {
+      await ready;
       const ids = views.get(view) ?? [];
       return { view, start, len: ids.length, rows: ids.slice(start, start + n).map((id) => flows[id]!) };
     },
     async getFlow(id): Promise<FlowSummary_Serialize | null> {
+      await ready;
       const f = flows[id];
       if (!f) return null;
       return {
         id: f[0], state: f[1], scheme: f[2], method: f[3], host: f[4], port: f[5], path: f[6], query: f[7],
         status: f[8], content_kind: f[9], client: f[10], started_at_ms: f[11], duration_ms: f[12],
-        req_size: f[13], resp_size: f[14], edited: f[15], http_version: f[16], tls: f[17],
+        req_size: f[13], resp_size: f[14], edited: f[15], http_version: f[16], tls: f[17], graphql_op: f[18],
       };
     },
     async subscribe(view, onDelta: (d: ViewDelta) => void) {
@@ -123,6 +150,9 @@ export function createMockBackend(count: number): Backend {
       setTimeout(() => onDelta({ view, seq: 1, total: flows.length, len, appended: 0, changed: [], structural: true }), 0);
     },
     async getFlowDetail(id): Promise<FlowDetail_Serialize | null> {
+      await ready;
+      const fixture = full.get(id);
+      if (fixture) return fixture.detail;
       const f = flows[id];
       if (!f) return null;
       const body = mockBody(f[9]);
@@ -162,8 +192,16 @@ export function createMockBackend(count: number): Backend {
             { name: "content-length", value: String(body.length) },
           ],
         },
-        request_body: { size: 0, captured: 0, truncated: false, encoding: null, complete: true },
-        response_body: { size: body.length, captured: body.length, truncated: false, encoding: null, complete: true },
+        request_body: { size: 0, captured: 0, truncated: false, encoding: null, complete: true, kind: "none", mime: null },
+        response_body: {
+          size: body.length,
+          captured: body.length,
+          truncated: false,
+          encoding: null,
+          complete: true,
+          kind: f[9] === "json" ? "json" : "text",
+          mime: f[9] === "json" ? "application/json" : "text/plain",
+        },
         error: f[17] === "likely_pinned" ? "The client rejected the Proxymate certificate. It sent an unknown_ca alert." : null,
         tls,
         timing: {
@@ -176,40 +214,76 @@ export function createMockBackend(count: number): Backend {
         },
       };
     },
-    async getBody(id, part) {
+    async getBody(id, part, decoded, max) {
+      await ready;
+      const fixture = full.get(id);
       const f = flows[id];
-      const bytes = f && part === "response" ? new TextEncoder().encode(mockBody(f[9])) : new Uint8Array();
-      return bytes.buffer as ArrayBuffer;
+      let bytes = fixture
+        ? fixture.bodies[part][decoded ? "decoded" : "raw"]
+        : f && part === "response"
+          ? new TextEncoder().encode(mockBody(f[9]))
+          : new Uint8Array();
+      if (max != null) bytes = bytes.subarray(0, max);
+      return bytes.slice().buffer as ArrayBuffer;
+    },
+    async bodyUrl(id, part, decoded) {
+      await ready;
+      const key = `${id}/${part}/${decoded}`;
+      const cached = urls.get(key);
+      if (cached) return cached;
+      const fixture = full.get(id);
+      const info = fixture?.detail[part === "request" ? "request_body" : "response_body"];
+      const bytes = new Uint8Array(await this.getBody(id, part, decoded));
+      const url = URL.createObjectURL(new Blob([bytes], { type: info?.mime ?? "application/octet-stream" }));
+      urls.set(key, url);
+      return url;
+    },
+    async saveBody(id, part, decoded, fileName) {
+      await ready;
+      const a = document.createElement("a");
+      a.href = await this.bodyUrl(id, part, decoded);
+      a.download = fileName;
+      a.click();
+      return fileName;
     },
     async clearFlows() {
+      await ready;
       flows = [];
       for (const view of views.keys()) views.set(view, []);
     },
     async setRecording(on) {
+      await ready;
       recording = on;
       return status();
     },
     async getProxyStatus() {
+      await ready;
       return status();
     },
     async getCaInfo() {
+      await ready;
       return ca;
     },
     async regenerateCa() {
+      await ready;
       return ca;
     },
     async getSslSettings() {
+      await ready;
       return ssl;
     },
     async setSslSettings(settings) {
+      await ready;
       ssl = settings;
       return ssl;
     },
     async addSslBypass(host) {
+      await ready;
       if (!ssl.bypass.includes(host)) ssl = { ...ssl, bypass: [...ssl.bypass, host] };
       return ssl;
     },
     async setInsecureUpstream(host, allow) {
+      await ready;
       const rest = ssl.insecure_upstream.filter((h) => h !== host);
       ssl = { ...ssl, insecure_upstream: allow ? [...rest, host] : rest };
       return ssl;

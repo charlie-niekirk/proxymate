@@ -65,13 +65,46 @@ pub fn get_flow_detail(engine: EngineState<'_>, id: FlowId) -> Result<Option<Flo
 
 /// A body's bytes as a raw `ArrayBuffer`, not JSON. With `decoded`, a
 /// content-encoded body is decoded first; decoding errors are returned.
+/// With `max`, only the first `max` bytes are sent.
 #[tauri::command]
 #[specta::specta]
-pub fn get_body(engine: EngineState<'_>, id: FlowId, part: BodyPart, decoded: bool) -> Result<RawBytes, String> {
+pub fn get_body(
+    engine: EngineState<'_>,
+    id: FlowId,
+    part: BodyPart,
+    decoded: bool,
+    max: Option<u64>,
+) -> Result<RawBytes, String> {
+    let max = max.map(|m| usize::try_from(m).unwrap_or(usize::MAX));
     engine
-        .body(id, part, decoded)
+        .body_head(id, part, decoded, max)
         .map(|body| RawBytes(tauri::ipc::Response::new(body.bytes)))
         .map_err(|e| e.to_string())
+}
+
+/// Asks where to save a body (decoded, with `decoded`) and writes it there.
+/// Returns the path, or `None` if the user cancelled.
+#[tauri::command]
+#[specta::specta]
+pub async fn save_body(
+    app: tauri::AppHandle,
+    engine: EngineState<'_>,
+    id: FlowId,
+    part: BodyPart,
+    decoded: bool,
+    file_name: String,
+) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog().file().set_file_name(&file_name).save_file(move |path| {
+        let _ = tx.send(path);
+    });
+    let Some(path) = rx.await.ok().flatten() else {
+        return Ok(None);
+    };
+    let path = path.into_path().map_err(|e| e.to_string())?;
+    engine.save_body(id, part, decoded, &path).map_err(|e| e.to_string())?;
+    Ok(Some(path.display().to_string()))
 }
 
 #[tauri::command]

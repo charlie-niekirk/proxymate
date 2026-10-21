@@ -125,6 +125,7 @@ mod tests {
             edited: false,
             http_version: HttpVersion::Http11,
             tls: TlsStatus::None,
+            graphql_op: None,
         }
     }
 

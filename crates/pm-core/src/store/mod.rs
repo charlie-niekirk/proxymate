@@ -90,6 +90,14 @@ impl Store {
                     f.status = Some(status);
                     f.content_kind = content_kind;
                 }),
+                FlowEvent::Content {
+                    id,
+                    content_kind,
+                    graphql_op,
+                } => self.modify(id, first_new, |f| {
+                    f.content_kind = content_kind;
+                    f.graphql_op = graphql_op;
+                }),
                 FlowEvent::Progress {
                     id,
                     req_size,

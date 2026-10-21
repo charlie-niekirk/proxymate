@@ -12,6 +12,8 @@ use pm_model::{BodyPart, ContentKind, FlowDetail, FlowId, FlowState, ResponseHea
 
 use crate::Engine;
 use crate::ingest::FlowEvent;
+use crate::io::content::{self, GRAPHQL_MAX, SNIFF_LEN};
+use crate::io::decode;
 use crate::store::{Capture, SegmentStore, StoredDetail};
 
 /// Size updates for a streaming body go out at most this often.
@@ -49,6 +51,12 @@ struct LiveState {
     request_sent: Option<Instant>,
     /// When the response head arrived; transfer time counts from here.
     response_at: Option<Instant>,
+    /// The response's kind going by its `Content-Type`, until its body has
+    /// been seen.
+    response_hint: ContentKind,
+    /// Set once the request body has been through detection.
+    request_detected: bool,
+    graphql_op: Option<Arc<str>>,
     /// Set once the flow has finished and been persisted.
     finished: Option<Arc<StoredDetail>>,
 }
@@ -68,6 +76,9 @@ impl FlowRecorder {
                 last_progress: now,
                 request_sent: None,
                 response_at: None,
+                response_hint: ContentKind::None,
+                request_detected: false,
+                graphql_op: None,
                 finished: None,
             }),
         });
@@ -96,21 +107,24 @@ impl FlowRecorder {
     }
 
     /// Records the response head; the status and content kind reach the
-    /// flow table on the next ingest batch.
+    /// flow table on the next ingest batch. `content_kind` is the header's
+    /// guess; the body is sniffed once it has finished.
     pub fn response(&self, head: ResponseHead, content_kind: ContentKind) {
         let status = head.status;
-        {
+        let content_kind = {
             let mut state = self.flow.state.lock();
             if state.finished.is_some() {
                 return;
             }
+            state.response_hint = content_kind;
             let now = Instant::now();
             let sent = state.request_sent.unwrap_or(self.flow.started);
             state.detail.timing.ttfb_ms = Some(ms(now - sent));
             state.response_at = Some(now);
             state.detail.response_body.encoding = content_encoding(&head.headers);
             state.detail.response = Some(head);
-        }
+            content::flow_kind(state.detail.request_body.kind, content_kind)
+        };
         self.send(FlowEvent::Response {
             id: self.flow.id,
             status,
@@ -148,8 +162,27 @@ impl FlowRecorder {
     pub fn body_end(&self, part: BodyPart, end: BodyEnd) {
         match part {
             BodyPart::Request => {
-                let mut state = self.flow.state.lock();
-                state.detail.request_body.complete = end == BodyEnd::Complete;
+                let Some(engine) = self.flow.engine.upgrade() else {
+                    return;
+                };
+                let event = {
+                    let mut state = self.flow.state.lock();
+                    if state.finished.is_some() {
+                        return;
+                    }
+                    state.detail.request_body.complete = end == BodyEnd::Complete;
+                    state.detect_request(&engine.details().segments);
+                    let response = match state.detail.response_body.kind {
+                        ContentKind::None => state.response_hint,
+                        kind => kind,
+                    };
+                    FlowEvent::Content {
+                        id: self.flow.id,
+                        content_kind: content::flow_kind(state.detail.request_body.kind, response),
+                        graphql_op: state.graphql_op.clone(),
+                    }
+                };
+                engine.ingest().send(event);
             }
             BodyPart::Response => match end {
                 BodyEnd::Complete => self.finish(FlowState::Completed, None),
@@ -192,12 +225,23 @@ impl FlowRecorder {
         };
         let details = engine.details();
         let duration_ms = self.flow.started.elapsed().as_millis().min(u32::MAX as u128) as u32;
-        let (stored, req_size, resp_size) = {
+        let (stored, req_size, resp_size, content) = {
             let mut state = self.flow.state.lock();
             if state.finished.is_some() {
                 return;
             }
             let state = &mut *state;
+            let content = (end_state != FlowState::Tunnel).then(|| {
+                if !state.request_detected {
+                    state.detect_request(&details.segments);
+                }
+                state.detect_response();
+                FlowEvent::Content {
+                    id: self.flow.id,
+                    content_kind: content::flow_kind(state.detail.request_body.kind, state.detail.response_body.kind),
+                    graphql_op: state.graphql_op.clone(),
+                }
+            });
             if end_state == FlowState::Completed {
                 state.detail.response_body.complete = true;
             }
@@ -213,9 +257,12 @@ impl FlowRecorder {
                 response_body: state.response.finish(&details.segments),
             });
             state.finished = Some(stored.clone());
-            (stored, state.request.size, state.response.size)
+            (stored, state.request.size, state.response.size, content)
         };
         let _ = details.persist(self.flow.id, stored);
+        if let Some(content) = content {
+            engine.ingest().send(content);
+        }
         engine.ingest().send(FlowEvent::Finished {
             id: self.flow.id,
             state: end_state,
@@ -263,6 +310,60 @@ impl LiveFlow {
 }
 
 impl LiveState {
+    /// Sniffs the request body, and recognises GraphQL operations (which
+    /// can need the whole, normally small, body).
+    fn detect_request(&mut self, segments: &SegmentStore) {
+        self.request_detected = true;
+        let request = &self.detail.request;
+        let content_type = header_value(&request.headers, "content-type");
+        let query = request.url.split_once('?').map_or("", |(_, q)| q);
+        let query = query.split('#').next().unwrap_or_default();
+        let capture = &self.request;
+        let whole = if capture.captured as usize <= GRAPHQL_MAX && !capture.truncated {
+            capture.snapshot(segments).ok()
+        } else {
+            None
+        };
+        let encoding = self.detail.request_body.encoding.as_deref();
+        let decoded = |bytes: &[u8], limit: usize| match encoding {
+            Some(encoding) => decode::decode_prefix(encoding, bytes, limit),
+            None => bytes[..bytes.len().min(limit)].to_vec(),
+        };
+        let body = match &whole {
+            Some(bytes) => decoded(bytes, GRAPHQL_MAX),
+            None => decoded(&capture.head, SNIFF_LEN),
+        };
+        let detected = content::detect(content_type, &body[..body.len().min(SNIFF_LEN)]);
+        let graphql = whole
+            .is_some()
+            .then(|| content::graphql_request(content_type, &body, query))
+            .flatten();
+        let info = &mut self.detail.request_body;
+        info.kind = if graphql.is_some() {
+            ContentKind::GraphQl
+        } else {
+            detected.kind
+        };
+        info.mime = detected.mime;
+        self.graphql_op = graphql.and_then(|g| g.operation).map(Arc::from);
+    }
+
+    fn detect_response(&mut self) {
+        let Some(response) = &self.detail.response else {
+            return;
+        };
+        let content_type = header_value(&response.headers, "content-type");
+        let head = &self.response.head;
+        let head = match &self.detail.response_body.encoding {
+            Some(encoding) => decode::decode_prefix(encoding, head, SNIFF_LEN),
+            None => head.clone(),
+        };
+        let detected = content::detect(content_type, &head);
+        let info = &mut self.detail.response_body;
+        info.kind = detected.kind;
+        info.mime = detected.mime;
+    }
+
     fn capture(&self, part: BodyPart) -> &Capture {
         match part {
             BodyPart::Request => &self.request,
@@ -286,6 +387,13 @@ fn fill_body_info(info: &mut pm_model::BodyInfo, capture: &Capture) {
     info.size = capture.size;
     info.captured = capture.captured;
     info.truncated = capture.truncated;
+}
+
+fn header_value<'a>(headers: &'a [pm_model::Header], name: &str) -> Option<&'a str> {
+    headers
+        .iter()
+        .find(|h| h.name.eq_ignore_ascii_case(name))
+        .map(|h| h.value.as_str())
 }
 
 /// The `Content-Encoding` header, if any, lower-cased.

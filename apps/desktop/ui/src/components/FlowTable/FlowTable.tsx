@@ -191,7 +191,7 @@ function RowCells({ row }: { row: Row }) {
         <StateDot state={row.state} />
       </div>
       <div className={cell}>
-        <UrlText row={row} />
+        <UrlText row={row} operation={row.graphqlOp} />
       </div>
       <div className={cn(cell, "truncate font-sans text-xs")}>
         <span className="truncate">{row.client ?? "—"}</span>

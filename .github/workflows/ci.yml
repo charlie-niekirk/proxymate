@@ -53,3 +53,19 @@ jobs:
       - run: npm run lint
       - run: npm run test
       - run: npm run build
+      - name: Install Playwright browsers
+        run: npx -w @proxymate/ui playwright install --with-deps webkit chromium
+      # Viewer rendering and preview-safety checks against the zoo fixtures.
+      # Snapshot baselines are macOS-only for now, so Linux skips the pixel diffs.
+      - name: Playwright
+        run: npm run e2e -w @proxymate/ui
+        env:
+          PM_E2E_IGNORE_SNAPSHOTS: "1"
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            apps/desktop/ui/playwright-report/
+            apps/desktop/ui/test-results/
+          retention-days: 7

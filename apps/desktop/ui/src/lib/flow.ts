@@ -20,6 +20,8 @@ export interface Row {
   edited: boolean;
   httpVersion: HttpVersion;
   tls: TlsStatus;
+  /** GraphQL operation name, shown in the URL column. */
+  graphqlOp: string | null;
 }
 
 export function decodeRow(t: FlowRow_Serialize): Row {
@@ -42,6 +44,7 @@ export function decodeRow(t: FlowRow_Serialize): Row {
     edited: t[15],
     httpVersion: t[16],
     tls: t[17],
+    graphqlOp: t[18],
   };
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { bodyText, displayHeaderName, headerValue, jsonTokens, prettyJson, queryPairs, rawMessage } from "@/lib/http";
+import { bodyText, displayHeaderName, headerValue, queryPairs, rawMessage } from "@/lib/http";
 
 describe("http helpers", () => {
   it("title-cases lower-case header names only", () => {
@@ -27,17 +27,6 @@ describe("http helpers", () => {
     expect(bodyText(new TextEncoder().encode("héllo"))).toBe("héllo");
     expect(bodyText(new Uint8Array([0x1f, 0x8b, 0x08, 0x00]))).toBeNull();
     expect(bodyText(new Uint8Array([0xff, 0xfe, 0x41]))).toBeNull();
-  });
-
-  it("pretty-prints JSON and tokenises it losslessly", () => {
-    const pretty = prettyJson('{"a":[1,true,null],"b":"x:y"}')!;
-    expect(pretty).toBe('{\n  "a": [\n    1,\n    true,\n    null\n  ],\n  "b": "x:y"\n}');
-    const tokens = jsonTokens(pretty);
-    expect(tokens.map((t) => t.text).join("")).toBe(pretty);
-    expect(tokens.filter((t) => t.kind === "key").map((t) => t.text)).toEqual(['"a"', '"b"']);
-    expect(tokens.find((t) => t.kind === "string")?.text).toBe('"x:y"');
-    expect(tokens.filter((t) => t.kind === "literal").map((t) => t.text)).toEqual(["true", "null"]);
-    expect(prettyJson("not json")).toBeNull();
   });
 
   it("rebuilds a raw message", () => {

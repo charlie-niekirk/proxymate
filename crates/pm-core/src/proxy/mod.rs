@@ -246,6 +246,7 @@ fn record_request(engine: &Arc<Engine>, req: &Request<Incoming>, origin: Origin)
         edited: false,
         http_version: version(req.version()),
         tls: origin.tls,
+        graphql_op: None,
     };
     let headers = headers(req.headers());
     let detail = FlowDetail {

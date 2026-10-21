@@ -44,6 +44,7 @@ pub fn pattern_byte(i: u64) -> u8 {
 /// - `/bytes/{n}`: `n` pattern bytes, generated while streaming.
 /// - `/echo`: the request body back, with the request's content type.
 /// - `/version`: the request's HTTP version, e.g. `HTTP/2.0`.
+/// - `/zoo`: the zoo fixture names; `/zoo/{name}`: that fixture (see [`crate::zoo`]).
 pub struct Upstream {
     addr: SocketAddr,
     task: JoinHandle<()>,
@@ -115,6 +116,27 @@ pub(crate) async fn route(req: Request<Incoming>) -> Result<Response<TestBody>, 
         ["bytes", n] => match n.parse() {
             Ok(len) => with_type(PatternBody { sent: 0, len }.boxed_unsync(), "application/octet-stream"),
             Err(_) => status_only(StatusCode::BAD_REQUEST),
+        },
+        ["zoo"] => {
+            let names: Vec<&str> = crate::zoo::fixtures().iter().map(|f| f.name.as_str()).collect();
+            with_type(full(serde_json::to_vec(&names).expect("names")), "application/json")
+        }
+        ["zoo", name] => match crate::zoo::fixture(name) {
+            Some(fixture) => {
+                // Drain the request body, as a real endpoint would.
+                let _ = req.into_body().collect().await;
+                let mut response = Response::new(full(fixture.response_body()));
+                *response.status_mut() = StatusCode::from_u16(fixture.status).unwrap_or(StatusCode::OK);
+                let headers = response.headers_mut();
+                if let Some(ct) = &fixture.content_type {
+                    headers.insert(header::CONTENT_TYPE, ct.parse().expect("valid content type"));
+                }
+                if let Some(coding) = &fixture.encoding {
+                    headers.insert(header::CONTENT_ENCODING, coding.parse().expect("valid coding"));
+                }
+                response
+            }
+            None => status_only(StatusCode::NOT_FOUND),
         },
         ["echo"] => {
             let content_type = req.headers().get(header::CONTENT_TYPE).cloned();

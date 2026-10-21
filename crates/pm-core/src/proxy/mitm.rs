@@ -396,6 +396,7 @@ fn record_connect(
         edited: false,
         http_version: target.head.version,
         tls,
+        graphql_op: None,
     };
     let detail = FlowDetail {
         id: 0,

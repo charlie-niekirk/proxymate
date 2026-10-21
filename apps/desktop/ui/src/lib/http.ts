@@ -34,40 +34,6 @@ export function bodyText(bytes: Uint8Array): string | null {
   }
 }
 
-/** Pretty-printed JSON, or null if `text` isn't JSON. */
-export function prettyJson(text: string): string | null {
-  const start = text.trimStart()[0];
-  if (start !== "{" && start !== "[") return null;
-  try {
-    return JSON.stringify(JSON.parse(text), null, 2);
-  } catch {
-    return null;
-  }
-}
-
-export type JsonTokenKind = "key" | "string" | "number" | "literal" | "punct";
-
-/** Splits pretty-printed JSON into coloured runs. Whitespace stays in "punct". */
-export function jsonTokens(pretty: string): { text: string; kind: JsonTokenKind }[] {
-  const out: { text: string; kind: JsonTokenKind }[] = [];
-  const re = /("(?:[^"\\]|\\.)*")(\s*:)?|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|(true|false|null)/g;
-  let last = 0;
-  for (let m = re.exec(pretty); m !== null; m = re.exec(pretty)) {
-    if (m.index > last) out.push({ text: pretty.slice(last, m.index), kind: "punct" });
-    if (m[1] !== undefined) {
-      out.push({ text: m[1], kind: m[2] ? "key" : "string" });
-      if (m[2]) out.push({ text: m[2], kind: "punct" });
-    } else if (m[3] !== undefined) {
-      out.push({ text: m[3], kind: "number" });
-    } else {
-      out.push({ text: m[0], kind: "literal" });
-    }
-    last = re.lastIndex;
-  }
-  if (last < pretty.length) out.push({ text: pretty.slice(last), kind: "punct" });
-  return out;
-}
-
 /**
  * An HTTP message rebuilt from its parsed parts, for the Raw tab. Not the
  * exact wire bytes: header case is normalised and framing may differ.

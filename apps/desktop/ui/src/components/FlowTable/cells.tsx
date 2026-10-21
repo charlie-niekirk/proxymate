@@ -61,11 +61,30 @@ export function StateDot({ state }: { state: FlowState }) {
   );
 }
 
-export function UrlText({ row, className }: { row: Pick<Row, "scheme" | "host" | "port" | "path" | "query">; className?: string }) {
+export function UrlText({
+  row,
+  operation,
+  className,
+}: {
+  row: Pick<Row, "scheme" | "host" | "port" | "path" | "query">;
+  /** GraphQL operation name, shown as a badge before the URL. */
+  operation?: string | null;
+  className?: string;
+}) {
   const u = urlParts(row);
   const part = cn(ON_SELECTED);
   return (
     <span className={cn("truncate font-mono", className)}>
+      {operation && (
+        <span
+          className={cn(pillBase, "mr-1.5 align-[1px] font-sans tracking-normal")}
+          style={pillStyle("graphql")}
+          title={`GraphQL operation ${operation}`}
+          data-testid="graphql-op"
+        >
+          {operation}
+        </span>
+      )}
       <span className={part} style={{ color: "var(--url-scheme)" }}>
         {u.scheme}
       </span>
