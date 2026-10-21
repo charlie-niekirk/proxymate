@@ -4,7 +4,7 @@
 use std::sync::{Arc, Weak};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use pm_model::{ContentKind, FlowState, FlowSummary, Scheme};
+use pm_model::{ContentKind, FlowState, FlowSummary, HttpVersion, Scheme, TlsStatus};
 
 use crate::Engine;
 
@@ -212,6 +212,16 @@ impl Generator {
             req_size,
             resp_size: 0,
             edited: self.below(50) == 0,
+            http_version: if scheme.is_tls() && self.below(3) > 0 {
+                HttpVersion::Http2
+            } else {
+                HttpVersion::Http11
+            },
+            tls: if scheme.is_tls() {
+                TlsStatus::Intercepted
+            } else {
+                TlsStatus::None
+            },
         }
     }
 

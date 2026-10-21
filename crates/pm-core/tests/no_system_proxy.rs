@@ -26,6 +26,7 @@ fn proxy_environment_variables_are_ignored() {
         let upstream = Upstream::start().await;
         let engine = Engine::with_config(EngineConfig {
             data_dir: Some(std::env::temp_dir().join("proxymate-tests")),
+            ..Default::default()
         });
         let proxy = engine
             .start_proxy(ProxyConfig {

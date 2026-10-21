@@ -19,7 +19,7 @@ use crate::recorder::LiveFlow;
 const CACHE_ENTRIES: u64 = 2_048;
 
 /// What is persisted per finished flow.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct StoredDetail {
     pub detail: FlowDetail,
     pub request_body: BlobRef,

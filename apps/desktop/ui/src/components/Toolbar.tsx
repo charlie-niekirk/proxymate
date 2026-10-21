@@ -7,12 +7,12 @@ import {
   OctagonPause,
   Plus,
   Settings,
-  ShieldCheck,
   Trash2,
   type LucideIcon,
 } from "lucide-react";
 
 import type { ProxyStatus_Serialize } from "@/bindings";
+import { CertificateMenu } from "@/components/CertificateMenu";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -79,7 +79,7 @@ export function Toolbar() {
       <ToolButton icon={OctagonPause} label="Breakpoints" milestone="M5" />
       <Separator orientation="vertical" className="mx-1 !h-5" />
       <ToolButton icon={Globe} label="System proxy" milestone="M4" />
-      <ToolButton icon={ShieldCheck} label="Certificate" milestone="M2" />
+      <CertificateMenu />
       <ToolButton icon={Bot} label="MCP server" milestone="M7" />
       <ToolButton icon={Settings} label="Settings" milestone="M10" />
     </header>

@@ -3,6 +3,9 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
+use crate::detail::HttpVersion;
+use crate::tls::TlsStatus;
+
 /// Stable identifier of a flow within one live store or saved session.
 ///
 /// Ids are assigned monotonically and never reused, so the UI can key caches
@@ -112,6 +115,9 @@ pub struct FlowSummary {
     pub resp_size: u64,
     /// True if any rule modified the flow.
     pub edited: bool,
+    /// Protocol the client spoke (mirrored upstream for HTTPS).
+    pub http_version: HttpVersion,
+    pub tls: TlsStatus,
 }
 
 impl FlowSummary {

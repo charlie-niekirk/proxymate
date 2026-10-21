@@ -62,6 +62,7 @@ apps/cli                 proxymate-cli serve|mcp-stdio|gen-flows|bench (headless
   - Flows are capped at 250k with ring eviction. Pinned flows are kept.
 - **Sessions.** A saved session (`.proxymate`) is a single SQLite file. A `BlobBackend` trait lets the same store and view code read live segments, saved sessions and imported HARs.
 - **App database.** `app.sqlite` (rusqlite, WAL) holds rules, settings, the SSL include/exclude lists, the LAN client allow-list and the MCP audit log.
+  - Until it exists, the SSL lists (include, exclude, bypass, insecure upstream) live in `<data_dir>/ssl.json` (M2).
 
 ### Filtering at 100k+ rows (in Rust)
 - **Views.** Each `View` holds `{CompiledFilter, SortSpec, indices: Vec<u32>}` and is maintained incrementally as flows arrive and change.
@@ -78,7 +79,7 @@ apps/cli                 proxymate-cli serve|mcp-stdio|gen-flows|bench (headless
 | HTTP/1.1 + HTTP/2 | hyper 1.x + hyper-util (explicit http1/http2 builders, `preserve_header_case`) |
 | TLS | rustls 0.23 + tokio-rustls with the `ring` provider |
 | Upstream certificate checks | rustls-platform-verifier (uses the OS trust store, so corporate CAs work) |
-| Pooled upstream client | hyper-rustls; must not use the system proxy, to avoid loops |
+| Pooled upstream client | hyper-util's pooled client for plain HTTP; must not use the system proxy, to avoid loops. Decrypted HTTPS doesn't pool: each client connection gets its own upstream TLS connection, opened during the handshake so its ALPN can be mirrored, and redialled if the upstream closes it (M2). hyper-rustls is not used |
 | Cert generation | rcgen |
 | Leaf cert cache | moka |
 | WebSockets | tokio-tungstenite |
@@ -101,12 +102,14 @@ We build our own engine and use hudsucker only as a reading reference. Its handl
    - Read the client's ClientHello with `LazyConfigAcceptor` to get the SNI and ALPN.
    - Connect upstream offering the same ALPN, and see what upstream picks.
    - Finish the client handshake offering only that protocol. Three prebuilt `ServerConfig`s cover this: `[h2]`, `[http/1.1]` and `[]`.
-   - If the upstream handshake fails, return a readable 502 page.
+   - If the upstream handshake fails, finish the client handshake anyway and answer every request with a readable 502 page; each request's flow fails with the reason and keeps the rejected chain for the TLS tab.
+   - Plain HTTP inside a CONNECT is served as HTTP. Passthrough tunnels, and connection-level failures with no request, are recorded as one `CONNECT` flow.
+   - The leaf chain sent to clients includes the CA. Upstreams are verified with `rustls-platform-verifier` plus any configured extra roots; a per-host "allow insecure upstream" list skips verification (signatures are still checked).
 4. **Leaf certs.**
    - Each host gets an ECDSA P-256 leaf cert with SAN, EKU serverAuth, validity of 365 days or less (backdated 1 day) and a unique serial.
    - All leaves share one keypair, so issuing a cert takes about 50 µs.
    - The CA is ECDSA, with `CA:true` and `keyCertSign`. Its CN includes the machine name and date. The key file is mode 0600, and the user can regenerate the CA.
-5. **Pinning detection.** If the client sends an `unknown_ca` or `bad_certificate` alert, or closes before sending any data, mark the flow `likely_pinned` and offer "Add to SSL bypass".
+5. **Pinning detection.** If the client sends an `unknown_ca`, `bad_certificate` or `certificate_unknown` alert, closes during the handshake, or closes within 2 s of the handshake without sending any data, mark the flow `likely_pinned` and offer "Add to SSL bypass". The same signal appears when a client simply doesn't trust the CA yet, and the UI says so.
 6. **WebSockets.**
    - Strip `Sec-WebSocket-Extensions` so frames stay uncompressed.
    - On `101`, wrap both upgraded connections and relay the frames, recording direction, opcode, size and time.
@@ -119,6 +122,8 @@ We build our own engine and use hudsucker only as a reading reference. Its handl
 - The Raw tab is a reconstruction, not the exact wire bytes.
 - TLS 1.0/1.1 upstreams fail, with a clear error.
 - h2c is recorded but deferred.
+- HTTPS in absolute form (`GET https://…` sent to the proxy) is refused with 501; clients must use CONNECT.
+- WebSocket upgrades inside decrypted HTTPS aren't relayed until M6.
 - HTTP/1.1 header names are forwarded with their original case, but recorded lower-cased (hyper doesn't expose its case map) and shown in Title-Case.
 
 ## Rules engine
@@ -243,12 +248,12 @@ We build our own engine and use hudsucker only as a reading reference. Its handl
   - A filter box.
 - **Filter row.** The chips plus a DSL search box with autocomplete.
 - **FlowTable.**
-  - Columns: #, state dot, colourised URL, Client, Method pill, Status pill, Time, Duration, Req size, Resp size, SSL, Edited, Tools.
+  - Columns: #, state dot, colourised URL, Client, Method pill, Status pill, Time, Duration, Req size, Resp size, Proto (`h2`/`1.1`), SSL (decrypted, passthrough or likely pinned), Edited, Tools.
   - Columns can be resized, reordered, hidden and sorted.
   - The context menu has copy URL/cURL, Replay, Edit & Replay, Pin, Map Local…, Breakpoint…, Rewrite…, Export HAR and Add to SSL bypass.
 - **Detail pane.**
   - A URL bar with method and status pills.
-  - Request | Response split, with tabs Header, Query, Cookies, Body, Raw, JSON, Form, Hex, Preview, Timing and TLS.
+  - Request | Response split, with tabs Header, Query, Cookies, Body, Raw, JSON, Form, Hex, Preview, Timing and TLS. Timing and TLS sit in the Response pane; the URL bar shows the HTTP version.
   - A WebSocket frame panel and an SSE event list.
 - **Footer.** Clear, Filter, Auto Select, "n/m rows selected", ↑↓ throughput and deep-search progress.
 - **Windows.** Compose, Rules Editor (drag to reorder, MatcherBuilder, ActionListEditor, dry run), Breakpoint Editor (queue plus editable message with Execute/Abort/Respond), Cert Wizard, Device Setup Wizard (Simulator / iPhone / Android / Android emulator, with QR codes and a live "waiting for device…" state), Settings and Session Manager.

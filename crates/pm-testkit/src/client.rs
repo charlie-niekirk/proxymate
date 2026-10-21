@@ -1,7 +1,9 @@
 //! Minimal clients that talk to a forward proxy the way curl does: they
-//! connect to the proxy and send absolute-form request lines.
+//! connect to the proxy and send absolute-form request lines, or open a
+//! CONNECT tunnel and speak TLS (h1 or h2) through it.
 
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -9,6 +11,7 @@ use http::{Request, Response};
 use http_body_util::{BodyExt, Full};
 use hyper::body::Incoming;
 use hyper_util::rt::TokioIo;
+use rustls::pki_types::{CertificateDer, ServerName};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
@@ -56,5 +59,94 @@ pub async fn eventually<T>(timeout: Duration, mut check: impl FnMut() -> Option<
         }
         assert!(start.elapsed() < timeout, "condition not met within {timeout:?}");
         tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+/// Opens a CONNECT tunnel to `authority` through the proxy and returns the
+/// stream once the proxy has answered 200.
+pub async fn tunnel(proxy: SocketAddr, authority: &str) -> TcpStream {
+    let mut stream = TcpStream::connect(proxy).await.expect("connect to proxy");
+    let request = format!("CONNECT {authority} HTTP/1.1\r\nHost: {authority}\r\n\r\n");
+    stream.write_all(request.as_bytes()).await.expect("write CONNECT");
+    let head = crate::upstream::read_head(&mut stream).await;
+    let head = String::from_utf8_lossy(&head);
+    assert!(head.starts_with("HTTP/1.1 200 "), "CONNECT answered {head:?}");
+    stream
+}
+
+/// A TLS client config trusting only `root`, offering `alpn`.
+pub fn tls_config(root: &CertificateDer<'_>, alpn: &[&[u8]]) -> Arc<rustls::ClientConfig> {
+    let mut roots = rustls::RootCertStore::empty();
+    roots.add(root.clone().into_owned()).expect("add root");
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let mut config = rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .expect("protocol versions")
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    config.alpn_protocols = alpn.iter().map(|p| p.to_vec()).collect();
+    Arc::new(config)
+}
+
+/// TLS through a CONNECT tunnel to `host:port`, as a browser would do it.
+pub async fn tls_through(
+    proxy: SocketAddr,
+    host: &str,
+    port: u16,
+    config: Arc<rustls::ClientConfig>,
+) -> std::io::Result<tokio_rustls::client::TlsStream<TcpStream>> {
+    let stream = tunnel(proxy, &format!("{host}:{port}")).await;
+    let name = ServerName::try_from(host.to_owned()).expect("server name");
+    tokio_rustls::TlsConnector::from(config).connect(name, stream).await
+}
+
+/// What [`https_get`] saw.
+#[derive(Debug)]
+pub struct HttpsResponse {
+    pub status: u16,
+    pub version: http::Version,
+    /// The protocol the proxy picked for the client side.
+    pub alpn: Option<Vec<u8>>,
+    pub body: Bytes,
+}
+
+/// `GET url` (https) through the proxy's CONNECT, trusting only `root`,
+/// offering `alpn`, and speaking whichever protocol was negotiated.
+pub async fn https_get(proxy: SocketAddr, url: &str, root: &CertificateDer<'_>, alpn: &[&[u8]]) -> HttpsResponse {
+    let uri: http::Uri = url.parse().expect("valid url");
+    let host = uri.host().expect("url host").to_owned();
+    let port = uri.port_u16().unwrap_or(443);
+    let tls = tls_through(proxy, &host, port, tls_config(root, alpn))
+        .await
+        .expect("TLS handshake through the proxy");
+    let negotiated = tls.get_ref().1.alpn_protocol().map(<[u8]>::to_vec);
+    let io = TokioIo::new(tls);
+    let response = if negotiated.as_deref() == Some(b"h2") {
+        let (mut sender, conn) = hyper::client::conn::http2::handshake(hyper_util::rt::TokioExecutor::new(), io)
+            .await
+            .expect("h2 handshake");
+        tokio::spawn(conn);
+        let req = Request::get(uri.clone())
+            .body(Full::<Bytes>::default())
+            .expect("request");
+        sender.send_request(req).await.expect("h2 request")
+    } else {
+        let (mut sender, conn) = hyper::client::conn::http1::handshake(io).await.expect("h1 handshake");
+        tokio::spawn(conn);
+        let pq = uri.path_and_query().map_or("/", |p| p.as_str());
+        let req = Request::get(pq)
+            .header(http::header::HOST, uri.authority().expect("authority").as_str())
+            .body(Full::<Bytes>::default())
+            .expect("request");
+        sender.send_request(req).await.expect("h1 request")
+    };
+    let status = response.status().as_u16();
+    let version = response.version();
+    let body = response.into_body().collect().await.expect("read body").to_bytes();
+    HttpsResponse {
+        status,
+        version,
+        alpn: negotiated,
+        body,
     }
 }

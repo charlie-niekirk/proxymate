@@ -1,7 +1,9 @@
+import { Lock, LockOpen, ShieldAlert } from "lucide-react";
 import type { CSSProperties } from "react";
 
-import type { FlowState } from "@/bindings";
+import type { FlowState, TlsStatus } from "@/bindings";
 import { methodToken, statusLabel, statusToken, urlParts, type Row } from "@/lib/flow";
+import { sslTitle } from "@/lib/tls";
 import { cn } from "@/lib/utils";
 
 const ON_SELECTED = "group-data-[selected=true]/row:!text-selection-foreground";
@@ -85,4 +87,26 @@ export function UrlText({ row, className }: { row: Pick<Row, "scheme" | "host" |
       )}
     </span>
   );
+}
+
+/** The SSL column: decrypted, passed through, or rejected by the client. */
+export function SslIcon({ tls }: { tls: TlsStatus }) {
+  const selected = "group-data-[selected=true]/row:!text-selection-foreground";
+  switch (tls) {
+    case "none":
+      return null;
+    case "intercepted":
+      return <Lock aria-label={sslTitle(tls)} className="size-3" />;
+    case "passthrough":
+      return (
+        <LockOpen
+          aria-label={sslTitle(tls)}
+          className={cn("size-3 text-[var(--ssl-passthrough)]", selected)}
+        />
+      );
+    case "likely_pinned":
+      return (
+        <ShieldAlert aria-label={sslTitle(tls)} className={cn("size-3 text-[var(--ssl-pinned)]", selected)} />
+      );
+  }
 }

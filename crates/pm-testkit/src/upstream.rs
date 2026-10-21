@@ -43,6 +43,7 @@ pub fn pattern_byte(i: u64) -> u8 {
 /// - `/gzip`, `/br`, `/deflate`, `/zstd`: [`JSON_BODY`] content-encoded.
 /// - `/bytes/{n}`: `n` pattern bytes, generated while streaming.
 /// - `/echo`: the request body back, with the request's content type.
+/// - `/version`: the request's HTTP version, e.g. `HTTP/2.0`.
 pub struct Upstream {
     addr: SocketAddr,
     task: JoinHandle<()>,
@@ -82,11 +83,12 @@ impl Drop for Upstream {
 
 type TestBody = http_body_util::combinators::UnsyncBoxBody<Bytes, Infallible>;
 
-async fn route(req: Request<Incoming>) -> Result<Response<TestBody>, Infallible> {
+pub(crate) async fn route(req: Request<Incoming>) -> Result<Response<TestBody>, Infallible> {
     let path = req.uri().path().to_owned();
     let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
     let response = match segments.as_slice() {
         ["json"] => with_type(full(JSON_BODY), "application/json"),
+        ["version"] => with_type(full(format!("{:?}", req.version())), "text/plain"),
         ["status", code] => {
             let status = code.parse().ok().and_then(|c| StatusCode::from_u16(c).ok());
             let status = status.unwrap_or(StatusCode::BAD_REQUEST);

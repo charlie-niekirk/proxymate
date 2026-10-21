@@ -23,6 +23,12 @@ export const commands = {
 	clearFlows: () => __TAURI_INVOKE<void>("clear_flows"),
 	setRecording: (on: boolean) => __TAURI_INVOKE<ProxyStatus_Serialize>("set_recording", { on }),
 	getProxyStatus: () => __TAURI_INVOKE<ProxyStatus_Serialize>("get_proxy_status"),
+	getCaInfo: () => __TAURI_INVOKE<CaInfo>("get_ca_info"),
+	regenerateCa: () => typedError<CaInfo, string>(__TAURI_INVOKE("regenerate_ca")),
+	getSslSettings: () => __TAURI_INVOKE<SslSettings>("get_ssl_settings"),
+	setSslSettings: (settings: SslSettings) => typedError<SslSettings, string>(__TAURI_INVOKE("set_ssl_settings", { settings })),
+	addSslBypass: (host: string) => typedError<SslSettings, string>(__TAURI_INVOKE("add_ssl_bypass", { host })),
+	setInsecureUpstream: (host: string, allow: boolean) => typedError<SslSettings, string>(__TAURI_INVOKE("set_insecure_upstream", { host, allow })),
 };
 
 /* Types */
@@ -68,6 +74,35 @@ export type BodyInfo_Serialize = {
 
 /**  Which body of a flow. */
 export type BodyPart = "request" | "response";
+
+/**  The Proxymate root CA, for the certificate popover and wizard. */
+export type CaInfo = {
+	common_name: string,
+	/**  PEM file of the CA certificate, e.g. for `curl --cacert`. */
+	cert_path: string,
+	/**  RFC 3339. */
+	not_before: string,
+	/**  RFC 3339. */
+	not_after: string,
+	/**  SHA-256 of the DER, hex. */
+	sha256: string,
+};
+
+/**  One certificate of the upstream chain, as shown in the TLS tab. */
+export type CertSummary = {
+	subject: string,
+	issuer: string,
+	/**  Hex, colon separated. */
+	serial: string,
+	/**  RFC 3339. */
+	not_before: string,
+	/**  RFC 3339. */
+	not_after: string,
+	/**  DNS names and IP addresses from the subjectAltName extension. */
+	san: string[],
+	/**  SHA-256 of the DER, hex. */
+	sha256: string,
+};
 
 /**  Content chip in the filter row. Each group covers one or more [`ContentKind`]s. */
 export type ContentGroup = "json" | "form" | "xml" | "js" | "css" | "graphql" | "document" | "media" | "other";
@@ -142,6 +177,9 @@ export type FlowDetail_Deserialize = {
 	response_body: BodyInfo_Deserialize,
 	/**  Why the flow failed, if it did. */
 	error?: string | null,
+	/**  Present for HTTPS flows that went through the MITM. */
+	tls?: TlsInfo_Deserialize | null,
+	timing: Timing_Deserialize,
 };
 
 /**
@@ -156,13 +194,17 @@ export type FlowDetail_Serialize = {
 	response_body: BodyInfo_Serialize,
 	/**  Why the flow failed, if it did. */
 	error: string | null,
+	/**  Present for HTTPS flows that went through the MITM. */
+	tls: TlsInfo_Serialize | null,
+	timing: Timing_Serialize,
 };
 
 /**
  *  One flow table row in a compact positional form (a JSON array on the wire).
  * 
  *  Field order: `id, state, scheme, method, host, port, path, query, status,
- *  content_kind, client, started_at_ms, duration_ms, req_size, resp_size, edited`.
+ *  content_kind, client, started_at_ms, duration_ms, req_size, resp_size, edited,
+ *  http_version, tls`.
  */
 export type FlowRow = FlowRow_Serialize | FlowRow_Deserialize;
 
@@ -170,17 +212,19 @@ export type FlowRow = FlowRow_Serialize | FlowRow_Deserialize;
  *  One flow table row in a compact positional form (a JSON array on the wire).
  * 
  *  Field order: `id, state, scheme, method, host, port, path, query, status,
- *  content_kind, client, started_at_ms, duration_ms, req_size, resp_size, edited`.
+ *  content_kind, client, started_at_ms, duration_ms, req_size, resp_size, edited,
+ *  http_version, tls`.
  */
-export type FlowRow_Deserialize = [number, FlowState, Scheme, string, string, number, string, string, number | null, ContentKind, string | null, number | null, number | null, number, number, boolean];
+export type FlowRow_Deserialize = [number, FlowState, Scheme, string, string, number, string, string, number | null, ContentKind, string | null, number | null, number | null, number, number, boolean, HttpVersion, TlsStatus];
 
 /**
  *  One flow table row in a compact positional form (a JSON array on the wire).
  * 
  *  Field order: `id, state, scheme, method, host, port, path, query, status,
- *  content_kind, client, started_at_ms, duration_ms, req_size, resp_size, edited`.
+ *  content_kind, client, started_at_ms, duration_ms, req_size, resp_size, edited,
+ *  http_version, tls`.
  */
-export type FlowRow_Serialize = [number, FlowState, Scheme, string, string, number, string, string, number | null, ContentKind, string | null, number | null, number | null, number, number, boolean];
+export type FlowRow_Serialize = [number, FlowState, Scheme, string, string, number, string, string, number | null, ContentKind, string | null, number | null, number | null, number, number, boolean, HttpVersion, TlsStatus];
 
 /**  Lifecycle state of a flow. Drives the state dot and the status pill colour. */
 export type FlowState = 
@@ -233,6 +277,9 @@ export type FlowSummary_Deserialize = {
 	resp_size: number,
 	/**  True if any rule modified the flow. */
 	edited: boolean,
+	/**  Protocol the client spoke (mirrored upstream for HTTPS). */
+	http_version: HttpVersion,
+	tls: TlsStatus,
 };
 
 /**
@@ -267,6 +314,9 @@ export type FlowSummary_Serialize = {
 	resp_size: number,
 	/**  True if any rule modified the flow. */
 	edited: boolean,
+	/**  Protocol the client spoke (mirrored upstream for HTTPS). */
+	http_version: HttpVersion,
+	tls: TlsStatus,
 };
 
 /**
@@ -357,6 +407,130 @@ export type SortSpec = {
 	key: SortKey,
 	dir: SortDir,
 };
+
+/**
+ *  Which CONNECT hosts are decrypted. Patterns are host globs (`*` matches
+ *  across dots, matching is case-insensitive), without ports.
+ */
+export type SslSettings = {
+	/**  Hosts to decrypt. `*` means everything not excluded. */
+	include: string[],
+	/**  Hosts never decrypted, e.g. Apple services and OCSP responders. */
+	exclude: string[],
+	/**  Hosts added with "Add to SSL bypass", typically pinned apps. */
+	bypass: string[],
+	/**  Hosts whose upstream certificate is accepted without verification. */
+	insecure_upstream: string[],
+};
+
+/**
+ *  Phase timings of one flow, in milliseconds. Connection phases are `None`
+ *  when the request reused a connection (or, for plain HTTP, came from the
+ *  pool).
+ */
+export type Timing = Timing_Serialize | Timing_Deserialize;
+
+/**
+ *  Phase timings of one flow, in milliseconds. Connection phases are `None`
+ *  when the request reused a connection (or, for plain HTTP, came from the
+ *  pool).
+ */
+export type Timing_Deserialize = {
+	dns_ms?: number | null,
+	connect_ms?: number | null,
+	/**  The upstream TLS handshake. */
+	tls_ms?: number | null,
+	/**  Request handed to the upstream until the response head arrived. */
+	ttfb_ms?: number | null,
+	/**  Response head until the end of the response body. */
+	transfer_ms?: number | null,
+	/**  True if the upstream connection was opened for an earlier flow. */
+	reused_connection: boolean,
+};
+
+/**
+ *  Phase timings of one flow, in milliseconds. Connection phases are `None`
+ *  when the request reused a connection (or, for plain HTTP, came from the
+ *  pool).
+ */
+export type Timing_Serialize = {
+	dns_ms: number | null,
+	connect_ms: number | null,
+	/**  The upstream TLS handshake. */
+	tls_ms: number | null,
+	/**  Request handed to the upstream until the response head arrived. */
+	ttfb_ms: number | null,
+	/**  Response head until the end of the response body. */
+	transfer_ms: number | null,
+	/**  True if the upstream connection was opened for an earlier flow. */
+	reused_connection: boolean,
+};
+
+/**  TLS facts for an intercepted connection, shared by every flow on it. */
+export type TlsInfo = TlsInfo_Serialize | TlsInfo_Deserialize;
+
+/**  TLS facts for an intercepted connection, shared by every flow on it. */
+export type TlsInfo_Deserialize = {
+	/**  Server name the client sent, if any (IP literals have none). */
+	sni?: string | null,
+	/**  ALPN protocols the client offered, in its order. */
+	client_alpn: string[],
+	/**  Protocol negotiated with the upstream and mirrored to the client. */
+	alpn?: string | null,
+	/**
+	 *  Upstream protocol version, e.g. `TLSv1.3`. Empty if the upstream
+	 *  handshake failed.
+	 */
+	version: string,
+	/**  Upstream cipher suite, e.g. `TLS13_AES_128_GCM_SHA256`. */
+	cipher: string,
+	/**
+	 *  False if the upstream certificate was accepted without verification
+	 *  (the host is in the "allow insecure upstream" list).
+	 */
+	upstream_verified: boolean,
+	/**  The upstream's certificate chain, leaf first. */
+	chain: CertSummary[],
+};
+
+/**  TLS facts for an intercepted connection, shared by every flow on it. */
+export type TlsInfo_Serialize = {
+	/**  Server name the client sent, if any (IP literals have none). */
+	sni: string | null,
+	/**  ALPN protocols the client offered, in its order. */
+	client_alpn: string[],
+	/**  Protocol negotiated with the upstream and mirrored to the client. */
+	alpn: string | null,
+	/**
+	 *  Upstream protocol version, e.g. `TLSv1.3`. Empty if the upstream
+	 *  handshake failed.
+	 */
+	version: string,
+	/**  Upstream cipher suite, e.g. `TLS13_AES_128_GCM_SHA256`. */
+	cipher: string,
+	/**
+	 *  False if the upstream certificate was accepted without verification
+	 *  (the host is in the "allow insecure upstream" list).
+	 */
+	upstream_verified: boolean,
+	/**  The upstream's certificate chain, leaf first. */
+	chain: CertSummary[],
+};
+
+/**  How a flow's TLS was handled. Drives the SSL column. */
+export type TlsStatus = 
+/**  Plain HTTP. */
+"none" | 
+/**  Decrypted by the MITM. */
+"intercepted" | 
+/**  CONNECT relayed without decrypting (SSL exclude list or bypass). */
+"passthrough" | 
+/**
+ *  The client rejected our certificate (an `unknown_ca`/`bad_certificate`
+ *  alert, or a close before any request). Either the Proxymate CA isn't
+ *  trusted by that client or the app pins its certificates.
+ */
+"likely_pinned";
 
 /**
  *  Per-tick change notification for one view, published at 20 Hz.

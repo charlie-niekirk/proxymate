@@ -7,5 +7,6 @@
 //! - `procinfo`: peer port → pid → app bundle, name and icon (M4)
 //! - `netif`: LAN interface addresses for device setup (M9)
 //! - `simctl`: iOS Simulator root-cert install (M9)
-//!
-//! Empty in M0.
+//! - `fs`: private files (the CA key) (M2)
+
+pub mod fs;

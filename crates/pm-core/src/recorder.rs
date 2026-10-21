@@ -8,7 +8,7 @@ use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
-use pm_model::{BodyPart, ContentKind, FlowDetail, FlowId, FlowState, ResponseHead};
+use pm_model::{BodyPart, ContentKind, FlowDetail, FlowId, FlowState, ResponseHead, Timing};
 
 use crate::Engine;
 use crate::ingest::FlowEvent;
@@ -45,6 +45,10 @@ struct LiveState {
     request: Capture,
     response: Capture,
     last_progress: Instant,
+    /// When the request went to the upstream; TTFB counts from here.
+    request_sent: Option<Instant>,
+    /// When the response head arrived; transfer time counts from here.
+    response_at: Option<Instant>,
     /// Set once the flow has finished and been persisted.
     finished: Option<Arc<StoredDetail>>,
 }
@@ -62,6 +66,8 @@ impl FlowRecorder {
                 request: Capture::default(),
                 response: Capture::default(),
                 last_progress: now,
+                request_sent: None,
+                response_at: None,
                 finished: None,
             }),
         });
@@ -73,6 +79,22 @@ impl FlowRecorder {
         self.flow.id
     }
 
+    /// Records how the upstream connection was set up: DNS, connect and TLS
+    /// times for a new connection, or that an existing one was reused.
+    pub fn connection_timing(&self, timing: &Timing) {
+        let mut state = self.flow.state.lock();
+        let t = &mut state.detail.timing;
+        t.dns_ms = timing.dns_ms;
+        t.connect_ms = timing.connect_ms;
+        t.tls_ms = timing.tls_ms;
+        t.reused_connection = timing.reused_connection;
+    }
+
+    /// Marks the request as handed to the upstream, which starts TTFB.
+    pub fn request_sent(&self) {
+        self.flow.state.lock().request_sent = Some(Instant::now());
+    }
+
     /// Records the response head; the status and content kind reach the
     /// flow table on the next ingest batch.
     pub fn response(&self, head: ResponseHead, content_kind: ContentKind) {
@@ -82,6 +104,10 @@ impl FlowRecorder {
             if state.finished.is_some() {
                 return;
             }
+            let now = Instant::now();
+            let sent = state.request_sent.unwrap_or(self.flow.started);
+            state.detail.timing.ttfb_ms = Some(ms(now - sent));
+            state.response_at = Some(now);
             state.detail.response_body.encoding = content_encoding(&head.headers);
             state.detail.response = Some(head);
         }
@@ -141,6 +167,25 @@ impl FlowRecorder {
         self.finish(FlowState::Failed, Some(error.into()));
     }
 
+    /// Live byte counts of a tunnel (nothing is captured).
+    pub fn tunnel_progress(&self, sent: u64, received: u64) {
+        self.send(FlowEvent::Progress {
+            id: self.flow.id,
+            req_size: sent,
+            resp_size: received,
+        });
+    }
+
+    /// Finishes a passthrough tunnel with the bytes relayed each way.
+    pub fn tunnel_closed(&self, sent: u64, received: u64) {
+        {
+            let mut state = self.flow.state.lock();
+            state.request.size = sent;
+            state.response.size = received;
+        }
+        self.finish(FlowState::Tunnel, None);
+    }
+
     fn finish(&self, end_state: FlowState, error: Option<String>) {
         let Some(engine) = self.flow.engine.upgrade() else {
             return;
@@ -157,6 +202,9 @@ impl FlowRecorder {
                 state.detail.response_body.complete = true;
             }
             state.detail.error = error;
+            if let Some(response_at) = state.response_at {
+                state.detail.timing.transfer_ms = Some(ms(response_at.elapsed()));
+            }
             fill_body_info(&mut state.detail.request_body, &state.request);
             fill_body_info(&mut state.detail.response_body, &state.response);
             let stored = Arc::new(StoredDetail {
@@ -228,6 +276,10 @@ impl LiveState {
             BodyPart::Response => &mut self.response,
         }
     }
+}
+
+fn ms(d: Duration) -> f64 {
+    d.as_secs_f64() * 1000.0
 }
 
 fn fill_body_info(info: &mut pm_model::BodyInfo, capture: &Capture) {

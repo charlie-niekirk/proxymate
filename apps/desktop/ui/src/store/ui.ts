@@ -9,7 +9,7 @@ export interface ViewStats {
 
 /** Inspector tabs; the choice sticks as the selection changes. */
 export type RequestTab = "Header" | "Query" | "Body" | "Raw";
-export type ResponseTab = "Header" | "Body" | "Raw";
+export type ResponseTab = "Header" | "Body" | "Raw" | "TLS" | "Timing";
 
 export interface FilterTiming {
   /** Engine refilter time reported by Rust. */

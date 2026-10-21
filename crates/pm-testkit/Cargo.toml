@@ -19,6 +19,9 @@ bytes.workspace = true
 flate2.workspace = true
 brotli.workspace = true
 zstd.workspace = true
+rustls.workspace = true
+tokio-rustls.workspace = true
+rcgen.workspace = true
 
 [lints]
 workspace = true

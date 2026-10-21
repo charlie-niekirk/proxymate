@@ -4,11 +4,15 @@
 use std::process::ExitCode;
 use std::time::Instant;
 
-use pm_core::{Engine, ProxyConfig, synth};
-use pm_model::{ContentGroup, FilterSpec, FlowState, FlowSummary, ProtocolFilter, SortDir, SortKey, SortSpec};
+use pm_core::{Engine, EngineConfig, ProxyConfig, synth};
+use pm_model::{
+    ContentGroup, FilterSpec, FlowState, FlowSummary, ProtocolFilter, SortDir, SortKey, SortSpec, TlsStatus,
+};
 
 const USAGE: &str = "usage:
   proxymate-cli serve [PORT]    run the proxy on 127.0.0.1:PORT (default 9090, falls back up to 9099) and log flows
+                                env: PROXYMATE_DATA_DIR (CA, settings; default: a temp dir),
+                                     PROXYMATE_EXTRA_UPSTREAM_CA (PEM of extra upstream roots)
   proxymate-cli bench [FLOWS]   seed FLOWS synthetic flows (default 100000) and time refilters";
 
 fn main() -> ExitCode {
@@ -106,7 +110,20 @@ fn bench(flows: usize) {
 fn serve(config: ProxyConfig) -> ExitCode {
     let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
     runtime.block_on(async {
-        let engine = Engine::new();
+        let extra_upstream_roots = match std::env::var_os("PROXYMATE_EXTRA_UPSTREAM_CA") {
+            Some(path) => match pm_core::tls::certs_from_pem_file(path.as_ref()) {
+                Ok(certs) => certs,
+                Err(err) => {
+                    eprintln!("PROXYMATE_EXTRA_UPSTREAM_CA: {err}");
+                    return ExitCode::FAILURE;
+                }
+            },
+            None => Vec::new(),
+        };
+        let engine = Engine::with_config(EngineConfig {
+            data_dir: std::env::var_os("PROXYMATE_DATA_DIR").map(Into::into),
+            extra_upstream_roots,
+        });
         let addr = match engine.start_proxy(config).await {
             Ok(addr) => addr,
             Err(err) => {
@@ -114,7 +131,12 @@ fn serve(config: ProxyConfig) -> ExitCode {
                 return ExitCode::FAILURE;
             }
         };
+        let ca = engine.ca_info();
         println!("listening on http://{addr}  (try: curl -x http://{addr} http://example.com/)");
+        println!(
+            "HTTPS CA: {}  (try: curl -x http://{addr} --cacert {} https://example.com/)",
+            ca.common_name, ca.cert_path
+        );
 
         // Log each flow once it finishes. Short flows arrive finished, as
         // appended rows; longer ones finish later and come back as changes.
@@ -146,7 +168,9 @@ fn serve(config: ProxyConfig) -> ExitCode {
 
 fn describe(flow: &FlowSummary) -> String {
     let status = match (flow.state, flow.status) {
+        (FlowState::Failed, _) if flow.tls == TlsStatus::LikelyPinned => "PINNED".to_owned(),
         (FlowState::Failed, _) => "FAIL".to_owned(),
+        (FlowState::Tunnel, _) => "TUNNEL".to_owned(),
         (_, Some(status)) => status.to_string(),
         (_, None) => "-".to_owned(),
     };
@@ -156,9 +180,11 @@ fn describe(flow: &FlowSummary) -> String {
         format!("?{}", flow.query)
     };
     format!(
-        "#{:<5} {:<7} {status:<4} http://{}:{}{}{query}  {} B  {} ms",
+        "#{:<5} {:<7} {status:<6} {:<8} {}://{}:{}{}{query}  {} B  {} ms",
         flow.id,
         flow.method,
+        flow.http_version.as_str(),
+        flow.scheme.as_str(),
         flow.host,
         flow.port,
         flow.path,

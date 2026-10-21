@@ -18,7 +18,12 @@ const WAIT: Duration = Duration::from_secs(10);
 
 async fn proxy() -> (Arc<Engine>, SocketAddr) {
     let engine = Engine::with_config(EngineConfig {
-        data_dir: Some(std::env::temp_dir().join("proxymate-tests")),
+        data_dir: Some(
+            std::env::temp_dir()
+                .join("proxymate-tests")
+                .join(uuid::Uuid::new_v4().to_string()),
+        ),
+        ..Default::default()
     });
     let config = ProxyConfig {
         ports: 0..=0,
@@ -230,30 +235,6 @@ async fn unreachable_upstreams_fail_the_flow_with_502() {
     let (flow, detail) = finished(&engine, 0).await;
     assert_eq!((flow.state, flow.status), (FlowState::Failed, None));
     assert!(detail.error.unwrap().to_lowercase().contains("refused"));
-}
-
-#[tokio::test]
-async fn connect_is_tunnelled_without_recording() {
-    let upstream = Upstream::start().await;
-    let (engine, proxy) = proxy().await;
-    let mut stream = tokio::net::TcpStream::connect(proxy).await.unwrap();
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    let target = upstream.addr();
-    stream
-        .write_all(format!("CONNECT {target} HTTP/1.1\r\nHost: {target}\r\n\r\n").as_bytes())
-        .await
-        .unwrap();
-    let head = upstream::read_head(&mut stream).await;
-    assert!(head.starts_with(b"HTTP/1.1 200"), "{}", String::from_utf8_lossy(&head));
-    stream
-        .write_all(format!("GET /json HTTP/1.1\r\nHost: {target}\r\nConnection: close\r\n\r\n").as_bytes())
-        .await
-        .unwrap();
-    let mut response = Vec::new();
-    stream.read_to_end(&mut response).await.unwrap();
-    assert!(String::from_utf8_lossy(&response).ends_with(JSON_BODY));
-    engine.flush();
-    assert_eq!(engine.total(), 0);
 }
 
 #[tokio::test]

@@ -21,6 +21,7 @@ export const COLUMNS: readonly Column[] = [
   { id: "duration", title: "Duration", width: "72px", align: "right", sortKey: "duration" },
   { id: "req", title: "Request", width: "72px", align: "right", sortKey: "req_size" },
   { id: "resp", title: "Response", width: "76px", align: "right", sortKey: "resp_size" },
+  { id: "proto", title: "Proto", width: "42px", align: "center" },
   { id: "ssl", title: "SSL", width: "34px", align: "center" },
   { id: "edited", title: "Edited", width: "46px", align: "center" },
   { id: "tools", title: "", width: "28px", align: "center" },
