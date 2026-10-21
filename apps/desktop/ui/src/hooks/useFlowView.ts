@@ -2,7 +2,7 @@ import { useEffect, useReducer, useRef, useState } from "react";
 
 import type { ViewDelta } from "@/bindings";
 import { backend } from "@/lib/backend";
-import { flowKey, queryClient } from "@/lib/query";
+import { flowKey, queryClient, streamKey } from "@/lib/query";
 import { RowCache } from "@/lib/rowCache";
 import { useUi } from "@/store/ui";
 
@@ -108,6 +108,7 @@ function refreshInspected(d: ViewDelta) {
   }
   if (d.structural || d.changed.includes(selectedId)) {
     void queryClient.invalidateQueries({ queryKey: flowKey(selectedId) });
+    void queryClient.invalidateQueries({ queryKey: streamKey(selectedId) });
   }
 }
 

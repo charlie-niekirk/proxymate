@@ -4,7 +4,7 @@
  *   2. Proxymate app tokens: --m-* (HTTP methods), --s-* (status / flow state),
  *      --url-* (colourised URL parts), --selection-*, --pane-*, --syntax-* (bodies),
  *      --ssl-* (SSL column), --timing-* (Timing tab phases), --code-* and --checker-*
- *      (body viewers).
+ *      (body viewers), --ws-* (message direction).
  * Pills use a tinted *-bg with the saturated foreground (>= 4.5:1 contrast).
  * Dark is the primary theme; the light values get a full pass in M10.
  */
@@ -117,6 +117,10 @@
   --timing-tls: var(--chart-4);
   --timing-wait: var(--chart-3);
   --timing-receive: var(--m-head);
+
+  /* ---- WebSocket message direction ---- */
+  --ws-sent: var(--m-post);
+  --ws-received: var(--m-get);
 
   /* ---- colourised URL ---- */
   --url-scheme: oklch(0.58 0.01 270);

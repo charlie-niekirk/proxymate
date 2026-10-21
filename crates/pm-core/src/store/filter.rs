@@ -94,7 +94,7 @@ const fn group_bit(group: ContentGroup) -> u16 {
 }
 
 /// `needle` must already be lower-case ASCII (non-ASCII bytes compare exactly).
-fn contains_ignore_ascii_case(haystack: &[u8], needle: &[u8]) -> bool {
+pub(crate) fn contains_ignore_ascii_case(haystack: &[u8], needle: &[u8]) -> bool {
     if needle.len() > haystack.len() {
         return false;
     }

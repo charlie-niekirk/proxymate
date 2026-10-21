@@ -5,7 +5,7 @@ use std::sync::Arc;
 use pm_core::Engine;
 use pm_model::{
     BodyPart, CaInfo, FilterSpec, FlowDetail, FlowId, FlowSummary, ProxyStatus, RowsPage, SidebarSnapshot, SortSpec,
-    SslSettings, SystemProxyStatus, TrustStatus, ViewDelta, ViewId, ViewInfo,
+    SsePage, SslSettings, SystemProxyStatus, TrustStatus, ViewDelta, ViewId, ViewInfo, WsPage, WsQuery,
 };
 use tauri::State;
 use tauri::ipc::{Channel, InvokeResponseBody, IpcResponse};
@@ -105,6 +105,42 @@ pub async fn save_body(
     let path = path.into_path().map_err(|e| e.to_string())?;
     engine.save_body(id, part, decoded, &path).map_err(|e| e.to_string())?;
     Ok(Some(path.display().to_string()))
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn get_websocket_messages(
+    engine: EngineState<'_>,
+    id: FlowId,
+    query: WsQuery,
+    start: u32,
+    count: u32,
+) -> Result<WsPage, String> {
+    engine
+        .websocket_messages(id, &query, start, count)
+        .map_err(|e| e.to_string())
+}
+
+/// One WebSocket message's payload as a raw `ArrayBuffer`.
+#[tauri::command]
+#[specta::specta]
+pub fn get_websocket_payload(engine: EngineState<'_>, id: FlowId, index: u32) -> Result<RawBytes, String> {
+    engine
+        .websocket_payload(id, index)
+        .map(|bytes| RawBytes(tauri::ipc::Response::new(bytes)))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn get_sse_events(
+    engine: EngineState<'_>,
+    id: FlowId,
+    text: String,
+    start: u32,
+    count: u32,
+) -> Result<SsePage, String> {
+    engine.sse_events(id, &text, start, count).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

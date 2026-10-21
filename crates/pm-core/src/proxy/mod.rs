@@ -4,12 +4,14 @@
 //! case preserved. Absolute-form requests are forwarded through a pooled
 //! upstream client and recorded; CONNECT goes to [`mitm`], which decrypts
 //! or tunnels it; origin-form requests are addressed to the proxy itself
-//! and get a short info page (the onboarding server is M9).
+//! and get a short info page (the onboarding server is M9). WebSocket
+//! handshakes on either path switch to the [`ws`] relay.
 
 mod io;
 mod mitm;
 mod sniff;
 mod tee;
+mod ws;
 
 use std::convert::Infallible;
 use std::error::Error as StdError;
@@ -180,11 +182,12 @@ async fn handle(
     Ok(response)
 }
 
-async fn forward(ctx: &ProxyCtx, client: &Arc<PeerClient>, req: Request<Incoming>) -> Response<ProxyBody> {
+async fn forward(ctx: &ProxyCtx, client: &Arc<PeerClient>, mut req: Request<Incoming>) -> Response<ProxyBody> {
+    let websocket = ws::is_upgrade(&req);
     let recorder = ctx.engine.upgrade().and_then(|engine| {
         let uri = req.uri();
         let origin = Origin {
-            scheme: Scheme::Http,
+            scheme: if websocket { Scheme::Ws } else { Scheme::Http },
             host: uri.host().unwrap_or_default().to_owned(),
             port: uri.port_u16().unwrap_or(80),
             url: uri.to_string(),
@@ -194,8 +197,13 @@ async fn forward(ctx: &ProxyCtx, client: &Arc<PeerClient>, req: Request<Incoming
         };
         record_request(&engine, &req, origin)
     });
+    let client_upgrade = websocket.then(|| hyper::upgrade::on(&mut req));
     let (mut parts, body) = req.into_parts();
-    strip_hop_by_hop(&mut parts.headers);
+    if websocket {
+        ws::prepare_request(&mut parts.headers);
+    } else {
+        strip_hop_by_hop(&mut parts.headers);
+    }
     let body = TeeBody::new(body, recorder.clone(), BodyPart::Request);
     if let Some(recorder) = &recorder {
         recorder.request_sent();
@@ -216,6 +224,11 @@ async fn forward(ctx: &ProxyCtx, client: &Arc<PeerClient>, req: Request<Incoming
     if let Some(recorder) = &recorder {
         let content_kind = content_kind(upstream.headers());
         recorder.response(response_head(&upstream), content_kind);
+    }
+    if let Some(client_upgrade) = client_upgrade
+        && upstream.status() == StatusCode::SWITCHING_PROTOCOLS
+    {
+        return ws::switch(recorder, client_upgrade, upstream);
     }
     let (mut parts, body) = upstream.into_parts();
     strip_hop_by_hop(&mut parts.headers);
@@ -406,7 +419,7 @@ fn error_chain(err: &dyn StdError) -> String {
     message
 }
 
-fn now_ms() -> f64 {
+pub(crate) fn now_ms() -> f64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs_f64() * 1000.0)

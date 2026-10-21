@@ -26,6 +26,10 @@ export const commands = {
 	 *  Returns the path, or `None` if the user cancelled.
 	 */
 	saveBody: (id: number, part: BodyPart, decoded: boolean, fileName: string) => typedError<string | null, string>(__TAURI_INVOKE("save_body", { id, part, decoded, fileName })),
+	getWebsocketMessages: (id: number, query: WsQuery_Deserialize, start: number, count: number) => typedError<WsPage_Serialize, string>(__TAURI_INVOKE("get_websocket_messages", { id, query, start, count })),
+	/**  One WebSocket message's payload as a raw `ArrayBuffer`. */
+	getWebsocketPayload: (id: number, index: number) => typedError<unknown, string>(__TAURI_INVOKE("get_websocket_payload", { id, index })),
+	getSseEvents: (id: number, text: string, start: number, count: number) => typedError<SsePage_Serialize, string>(__TAURI_INVOKE("get_sse_events", { id, text, start, count })),
 	clearFlows: () => __TAURI_INVOKE<void>("clear_flows"),
 	setRecording: (on: boolean) => __TAURI_INVOKE<ProxyStatus_Serialize>("set_recording", { on }),
 	getProxyStatus: () => __TAURI_INVOKE<ProxyStatus_Serialize>("get_proxy_status"),
@@ -538,6 +542,78 @@ export type SortSpec = {
 	dir: SortDir,
 };
 
+/**  One event of a `text/event-stream` response. */
+export type SseEvent = SseEvent_Serialize | SseEvent_Deserialize;
+
+/**  One event of a `text/event-stream` response. */
+export type SseEvent_Deserialize = {
+	/**  Position in the stream, from 0. */
+	index: number,
+	/**
+	 *  When the event was complete, milliseconds since the Unix epoch.
+	 *  `None` when the stream was parsed after the fact (a compressed body).
+	 */
+	time_ms?: number | null,
+	/**  The `id` field, if the event set one. */
+	id?: string | null,
+	/**  The `event` field; `None` means the default type, `message`. */
+	event?: string | null,
+	/**  The `data` lines, joined with `\n`. */
+	data: string,
+	/**  The `retry` field, in milliseconds. */
+	retry?: number | null,
+	/**  True if `data` was cut at the 1 MB cap. */
+	truncated: boolean,
+};
+
+/**  One event of a `text/event-stream` response. */
+export type SseEvent_Serialize = {
+	/**  Position in the stream, from 0. */
+	index: number,
+	/**
+	 *  When the event was complete, milliseconds since the Unix epoch.
+	 *  `None` when the stream was parsed after the fact (a compressed body).
+	 */
+	time_ms: number | null,
+	/**  The `id` field, if the event set one. */
+	id: string | null,
+	/**  The `event` field; `None` means the default type, `message`. */
+	event: string | null,
+	/**  The `data` lines, joined with `\n`. */
+	data: string,
+	/**  The `retry` field, in milliseconds. */
+	retry: number | null,
+	/**  True if `data` was cut at the 1 MB cap. */
+	truncated: boolean,
+};
+
+/**  A window of a flow's server-sent events. */
+export type SsePage = SsePage_Serialize | SsePage_Deserialize;
+
+/**  A window of a flow's server-sent events. */
+export type SsePage_Deserialize = {
+	/**  Events in the stream so far. */
+	total: number,
+	/**  Events matching the search text. */
+	len: number,
+	start: number,
+	events: SseEvent_Deserialize[],
+	/**  False once the response has ended. */
+	open: boolean,
+};
+
+/**  A window of a flow's server-sent events. */
+export type SsePage_Serialize = {
+	/**  Events in the stream so far. */
+	total: number,
+	/**  Events matching the search text. */
+	len: number,
+	start: number,
+	events: SseEvent_Serialize[],
+	/**  False once the response has ended. */
+	open: boolean,
+};
+
 /**
  *  Which CONNECT hosts are decrypted. Patterns are host globs (`*` matches
  *  across dots, matching is case-insensitive), without ports.
@@ -774,6 +850,128 @@ export type ViewInfo = {
 	len: number,
 	/**  Time the engine spent refiltering and sorting, in microseconds. */
 	elapsed_us: number,
+};
+
+/**  How a WebSocket connection ended. */
+export type WsClose = {
+	/**
+	 *  The close code, or `1005` for a close frame without one and `1006` for
+	 *  a connection that dropped without any close frame (neither is ever
+	 *  sent on the wire).
+	 */
+	code: number,
+	reason: string,
+	/**  The side that closed first. */
+	by: WsDirection,
+};
+
+/**  Which way a WebSocket message went. */
+export type WsDirection = 
+/**  Client to server. */
+"sent" | 
+/**  Server to client. */
+"received";
+
+/**
+ *  One WebSocket message (fragmented messages are reassembled). The payload
+ *  itself is fetched with `websocket_payload`.
+ */
+export type WsMessage = WsMessage_Serialize | WsMessage_Deserialize;
+
+/**
+ *  One WebSocket message (fragmented messages are reassembled). The payload
+ *  itself is fetched with `websocket_payload`.
+ */
+export type WsMessage_Deserialize = {
+	/**  Position in the flow's message list, from 0. */
+	index: number,
+	direction: WsDirection,
+	opcode: WsOpcode,
+	/**  Payload size in bytes. For close frames, the reason only. */
+	len: number,
+	/**  When the proxy received it, milliseconds since the Unix epoch. */
+	time_ms: number | null,
+	/**
+	 *  True if only the first part of the payload was recorded (the cap is
+	 *  1 MB per message). Forwarding is unaffected.
+	 */
+	truncated: boolean,
+	/**  Status code of a close frame, if it carried one. */
+	close_code?: number | null,
+	/**  The start of the payload for the list: text as is, binary empty. */
+	preview: string,
+};
+
+/**
+ *  One WebSocket message (fragmented messages are reassembled). The payload
+ *  itself is fetched with `websocket_payload`.
+ */
+export type WsMessage_Serialize = {
+	/**  Position in the flow's message list, from 0. */
+	index: number,
+	direction: WsDirection,
+	opcode: WsOpcode,
+	/**  Payload size in bytes. For close frames, the reason only. */
+	len: number,
+	/**  When the proxy received it, milliseconds since the Unix epoch. */
+	time_ms: number | null,
+	/**
+	 *  True if only the first part of the payload was recorded (the cap is
+	 *  1 MB per message). Forwarding is unaffected.
+	 */
+	truncated: boolean,
+	/**  Status code of a close frame, if it carried one. */
+	close_code: number | null,
+	/**  The start of the payload for the list: text as is, binary empty. */
+	preview: string,
+};
+
+export type WsOpcode = "text" | "binary" | "ping" | "pong" | "close";
+
+/**  A window of a flow's WebSocket messages. */
+export type WsPage = WsPage_Serialize | WsPage_Deserialize;
+
+/**  A window of a flow's WebSocket messages. */
+export type WsPage_Deserialize = {
+	/**  Messages in the flow. */
+	total: number,
+	/**  Messages matching the query. */
+	len: number,
+	start: number,
+	messages: WsMessage_Deserialize[],
+	/**  False once the connection has closed. */
+	open: boolean,
+	close?: WsClose | null,
+};
+
+/**  A window of a flow's WebSocket messages. */
+export type WsPage_Serialize = {
+	/**  Messages in the flow. */
+	total: number,
+	/**  Messages matching the query. */
+	len: number,
+	start: number,
+	messages: WsMessage_Serialize[],
+	/**  False once the connection has closed. */
+	open: boolean,
+	close: WsClose | null,
+};
+
+/**  Which messages of a flow to list. The default lists everything. */
+export type WsQuery = WsQuery_Serialize | WsQuery_Deserialize;
+
+/**  Which messages of a flow to list. The default lists everything. */
+export type WsQuery_Deserialize = {
+	direction?: WsDirection | null,
+	/**  Case-insensitive substring of the payload; empty matches everything. */
+	text: string,
+};
+
+/**  Which messages of a flow to list. The default lists everything. */
+export type WsQuery_Serialize = {
+	direction: WsDirection | null,
+	/**  Case-insensitive substring of the payload; empty matches everything. */
+	text: string,
 };
 
 /* Tauri Specta runtime */

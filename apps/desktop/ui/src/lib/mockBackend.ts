@@ -9,11 +9,13 @@ import type {
   FlowSummary_Serialize,
   ProxyStatus_Serialize,
   SidebarSnapshot_Deserialize,
+  SseEvent_Serialize,
   SslSettings,
   SystemProxyStatus_Serialize,
   TlsInfo_Serialize,
   TrustStatus_Serialize,
   ViewDelta,
+  WsMessage_Serialize,
 } from "@/bindings";
 import type { Backend } from "@/lib/backend";
 
@@ -47,7 +49,7 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
     const tunnel = https && i % 50 === 7;
     const pinned = https && i % 97 === 11;
     const connect = tunnel || pinned;
-    return [
+    const row: FlowRow_Serialize = [
       i,
       tunnel ? "tunnel" : pinned ? "failed" : "completed",
       https ? "https" : "http",
@@ -68,6 +70,10 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
       tunnel ? "passthrough" : pinned ? "likely_pinned" : https ? "intercepted" : "none",
       !connect && kinds[(i * 5) % kinds.length] === "graphql" ? "GetViewer" : null,
     ];
+    // A few are WebSockets and event streams, for the message panels.
+    if (!connect && i % 61 === 13) return asStream(row, "websocket");
+    if (!connect && i % 67 === 17) return asStream(row, "sse");
+    return row;
   });
   const ready = (fixtures ?? Promise.resolve(null)).then((zoo) => {
     if (!zoo) return;
@@ -112,7 +118,7 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
     for (const f of flows) {
       if (filter.protocol === "http" && f[2] !== "http") continue;
       if (filter.protocol === "https" && f[2] !== "https") continue;
-      if (filter.protocol === "websocket") continue;
+      if (filter.protocol === "websocket" && f[2] !== "ws" && f[2] !== "wss") continue;
       if (filter.content.length > 0 && !filter.content.includes(groupOf(f[9]))) continue;
       if (filter.host && !hostMatches(f[4], filter.host)) continue;
       if (filter.client && f[10] !== filter.client) continue;
@@ -206,7 +212,7 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
           reason: "OK",
           version: f[16],
           headers: [
-            { name: "content-type", value: f[9] === "json" ? "application/json" : "text/plain" },
+            { name: "content-type", value: f[6] === SSE_PATH ? "text/event-stream" : f[9] === "json" ? "application/json" : "text/plain" },
             { name: "content-length", value: String(body.length) },
           ],
         },
@@ -263,6 +269,26 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
       a.download = fileName;
       a.click();
       return fileName;
+    },
+    async getWebsocketMessages(id, query, start, n) {
+      const all = flows[id]?.[2] === "wss" || flows[id]?.[2] === "ws" ? mockMessages(flows[id]![11] ?? 0) : [];
+      const text = query.text.trim().toLowerCase();
+      const matching = all.filter(
+        (m) => (query.direction === null || m.direction === query.direction) && (!text || m.preview.toLowerCase().includes(text)),
+      );
+      const close = all.length ? { code: 1000, reason: "bye", by: "sent" as const } : null;
+      return { total: all.length, len: matching.length, start, messages: matching.slice(start, start + n), open: false, close };
+    },
+    async getWebsocketPayload(id, index) {
+      const m = mockMessages(flows[id]?.[11] ?? 0)[index];
+      const bytes = m?.opcode === "binary" ? Uint8Array.from({ length: 48 }, (_, i) => (i * 37) % 256) : new TextEncoder().encode(m?.preview ?? "");
+      return bytes.buffer as ArrayBuffer;
+    },
+    async getSseEvents(id, search, start, n) {
+      const all = flows[id]?.[6] === SSE_PATH ? mockEvents(flows[id]![11] ?? 0) : [];
+      const text = search.trim().toLowerCase();
+      const matching = all.filter((e) => !text || e.data.toLowerCase().includes(text) || (e.event ?? "").includes(text));
+      return { total: all.length, len: matching.length, start, events: matching.slice(start, start + n), open: false };
     },
     async clearFlows() {
       await ready;
@@ -379,6 +405,60 @@ function sidebar(flows: FlowRow_Serialize[]): SidebarSnapshot_Deserialize {
         hosts: list.length === 1 && list[0]!.host === domain ? [] : list.sort((a, b) => a.host.localeCompare(b.host)),
       })),
   };
+}
+
+const SSE_PATH = "/v1/chat/stream";
+
+/** `row` turned into a WebSocket or SSE flow; host, client and time stay. */
+function asStream(row: FlowRow_Serialize, kind: "websocket" | "sse"): FlowRow_Serialize {
+  const ws = kind === "websocket";
+  const tls = row[2] === "https";
+  const out: FlowRow_Serialize = [...row];
+  out[1] = "completed";
+  out[2] = ws ? (tls ? "wss" : "ws") : row[2];
+  out[3] = ws ? "GET" : "POST";
+  out[6] = ws ? "/socket" : SSE_PATH;
+  out[7] = "";
+  out[8] = ws ? 101 : 200;
+  out[9] = ws ? "none" : "text";
+  out[12] = 4_200;
+  out[13] = 1_480;
+  out[14] = 9_310;
+  out[16] = "HTTP/1.1";
+  out[18] = null;
+  return out;
+}
+
+function mockMessages(started: number): WsMessage_Serialize[] {
+  return Array.from({ length: 40 }, (_, i) => {
+    const sent = i % 2 === 0;
+    const last = i === 39;
+    const binary = i % 10 === 5;
+    const preview = last ? "bye" : binary ? "" : JSON.stringify(sent ? { op: "subscribe", channel: `ticker.${i}` } : { channel: `ticker.${i - 1}`, price: 100 + i, ok: true });
+    return {
+      index: i,
+      direction: sent || last ? "sent" : "received",
+      opcode: last ? "close" : binary ? "binary" : "text",
+      len: binary ? 48 : preview.length,
+      time_ms: started + i * 90,
+      truncated: false,
+      close_code: last ? 1000 : null,
+      preview,
+    };
+  });
+}
+
+function mockEvents(started: number): SseEvent_Serialize[] {
+  const words = ["Hello", " there", "! How", " can", " I", " help", " today", "?"];
+  return words.map((w, i) => ({
+    index: i,
+    time_ms: started + i * 120,
+    id: String(i),
+    event: i === words.length - 1 ? "done" : "delta",
+    data: JSON.stringify({ delta: w, index: i }),
+    retry: null,
+    truncated: false,
+  }));
 }
 
 function mockCert(subject: string, issuer: string, san: string[]) {

@@ -10,7 +10,7 @@ use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
-use pm_model::{ContentKind, FlowId, FlowState, FlowSummary};
+use pm_model::{ContentKind, FlowId, FlowState, FlowSummary, WsDirection};
 
 use crate::Engine;
 
@@ -37,6 +37,12 @@ pub(crate) enum FlowEvent {
         id: FlowId,
         req_size: u64,
         resp_size: u64,
+    },
+    /// One WebSocket message; adds its payload size to the flow's totals.
+    WsMsg {
+        id: FlowId,
+        direction: WsDirection,
+        len: u64,
     },
     Finished {
         id: FlowId,

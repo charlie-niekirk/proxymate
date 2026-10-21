@@ -149,6 +149,7 @@ impl TlsUpstream {
                     } else {
                         let _ = hyper::server::conn::http1::Builder::new()
                             .serve_connection(io, service_fn(route))
+                            .with_upgrades()
                             .await;
                     }
                 });

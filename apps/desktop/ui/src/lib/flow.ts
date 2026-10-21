@@ -101,7 +101,8 @@ export function statusToken(status: number | null, state: FlowState): string {
 export function statusLabel(status: number | null, state: FlowState): string {
   switch (state) {
     case "active":
-      return "…";
+      // Switched protocols and still open: a live WebSocket.
+      return status === 101 ? "Active" : "…";
     case "paused":
       return "Paused";
     case "failed":

@@ -7,6 +7,7 @@
 mod blob;
 mod detail;
 mod filter;
+mod messages;
 mod segments;
 mod sidebar;
 mod view;
@@ -20,6 +21,7 @@ use pm_model::{FilterSpec, FlowId, FlowSummary, RowsPage, SortSpec, ViewDelta, V
 pub(crate) use blob::Capture;
 pub(crate) use detail::{DetailStore, StoredDetail};
 pub use filter::CompiledFilter;
+pub(crate) use messages::{SseLog, WsLog, page_events, sse_event};
 pub(crate) use segments::SegmentStore;
 pub use sidebar::{SidebarCounts, in_domain, registrable_domain};
 pub use view::View;
@@ -111,6 +113,10 @@ impl Store {
                 } => self.modify(id, first_new, |f| {
                     f.req_size = req_size;
                     f.resp_size = resp_size;
+                }),
+                FlowEvent::WsMsg { id, direction, len } => self.modify(id, first_new, |f| match direction {
+                    pm_model::WsDirection::Sent => f.req_size += len,
+                    pm_model::WsDirection::Received => f.resp_size += len,
                 }),
                 FlowEvent::Finished {
                     id,

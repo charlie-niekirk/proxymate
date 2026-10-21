@@ -47,6 +47,8 @@ describe("colour tokens", () => {
     expect(statusToken(null, "active")).toBe("active");
     expect(statusToken(null, "failed")).toBe("failed");
     expect(statusLabel(null, "tunnel")).toBe("Tunnel");
+    expect(statusLabel(101, "active")).toBe("Active");
+    expect(statusLabel(null, "active")).toBe("…");
   });
 });
 

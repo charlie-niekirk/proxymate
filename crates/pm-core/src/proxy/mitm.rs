@@ -47,7 +47,7 @@ use tokio_rustls::{LazyConfigAcceptor, TlsConnector};
 use super::io::{Counters, Counting, Prefixed};
 use super::{
     BoxError, CONNECT_TIMEOUT, Origin, ProxyBody, ProxyCtx, TeeBody, content_kind, error_chain, forward, headers,
-    now_ms, record_request, response_head, strip_hop_by_hop, text_response,
+    now_ms, record_request, response_head, strip_hop_by_hop, text_response, ws,
 };
 use crate::Engine;
 use crate::client::PeerClient;
@@ -500,6 +500,7 @@ where
     let _ = hyper::server::conn::http1::Builder::new()
         .preserve_header_case(true)
         .serve_connection(TokioIo::new(io), service)
+        .with_upgrades()
         .await;
 }
 
@@ -703,7 +704,9 @@ async fn handshake(up: Upstream) -> Result<Sender, String> {
             .handshake(io)
             .await
             .map_err(|e| format!("HTTP/1.1 handshake with the upstream failed: {}", error_chain(&e)))?;
-        tokio::spawn(conn);
+        // A WebSocket handshake takes the connection over; the next request
+        // dials a new one.
+        tokio::spawn(conn.with_upgrades());
         Ok(Sender::H1(sender))
     }
 }
@@ -728,20 +731,23 @@ struct Slot {
 }
 
 impl MitmConn {
-    async fn handle(self: Arc<Self>, req: Request<Incoming>) -> Result<Response<ProxyBody>, Infallible> {
+    async fn handle(self: Arc<Self>, mut req: Request<Incoming>) -> Result<Response<ProxyBody>, Infallible> {
         self.requests.fetch_add(1, Ordering::Relaxed);
         let authority = request_authority(&req, &self.target);
+        // WebSockets only arrive over h1: the h2 server doesn't offer
+        // extended CONNECT.
+        let websocket = !self.client_h2 && ws::is_upgrade(&req);
         let recorder = self.ctx.engine.upgrade().and_then(|engine| {
             let pq = req.uri().path_and_query().map_or("/", PathAndQuery::as_str);
             let origin = Origin {
-                scheme: Scheme::Https,
+                scheme: if websocket { Scheme::Wss } else { Scheme::Https },
                 host: authority
                     .host()
                     .trim_start_matches('[')
                     .trim_end_matches(']')
                     .to_owned(),
                 port: authority.port_u16().unwrap_or(443),
-                url: format!("https://{authority}{pq}"),
+                url: format!("{}://{authority}{pq}", if websocket { "wss" } else { "https" }),
                 tls: TlsStatus::Intercepted,
                 tls_info: Some(self.info.clone()),
                 client: self.target.peer.clone(),
@@ -760,8 +766,13 @@ impl MitmConn {
             return Ok(error_page(&self.target.host, failure));
         }
 
+        let client_upgrade = websocket.then(|| hyper::upgrade::on(&mut req));
         let (mut parts, body) = req.into_parts();
-        strip_hop_by_hop(&mut parts.headers);
+        if websocket {
+            ws::prepare_request(&mut parts.headers);
+        } else {
+            strip_hop_by_hop(&mut parts.headers);
+        }
         let pq = parts
             .uri
             .path_and_query()
@@ -779,6 +790,11 @@ impl MitmConn {
         };
         if let Some(recorder) = &recorder {
             recorder.response(response_head(&upstream), content_kind(upstream.headers()));
+        }
+        if let Some(client_upgrade) = client_upgrade
+            && upstream.status() == StatusCode::SWITCHING_PROTOCOLS
+        {
+            return Ok(ws::switch(recorder, client_upgrade, upstream));
         }
         let (mut parts, body) = upstream.into_parts();
         strip_hop_by_hop(&mut parts.headers);

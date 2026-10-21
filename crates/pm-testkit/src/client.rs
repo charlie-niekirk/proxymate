@@ -1,6 +1,7 @@
 //! Minimal clients that talk to a forward proxy the way curl does: they
 //! connect to the proxy and send absolute-form request lines, or open a
-//! CONNECT tunnel and speak TLS (h1 or h2) through it.
+//! CONNECT tunnel and speak TLS (h1 or h2) through it. WebSocket clients
+//! do either too.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -14,6 +15,8 @@ use hyper_util::rt::TokioIo;
 use rustls::pki_types::{CertificateDer, ServerName};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::tungstenite::protocol::Role;
 
 /// Sends `req` (whose URI must be absolute) through the proxy at `proxy`
 /// on a fresh connection. Adds a `Host` header, as curl does.
@@ -48,6 +51,48 @@ pub async fn raw(proxy: SocketAddr, request: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
     let _ = tokio::time::timeout(Duration::from_secs(10), stream.read_to_end(&mut out)).await;
     out
+}
+
+/// A WebSocket handshake sent to the proxy in absolute form (`GET
+/// ws://…` becomes `GET http://…`), as clients configured with an HTTP
+/// proxy do for plain WebSockets. Returns the response head and, if it was
+/// `101`, the socket.
+pub async fn ws_absolute(
+    proxy: SocketAddr,
+    url: &str,
+    extra_headers: &[(&str, &str)],
+) -> (String, Option<WebSocketStream<TcpStream>>) {
+    let uri: http::Uri = url.parse().expect("valid url");
+    let authority = uri.authority().expect("url authority").as_str().to_owned();
+    let mut request = format!(
+        "GET {url} HTTP/1.1\r\nHost: {authority}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\
+         Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n"
+    );
+    for (name, value) in extra_headers {
+        request.push_str(&format!("{name}: {value}\r\n"));
+    }
+    request.push_str("\r\n");
+    let mut stream = TcpStream::connect(proxy).await.expect("connect to proxy");
+    stream.write_all(request.as_bytes()).await.expect("write handshake");
+    let head = String::from_utf8_lossy(&crate::upstream::read_head(&mut stream).await).into_owned();
+    if !head.starts_with("HTTP/1.1 101 ") {
+        return (head, None);
+    }
+    let ws = WebSocketStream::from_raw_socket(stream, Role::Client, None).await;
+    (head, Some(ws))
+}
+
+/// A WebSocket handshake for `url` over `stream` (a CONNECT tunnel, or TLS
+/// through one).
+pub async fn ws_over<S>(stream: S, url: &str) -> WebSocketStream<S>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    let (ws, response) = tokio_tungstenite::client_async(url, stream)
+        .await
+        .expect("WebSocket handshake through the proxy");
+    assert_eq!(response.status(), http::StatusCode::SWITCHING_PROTOCOLS);
+    ws
 }
 
 /// Polls `check` until it returns `Some`, or panics after `timeout`.

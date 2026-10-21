@@ -11,11 +11,14 @@ import {
   type RowsPage_Serialize,
   type SidebarSnapshot_Deserialize,
   type SortSpec,
+  type SsePage_Serialize,
   type SslSettings,
   type SystemProxyStatus_Serialize,
   type TrustStatus_Serialize,
   type ViewDelta,
   type ViewInfo,
+  type WsPage_Serialize,
+  type WsQuery_Deserialize,
 } from "@/bindings";
 import { createMockBackend } from "@/lib/mockBackend";
 
@@ -41,6 +44,12 @@ export interface Backend {
   bodyUrl(id: number, part: BodyPart, decoded: boolean): Promise<string>;
   /** Asks where to save a body and writes it; resolves to the path, or null if cancelled. */
   saveBody(id: number, part: BodyPart, decoded: boolean, fileName: string): Promise<string | null>;
+  /** A window of a WebSocket flow's messages matching `query`. */
+  getWebsocketMessages(id: number, query: WsQuery_Deserialize, start: number, count: number): Promise<WsPage_Serialize>;
+  /** One message's recorded payload (at most 1 MB). */
+  getWebsocketPayload(id: number, index: number): Promise<ArrayBuffer>;
+  /** A window of an event-stream response's events matching `text`. */
+  getSseEvents(id: number, text: string, start: number, count: number): Promise<SsePage_Serialize>;
   clearFlows(): Promise<void>;
   setRecording(on: boolean): Promise<ProxyStatus_Serialize>;
   getProxyStatus(): Promise<ProxyStatus_Serialize>;
@@ -97,6 +106,9 @@ const tauriBackend: Backend = {
   getBody: async (id, part, decoded, max = null) => (await unwrap(commands.getBody(id, part, decoded, max))) as ArrayBuffer,
   bodyUrl: async (id, part, decoded) => `${BODY_ORIGIN}/live/${id}/${part}${decoded ? "?decoded=1" : ""}`,
   saveBody: (id, part, decoded, fileName) => unwrap(commands.saveBody(id, part, decoded, fileName)),
+  getWebsocketMessages: (id, query, start, count) => unwrap(commands.getWebsocketMessages(id, query, start, count)),
+  getWebsocketPayload: async (id, index) => (await unwrap(commands.getWebsocketPayload(id, index))) as ArrayBuffer,
+  getSseEvents: (id, text, start, count) => unwrap(commands.getSseEvents(id, text, start, count)),
   clearFlows: () => commands.clearFlows(),
   setRecording: (on) => commands.setRecording(on),
   getProxyStatus: () => commands.getProxyStatus(),

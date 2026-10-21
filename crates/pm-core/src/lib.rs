@@ -20,7 +20,7 @@ pub use client::ClientApp;
 pub use engine::{BodyBytes, DeltaSink, Engine, EngineConfig, PUBLISH_INTERVAL};
 pub use integration::SidebarSink;
 pub use proxy::ProxyConfig;
-pub use recorder::{BodyEnd, FlowRecorder};
+pub use recorder::{BodyEnd, FlowRecorder, WsRecorder};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -28,6 +28,8 @@ pub enum Error {
     UnknownView(pm_model::ViewId),
     #[error("unknown flow {0}")]
     UnknownFlow(pm_model::FlowId),
+    #[error("flow {0} has no message {1}")]
+    UnknownMessage(pm_model::FlowId, u32),
     #[error("proxy: {0}")]
     Proxy(String),
     #[error(transparent)]
