@@ -5,12 +5,15 @@
 //! forwarding path. Flows that start before the answer is in are patched
 //! with a `ClientResolved` event once it is.
 //!
+//! LAN peers (M9) are named from the device allow-list instead, as soon
+//! as they are admitted.
+//!
 //! Port → pid is a full socket scan (a few ms). Scans are coalesced: one
 //! runs at a time, and every connection accepted before it started shares
 //! its result. Pid → app is cached.
 
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -20,6 +23,7 @@ use pm_model::{FlowDetail, FlowId, FlowSummary};
 use pm_platform::procinfo::{AppInfo, ProcessInfo};
 
 use crate::Engine;
+use crate::devices::Seen;
 use crate::ingest::FlowEvent;
 use crate::recorder::FlowRecorder;
 
@@ -37,6 +41,32 @@ pub struct ClientApp {
     pub name: Arc<str>,
     pub bundle_id: Option<String>,
     pub bundle_path: Option<PathBuf>,
+    pub kind: ClientKind,
+}
+
+/// Where a client runs, for device setup's "waiting for traffic" checks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClientKind {
+    /// An app on this machine.
+    Local,
+    /// An app inside an iOS Simulator device.
+    Simulator,
+    /// The Android emulator (its traffic leaves through the qemu process).
+    Emulator,
+    /// A LAN device, named from the allow-list.
+    Remote(IpAddr),
+}
+
+/// Simulator apps get a suffix so they don't merge with the Mac's own
+/// (`MobileSafari (Simulator)`); every emulator process is one client.
+fn display_name(info: &AppInfo) -> (String, ClientKind) {
+    if info.simulator {
+        (format!("{} (Simulator)", info.name), ClientKind::Simulator)
+    } else if info.bundle_path.is_none() && info.name.starts_with("qemu-system-") {
+        ("Android Emulator".into(), ClientKind::Emulator)
+    } else {
+        (info.name.clone(), ClientKind::Local)
+    }
 }
 
 /// A pid's app (or `None`: not one we can name) and when it was looked up.
@@ -120,16 +150,36 @@ impl ClientResolver {
     }
 
     fn intern(&self, info: AppInfo) -> Arc<ClientApp> {
+        let (name, kind) = display_name(&info);
         let mut known = self.known.lock();
-        if let Some(app) = known.get(info.name.as_str())
+        if let Some(app) = known.get(name.as_str())
             && app.bundle_path == info.bundle_path
         {
             return app.clone();
         }
         let app = Arc::new(ClientApp {
-            name: info.name.as_str().into(),
+            name: name.into(),
             bundle_id: info.bundle_id,
             bundle_path: info.bundle_path,
+            kind,
+        });
+        known.insert(app.name.clone(), app.clone());
+        app
+    }
+
+    /// The client of a LAN device's flows, shown as its label.
+    pub fn remote(&self, ip: IpAddr, label: &str) -> Arc<ClientApp> {
+        let mut known = self.known.lock();
+        if let Some(app) = known.get(label)
+            && app.kind == ClientKind::Remote(ip)
+        {
+            return app.clone();
+        }
+        let app = Arc::new(ClientApp {
+            name: label.into(),
+            bundle_id: None,
+            bundle_path: None,
+            kind: ClientKind::Remote(ip),
         });
         known.insert(app.name.clone(), app.clone());
         app
@@ -163,17 +213,28 @@ pub(crate) struct PeerClient {
 
 enum PeerState {
     /// Flows started before the app was known, to patch once it is.
-    Pending(Vec<FlowId>),
+    Pending(Vec<(FlowId, Seen)>),
     Resolved(Option<Arc<ClientApp>>),
 }
 
 impl PeerClient {
-    /// A client that is never resolved (non-loopback peers until M9).
-    pub fn unknown() -> Arc<PeerClient> {
+    /// A client whose app is already known, e.g. an admitted LAN device.
+    pub fn known(app: Option<Arc<ClientApp>>) -> Arc<PeerClient> {
         Arc::new(PeerClient {
-            state: Mutex::new(PeerState::Resolved(None)),
+            state: Mutex::new(PeerState::Resolved(app)),
             resolved: tokio::sync::Notify::new(),
         })
+    }
+
+    /// The LAN device's address, if this is one.
+    pub fn remote_ip(&self) -> Option<IpAddr> {
+        match &*self.state.lock() {
+            PeerState::Resolved(Some(app)) => match app.kind {
+                ClientKind::Remote(ip) => Some(ip),
+                _ => None,
+            },
+            _ => None,
+        }
     }
 
     /// Starts resolving `peer` on the current runtime.
@@ -202,7 +263,8 @@ impl PeerClient {
             }
         };
         if let Some(app) = app {
-            for id in pending {
+            for (id, seen) in pending {
+                engine.device_registry().note_flow(&app, seen);
                 engine.ingest().send(FlowEvent::ClientResolved {
                     id,
                     client: app.name.clone(),
@@ -220,16 +282,21 @@ impl PeerClient {
         mut summary: FlowSummary,
         detail: FlowDetail,
     ) -> Option<FlowRecorder> {
+        let seen = Seen::of(&summary);
         // Held across begin_flow so `finish` can't miss the new id.
         let mut state = self.state.lock();
         match &mut *state {
             PeerState::Resolved(app) => {
                 summary.client = app.as_ref().map(|a| a.name.clone());
-                engine.begin_flow(summary, detail)
+                let recorder = engine.begin_flow(summary, detail)?;
+                if let Some(app) = app {
+                    engine.device_registry().note_flow(app, seen);
+                }
+                Some(recorder)
             }
             PeerState::Pending(ids) => {
                 let recorder = engine.begin_flow(summary, detail)?;
-                ids.push(recorder.id());
+                ids.push((recorder.id(), seen));
                 Some(recorder)
             }
         }
@@ -248,5 +315,36 @@ impl PeerClient {
             PeerState::Resolved(app) => app.clone(),
             PeerState::Pending(_) => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn info(name: &str, bundle: Option<&str>, simulator: bool) -> AppInfo {
+        AppInfo {
+            name: name.into(),
+            bundle_id: None,
+            bundle_path: bundle.map(PathBuf::from),
+            pid: 1,
+            simulator,
+        }
+    }
+
+    #[test]
+    fn simulator_and_emulator_clients_are_named_apart() {
+        assert_eq!(
+            display_name(&info("MobileSafari", Some("/x/MobileSafari.app"), true)),
+            ("MobileSafari (Simulator)".into(), ClientKind::Simulator)
+        );
+        assert_eq!(
+            display_name(&info("qemu-system-aarch64", None, false)),
+            ("Android Emulator".into(), ClientKind::Emulator)
+        );
+        assert_eq!(
+            display_name(&info("Safari", Some("/Applications/Safari.app"), false)),
+            ("Safari".into(), ClientKind::Local)
+        );
     }
 }

@@ -1,17 +1,20 @@
 //! The proxy listener.
 //!
-//! Each accepted connection is sniffed, then served by hyper with header
-//! case preserved. Absolute-form requests are forwarded through a pooled
+//! Each accepted connection is admitted (LAN clients need the user's OK,
+//! see `devices`), sniffed, then served by hyper with header case
+//! preserved. Absolute-form requests are forwarded through a pooled
 //! upstream client and recorded; CONNECT goes to [`mitm`], which decrypts
-//! or tunnels it; origin-form requests are addressed to the proxy itself
-//! and get a short info page (the onboarding server is M9). WebSocket
-//! handshakes on either path switch to the [`ws`] relay; every other
-//! request goes through [`exchange`], which applies the rules.
+//! or tunnels it; requests addressed to the proxy itself (origin form, our
+//! own address, or `proxy.mate`) get the [`onboarding`] server, which also
+//! stops them looping. WebSocket handshakes on either path switch to the
+//! [`ws`] relay; every other request goes through [`exchange`], which
+//! applies the rules.
 
 mod body;
 mod exchange;
 mod io;
 mod mitm;
+pub mod onboarding;
 mod sniff;
 mod tee;
 mod ws;
@@ -36,9 +39,9 @@ use pm_model::{
     BodyInfo, BodyPart, ContentKind, FlowDetail, FlowState, FlowSummary, Header, HttpVersion, RequestHead,
     ResponseHead, Scheme, Timing, TlsInfo, TlsStatus,
 };
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::watch;
+use tokio::sync::{oneshot, watch};
 
 pub use sniff::{Sniffed, classify};
 pub use tee::TeeBody;
@@ -48,6 +51,7 @@ use exchange::{Exchange, Route};
 
 use crate::Engine;
 use crate::client::PeerClient;
+use crate::devices::{Admission, ONBOARDING_HOST};
 use crate::io::content::kind_from_content_type;
 use crate::recorder::{FlowRecorder, content_encoding};
 
@@ -88,7 +92,8 @@ pub struct ProxyConfig {
 }
 
 impl Default for ProxyConfig {
-    /// Loopback only: LAN clients need the allow-list from M9.
+    /// Loopback only. Turning on LAN access (device setup) listens on
+    /// every interface instead.
     fn default() -> Self {
         ProxyConfig {
             ip: IpAddr::V4(Ipv4Addr::LOCALHOST),
@@ -101,7 +106,16 @@ impl Default for ProxyConfig {
 /// connections finish on their own.
 pub(crate) struct ProxyHandle {
     pub addr: SocketAddr,
-    _stop: watch::Sender<()>,
+    stop: watch::Sender<()>,
+    closed: oneshot::Receiver<()>,
+}
+
+impl ProxyHandle {
+    /// Stops accepting and waits until the port is free again.
+    pub async fn stop(self) {
+        drop(self.stop);
+        let _ = self.closed.await;
+    }
 }
 
 /// Binds the first free port in `config.ports`.
@@ -121,6 +135,7 @@ pub(crate) async fn bind(config: &ProxyConfig) -> std::io::Result<TcpListener> {
 pub(crate) fn spawn(engine: Weak<Engine>, listener: TcpListener) -> std::io::Result<ProxyHandle> {
     let addr = listener.local_addr()?;
     let (stop_tx, mut stop_rx) = watch::channel(());
+    let (closed_tx, closed) = oneshot::channel();
     let ctx = Arc::new(ProxyCtx {
         engine,
         client: upstream_client(),
@@ -136,11 +151,17 @@ pub(crate) fn spawn(engine: Weak<Engine>, listener: TcpListener) -> std::io::Res
                     // Out of file descriptors and the like: back off briefly.
                     Err(_) => tokio::time::sleep(Duration::from_millis(50)).await,
                 },
-                _ = stop_rx.changed() => return,
+                _ = stop_rx.changed() => break,
             }
         }
+        drop(listener);
+        let _ = closed_tx.send(());
     });
-    Ok(ProxyHandle { addr, _stop: stop_tx })
+    Ok(ProxyHandle {
+        addr,
+        stop: stop_tx,
+        closed,
+    })
 }
 
 struct ProxyCtx {
@@ -165,6 +186,15 @@ fn upstream_client() -> UpstreamClient {
 }
 
 async fn serve_connection(ctx: Arc<ProxyCtx>, mut stream: TcpStream, peer: SocketAddr) {
+    let Some(engine) = ctx.engine.upgrade() else {
+        return;
+    };
+    let client = match engine.admit(peer.ip()).await {
+        Admission::Local => PeerClient::spawn(&engine, peer, ctx.addr.port()),
+        Admission::Remote(app) => PeerClient::known(Some(app)),
+        Admission::Refused => return refuse(stream).await,
+    };
+    drop(engine);
     match sniff::sniff(&stream).await {
         Some(kind) if kind.is_http() => {}
         Some(Sniffed::Garbage) => {
@@ -177,10 +207,6 @@ async fn serve_connection(ctx: Arc<ProxyCtx>, mut stream: TcpStream, peer: Socke
         _ => return,
     }
     let _ = stream.set_nodelay(true);
-    let client = match ctx.engine.upgrade() {
-        Some(engine) => PeerClient::spawn(&engine, peer, ctx.addr.port()),
-        None => PeerClient::unknown(),
-    };
     let service = service_fn(move |req| handle(ctx.clone(), client.clone(), req));
     let _ = hyper::server::conn::http1::Builder::new()
         .preserve_header_case(true)
@@ -188,6 +214,25 @@ async fn serve_connection(ctx: Arc<ProxyCtx>, mut stream: TcpStream, peer: Socke
         .serve_connection(TokioIo::new(stream), service)
         .with_upgrades()
         .await;
+}
+
+/// A LAN client the user denied, or didn't answer for in time. HTTP
+/// clients are told why; anything else is just closed.
+async fn refuse(mut stream: TcpStream) {
+    if !sniff::sniff(&stream).await.is_some_and(Sniffed::is_http) {
+        return;
+    }
+    // Read what has arrived so closing doesn't reset the connection
+    // before the client sees the answer.
+    let mut buf = [0u8; 4096];
+    let _ = tokio::time::timeout(Duration::from_millis(200), stream.read(&mut buf)).await;
+    let body = "Proxymate: this device isn't allowed to use the proxy. Allow it on the computer running Proxymate.\n";
+    let response = format!(
+        "HTTP/1.1 403 Forbidden\r\ncontent-type: text/plain; charset=utf-8\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    let _ = stream.write_all(response.as_bytes()).await;
+    let _ = stream.shutdown().await;
 }
 
 async fn handle(
@@ -199,13 +244,78 @@ async fn handle(
         return Ok(mitm::connect(ctx, client, req).await);
     }
     match req.uri().scheme_str() {
-        Some("http") if !targets_self(req.uri(), ctx.addr) => forward(&ctx, &client, req).await,
-        Some("http") | None => Ok(info_page(ctx.addr)),
+        Some("http") if !is_onboarding(&ctx, req.uri()) => forward(&ctx, &client, req).await,
+        Some("http") | None => Ok(onboarding_response(&ctx, &client, &req)),
         Some(_) => Ok(text_response(
             StatusCode::NOT_IMPLEMENTED,
             "Proxymate: send HTTPS requests through a CONNECT tunnel.\n",
         )),
     }
+}
+
+/// An absolute-form request for the onboarding host, or for this proxy
+/// itself, which forwarding would loop back to us.
+fn is_onboarding(ctx: &ProxyCtx, uri: &Uri) -> bool {
+    if uri.host().is_some_and(|h| h.eq_ignore_ascii_case(ONBOARDING_HOST)) {
+        return true;
+    }
+    let engine = ctx.engine.upgrade();
+    targets_self(uri, ctx.addr, |ip| {
+        engine.as_ref().is_some_and(|e| e.device_registry().is_local(ip))
+    })
+}
+
+fn onboarding_response(ctx: &ProxyCtx, client: &PeerClient, req: &Request<Incoming>) -> Response<ProxyBody> {
+    let Some(engine) = ctx.engine.upgrade() else {
+        return text_response(StatusCode::SERVICE_UNAVAILABLE, "Proxymate is shutting down\n");
+    };
+    let path = req.uri().path();
+    let page = if matches!(*req.method(), Method::GET | Method::HEAD) {
+        let tls = engine.tls();
+        // The address the device reached us on is the one to set as its proxy.
+        let proxy = req
+            .headers()
+            .get(header::HOST)
+            .and_then(|h| h.to_str().ok())
+            .and_then(|h| h.parse::<SocketAddr>().ok())
+            .filter(|_| req.uri().scheme().is_none())
+            .unwrap_or_else(|| engine.display_addr(ctx.addr));
+        onboarding::route(
+            path,
+            &onboarding::Onboarding {
+                ca: tls.ca.info(),
+                der: tls.ca.cert_der(),
+                proxy: Some(proxy.to_string()),
+                user_agent: req
+                    .headers()
+                    .get(header::USER_AGENT)
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or_default(),
+            },
+        )
+    } else {
+        onboarding::method_not_allowed()
+    };
+    if let Some(ip) = client.remote_ip()
+        && page.status == 200
+    {
+        engine.device_registry().note_onboarding(ip);
+    }
+    let mut response = Response::new(
+        Full::new(Bytes::from(page.body))
+            .map_err(|never| match never {})
+            .boxed_unsync(),
+    );
+    *response.status_mut() = StatusCode::from_u16(page.status).unwrap_or(StatusCode::OK);
+    let headers = response.headers_mut();
+    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(page.content_type));
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    if let Some(name) = page.file_name
+        && let Ok(value) = HeaderValue::from_str(&format!("attachment; filename=\"{name}\""))
+    {
+        headers.insert(header::CONTENT_DISPOSITION, value);
+    }
+    response
 }
 
 async fn forward(
@@ -429,26 +539,18 @@ fn strip_hop_by_hop(headers: &mut HeaderMap) {
 }
 
 /// True if `uri` points at this proxy's own listener, which would loop.
-fn targets_self(uri: &Uri, addr: SocketAddr) -> bool {
+/// `is_local` says whether an address is one of this machine's.
+fn targets_self(uri: &Uri, addr: SocketAddr, is_local: impl Fn(IpAddr) -> bool) -> bool {
     if uri.port_u16().unwrap_or(80) != addr.port() {
         return false;
     }
     match uri.host().map(|h| h.trim_start_matches('[').trim_end_matches(']')) {
-        Some("localhost") => true,
+        Some(host) if host.eq_ignore_ascii_case("localhost") => true,
         Some(host) => host
             .parse::<IpAddr>()
-            .is_ok_and(|ip| ip == addr.ip() || ip.is_loopback() || ip.is_unspecified()),
+            .is_ok_and(|ip| ip == addr.ip() || ip.is_loopback() || ip.is_unspecified() || is_local(ip)),
         None => true,
     }
-}
-
-fn info_page(addr: SocketAddr) -> Response<ProxyBody> {
-    text_response(
-        StatusCode::OK,
-        &format!(
-            "Proxymate is running.\n\nSet http://{addr} as the HTTP proxy of the client you want to inspect, e.g.\n\n  curl -x http://{addr} http://example.com/\n"
-        ),
-    )
 }
 
 fn text_response(status: StatusCode, text: &str) -> Response<ProxyBody> {
@@ -515,11 +617,29 @@ mod tests {
     #[test]
     fn requests_to_the_proxy_itself_are_detected() {
         let addr: SocketAddr = "127.0.0.1:9090".parse().unwrap();
-        assert!(targets_self(&"http://127.0.0.1:9090/".parse().unwrap(), addr));
-        assert!(targets_self(&"http://localhost:9090/x".parse().unwrap(), addr));
-        assert!(targets_self(&"http://[::1]:9090/".parse().unwrap(), addr));
-        assert!(!targets_self(&"http://127.0.0.1:9091/".parse().unwrap(), addr));
-        assert!(!targets_self(&"http://example.com:9090/".parse().unwrap(), addr));
+        let lan: IpAddr = "10.0.0.5".parse().unwrap();
+        let is_local = |ip: IpAddr| ip == lan;
+        assert!(targets_self(&"http://127.0.0.1:9090/".parse().unwrap(), addr, is_local));
+        assert!(targets_self(
+            &"http://localhost:9090/x".parse().unwrap(),
+            addr,
+            is_local
+        ));
+        assert!(targets_self(&"http://[::1]:9090/".parse().unwrap(), addr, is_local));
+        assert!(!targets_self(
+            &"http://127.0.0.1:9091/".parse().unwrap(),
+            addr,
+            is_local
+        ));
+        assert!(!targets_self(
+            &"http://example.com:9090/".parse().unwrap(),
+            addr,
+            is_local
+        ));
+        // Listening on every interface: our LAN address is us too.
+        let any: SocketAddr = "0.0.0.0:9090".parse().unwrap();
+        assert!(targets_self(&"http://10.0.0.5:9090/".parse().unwrap(), any, is_local));
+        assert!(!targets_self(&"http://10.0.0.6:9090/".parse().unwrap(), any, is_local));
     }
 
     #[test]

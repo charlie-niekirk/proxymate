@@ -1936,6 +1936,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "if-addrs"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c0a05c691e1fae256cf7013d99dad472dc52d5543322761f83ec8d47eab40d2b"
+dependencies = [
+ "libc",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "indexmap"
 version = "1.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2929,6 +2939,7 @@ name = "pm-core"
 version = "0.1.0"
 dependencies = [
  "arc-swap",
+ "base64 0.23.1",
  "brotli 8.0.4",
  "bytes",
  "criterion",
@@ -2944,10 +2955,12 @@ dependencies = [
  "hyper-util",
  "moka",
  "parking_lot 0.13.0",
+ "plist",
  "pm-model",
  "pm-platform",
  "pm-testkit",
  "postcard",
+ "qrcode",
  "rayon",
  "rcgen",
  "regex",
@@ -2989,6 +3002,7 @@ name = "pm-platform"
 version = "0.1.0"
 dependencies = [
  "core-foundation",
+ "if-addrs",
  "libc",
  "objc2",
  "objc2-app-kit",
@@ -3177,6 +3191,12 @@ dependencies = [
  "tokio",
  "window-vibrancy",
 ]
+
+[[package]]
+name = "qrcode"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d68782463e408eb1e668cf6152704bd856c78c5b6417adaee3203d8f4c1fc9ec"
 
 [[package]]
 name = "quick-xml"

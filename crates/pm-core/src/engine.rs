@@ -2,7 +2,7 @@
 //! so the UI and agents always see the same behaviour.
 
 use std::collections::{HashMap, HashSet};
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -17,6 +17,7 @@ use pm_model::{
 use rustls::pki_types::CertificateDer;
 
 use crate::Error;
+use crate::devices::{self, DeviceRegistry};
 use crate::ingest::{self, FlowEvent, IngestTx};
 use crate::integration::Platform;
 use crate::io::{decode, sse};
@@ -38,8 +39,8 @@ pub type DeltaSink = Box<dyn FnMut(ViewDelta) -> bool + Send>;
 #[derive(Debug, Clone, Default)]
 pub struct EngineConfig {
     /// Root for live segment files (`<data_dir>/live/<uuid>/`), the CA
-    /// (`<data_dir>/ca/`), `ssl.json` and `app.sqlite` (rules; in memory
-    /// without a data dir). Defaults to a `proxymate`
+    /// (`<data_dir>/ca/`), `ssl.json` and `app.sqlite` (rules and the device
+    /// allow-list; in memory without a data dir). Defaults to a `proxymate`
     /// directory under the system temp dir.
     pub data_dir: Option<PathBuf>,
     /// DER certificates trusted for upstream TLS on top of the OS trust
@@ -98,6 +99,7 @@ impl Engine {
         // Without a data directory (tests, throwaway engines) rules live
         // in memory, so engines never share them through the temp dir.
         let rules = Rules::load(config.data_dir.as_deref());
+        let devices = DeviceRegistry::load(config.data_dir.as_deref(), devices::HOLD);
         let root = config
             .data_dir
             .unwrap_or_else(|| std::env::temp_dir().join("proxymate"));
@@ -133,7 +135,7 @@ impl Engine {
             recording: AtomicBool::new(true),
             proxy: Mutex::new(ProxyState::Stopped),
             interned: Mutex::new(HashSet::new()),
-            platform: Platform::new(&root, config.guardian_exe),
+            platform: Platform::new(&root, config.guardian_exe, devices),
             root,
             extra_roots,
             tls: RwLock::new(Arc::new(tls)),
@@ -324,8 +326,12 @@ impl Engine {
 
     /// Binds the proxy listener (the first free port in `config.ports`) and
     /// serves it on the current tokio runtime. Failure is also kept for
-    /// [`Engine::proxy_status`].
-    pub async fn start_proxy(self: &Arc<Self>, config: ProxyConfig) -> Result<SocketAddr, Error> {
+    /// [`Engine::proxy_status`]. A loopback `config.ip` becomes every
+    /// interface if LAN access was left on.
+    pub async fn start_proxy(self: &Arc<Self>, mut config: ProxyConfig) -> Result<SocketAddr, Error> {
+        if config.ip.is_loopback() && self.device_registry().lan_enabled() {
+            config.ip = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
+        }
         let started = match proxy::bind(&config).await {
             Ok(listener) => proxy::spawn(Arc::downgrade(self), listener),
             Err(err) => Err(err),
@@ -346,19 +352,72 @@ impl Engine {
         }
     }
 
+    /// Moves the listener to `ip` on the same port (LAN access). If that
+    /// port can't be bound there, the old listener comes back.
+    pub(crate) async fn rebind_proxy(self: &Arc<Self>, ip: IpAddr) -> Result<SocketAddr, Error> {
+        let old = std::mem::take(&mut *self.proxy.lock());
+        let ProxyState::Listening(handle) = old else {
+            let ports = ProxyConfig::default().ports;
+            return self.start_proxy(ProxyConfig { ip, ports }).await;
+        };
+        let previous = handle.addr;
+        if previous.ip() == ip {
+            *self.proxy.lock() = ProxyState::Listening(handle);
+            return Ok(previous);
+        }
+        handle.stop().await;
+        let port = previous.port();
+        let bound = match proxy::bind(&ProxyConfig { ip, ports: port..=port }).await {
+            Ok(listener) => proxy::spawn(Arc::downgrade(self), listener).map_err(|e| (e, None)),
+            Err(err) => {
+                let back = proxy::bind(&ProxyConfig {
+                    ip: previous.ip(),
+                    ports: port..=port,
+                })
+                .await
+                .and_then(|l| proxy::spawn(Arc::downgrade(self), l));
+                Err((err, back.ok()))
+            }
+        };
+        let mut state = self.proxy.lock();
+        match bound {
+            Ok(handle) => {
+                let addr = handle.addr;
+                *state = ProxyState::Listening(handle);
+                Ok(addr)
+            }
+            Err((err, back)) => {
+                let message = format!("can't listen on {ip} port {port}: {err}");
+                *state = match back {
+                    Some(handle) => ProxyState::Listening(handle),
+                    None => ProxyState::Failed(message.clone()),
+                };
+                Err(Error::Proxy(message))
+            }
+        }
+    }
+
+    /// Where this machine reaches the listener: loopback when it listens on
+    /// every interface.
     pub(crate) fn proxy_addr(&self) -> Option<SocketAddr> {
         match &*self.proxy.lock() {
+            ProxyState::Listening(handle) if handle.addr.ip().is_unspecified() => {
+                Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), handle.addr.port()))
+            }
             ProxyState::Listening(handle) => Some(handle.addr),
             _ => None,
         }
     }
 
+    /// `listening` is what the toolbar shows: the chosen LAN interface's
+    /// address while LAN access is on.
     pub fn proxy_status(&self) -> ProxyStatus {
         let (listening, error) = match &*self.proxy.lock() {
             ProxyState::Stopped => (None, None),
-            ProxyState::Listening(handle) => (Some(handle.addr.to_string()), None),
+            ProxyState::Listening(handle) => (Some(handle.addr), None),
             ProxyState::Failed(err) => (None, Some(err.clone())),
         };
+        let listening = listening.map(|addr| self.display_addr(addr).to_string());
         ProxyStatus {
             listening,
             error,
@@ -370,6 +429,7 @@ impl Engine {
     /// quit: the engine itself may outlive the event loop.
     pub fn shutdown(&self) {
         *self.proxy.lock() = ProxyState::Stopped;
+        self.restore_android_proxies();
         self.details.segments.remove_all();
     }
 
@@ -480,6 +540,7 @@ impl Engine {
     pub fn publish_tick(&self) {
         self.publish_sidebar();
         self.rules.breakpoints.publish();
+        self.device_registry().publish();
         let mut sinks = self.sinks.lock();
         if sinks.is_empty() {
             return;

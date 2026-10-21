@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use crate::PlatformError;
-use crate::procinfo::{AppInfo, ProcessInfo, app_name, is_helper, outermost_app};
+use crate::procinfo::{AppInfo, ProcessInfo, app_name, is_helper, is_simulator, outermost_app};
 
 const PROC_PIDFDSOCKETINFO: libc::c_int = 3;
 const PROC_PIDPATHINFO_MAXSIZE: usize = 4 * 1024;
@@ -49,20 +49,22 @@ impl ProcessInfo for LibProc {
 
     fn app_for_pid(&self, pid: u32) -> Option<AppInfo> {
         let path = pid_path(pid)?;
+        let simulator = is_simulator(&path);
         if let Some(bundle) = outermost_app(&path) {
-            return Some(bundle_info(bundle, pid));
+            return Some(bundle_info(bundle, pid, simulator));
         }
         if is_helper(&path)
             && let Some(owner) = responsible_pid(pid).filter(|&p| p != pid)
             && let Some(bundle) = pid_path(owner).and_then(|p| outermost_app(&p))
         {
-            return Some(bundle_info(bundle, owner));
+            return Some(bundle_info(bundle, owner, simulator));
         }
         Some(AppInfo {
             name: path.file_name()?.to_string_lossy().into_owned(),
             bundle_id: None,
             bundle_path: None,
             pid,
+            simulator,
         })
     }
 
@@ -71,7 +73,7 @@ impl ProcessInfo for LibProc {
     }
 }
 
-fn bundle_info(bundle: PathBuf, pid: u32) -> AppInfo {
+fn bundle_info(bundle: PathBuf, pid: u32, simulator: bool) -> AppInfo {
     let bundle_id = plist::Value::from_file(bundle.join("Contents/Info.plist"))
         .ok()
         .and_then(|info| {
@@ -85,6 +87,7 @@ fn bundle_info(bundle: PathBuf, pid: u32) -> AppInfo {
         bundle_id,
         bundle_path: Some(bundle),
         pid,
+        simulator,
     }
 }
 
@@ -241,7 +244,7 @@ mod tests {
 
     #[test]
     fn reads_bundles() {
-        let finder = bundle_info(PathBuf::from("/System/Library/CoreServices/Finder.app"), 1);
+        let finder = bundle_info(PathBuf::from("/System/Library/CoreServices/Finder.app"), 1, false);
         assert_eq!(finder.name, "Finder");
         assert_eq!(finder.bundle_id.as_deref(), Some("com.apple.finder"));
         let png = LibProc.icon_png(finder.bundle_path.as_ref().unwrap(), 64).unwrap();

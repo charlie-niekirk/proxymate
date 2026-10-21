@@ -13,6 +13,9 @@ export interface ViewStats {
 export type RequestTab = "Header" | "Query" | "Body" | "Raw";
 export type ResponseTab = "Header" | "Body" | "Raw" | "TLS" | "Timing";
 
+/** Device Setup Wizard tabs. */
+export type DeviceTab = "simulator" | "iphone" | "android" | "emulator";
+
 export interface FilterTiming {
   /** Engine refilter time reported by Rust. */
   engineMs: number;
@@ -41,6 +44,8 @@ interface UiState {
   breakpointsOpen: boolean;
   /** The breakpoint shown in the Breakpoint Editor. */
   selectedBreakpoint: number | null;
+  deviceSetupOpen: boolean;
+  deviceTab: DeviceTab;
 
   setText(text: string): void;
   setProtocol(protocol: ProtocolFilter): void;
@@ -60,6 +65,8 @@ interface UiState {
   closeRulesEditor(): void;
   setBreakpointsOpen(open: boolean): void;
   selectBreakpoint(id: number | null): void;
+  setDeviceSetupOpen(open: boolean): void;
+  setDeviceTab(tab: DeviceTab): void;
 }
 
 export const useUi = create<UiState>()((set) => ({
@@ -76,6 +83,8 @@ export const useUi = create<UiState>()((set) => ({
   rulesEditor: { open: false, ruleId: null, draft: null, seq: 0 },
   breakpointsOpen: false,
   selectedBreakpoint: null,
+  deviceSetupOpen: false,
+  deviceTab: "simulator",
 
   setText: (text) => set((s) => ({ filter: { ...s.filter, text } })),
   setProtocol: (protocol) => set((s) => ({ filter: { ...s.filter, protocol } })),
@@ -110,4 +119,6 @@ export const useUi = create<UiState>()((set) => ({
   closeRulesEditor: () => set((s) => ({ rulesEditor: { ...s.rulesEditor, open: false, draft: null } })),
   setBreakpointsOpen: (breakpointsOpen) => set({ breakpointsOpen }),
   selectBreakpoint: (selectedBreakpoint) => set({ selectedBreakpoint }),
+  setDeviceSetupOpen: (deviceSetupOpen) => set({ deviceSetupOpen }),
+  setDeviceTab: (deviceTab) => set({ deviceTab }),
 }));

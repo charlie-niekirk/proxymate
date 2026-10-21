@@ -122,25 +122,25 @@ function TrustWarning({ listening }: { listening: boolean }) {
 }
 
 function ListeningStatus({ status }: { status: ProxyStatus_Serialize | undefined }) {
+  const openDeviceSetup = useUi((s) => s.setDeviceSetupOpen);
   const [dot, text] = !status
     ? ["var(--s-1xx)", "Starting proxy…"]
     : status.listening
       ? [status.recording ? "var(--s-2xx)" : "var(--s-paused)", `Listening on ${status.listening}${status.recording ? "" : " · paused"}`]
       : ["var(--s-5xx)", `Proxy not running: ${status.error ?? "stopped"}`];
-  const url = status?.listening ? `http://${status.listening}` : null;
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <button
           className="text-muted-foreground hover:bg-accent flex h-7 max-w-[520px] items-center gap-2 rounded-md border px-3 text-xs"
           data-testid="listening-status"
-          onClick={() => url && void navigator.clipboard?.writeText(url)}
+          onClick={() => openDeviceSetup(true)}
         >
           <span className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: dot }} />
           <span className="truncate">{text}</span>
         </button>
       </TooltipTrigger>
-      <TooltipContent>{url ? `Copy ${url} · device setup arrives in M9` : text}</TooltipContent>
+      <TooltipContent>Device setup · connect a phone, simulator or emulator</TooltipContent>
     </Tooltip>
   );
 }

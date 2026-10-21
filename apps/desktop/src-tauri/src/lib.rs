@@ -62,6 +62,17 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::subscribe_breakpoints,
             commands::get_breakpoint_body,
             commands::resolve_breakpoint,
+            commands::get_device_access,
+            commands::set_lan_access,
+            commands::set_lan_interface,
+            commands::subscribe_devices,
+            commands::decide_device,
+            commands::forget_device,
+            commands::get_simulator_status,
+            commands::install_simulator_cert,
+            commands::get_android_status,
+            commands::set_android_proxy,
+            commands::push_android_cert,
         ])
         // Sizes are u64 but stay far below 2^53.
         .dangerously_cast_bigints_to_number()

@@ -42,11 +42,14 @@ regex.workspace = true
 arc-swap.workspace = true
 dashmap.workspace = true
 rusqlite.workspace = true
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+base64 = "0.23"
 
 [dev-dependencies]
 pm-testkit.workspace = true
 criterion.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "test-util"] }
+plist = "1.10"
 
 [[bench]]
 name = "ingest"

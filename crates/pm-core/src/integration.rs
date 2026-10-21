@@ -13,7 +13,8 @@ use pm_platform::PlatformError;
 use pm_platform::sysproxy::SystemProxy;
 use pm_platform::trust::{CaCert, TrustState, TrustStore};
 
-use crate::client::ClientResolver;
+use crate::client::{ClientKind, ClientResolver};
+use crate::devices::DeviceRegistry;
 use crate::{Engine, Error};
 
 const SYSPROXY_BACKUP_FILE: &str = "sysproxy-backup.json";
@@ -32,10 +33,11 @@ pub(crate) struct Platform {
     guardian_exe: Option<PathBuf>,
     guardian_spawned: AtomicBool,
     sidebar_sink: Mutex<Option<SidebarSink>>,
+    pub devices: DeviceRegistry,
 }
 
 impl Platform {
-    pub fn new(root: &Path, guardian_exe: Option<PathBuf>) -> Platform {
+    pub fn new(root: &Path, guardian_exe: Option<PathBuf>, devices: DeviceRegistry) -> Platform {
         Platform {
             clients: ClientResolver::new(pm_platform::procinfo::system()),
             trust: pm_platform::trust::system(),
@@ -44,6 +46,7 @@ impl Platform {
             guardian_exe,
             guardian_spawned: AtomicBool::new(false),
             sidebar_sink: Mutex::new(None),
+            devices,
         }
     }
 }
@@ -65,7 +68,8 @@ impl Engine {
                     AppCount {
                         name: name.to_string(),
                         bundle_id: app.as_ref().and_then(|a| a.bundle_id.clone()),
-                        has_icon: app.is_some_and(|a| a.bundle_path.is_some()),
+                        has_icon: app.as_ref().is_some_and(|a| a.bundle_path.is_some()),
+                        remote: app.is_some_and(|a| matches!(a.kind, ClientKind::Remote(_))),
                         count,
                     }
                 })

@@ -3,7 +3,7 @@ import type { ViewerId } from "@/components/BodyViewer/registry";
 import { bridge } from "@/dev/bridge";
 import { openPreset, setThrottle } from "@/lib/actions";
 import { THROTTLE_PRESETS } from "@/lib/rules";
-import { useUi, type RequestTab, type ResponseTab } from "@/store/ui";
+import { useUi, type DeviceTab, type RequestTab, type ResponseTab } from "@/store/ui";
 
 /**
  * Dev only (`VITE_PM_REMOTE=1`): polls the Vite server's `/__pm_remote`
@@ -42,6 +42,10 @@ interface Command {
   throttle?: string;
   breakpoints?: boolean;
   breakpointAction?: { execute?: MessageEdits_Deserialize; abort?: boolean };
+  /** Opens device setup on this tab; `null` closes it. */
+  deviceTab?: DeviceTab | null;
+  /** Clicks the element with this `data-testid`, e.g. `simulator-install`. */
+  click?: string;
 }
 
 async function apply(cmd: Command) {
@@ -50,6 +54,15 @@ async function apply(cmd: Command) {
   if (cmd.requestTab) ui.setRequestTab(cmd.requestTab);
   if (cmd.responseTab) ui.setResponseTab(cmd.responseTab);
   if (cmd.viewer) ui.setViewer(cmd.viewer.kind, cmd.viewer.viewer);
+  if (cmd.deviceTab !== undefined) {
+    if (cmd.deviceTab) ui.setDeviceTab(cmd.deviceTab);
+    ui.setDeviceSetupOpen(cmd.deviceTab !== null);
+  }
+  if (cmd.click) {
+    // After this tick's state changes have rendered.
+    const id = cmd.click;
+    setTimeout(() => document.querySelector<HTMLElement>(`[data-testid="${CSS.escape(id)}"]`)?.click(), 100);
+  }
   if (cmd.theme) {
     document.documentElement.dataset.theme = cmd.theme;
     document.documentElement.classList.toggle("dark", cmd.theme === "dark");

@@ -9,6 +9,9 @@ pub struct AppCount {
     pub bundle_id: Option<String>,
     /// True if `pmicon://localhost/<name>` serves an icon.
     pub has_icon: bool,
+    /// A LAN device (shown as its nickname and IP), not an app on this Mac.
+    #[serde(default)]
+    pub remote: bool,
     pub count: u32,
 }
 
