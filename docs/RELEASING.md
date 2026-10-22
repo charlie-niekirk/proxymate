@@ -85,6 +85,8 @@ build with a throwaway updater key.
   update doesn't bring the Gatekeeper prompt back.
 - An ad-hoc signature is tied to the exact build, not to a developer. macOS may ask again, after an update, for
   permissions it remembers per app (for example Local Network access).
+- Not yet checked: updating a copy in `/Applications` that went through Open Anyway. If macOS says Proxymate was
+  prevented from modifying apps, allow it in System Settings › Privacy & Security › App Management.
 - Apple silicon needs every binary to be signed; ad-hoc counts, so the universal app runs natively on both
   architectures.
 
