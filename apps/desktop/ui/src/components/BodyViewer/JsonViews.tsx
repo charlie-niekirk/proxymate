@@ -12,6 +12,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { evaluatePath, toJsonPath, toPointer, type PathSegment } from "@/lib/body/jsonPath";
+import { isJsonNumber, numberText, stringifyLossless } from "@/lib/body/losslessJson";
 import { cn } from "@/lib/utils";
 
 import { CodeView } from "./CodeView";
@@ -61,7 +62,7 @@ const ROW = 20;
 
 function containerOf(v: unknown): "object" | "array" | null {
   if (Array.isArray(v)) return "array";
-  return v !== null && typeof v === "object" ? "object" : null;
+  return v !== null && typeof v === "object" && !isJsonNumber(v) ? "object" : null;
 }
 
 function flatten(roots: { label: string | null; path: PathSegment[]; value: unknown; match: boolean }[], expanded: Set<string>) {
@@ -95,6 +96,7 @@ function expandedTo(value: unknown, depth: number, path: PathSegment[] = [], out
 /**
  * The JSON tree: virtualised and collapsible, with type-coloured values,
  * child counts, a JSONPath / JSON pointer filter and right-click copy.
+ * Parsed losslessly, so numbers show (and copy) exactly as sent.
  */
 export function JsonTree({ bytes }: { bytes: Uint8Array }) {
   const parsed = useQuery({
@@ -197,7 +199,7 @@ function Tree({ root }: { root: unknown }) {
 }
 
 function valueText(v: unknown): string {
-  return typeof v === "string" ? v : JSON.stringify(v, null, 2);
+  return typeof v === "string" ? v : stringifyLossless(v);
 }
 
 const TreeLine = memo(function TreeLine({
@@ -251,6 +253,6 @@ function Value({ row }: { row: TreeRow }) {
   }
   const v = row.value;
   if (typeof v === "string") return <span className="truncate text-[var(--syntax-string)]">{JSON.stringify(v)}</span>;
-  if (typeof v === "number") return <span className="text-[var(--syntax-number)]">{String(v)}</span>;
+  if (typeof v === "number" || isJsonNumber(v)) return <span className="text-[var(--syntax-number)]">{numberText(v)}</span>;
   return <span className="text-[var(--syntax-literal)]">{String(v)}</span>;
 }

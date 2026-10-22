@@ -1,5 +1,5 @@
 /// <reference lib="webworker" />
-// Parses (or pretty-prints) large JSON bodies off the main thread.
+// Parses (losslessly, see lib/body/losslessJson) or pretty-prints large JSON bodies off the main thread.
 import { jsonOp } from "./jsonOp";
 
 export interface JsonRequest {
