@@ -13,6 +13,7 @@ import {
   setThrottle,
 } from "@/lib/actions";
 import { THROTTLE_PRESETS } from "@/lib/rules";
+import { forceTheme } from "@/lib/theme";
 import { useUi, type DeviceTab, type RequestTab, type ResponseTab, type SettingsPage } from "@/store/ui";
 
 /**
@@ -105,8 +106,7 @@ async function apply(cmd: Command) {
     setTimeout(() => document.querySelector<HTMLElement>(`[data-testid="${CSS.escape(id)}"]`)?.click(), 100);
   }
   if (cmd.theme) {
-    document.documentElement.dataset.theme = cmd.theme;
-    document.documentElement.classList.toggle("dark", cmd.theme === "dark");
+    forceTheme(cmd.theme);
   }
   if (cmd.contextMenu !== undefined) openContextMenu(cmd.contextMenu);
   if (cmd.preset) await openPreset(cmd.preset.flow, cmd.preset.kind);

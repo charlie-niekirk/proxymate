@@ -55,6 +55,8 @@ pub struct Store {
     /// Flows evicted by the limits so far.
     evicted: u64,
     pinned: u32,
+    /// Body bytes seen on the wire so far (sent, received), for throughput.
+    traffic: (u64, u64),
     /// An eviction that found nothing it may drop (everything old is
     /// pinned or in flight) isn't tried again below this many flows.
     evict_retry_at: u32,
@@ -121,6 +123,12 @@ impl Store {
     /// Pinned flows in the store.
     pub fn pinned(&self) -> u32 {
         self.pinned
+    }
+
+    /// Body bytes sent and received by every flow since the store began
+    /// (clears and evictions don't take them back).
+    pub fn traffic(&self) -> (u64, u64) {
+        self.traffic
     }
 
     /// The arena position of flow `id`.
@@ -193,11 +201,11 @@ impl Store {
                     id,
                     req_size,
                     resp_size,
-                } => self.modify(id, first_new, |f| {
+                } => self.modify_sizes(id, first_new, |f| {
                     f.req_size = req_size;
                     f.resp_size = resp_size;
                 }),
-                FlowEvent::WsMsg { id, direction, len } => self.modify(id, first_new, |f| match direction {
+                FlowEvent::WsMsg { id, direction, len } => self.modify_sizes(id, first_new, |f| match direction {
                     pm_model::WsDirection::Sent => f.req_size += len,
                     pm_model::WsDirection::Received => f.resp_size += len,
                 }),
@@ -207,7 +215,7 @@ impl Store {
                     duration_ms,
                     req_size,
                     resp_size,
-                } => self.modify(id, first_new, |f| {
+                } => self.modify_sizes(id, first_new, |f| {
                     f.state = state;
                     f.duration_ms = Some(duration_ms);
                     f.req_size = req_size;
@@ -257,6 +265,8 @@ impl Store {
         debug_assert!(flow.id >= self.next, "flows must arrive in id order");
         self.next = flow.id + 1;
         self.pinned += u32::from(flow.pinned);
+        self.traffic.0 += flow.req_size;
+        self.traffic.1 += flow.resp_size;
         self.sidebar.add(&flow);
         self.flows.push(flow);
     }
@@ -317,6 +327,22 @@ impl Store {
         for view in self.views.values_mut() {
             view.on_update(pos as u32, &old, new);
         }
+    }
+
+    /// Like [`Store::modify`], for changes to a flow's sizes: the traffic
+    /// counters take the growth.
+    fn modify_sizes(&mut self, id: FlowId, first_new: usize, change: impl FnOnce(&mut FlowSummary)) {
+        let mut grew = (0, 0);
+        self.modify(id, first_new, |f| {
+            let before = (f.req_size, f.resp_size);
+            change(f);
+            grew = (
+                f.req_size.saturating_sub(before.0),
+                f.resp_size.saturating_sub(before.1),
+            );
+        });
+        self.traffic.0 += grew.0;
+        self.traffic.1 += grew.1;
     }
 
     /// Like [`Store::modify`], for changes that may move the flow to another

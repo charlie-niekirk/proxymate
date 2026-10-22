@@ -34,6 +34,7 @@ import { formatCount } from "@/lib/flow";
 import { sslSettingsKey } from "@/lib/query";
 import { cn } from "@/lib/utils";
 import { startSidebar, useSidebar } from "@/store/sidebar";
+import { useStorage } from "@/store/storage";
 import { LIVE_STORE, useUi } from "@/store/ui";
 
 function Section({ title, children, defaultOpen = true }: { title: string; children: ReactNode; defaultOpen?: boolean }) {
@@ -81,6 +82,8 @@ function Item({
     <button
       onClick={onClick}
       className={cn(itemClass(active), muted && "text-muted-foreground italic", indent && "pl-7")}
+      // Long app and host names are cut with an ellipsis; the whole name is here.
+      title={count !== undefined ? `${label} · ${count.toLocaleString()} flows` : label}
       data-testid={testId}
     >
       {icon}
@@ -91,6 +94,29 @@ function Item({
 }
 
 const glyph = (Icon: LucideIcon) => <Icon className="size-3.5 shrink-0 opacity-70" />;
+
+/** The Apps and Domains filter box, for ⌘L. */
+export const SIDEBAR_FILTER_ID = "sidebar-filter";
+
+/** Pinned flows (kept when old flows are evicted): a click shows them. */
+function PinnedItem() {
+  const pinned = useStorage((s) => s.status?.pinned ?? 0);
+  const live = useUi((s) => s.store === LIVE_STORE);
+  const text = useUi((s) => s.filter.text);
+  const setText = useUi((s) => s.setText);
+  const showing = text.trim() === "is:pinned";
+  if (pinned === 0 || !live) return <Item icon={glyph(Pin)} label="No pinned flows" muted />;
+  return (
+    <Item
+      icon={glyph(Pin)}
+      label="Pinned flows"
+      count={pinned}
+      active={showing}
+      onClick={() => setText(showing ? "" : "is:pinned")}
+      testId="sidebar-pinned"
+    />
+  );
+}
 
 /**
  * Opened sessions and HARs, beside the live capture: a click shows one in
@@ -154,12 +180,13 @@ export function Sidebar() {
     <aside className="bg-sidebar flex h-full flex-col">
       {/* Traffic lights sit here; the strip drags the window. */}
       <div data-tauri-drag-region className="h-[52px] shrink-0" />
-      <ScrollArea className="min-h-0 flex-1 px-2">
+      {/* Radix wraps the content in a `display: table` box that grows with long names; a block lets them truncate. */}
+      <ScrollArea className="min-h-0 flex-1 px-2 [&_[data-slot=scroll-area-viewport]>div]:!block">
         <Section title="Favorites">
           <Item icon={glyph(Star)} label="No favorites yet" muted />
         </Section>
         <Section title="Pinned">
-          <Item icon={glyph(Pin)} label="No pinned flows" muted />
+          <PinnedItem />
         </Section>
         <Section title="Saved">
           <SavedDocuments />
@@ -199,7 +226,15 @@ export function Sidebar() {
       </ScrollArea>
       <div className="relative shrink-0 p-2">
         <Search className="text-muted-foreground absolute top-1/2 left-4 size-3 -translate-y-1/2" />
-        <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Filter" className="bg-background/40 pl-6" />
+        <Input
+          id={SIDEBAR_FILTER_ID}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => e.key === "Escape" && setQuery("")}
+          placeholder="Filter apps and domains"
+          aria-label="Filter apps and domains"
+          className="bg-background/40 pl-6"
+        />
       </div>
     </aside>
   );

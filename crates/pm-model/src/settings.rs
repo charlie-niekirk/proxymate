@@ -39,6 +39,10 @@ pub struct StorageStatus {
     pub error: Option<String>,
     /// Where the segment files live.
     pub dir: String,
+    /// Body bytes sent and received through the proxy since launch; the
+    /// footer's throughput is their rate of change.
+    pub sent_bytes: u64,
+    pub received_bytes: u64,
 }
 
 /// The proxy listener and its upstream client. A port or pool change

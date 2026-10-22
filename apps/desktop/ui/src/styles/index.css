@@ -31,6 +31,8 @@
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-primary-chip: var(--primary-chip-bg);
+  --color-primary-chip-foreground: var(--primary-chip-fg);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
@@ -38,6 +40,10 @@
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-destructive-solid: var(--destructive-solid);
+  --color-overlay: var(--overlay);
+  --color-paper: var(--paper);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);

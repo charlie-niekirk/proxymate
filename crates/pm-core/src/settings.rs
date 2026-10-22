@@ -123,6 +123,8 @@ impl Engine {
             evicted: store.evicted(),
             error: segments.error(),
             dir: segments.dir_path().display().to_string(),
+            sent_bytes: store.traffic().0,
+            received_bytes: store.traffic().1,
         }
     }
 

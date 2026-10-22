@@ -123,7 +123,7 @@ export function QrCard({ access, device }: { access: DeviceAccess_Serialize | un
       <img
         src={svgDataUrl(access.qr_svg)}
         alt={`QR code for ${access.setup_url}`}
-        className="size-[132px] shrink-0 rounded-sm bg-white"
+        className="size-[132px] shrink-0 rounded-sm bg-paper"
         draggable={false}
       />
       <div className="flex min-w-0 flex-col gap-1.5">

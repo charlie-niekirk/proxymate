@@ -37,6 +37,17 @@ export class RowCache {
     return this.pages.get(page)?.[offset] ?? this.stale.get(page)?.[offset];
   }
 
+  /** The index of flow `id` among the loaded rows, if it is loaded. */
+  indexOf(id: number): number | undefined {
+    for (const map of [this.pages, this.stale]) {
+      for (const [p, rows] of map) {
+        const i = rows.findIndex((r) => r.id === id);
+        if (i >= 0) return p * PAGE_SIZE + i;
+      }
+    }
+    return undefined;
+  }
+
   /** Makes sure rows `first..=last` are loaded or loading. */
   ensure(first: number, last: number): void {
     this.visible = [first, last];

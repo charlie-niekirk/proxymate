@@ -1873,6 +1873,12 @@ export type StorageStatus_Deserialize = {
 	error?: string | null,
 	/**  Where the segment files live. */
 	dir: string,
+	/**
+	 *  Body bytes sent and received through the proxy since launch; the
+	 *  footer's throughput is their rate of change.
+	 */
+	sent_bytes: number,
+	received_bytes: number,
 };
 
 /**  What the live capture holds now, for Settings › Storage and the footer. */
@@ -1890,6 +1896,12 @@ export type StorageStatus_Serialize = {
 	error: string | null,
 	/**  Where the segment files live. */
 	dir: string,
+	/**
+	 *  Body bytes sent and received through the proxy since launch; the
+	 *  footer's throughput is their rate of change.
+	 */
+	sent_bytes: number,
+	received_bytes: number,
 };
 
 /**  Whether the OS proxy points at Proxymate. */

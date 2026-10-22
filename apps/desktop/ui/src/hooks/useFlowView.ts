@@ -1,6 +1,6 @@
 import { useEffect, useReducer, useRef, useState } from "react";
 
-import type { ViewDelta } from "@/bindings";
+import type { ViewDelta_Serialize } from "@/bindings";
 import { backend } from "@/lib/backend";
 import { flowKey, queryClient, streamKey } from "@/lib/query";
 import { RowCache } from "@/lib/rowCache";
@@ -54,9 +54,10 @@ export function useFlowView() {
       );
       cache.reset(info.len);
       useUi.getState().setStats({ len: info.len, total: info.total });
+      useUi.getState().setDeep(info.deep);
       setLive({ view: info.view, cache });
       useUi.getState().setView(info.view);
-      await backend.subscribe(info.view, (d: ViewDelta) => {
+      await backend.subscribe(info.view, (d: ViewDelta_Serialize) => {
         if (cancelled) return;
         if (d.structural) cache.reset(d.len);
         else {
@@ -64,10 +65,13 @@ export function useFlowView() {
           if (d.len !== cache.len) cache.append(d.len);
         }
         useUi.getState().setStats({ len: d.len, total: d.total });
+        useUi.getState().setDeep(d.deep);
         refreshInspected(store, d);
         bump();
       });
     })();
+    // The sidebar counts the store the table shows.
+    void backend.setSidebarStore(store);
     return () => {
       cancelled = true;
       setLive(null);
@@ -88,6 +92,7 @@ export function useFlowView() {
       else pendingFilter.current = pending;
       live.cache.reset(info.len);
       useUi.getState().setStats({ len: info.len, total: info.total });
+      useUi.getState().setDeep(info.deep);
       bump();
     });
   }, [live, filter]);
@@ -104,7 +109,7 @@ export function useFlowView() {
 }
 
 /** Refetches the inspected flow if this delta may have changed it. */
-function refreshInspected(store: number, d: ViewDelta) {
+function refreshInspected(store: number, d: ViewDelta_Serialize) {
   const { selectedId, select } = useUi.getState();
   if (selectedId === null) return;
   if (d.total === 0) {

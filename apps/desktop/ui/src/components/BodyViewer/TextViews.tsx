@@ -60,7 +60,7 @@ export function HtmlPreview({ bytes }: { bytes: Uint8Array }) {
         referrerPolicy="no-referrer"
         // CSP Embedded Enforcement (Chromium, so WebView2); WebKit ignores it.
         {...{ csp: PREVIEW_CSP }}
-        className="min-h-0 w-full flex-1 border-0 bg-white"
+        className="min-h-0 w-full flex-1 border-0 bg-paper"
         data-testid="html-preview"
       />
     </div>
