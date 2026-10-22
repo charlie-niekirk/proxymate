@@ -1,6 +1,6 @@
-import { Copy, FileDown, FileInput, OctagonPause, PencilLine, Repeat2, Send, ShieldOff, Terminal } from "lucide-react";
+import { Copy, FileDown, FileInput, OctagonPause, PencilLine, Pin, PinOff, Repeat2, Send, ShieldOff, Terminal } from "lucide-react";
 
-import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from "@/components/ui/context-menu";
+import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuShortcut } from "@/components/ui/context-menu";
 import {
   addSslBypass,
   copyFlowCurl,
@@ -8,8 +8,10 @@ import {
   editAndReplay,
   exportHar,
   openPreset,
+  pinFlows,
   replayFlow,
 } from "@/lib/actions";
+import { shortcutLabel } from "@/lib/commands";
 import type { Row } from "@/lib/flow";
 import { LIVE_STORE, useUi } from "@/store/ui";
 
@@ -40,10 +42,15 @@ export function FlowContextMenu({ row }: { row: Row | null }) {
       <ContextMenuItem disabled={!sendable} onSelect={() => void replayFlow(store, row.id)} data-testid="menu-replay">
         <Repeat2 />
         Replay
+        <ContextMenuShortcut>{shortcutLabel("r")}</ContextMenuShortcut>
       </ContextMenuItem>
       <ContextMenuItem disabled={!sendable} onSelect={() => void editAndReplay(store, row.id)} data-testid="menu-edit-replay">
         <Send />
         Edit &amp; Replay…
+      </ContextMenuItem>
+      <ContextMenuItem disabled={!live} onSelect={() => void pinFlows([row.id], !row.pinned)} data-testid="menu-pin">
+        {row.pinned ? <PinOff /> : <Pin />}
+        {row.pinned ? "Unpin" : "Pin"}
       </ContextMenuItem>
       <ContextMenuSeparator />
       <ContextMenuItem

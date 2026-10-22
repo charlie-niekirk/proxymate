@@ -22,6 +22,7 @@ test("the toolbar counts connected agents and opens Settings › MCP", async ({ 
 test("read-only and the enable switch take effect", async ({ page }) => {
   await page.goto("/");
   await page.getByTestId("settings-button").click();
+  await page.getByTestId("settings-page-mcp").click();
   const settings = page.getByTestId("settings-mcp");
 
   await settings.getByTestId("mcp-read-only").click();

@@ -89,6 +89,12 @@
     user-select: none;
     cursor: default;
   }
+  /* Keyboard focus is always visible. Components with their own ring
+   * (shadcn's outline-none + ring) win: :where() adds no specificity. */
+  :where(button, a, [role="button"], [role="tab"], [role="radio"], [role="option"], [tabindex]):focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 1px;
+  }
   input,
   textarea,
   [data-selectable] {
