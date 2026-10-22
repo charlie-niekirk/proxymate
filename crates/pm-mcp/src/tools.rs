@@ -92,8 +92,10 @@ macro_rules! def {
 
 const FILTER_HELP: &str = "Filter DSL: space-separated terms, all must match; `-` negates. host:*.example.com \
 path:/api/* method:POST,PUT status:4xx|404|400-499 ct:json|form|xml|js|css|graphql|document|media|html|image \
-app:Safari state:active|completed|failed|blocked|paused|tunnel is:edited dur>500 dur<2s size>1mb reqsize>10kb \
-id>120. Bare words (or \"quoted phrases\") search the URL.";
+app:Safari state:active|completed|failed|blocked|paused|tunnel is:edited is:pinned dur>500 dur<2s size>1mb \
+reqsize>10kb id>120. Bare words (or \"quoted phrases\") search the URL. Header and body terms read each flow's \
+detail, so they are slower: header:x-request-id (any header line; reqheader:/resheader: for one side), \
+body:\"order_id\" (decoded body, first 4 MB; reqbody:/resbody:).";
 
 fn defs() -> Vec<Def> {
     vec![

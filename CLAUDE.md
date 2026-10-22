@@ -50,12 +50,13 @@ Run these from the repo root unless noted.
 | UI typecheck / lint / test / build | `npm run typecheck`, `npm run lint`, `npm run test`, `npm run build` |
 | Regenerate TS bindings | `cargo test -p proxymate-desktop export_bindings`. Debug app launches also regenerate them |
 | Engine micro-bench | `cargo run --release -p proxymate-cli -- bench [FLOWS]` |
+| Soak (M10) | `cargo run --release -p proxymate-cli -- bench --rps 500 --duration 3600 [--max-flows N]` (own engine), or `--proxy 127.0.0.1:9090 --pid <app pid>` against the app. CSV every `--interval` seconds: rate, p50/p99, failures, RSS, flows, disk, evicted |
 | Ingest bench (criterion, target < 2 s per 100k flows) | `cargo bench -p pm-core --bench ingest` |
 | Release bundle | `npm run tauri build` |
 
 CI (`.github/workflows/ci.yml`):
 - Rust: `fmt --check`, `clippy -D warnings`, `test` and a bindings-drift check, on macOS and Linux.
-- UI: `typecheck`, `lint`, `vitest`, `build` and Playwright (`e2e`, pixel snapshots off on Linux: baselines are macOS-only for now).
+- UI: `typecheck`, `lint`, `vitest`, `build` and Playwright (`e2e`), in the Playwright Docker image with pixel diffs on. Linux baselines (`*-linux.png`) are made there: a missing one fails the run and comes back in the `playwright-report` artifact to commit.
 
 Run the same checks locally before pushing.
 
@@ -117,7 +118,7 @@ Targets:
 - Use the generated `src/bindings.ts` types. Never edit that file by hand, never hand-write IPC types, and call commands through `lib/backend.ts`.
 
 **State**
-- Zustand (`store/ui.ts`) holds UI state.
+- Zustand (`store/ui.ts`) holds UI state; `store/prefs.ts` holds what persists across launches (appearance, columns, sort).
 - Row data lives in the non-reactive `RowCache`, never in React state.
 - TanStack Query is planned for detail, bodies and rules.
 
@@ -125,9 +126,10 @@ Targets:
 - The components are copied into `src/components/ui/` and restyled to a compact density: 12–13 px text and 24–28 px controls. Add more with `npx shadcn@latest add <name>` from `apps/desktop/ui`.
 - Check the result: once the CLI rewrote the `cn` import to a stray npm package.
 
-**Colours**
-- Every colour is a token in `src/styles/tokens.css`: shadcn variables plus `--m-*` (methods), `--s-*` (status and state), `--url-*` and `--selection-*`. Don't hard-code colours in components.
-- Dark is the primary theme; light gets a full pass in M10.
+**Colours and themes**
+- Every colour is a token in `src/styles/tokens.css`: shadcn variables plus `--m-*` (methods), `--s-*` (status and state), `--url-*`, `--selection-*` and the rest. Don't hard-code colours in components (not even `bg-white` or `bg-black/50`: there are `--paper` and `--overlay`).
+- Both themes are first-class. `src/styles/contrast.test.ts` checks 4.5:1 for every text token on its surface (pills composited over the table) in dark and light; add a pair there when you add a text token.
+- Settings › Appearance (System/Light/Dark) lives in `store/prefs.ts` (local storage) with the column layout and sort; `lib/theme.ts` applies it and syncs the native window theme. `?theme=light` pins a theme in dev (Playwright).
 
 **Body viewers** (`src/components/BodyViewer/`)
 - `registry.ts` maps each `ContentKind` to its viewers, best first. Add a viewer there and in `Viewer.tsx`.
@@ -138,6 +140,11 @@ Targets:
 **The flow table**
 - It is a custom div grid virtualised with TanStack Virtual, at a fixed 22 px row height. Do not swap in shadcn's DataTable.
 - Keep row components memoised, with stable callbacks.
+- Columns are defined in `FlowTable/columns.ts`; a new one also needs a `RowCell` case and a place in `DEFAULT_LAYOUT` (saved layouts pick it up at its default position).
+
+**Keyboard and commands (M10)**
+- `lib/commands.ts` is the single list: the ⌘K palette shows every command, and a command's `key` binds ⌘/Ctrl+key in `hooks/useShortcuts.ts`. Add commands there, not ad-hoc `keydown` listeners. ⌘⌫ never fires in text fields; ⌘F inside CodeMirror is left to its search.
+- Errors from actions go to `reportError` (a sonner toast); a failed flow's explanation and fixes come from `lib/errors.ts`.
 
 **Window chrome**
 - The overlay title bar with inset traffic lights is set in `tauri.conf.json`.
@@ -175,6 +182,12 @@ Targets:
 - Every accepted connection goes through `Engine::admit` first: loopback and our own addresses pass, LAN IPs wait up to 30 s for the "Allow?" prompt. Tests can't make a non-local peer, so the hold/allow/deny logic is unit-tested on `DeviceRegistry` directly.
 - LAN access rebinds to `0.0.0.0` on the same port. Use `Engine::proxy_addr()` (loopback) for anything this machine connects to, and `display_addr` for what the user sees.
 - Tests never change the machine: no simulator boot or keychain install, no emulator proxy. Real `simctl`/`adb` runs need the user's OK.
+
+**Storage limits and deep search (M10)**
+- `StorageSettings` (flows, disk MB, WebSocket messages per connection) and `ProxySettings` (port, plain-HTTP pool) are `app.sqlite` settings rows, owned by `pm-core/src/settings.rs`, which also runs eviction after each ingest batch (`Engine::evict_locked` → `Store::evict` → `DetailStore::evict` → `SegmentStore::drop_through`).
+- Pinned (`FlowSummary.pinned`, `FlowRow`'s last field) and in-flight flows are never evicted. The arena may have gaps after an eviction: look flows up with `Store::get`, never by `id - first_id`.
+- Every `SegmentStore::append` names the flow it writes for; that is how a segment knows when it can be deleted.
+- Deep DSL terms (`header:`, `body:`, …) live in `store/deep.rs`. `FlowQuery::matches` passes them; anything evaluating a query over summaries must also run `FlowQuery::deep()` against the detail (views do it in the background job, MCP inline).
 
 **Replay, cURL, HAR and sessions (M8)**
 - `Engine::send(RequestSpec, SendOpts)` is the one way Proxymate sends a request itself (Replay, Compose, MCP). It goes through `proxy/exchange.rs` like proxied traffic; the flow's summary gets `sent_by`.
