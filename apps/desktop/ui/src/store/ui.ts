@@ -1,6 +1,15 @@
 import { create } from "zustand";
 
-import type { ContentGroup, ContentKind, FilterSpec_Deserialize, ProtocolFilter, SortSpec } from "@/bindings";
+import type {
+  ContentGroup,
+  ContentKind,
+  DocumentInfo,
+  FilterSpec_Deserialize,
+  ProtocolFilter,
+  RequestSpec_Serialize,
+  SaveProgress_Serialize,
+  SortSpec,
+} from "@/bindings";
 import type { ViewerId } from "@/components/BodyViewer/registry";
 import type { Rule } from "@/lib/rules";
 
@@ -19,6 +28,16 @@ export type DeviceTab = "simulator" | "iphone" | "android" | "emulator";
 /** Settings pages; more arrive with M10. */
 export type SettingsPage = "mcp";
 
+/** The live capture's store; opened documents have their own. */
+export const LIVE_STORE = 0;
+
+/** A background save or export, for the footer. */
+export interface SaveJob {
+  /** What is being written, e.g. "Saving session". */
+  label: string;
+  progress: SaveProgress_Serialize;
+}
+
 export interface FilterTiming {
   /** Engine refilter time reported by Rust. */
   engineMs: number;
@@ -27,6 +46,15 @@ export interface FilterTiming {
 }
 
 interface UiState {
+  /** The store the table and inspector show: the live capture or a document tab. */
+  store: number;
+  /** Opened sessions and HARs, in tab order. */
+  documents: DocumentInfo[];
+  /** The flow table's engine view (its filter and sort), for "export what I see". */
+  view: number | null;
+  /** The Compose window: open or not, and what it starts from. */
+  compose: { open: boolean; spec: RequestSpec_Serialize | null; seq: number };
+  save: SaveJob | null;
   filter: FilterSpec_Deserialize;
   sort: SortSpec;
   selectedId: number | null;
@@ -51,6 +79,13 @@ interface UiState {
   deviceTab: DeviceTab;
   settings: { open: boolean; page: SettingsPage };
 
+  /** Switches tabs; the selection doesn't carry over (ids are per store). */
+  setStore(store: number): void;
+  setDocuments(documents: DocumentInfo[]): void;
+  setView(view: number | null): void;
+  openCompose(spec?: RequestSpec_Serialize | null): void;
+  closeCompose(): void;
+  setSave(save: SaveJob | null): void;
   setText(text: string): void;
   setProtocol(protocol: ProtocolFilter): void;
   toggleContent(group: ContentGroup): void;
@@ -76,6 +111,11 @@ interface UiState {
 }
 
 export const useUi = create<UiState>()((set) => ({
+  store: LIVE_STORE,
+  documents: [],
+  view: null,
+  compose: { open: false, spec: null, seq: 0 },
+  save: null,
   filter: { text: "", protocol: "all", content: [], host: null, client: null },
   sort: { key: "id", dir: "asc" },
   selectedId: null,
@@ -93,6 +133,13 @@ export const useUi = create<UiState>()((set) => ({
   deviceTab: "simulator",
   settings: { open: false, page: "mcp" },
 
+  setStore: (store) => set((s) => (s.store === store ? {} : { store, selectedId: null, stats: { len: 0, total: 0 } })),
+  setDocuments: (documents) => set({ documents }),
+  setView: (view) => set({ view }),
+  // Bumping `seq` remounts the form, so a new spec never inherits the last one's edits.
+  openCompose: (spec = null) => set((s) => ({ compose: { open: true, spec, seq: s.compose.seq + 1 } })),
+  closeCompose: () => set((s) => ({ compose: { ...s.compose, open: false } })),
+  setSave: (save) => set({ save }),
   setText: (text) => set((s) => ({ filter: { ...s.filter, text } })),
   setProtocol: (protocol) => set((s) => ({ filter: { ...s.filter, protocol } })),
   toggleContent: (group) =>

@@ -1,4 +1,5 @@
 import { Channel, isTauri } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 import {
   commands,
@@ -16,7 +17,9 @@ import {
   type DeviceAccess_Serialize,
   type DevicesSnapshot_Deserialize,
   type DevicesSnapshot_Serialize,
+  type DocumentInfo,
   type FilterSpec_Deserialize,
+  type FlowSelection,
   type FlowDetail_Serialize,
   type FlowSummary_Serialize,
   type McpAuditPage_Serialize,
@@ -24,7 +27,11 @@ import {
   type McpStatus_Deserialize,
   type McpStatus_Serialize,
   type ProxyStatus_Serialize,
+  type RequestSpec_Deserialize,
+  type RequestSpec_Serialize,
   type RowsPage_Serialize,
+  type SaveProgress_Deserialize,
+  type SaveProgress_Serialize,
   type SidebarSnapshot_Deserialize,
   type SimInstallResult_Serialize,
   type SimulatorStatus_Serialize,
@@ -40,34 +47,45 @@ import {
 } from "@/bindings";
 import { createMockBackend } from "@/lib/mockBackend";
 
-/** The engine as seen by the UI. Mirrors the Tauri commands one to one. */
+/**
+ * The engine as seen by the UI. Mirrors the Tauri commands one to one.
+ *
+ * Flow ids are per store: `store` is 0 (`LIVE_STORE`) for the live
+ * capture, or an opened document's. View ids already name their store.
+ */
 export interface Backend {
-  createView(filter: FilterSpec_Deserialize, sort: SortSpec): Promise<ViewInfo>;
+  createView(store: number, filter: FilterSpec_Deserialize, sort: SortSpec): Promise<ViewInfo>;
   setFilter(view: number, filter: FilterSpec_Deserialize): Promise<ViewInfo>;
   setSort(view: number, sort: SortSpec): Promise<ViewInfo>;
   dropView(view: number): Promise<void>;
   getRows(view: number, start: number, count: number): Promise<RowsPage_Serialize>;
-  getFlow(id: number): Promise<FlowSummary_Serialize | null>;
+  getFlow(store: number, id: number): Promise<FlowSummary_Serialize | null>;
   subscribe(view: number, onDelta: (delta: ViewDelta) => void): Promise<void>;
-  getFlowDetail(id: number): Promise<FlowDetail_Serialize | null>;
+  getFlowDetail(store: number, id: number): Promise<FlowDetail_Serialize | null>;
   /**
    * Body bytes; with `decoded`, content-encoding undone (rejects if that
    * fails). With `max`, only the first `max` bytes.
    */
-  getBody(id: number, part: BodyPart, decoded: boolean, max?: number | null): Promise<ArrayBuffer>;
+  getBody(store: number, id: number, part: BodyPart, decoded: boolean, max?: number | null): Promise<ArrayBuffer>;
   /**
    * A URL serving the body with its detected Content-Type, for `<img>`,
    * `<video>`, PDF frames and fonts (`pmbody://` in the app).
    */
-  bodyUrl(id: number, part: BodyPart, decoded: boolean): Promise<string>;
+  bodyUrl(store: number, id: number, part: BodyPart, decoded: boolean): Promise<string>;
   /** Asks where to save a body and writes it; resolves to the path, or null if cancelled. */
-  saveBody(id: number, part: BodyPart, decoded: boolean, fileName: string): Promise<string | null>;
+  saveBody(store: number, id: number, part: BodyPart, decoded: boolean, fileName: string): Promise<string | null>;
   /** A window of a WebSocket flow's messages matching `query`. */
-  getWebsocketMessages(id: number, query: WsQuery_Deserialize, start: number, count: number): Promise<WsPage_Serialize>;
+  getWebsocketMessages(
+    store: number,
+    id: number,
+    query: WsQuery_Deserialize,
+    start: number,
+    count: number,
+  ): Promise<WsPage_Serialize>;
   /** One message's recorded payload (at most 1 MB). */
-  getWebsocketPayload(id: number, index: number): Promise<ArrayBuffer>;
+  getWebsocketPayload(store: number, id: number, index: number): Promise<ArrayBuffer>;
   /** A window of an event-stream response's events matching `text`. */
-  getSseEvents(id: number, text: string, start: number, count: number): Promise<SsePage_Serialize>;
+  getSseEvents(store: number, id: number, text: string, start: number, count: number): Promise<SsePage_Serialize>;
   clearFlows(): Promise<void>;
   setRecording(on: boolean): Promise<ProxyStatus_Serialize>;
   getProxyStatus(): Promise<ProxyStatus_Serialize>;
@@ -160,6 +178,44 @@ export interface Backend {
   /** Tool calls older than `before` (newest first). */
   getMcpAudit(before: number | null, limit: number): Promise<McpAuditPage_Serialize>;
   clearMcpAudit(): Promise<void>;
+
+  // ---- Replay, compose, cURL (M8) ----
+  /** Sends a composed request; resolves to the new live flow's id once recorded. */
+  sendRequest(spec: RequestSpec_Deserialize, applyRules: boolean): Promise<number>;
+  /** Sends a recorded request again, as it was sent. */
+  replayFlow(store: number, id: number, applyRules: boolean): Promise<number>;
+  /** A recorded request with its body decoded, for Edit & Replay. */
+  getRequestSpec(store: number, id: number): Promise<RequestSpec_Serialize>;
+  /** A shell command that sends the request again with curl. */
+  getCurl(store: number, id: number): Promise<string>;
+
+  // ---- Documents: sessions and HAR (M8) ----
+  listDocuments(): Promise<DocumentInfo[]>;
+  /** Opens a `.proxymate` session or a HAR; asks for the file without `path`. Null if cancelled. */
+  openDocument(path: string | null, har: boolean): Promise<DocumentInfo | null>;
+  closeDocument(store: number): Promise<void>;
+  /**
+   * Saves flows as a `.proxymate` session in the background (asking where
+   * without `path`). Resolves to the path once started, or null if cancelled;
+   * `onProgress` hears the rest.
+   */
+  saveSession(
+    store: number,
+    selection: FlowSelection,
+    path: string | null,
+    fileName: string,
+    onProgress: (p: SaveProgress_Serialize) => void,
+  ): Promise<string | null>;
+  /** Exports flows as a HAR file in the background; like `saveSession`. */
+  exportHar(
+    store: number,
+    selection: FlowSelection,
+    path: string | null,
+    fileName: string,
+    onProgress: (p: SaveProgress_Serialize) => void,
+  ): Promise<string | null>;
+  /** File menu clicks (`open`, `import-har`, `save-session`, `export-har`, `compose`). */
+  onMenu(handler: (id: string) => void): Promise<() => void>;
 }
 
 type Result<T> = { status: "ok"; data: T } | { status: "error"; error: string };
@@ -174,26 +230,30 @@ async function unwrap<T>(result: Promise<Result<T>>): Promise<T> {
 const BODY_ORIGIN = navigator.userAgent.includes("Windows") ? "http://pmbody.localhost" : "pmbody://localhost";
 
 const tauriBackend: Backend = {
-  createView: (filter, sort) => commands.createView(filter, sort),
+  createView: (store, filter, sort) => unwrap(commands.createView(store, filter, sort)),
   setFilter: (view, filter) => unwrap(commands.setFilter(view, filter)),
   setSort: (view, sort) => unwrap(commands.setSort(view, sort)),
   dropView: (view) => commands.dropView(view),
   getRows: (view, start, count) => unwrap(commands.getRows(view, start, count)),
-  getFlow: (id) => commands.getFlow(id),
+  getFlow: (store, id) => commands.getFlow(store, id),
   subscribe: async (view, onDelta) => {
     const channel = new Channel<ViewDelta>();
     channel.onmessage = onDelta;
     await unwrap(commands.subscribeView(view, channel));
   },
-  getFlowDetail: (id) => unwrap(commands.getFlowDetail(id)),
+  getFlowDetail: (store, id) => unwrap(commands.getFlowDetail(store, id)),
   // `get_body` answers with a raw ipc::Response, which arrives as an ArrayBuffer;
   // the binding can only say `unknown`.
-  getBody: async (id, part, decoded, max = null) => (await unwrap(commands.getBody(id, part, decoded, max))) as ArrayBuffer,
-  bodyUrl: async (id, part, decoded) => `${BODY_ORIGIN}/live/${id}/${part}${decoded ? "?decoded=1" : ""}`,
-  saveBody: (id, part, decoded, fileName) => unwrap(commands.saveBody(id, part, decoded, fileName)),
-  getWebsocketMessages: (id, query, start, count) => unwrap(commands.getWebsocketMessages(id, query, start, count)),
-  getWebsocketPayload: async (id, index) => (await unwrap(commands.getWebsocketPayload(id, index))) as ArrayBuffer,
-  getSseEvents: (id, text, start, count) => unwrap(commands.getSseEvents(id, text, start, count)),
+  getBody: async (store, id, part, decoded, max = null) =>
+    (await unwrap(commands.getBody(store, id, part, decoded, max))) as ArrayBuffer,
+  bodyUrl: async (store, id, part, decoded) =>
+    `${BODY_ORIGIN}/${store === 0 ? "live" : store}/${id}/${part}${decoded ? "?decoded=1" : ""}`,
+  saveBody: (store, id, part, decoded, fileName) => unwrap(commands.saveBody(store, id, part, decoded, fileName)),
+  getWebsocketMessages: (store, id, query, start, count) =>
+    unwrap(commands.getWebsocketMessages(store, id, query, start, count)),
+  getWebsocketPayload: async (store, id, index) =>
+    (await unwrap(commands.getWebsocketPayload(store, id, index))) as ArrayBuffer,
+  getSseEvents: (store, id, text, start, count) => unwrap(commands.getSseEvents(store, id, text, start, count)),
   clearFlows: () => commands.clearFlows(),
   setRecording: (on) => commands.setRecording(on),
   getProxyStatus: () => commands.getProxyStatus(),
@@ -274,7 +334,28 @@ const tauriBackend: Backend = {
   clearMcpAudit: async () => {
     await unwrap(commands.clearMcpAudit());
   },
+  sendRequest: (spec, applyRules) => unwrap(commands.sendRequest(spec, applyRules)),
+  replayFlow: (store, id, applyRules) => unwrap(commands.replayFlow(store, id, applyRules)),
+  getRequestSpec: (store, id) => unwrap(commands.getRequestSpec(store, id)),
+  getCurl: (store, id) => unwrap(commands.getCurl(store, id)),
+  listDocuments: () => commands.listDocuments(),
+  openDocument: (path, har) => unwrap(commands.openDocument(path, har)),
+  closeDocument: async (store) => {
+    await unwrap(commands.closeDocument(store));
+  },
+  saveSession: (store, selection, path, fileName, onProgress) =>
+    unwrap(commands.saveSession(store, selection, path, fileName, progressChannel(onProgress))),
+  exportHar: (store, selection, path, fileName, onProgress) =>
+    unwrap(commands.exportHar(store, selection, path, fileName, progressChannel(onProgress))),
+  onMenu: (handler) => listen<string>("pm-menu", (e) => handler(e.payload)),
 };
+
+function progressChannel(onProgress: (p: SaveProgress_Serialize) => void) {
+  // The channel carries what Rust serializes; the binding names the other shape.
+  const channel = new Channel<SaveProgress_Serialize>();
+  channel.onmessage = onProgress;
+  return channel as unknown as Channel<SaveProgress_Deserialize>;
+}
 
 function pickBackend(): Backend {
   if (isTauri()) return tauriBackend;

@@ -1,5 +1,19 @@
 import { useQuery } from "@tanstack/react-query";
-import { Archive, ChevronDown, ChevronRight, Globe, Layers, Pin, Search, ShieldOff, Star, type LucideIcon } from "lucide-react";
+import {
+  Archive,
+  ChevronDown,
+  ChevronRight,
+  FileJson,
+  FolderOpen,
+  Globe,
+  Layers,
+  Pin,
+  Radio,
+  Search,
+  ShieldOff,
+  Star,
+  type LucideIcon,
+} from "lucide-react";
 import { memo, useEffect, useState, type ReactNode } from "react";
 
 import type { AppCount_Deserialize, DomainNode } from "@/bindings";
@@ -14,13 +28,13 @@ import {
 } from "@/components/ui/context-menu";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { addSslBypass, setAppSslExcluded } from "@/lib/actions";
+import { addSslBypass, closeDocument, openDocument, setAppSslExcluded } from "@/lib/actions";
 import { backend } from "@/lib/backend";
 import { formatCount } from "@/lib/flow";
 import { sslSettingsKey } from "@/lib/query";
 import { cn } from "@/lib/utils";
 import { startSidebar, useSidebar } from "@/store/sidebar";
-import { useUi } from "@/store/ui";
+import { LIVE_STORE, useUi } from "@/store/ui";
 
 function Section({ title, children, defaultOpen = true }: { title: string; children: ReactNode; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -79,6 +93,47 @@ function Item({
 const glyph = (Icon: LucideIcon) => <Icon className="size-3.5 shrink-0 opacity-70" />;
 
 /**
+ * Opened sessions and HARs, beside the live capture: a click shows one in
+ * the table (like its tab), the context menu closes it.
+ */
+function SavedDocuments() {
+  const documents = useUi((s) => s.documents);
+  const store = useUi((s) => s.store);
+  const setStore = useUi((s) => s.setStore);
+  return (
+    <div data-testid="saved-documents">
+      <Item
+        icon={glyph(Radio)}
+        label="Live capture"
+        active={store === LIVE_STORE}
+        onClick={() => setStore(LIVE_STORE)}
+        testId="saved-live"
+      />
+      {documents.map((doc) => (
+        <ContextMenu key={doc.store}>
+          <ContextMenuTrigger asChild>
+            <div title={doc.path}>
+              <Item
+                icon={glyph(doc.kind === "har" ? FileJson : Archive)}
+                label={doc.name}
+                count={doc.flows}
+                active={store === doc.store}
+                onClick={() => setStore(doc.store)}
+                testId={`saved-${doc.store}`}
+              />
+            </div>
+          </ContextMenuTrigger>
+          <ContextMenuContent>
+            <ContextMenuItem onSelect={() => void closeDocument(doc.store)}>Close {doc.name}</ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
+      ))}
+      <Item icon={glyph(FolderOpen)} label="Open session or HAR…" muted onClick={() => void openDocument()} />
+    </div>
+  );
+}
+
+/**
  * Sidebar over macOS vibrancy (solid colour elsewhere). Apps and Domains
  * come live from the engine, which aggregates their counts in Rust.
  */
@@ -106,8 +161,8 @@ export function Sidebar() {
         <Section title="Pinned">
           <Item icon={glyph(Pin)} label="No pinned flows" muted />
         </Section>
-        <Section title="Saved Sessions" defaultOpen={false}>
-          <Item icon={glyph(Archive)} label="Sessions arrive in M8" muted />
+        <Section title="Saved">
+          <SavedDocuments />
         </Section>
         <Section title="All">
           <Item

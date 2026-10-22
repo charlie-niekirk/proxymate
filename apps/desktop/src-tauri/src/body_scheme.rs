@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 use pm_core::Engine;
-use pm_model::{BodyPart, ContentKind, FlowId};
+use pm_model::{BodyPart, ContentKind, FlowId, LIVE_STORE, StoreId};
 use tauri::http::{Request, Response, StatusCode, header};
 
 pub const SCHEME: &str = "pmbody";
@@ -26,6 +26,7 @@ const CSP: &str = "default-src 'none'; img-src data:; style-src 'unsafe-inline';
 
 #[derive(Clone, PartialEq, Eq)]
 struct Key {
+    store: StoreId,
     flow: FlowId,
     part: BodyPart,
     decoded: bool,
@@ -89,17 +90,20 @@ fn serve(engine: &Engine, cache: &BodyCache, request: &Request<Vec<u8>>) -> Resu
     response.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
 }
 
-/// `/<store>/<flow>/<part>?decoded=1&max=N`.
+/// `/<store>/<flow>/<part>?decoded=1&max=N`, where `<store>` is `live` or
+/// an opened document's store id.
 fn parse(uri: &tauri::http::Uri) -> Result<Key, Failure> {
     let bad = |what: &str| (StatusCode::BAD_REQUEST, format!("pmbody: {what} in {uri}"));
     let segments: Vec<&str> = uri.path().trim_matches('/').split('/').collect();
     let [store, flow, part] = segments.as_slice() else {
         return Err(bad("expected /<store>/<flow>/<part>"));
     };
-    // Saved sessions and HAR imports (M8) add stores beside the live one.
-    if *store != "live" {
-        return Err((StatusCode::NOT_FOUND, format!("pmbody: unknown store {store:?}")));
-    }
+    let store = match *store {
+        "live" => LIVE_STORE,
+        other => other
+            .parse()
+            .map_err(|_| (StatusCode::NOT_FOUND, format!("pmbody: unknown store {other:?}")))?,
+    };
     let flow = flow.parse().map_err(|_| bad("bad flow id"))?;
     let part = match *part {
         "request" => BodyPart::Request,
@@ -116,6 +120,7 @@ fn parse(uri: &tauri::http::Uri) -> Result<Key, Failure> {
         }
     }
     Ok(Key {
+        store,
         flow,
         part,
         decoded,
@@ -129,15 +134,18 @@ fn load(engine: &Engine, cache: &BodyCache, key: &Key) -> Result<Arc<Body>, Fail
     }
     let not_found = || (StatusCode::NOT_FOUND, format!("pmbody: no flow {}", key.flow));
     let detail = engine
-        .flow_detail(key.flow)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .flow_detail_in(key.store, key.flow)
+        .map_err(|e| match e {
+            pm_core::Error::UnknownStore(_) => (StatusCode::NOT_FOUND, format!("pmbody: {e}")),
+            e => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        })?
         .ok_or_else(not_found)?;
     let info = match key.part {
         BodyPart::Request => detail.request_body,
         BodyPart::Response => detail.response_body,
     };
     let bytes = engine
-        .body_head(key.flow, key.part, key.decoded, key.max)
+        .body_head_in(key.store, key.flow, key.part, key.decoded, key.max)
         .map_err(|e| (StatusCode::UNPROCESSABLE_ENTITY, e.to_string()))?;
     // Still-encoded bytes are not what the MIME type describes.
     let encoded = info.encoding.is_some() && bytes.decoded_from.is_none();
@@ -206,6 +214,8 @@ mod tests {
         );
         assert!(parse(&"pmbody://localhost/live/x/response".parse().unwrap()).is_err());
         assert!(parse(&"pmbody://localhost/session/1/response".parse().unwrap()).is_err());
+        let key = parse(&"pmbody://localhost/3/1/response".parse().unwrap()).unwrap();
+        assert_eq!((key.store, key.flow), (3, 1));
     }
 
     fn get(engine: &Engine, cache: &BodyCache, uri: &str, range: Option<&str>) -> Response<Vec<u8>> {
@@ -277,6 +287,24 @@ mod tests {
 
         assert_eq!(
             get(&engine, &cache, "pmbody://localhost/live/9/response", None).status(),
+            StatusCode::NOT_FOUND
+        );
+
+        // Opened documents are stores too.
+        let har = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../crates/pm-core/tests/fixtures/chrome-devtools.har");
+        let doc = engine.open_document(&har).unwrap();
+        let image = get(
+            &engine,
+            &cache,
+            &format!("pmbody://localhost/{}/2/response?decoded=1", doc.store),
+            None,
+        );
+        assert_eq!(image.status(), StatusCode::OK);
+        assert_eq!(image.headers()[header::CONTENT_TYPE], "image/png");
+        assert!(image.body().starts_with(b"\x89PNG"));
+        assert_eq!(
+            get(&engine, &cache, "pmbody://localhost/99/0/response", None).status(),
             StatusCode::NOT_FOUND
         );
     }

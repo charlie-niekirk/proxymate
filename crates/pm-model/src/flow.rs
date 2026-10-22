@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use crate::detail::HttpVersion;
+use crate::send::SentBy;
 use crate::tls::TlsStatus;
 
 /// Stable identifier of a flow within one live store or saved session.
@@ -124,6 +125,9 @@ pub struct FlowSummary {
     pub tls: TlsStatus,
     /// Operation name of a GraphQL request, shown in the URL column.
     pub graphql_op: Option<Arc<str>>,
+    /// Set for flows Proxymate sent itself (Replay, Compose, an agent).
+    #[serde(default)]
+    pub sent_by: Option<SentBy>,
 }
 
 impl FlowSummary {

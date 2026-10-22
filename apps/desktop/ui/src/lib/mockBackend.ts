@@ -5,11 +5,14 @@ import type {
   FlowRules_Serialize,
   ContentGroup,
   ContentKind,
+  DocumentInfo,
   FilterSpec_Deserialize,
   FlowDetail_Serialize,
+  FlowSelection,
   FlowRow_Serialize,
   FlowSummary_Serialize,
   ProxyStatus_Serialize,
+  SaveProgress_Serialize,
   SidebarSnapshot_Deserialize,
   SseEvent_Serialize,
   SslSettings,
@@ -74,6 +77,7 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
       https && !connect && i % 3 !== 0 ? "HTTP/2" : "HTTP/1.1",
       tunnel ? "passthrough" : pinned ? "likely_pinned" : https ? "intercepted" : "none",
       !connect && kinds[(i * 5) % kinds.length] === "graphql" ? "GetViewer" : null,
+      i % 211 === 3 ? "user" : null,
     ];
     // A few are WebSockets and event streams, for the message panels.
     if (!connect && i % 61 === 13) return asStream(row, "websocket");
@@ -109,6 +113,11 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
 
   const views = new Map<number, number[]>();
   let nextView = 0;
+  // Opened documents show the first flows of the mock data, under the same ids.
+  let documents: DocumentInfo[] = [];
+  let lastDocument = 0;
+  const DOCUMENT_FLOWS = 50;
+  const storeFlows = (store: number) => (store === 0 ? flows : flows.slice(0, DOCUMENT_FLOWS));
 
   let rules: Rule[] = [
     {
@@ -150,10 +159,10 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
   };
   const groupOf = (k: ContentKind): ContentGroup => GROUPS[k];
 
-  function refilter(filter: FilterSpec_Deserialize): number[] {
+  function refilter(filter: FilterSpec_Deserialize, store = 0): number[] {
     const text = filter.text.trim().toLowerCase();
     const out: number[] = [];
-    for (const f of flows) {
+    for (const f of storeFlows(store)) {
       if (filter.protocol === "http" && f[2] !== "http") continue;
       if (filter.protocol === "https" && f[2] !== "https") continue;
       if (filter.protocol === "websocket" && f[2] !== "ws" && f[2] !== "wss") continue;
@@ -171,17 +180,18 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
   }
 
   return {
-    async createView(filter: FilterSpec_Deserialize) {
+    async createView(store, filter: FilterSpec_Deserialize) {
       await ready;
       const start = performance.now();
-      const view = ++nextView;
-      views.set(view, refilter(filter));
+      // Like the engine: a document's view ids carry its store.
+      const view = store * 2 ** 24 + ++nextView;
+      views.set(view, refilter(filter, store));
       return info(view, start);
     },
     async setFilter(view, filter) {
       await ready;
       const start = performance.now();
-      views.set(view, refilter(filter));
+      views.set(view, refilter(filter, Math.floor(view / 2 ** 24)));
       return info(view, start);
     },
     async setSort(view) {
@@ -197,7 +207,7 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
       const ids = views.get(view) ?? [];
       return { view, start, len: ids.length, rows: ids.slice(start, start + n).map((id) => flows[id]!) };
     },
-    async getFlow(id): Promise<FlowSummary_Serialize | null> {
+    async getFlow(_store, id): Promise<FlowSummary_Serialize | null> {
       await ready;
       const f = flows[id];
       if (!f) return null;
@@ -205,13 +215,14 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
         id: f[0], state: f[1], scheme: f[2], method: f[3], host: f[4], port: f[5], path: f[6], query: f[7],
         status: f[8], content_kind: f[9], client: f[10], started_at_ms: f[11], duration_ms: f[12],
         req_size: f[13], resp_size: f[14], edited: f[15], http_version: f[16], tls: f[17], graphql_op: f[18],
+        sent_by: f[19],
       };
     },
     async subscribe(view, onDelta: (d: ViewDelta) => void) {
       const len = views.get(view)?.length ?? 0;
       setTimeout(() => onDelta({ view, seq: 1, total: flows.length, len, appended: 0, changed: [], structural: true }), 0);
     },
-    async getFlowDetail(id): Promise<FlowDetail_Serialize | null> {
+    async getFlowDetail(_store, id): Promise<FlowDetail_Serialize | null> {
       await ready;
       const fixture = full.get(id);
       if (fixture) return fixture.detail;
@@ -277,7 +288,7 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
         },
       };
     },
-    async getBody(id, part, decoded, max) {
+    async getBody(_store, id, part, decoded, max) {
       await ready;
       const fixture = full.get(id);
       const f = flows[id];
@@ -289,27 +300,27 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
       if (max != null) bytes = bytes.subarray(0, max);
       return bytes.slice().buffer as ArrayBuffer;
     },
-    async bodyUrl(id, part, decoded) {
+    async bodyUrl(store, id, part, decoded) {
       await ready;
       const key = `${id}/${part}/${decoded}`;
       const cached = urls.get(key);
       if (cached) return cached;
       const fixture = full.get(id);
       const info = fixture?.detail[part === "request" ? "request_body" : "response_body"];
-      const bytes = new Uint8Array(await this.getBody(id, part, decoded));
+      const bytes = new Uint8Array(await this.getBody(store, id, part, decoded));
       const url = URL.createObjectURL(new Blob([bytes], { type: info?.mime ?? "application/octet-stream" }));
       urls.set(key, url);
       return url;
     },
-    async saveBody(id, part, decoded, fileName) {
+    async saveBody(store, id, part, decoded, fileName) {
       await ready;
       const a = document.createElement("a");
-      a.href = await this.bodyUrl(id, part, decoded);
+      a.href = await this.bodyUrl(store, id, part, decoded);
       a.download = fileName;
       a.click();
       return fileName;
     },
-    async getWebsocketMessages(id, query, start, n) {
+    async getWebsocketMessages(_store, id, query, start, n) {
       const all = flows[id]?.[2] === "wss" || flows[id]?.[2] === "ws" ? mockMessages(flows[id]![11] ?? 0) : [];
       const text = query.text.trim().toLowerCase();
       const matching = all.filter(
@@ -318,12 +329,12 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
       const close = all.length ? { code: 1000, reason: "bye", by: "sent" as const } : null;
       return { total: all.length, len: matching.length, start, messages: matching.slice(start, start + n), open: false, close };
     },
-    async getWebsocketPayload(id, index) {
+    async getWebsocketPayload(_store, id, index) {
       const m = mockMessages(flows[id]?.[11] ?? 0)[index];
       const bytes = m?.opcode === "binary" ? Uint8Array.from({ length: 48 }, (_, i) => (i * 37) % 256) : new TextEncoder().encode(m?.preview ?? "");
       return bytes.buffer as ArrayBuffer;
     },
-    async getSseEvents(id, search, start, n) {
+    async getSseEvents(_store, id, search, start, n) {
       const all = flows[id]?.[6] === SSE_PATH ? mockEvents(flows[id]![11] ?? 0) : [];
       const text = search.trim().toLowerCase();
       const matching = all.filter((e) => !text || e.data.toLowerCase().includes(text) || (e.event ?? "").includes(text));
@@ -493,7 +504,7 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
       const host = r.matcher.host;
       const hostOk = !host || (host.kind === "exact" ? host.value === f[4] : hostMatches(f[4], host.value));
       const methodOk = r.matcher.methods.length === 0 || r.matcher.methods.includes(f[3]);
-      const detail = await this.getFlowDetail(flow);
+      const detail = await this.getFlowDetail(0, flow);
       const matched = hostOk && methodOk;
       return {
         matched,
@@ -541,6 +552,70 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
     },
     // `?devicePrompt=<ip>`: a LAN client waiting to be allowed.
     ...createMockDevices(9090, new URLSearchParams(window.location.search).get("devicePrompt")),
+    async sendRequest(spec) {
+      await ready;
+      const url = new URL(spec.url);
+      const id = flows.length;
+      const https = url.protocol === "https:";
+      flows = [
+        ...flows,
+        [
+          id, "completed", https ? "https" : "http", spec.method, url.hostname, Number(url.port) || (https ? 443 : 80),
+          url.pathname, url.search.slice(1), 200, "json", "Proxymate", Date.now(), 120, (spec.body ?? "").length, 512,
+          false, "HTTP/1.1", https ? "intercepted" : "none", null, "user",
+        ],
+      ];
+      return id;
+    },
+    async replayFlow(store, id) {
+      const spec = await this.getRequestSpec(store, id);
+      return this.sendRequest(spec, true);
+    },
+    async getRequestSpec(store, id) {
+      const detail = await this.getFlowDetail(store, id);
+      if (!detail) throw new Error(`unknown flow ${id}`);
+      const skip = new Set(["host", "content-length"]);
+      return {
+        method: detail.request.method,
+        url: detail.request.url,
+        headers: detail.request.headers.filter((h) => !skip.has(h.name.toLowerCase())),
+        body: null,
+        body_base64: false,
+      };
+    },
+    async getCurl(store, id) {
+      const spec = await this.getRequestSpec(store, id);
+      const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+      return [`curl ${q(spec.url)}`, ...spec.headers.map((h) => `  -H ${q(`${h.name}: ${h.value}`)}`)].join(" \\\n");
+    },
+    async listDocuments() {
+      return documents;
+    },
+    async openDocument(path, har) {
+      await ready;
+      const name = path?.split("/").pop() ?? (har ? "mock.har" : "mock.proxymate");
+      const doc: DocumentInfo = {
+        store: ++lastDocument,
+        kind: name.endsWith(".har") ? "har" : "session",
+        name,
+        path: path ?? `/Users/you/Documents/${name}`,
+        flows: Math.min(DOCUMENT_FLOWS, flows.length),
+      };
+      documents = [...documents, doc];
+      return doc;
+    },
+    async closeDocument(store) {
+      documents = documents.filter((d) => d.store !== store);
+    },
+    async saveSession(store, selection, path, fileName, onProgress) {
+      return mockSave(storeFlows(store).length, selection, path ?? `/Users/you/Documents/${fileName}`, onProgress);
+    },
+    async exportHar(store, selection, path, fileName, onProgress) {
+      return mockSave(storeFlows(store).length, selection, path ?? `/Users/you/Documents/${fileName}`, onProgress);
+    },
+    async onMenu() {
+      return () => {};
+    },
     ...createMockMcp(now),
   };
 }
@@ -686,4 +761,18 @@ function mockBreakpoint(now: number): BreakpointInfo_Serialize {
 
 function mockBody(kind: ContentKind): string {
   return kind === "json" ? JSON.stringify({ mock: true, items: [1, 2, 3], nested: { ok: true } }) : "mock body\n";
+}
+
+/** A save that reports progress in a few steps, like the engine's writer. */
+function mockSave(
+  all: number,
+  selection: FlowSelection,
+  path: string,
+  onProgress: (p: SaveProgress_Serialize) => void,
+): Promise<string> {
+  const total = selection.kind === "ids" ? selection.ids.length : all;
+  [0, 0.5, 1].forEach((f, i) =>
+    setTimeout(() => onProgress({ done: Math.round(total * f), total, finished: f === 1, error: null, path }), i * 150),
+  );
+  return Promise.resolve(path);
 }

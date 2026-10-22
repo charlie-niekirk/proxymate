@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Circle, ListChecks, Plus, Settings, ShieldAlert, Trash2, type LucideIcon } from "lucide-react";
+import { Circle, ListChecks, Plus, Settings, ShieldAlert, Trash2 } from "lucide-react";
 
 import type { ProxyStatus_Serialize } from "@/bindings";
 import { BreakpointBadge } from "@/components/Breakpoints/BreakpointBadge";
@@ -14,30 +14,17 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { clearFlows, setRecording } from "@/lib/actions";
 import { backend } from "@/lib/backend";
 import { proxyStatusKey } from "@/lib/query";
-import { useUi } from "@/store/ui";
-
-function ToolButton({ icon: Icon, label, milestone }: { icon: LucideIcon; label: string; milestone: string }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button variant="ghost" size="icon" aria-label={label} className="text-muted-foreground">
-          <Icon />
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>
-        {label} · arrives in {milestone}
-      </TooltipContent>
-    </Tooltip>
-  );
-}
+import { LIVE_STORE, useUi } from "@/store/ui";
 
 /**
  * The toolbar, drawn in the overlay title bar area. Empty space drags the
- * window. Controls for later milestones are placeholders.
+ * window.
  */
 export function Toolbar() {
   const { data: status } = useQuery({ queryKey: proxyStatusKey, queryFn: () => backend.getProxyStatus() });
   const recording = status?.recording ?? true;
+  const openCompose = useUi((s) => s.openCompose);
+  const live = useUi((s) => s.store === LIVE_STORE);
   return (
     <header
       data-tauri-drag-region
@@ -57,10 +44,17 @@ export function Toolbar() {
         </TooltipTrigger>
         <TooltipContent>{recording ? "Recording · click to pause" : "Paused · traffic is forwarded but not recorded"}</TooltipContent>
       </Tooltip>
-      <ToolButton icon={Plus} label="Compose" milestone="M8" />
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button variant="ghost" size="icon" aria-label="Clear" onClick={() => void clearFlows()}>
+          <Button variant="ghost" size="icon" aria-label="Compose" onClick={() => openCompose()} data-testid="compose-button">
+            <Plus />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Compose a request · ⌘N</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button variant="ghost" size="icon" aria-label="Clear" disabled={!live} onClick={() => void clearFlows()}>
             <Trash2 />
           </Button>
         </TooltipTrigger>

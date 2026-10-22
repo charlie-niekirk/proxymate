@@ -16,9 +16,11 @@ export const queryClient = new QueryClient({
   },
 });
 
-export const flowKey = (id: number | null) => ["flow", id] as const;
+/** A flow's summary and detail, in a store (ids are per store). */
+export const flowKey = (store: number, id: number | null) => ["flow", store, id] as const;
 /** Live state of a flow's message log (counts, open/closed); refetched as the flow changes. */
-export const streamKey = (id: number | null) => ["stream", id] as const;
+export const streamKey = (store: number, id: number | null) => ["stream", store, id] as const;
+export const documentsKey = ["documents"] as const;
 export const proxyStatusKey = ["proxy-status"] as const;
 export const caInfoKey = ["ca-info"] as const;
 export const sslSettingsKey = ["ssl-settings"] as const;

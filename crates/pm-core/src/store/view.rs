@@ -186,6 +186,11 @@ impl View {
         Some(delta)
     }
 
+    /// Arena positions of the view's rows, in display order.
+    pub fn positions(&self) -> &[Pos] {
+        &self.indices
+    }
+
     pub fn rows(&self, flows: &[FlowSummary], start: u32, count: u32) -> Vec<FlowRow> {
         let start = (start as usize).min(self.indices.len());
         let end = start.saturating_add(count as usize).min(self.indices.len());

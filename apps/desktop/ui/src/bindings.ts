@@ -6,30 +6,30 @@ import { invoke as __TAURI_INVOKE, Channel } from "@tauri-apps/api/core";
 
 /** Commands */
 export const commands = {
-	createView: (filter: FilterSpec_Deserialize, sort: SortSpec) => __TAURI_INVOKE<ViewInfo>("create_view", { filter, sort }),
+	createView: (store: number, filter: FilterSpec_Deserialize, sort: SortSpec) => typedError<ViewInfo, string>(__TAURI_INVOKE("create_view", { store, filter, sort })),
 	setFilter: (view: number, filter: FilterSpec_Deserialize) => typedError<ViewInfo, string>(__TAURI_INVOKE("set_filter", { view, filter })),
 	setSort: (view: number, sort: SortSpec) => typedError<ViewInfo, string>(__TAURI_INVOKE("set_sort", { view, sort })),
 	dropView: (view: number) => __TAURI_INVOKE<void>("drop_view", { view }),
 	getRows: (view: number, start: number, count: number) => typedError<RowsPage_Serialize, string>(__TAURI_INVOKE("get_rows", { view, start, count })),
-	getFlow: (id: number) => __TAURI_INVOKE<FlowSummary_Serialize | null>("get_flow", { id }),
+	getFlow: (store: number, id: number) => __TAURI_INVOKE<FlowSummary_Serialize | null>("get_flow", { store, id }),
 	/**  Streams the view's 20 Hz deltas to the webview until the channel closes. */
 	subscribeView: (view: number, onDelta: Channel<ViewDelta>) => typedError<null, string>(__TAURI_INVOKE("subscribe_view", { view, onDelta })),
-	getFlowDetail: (id: number) => typedError<FlowDetail_Serialize | null, string>(__TAURI_INVOKE("get_flow_detail", { id })),
+	getFlowDetail: (store: number, id: number) => typedError<FlowDetail_Serialize | null, string>(__TAURI_INVOKE("get_flow_detail", { store, id })),
 	/**
 	 *  A body's bytes as a raw `ArrayBuffer`, not JSON. With `decoded`, a
 	 *  content-encoded body is decoded first; decoding errors are returned.
 	 *  With `max`, only the first `max` bytes are sent.
 	 */
-	getBody: (id: number, part: BodyPart, decoded: boolean, max: number | null) => typedError<unknown, string>(__TAURI_INVOKE("get_body", { id, part, decoded, max })),
+	getBody: (store: number, id: number, part: BodyPart, decoded: boolean, max: number | null) => typedError<unknown, string>(__TAURI_INVOKE("get_body", { store, id, part, decoded, max })),
 	/**
 	 *  Asks where to save a body (decoded, with `decoded`) and writes it there.
 	 *  Returns the path, or `None` if the user cancelled.
 	 */
-	saveBody: (id: number, part: BodyPart, decoded: boolean, fileName: string) => typedError<string | null, string>(__TAURI_INVOKE("save_body", { id, part, decoded, fileName })),
-	getWebsocketMessages: (id: number, query: WsQuery_Deserialize, start: number, count: number) => typedError<WsPage_Serialize, string>(__TAURI_INVOKE("get_websocket_messages", { id, query, start, count })),
+	saveBody: (store: number, id: number, part: BodyPart, decoded: boolean, fileName: string) => typedError<string | null, string>(__TAURI_INVOKE("save_body", { store, id, part, decoded, fileName })),
+	getWebsocketMessages: (store: number, id: number, query: WsQuery_Deserialize, start: number, count: number) => typedError<WsPage_Serialize, string>(__TAURI_INVOKE("get_websocket_messages", { store, id, query, start, count })),
 	/**  One WebSocket message's payload as a raw `ArrayBuffer`. */
-	getWebsocketPayload: (id: number, index: number) => typedError<unknown, string>(__TAURI_INVOKE("get_websocket_payload", { id, index })),
-	getSseEvents: (id: number, text: string, start: number, count: number) => typedError<SsePage_Serialize, string>(__TAURI_INVOKE("get_sse_events", { id, text, start, count })),
+	getWebsocketPayload: (store: number, id: number, index: number) => typedError<unknown, string>(__TAURI_INVOKE("get_websocket_payload", { store, id, index })),
+	getSseEvents: (store: number, id: number, text: string, start: number, count: number) => typedError<SsePage_Serialize, string>(__TAURI_INVOKE("get_sse_events", { store, id, text, start, count })),
 	clearFlows: () => __TAURI_INVOKE<void>("clear_flows"),
 	setRecording: (on: boolean) => __TAURI_INVOKE<ProxyStatus_Serialize>("set_recording", { on }),
 	getProxyStatus: () => __TAURI_INVOKE<ProxyStatus_Serialize>("get_proxy_status"),
@@ -110,6 +110,34 @@ export const commands = {
 	/**  Audit entries older than `before` (all, without), newest first. */
 	getMcpAudit: (before: number | null, limit: number) => typedError<McpAuditPage_Serialize, string>(__TAURI_INVOKE("get_mcp_audit", { before, limit })),
 	clearMcpAudit: () => typedError<null, string>(__TAURI_INVOKE("clear_mcp_audit")),
+	/**
+	 *  Sends a composed (or edited) request from the app; resolves to the new
+	 *  flow's id once it is recorded.
+	 */
+	sendRequest: (spec: RequestSpec_Deserialize, applyRules: boolean) => typedError<number, string>(__TAURI_INVOKE("send_request", { spec, applyRules })),
+	/**  Sends a recorded request again, as it was sent. */
+	replayFlow: (store: number, id: number, applyRules: boolean) => typedError<number, string>(__TAURI_INVOKE("replay_flow", { store, id, applyRules })),
+	/**  A recorded request, editable (body decoded), for Edit & Replay. */
+	getRequestSpec: (store: number, id: number) => typedError<RequestSpec_Serialize, string>(__TAURI_INVOKE("get_request_spec", { store, id })),
+	getCurl: (store: number, id: number) => typedError<string, string>(__TAURI_INVOKE("get_curl", { store, id })),
+	listDocuments: () => __TAURI_INVOKE<DocumentInfo[]>("list_documents"),
+	/**
+	 *  Opens a session or HAR file as a document; without `path`, asks for
+	 *  one (only HAR files with `har`). `None` if the user cancelled.
+	 */
+	openDocument: (path: string | null, har: boolean) => typedError<DocumentInfo | null, string>(__TAURI_INVOKE("open_document", { path, har })),
+	closeDocument: (store: number) => typedError<null, string>(__TAURI_INVOKE("close_document", { store })),
+	/**
+	 *  Saves flows of a store as a `.proxymate` session in the background;
+	 *  without `path`, asks where. Resolves to the path (`None` if cancelled)
+	 *  once the save has started; `on_progress` hears the rest.
+	 */
+	saveSession: (store: number, selection: FlowSelection, path: string | null, fileName: string, onProgress: Channel<SaveProgress_Deserialize>) => typedError<string | null, string>(__TAURI_INVOKE("save_session", { store, selection, path, fileName, onProgress })),
+	/**
+	 *  Exports flows of a store as a HAR file in the background; like
+	 *  [`save_session`].
+	 */
+	exportHar: (store: number, selection: FlowSelection, path: string | null, fileName: string, onProgress: Channel<SaveProgress_Deserialize>) => typedError<string | null, string>(__TAURI_INVOKE("export_har", { store, selection, path, fileName, onProgress })),
 };
 
 /* Types */
@@ -625,6 +653,23 @@ export type DevicesSnapshot_Serialize = {
 	emulator: LocalActivity,
 };
 
+/**  An opened document, for its tab and the sidebar's Saved section. */
+export type DocumentInfo = {
+	store: number,
+	kind: DocumentKind,
+	/**  The file name, without its directory. */
+	name: string,
+	/**  Where it was opened from. */
+	path: string,
+	flows: number,
+};
+
+export type DocumentKind = 
+/**  A saved `.proxymate` session. */
+"session" | 
+/**  An imported HAR file. */
+"har";
+
 /**  A registrable domain (`example.com`) and the hosts under it. */
 export type DomainNode = {
 	domain: string,
@@ -737,7 +782,7 @@ export type FlowDetail_Serialize = {
  * 
  *  Field order: `id, state, scheme, method, host, port, path, query, status,
  *  content_kind, client, started_at_ms, duration_ms, req_size, resp_size, edited,
- *  http_version, tls, graphql_op`.
+ *  http_version, tls, graphql_op, sent_by`.
  */
 export type FlowRow = FlowRow_Serialize | FlowRow_Deserialize;
 
@@ -746,18 +791,18 @@ export type FlowRow = FlowRow_Serialize | FlowRow_Deserialize;
  * 
  *  Field order: `id, state, scheme, method, host, port, path, query, status,
  *  content_kind, client, started_at_ms, duration_ms, req_size, resp_size, edited,
- *  http_version, tls, graphql_op`.
+ *  http_version, tls, graphql_op, sent_by`.
  */
-export type FlowRow_Deserialize = [number, FlowState, Scheme, string, string, number, string, string, number | null, ContentKind, string | null, number | null, number | null, number, number, boolean, HttpVersion, TlsStatus, string | null];
+export type FlowRow_Deserialize = [number, FlowState, Scheme, string, string, number, string, string, number | null, ContentKind, string | null, number | null, number | null, number, number, boolean, HttpVersion, TlsStatus, string | null, SentBy | null];
 
 /**
  *  One flow table row in a compact positional form (a JSON array on the wire).
  * 
  *  Field order: `id, state, scheme, method, host, port, path, query, status,
  *  content_kind, client, started_at_ms, duration_ms, req_size, resp_size, edited,
- *  http_version, tls, graphql_op`.
+ *  http_version, tls, graphql_op, sent_by`.
  */
-export type FlowRow_Serialize = [number, FlowState, Scheme, string, string, number, string, string, number | null, ContentKind, string | null, number | null, number | null, number, number, boolean, HttpVersion, TlsStatus, string | null];
+export type FlowRow_Serialize = [number, FlowState, Scheme, string, string, number, string, string, number | null, ContentKind, string | null, number | null, number | null, number, number, boolean, HttpVersion, TlsStatus, string | null, SentBy | null];
 
 /**
  *  What rules did to one flow. Drives the Edited column and the
@@ -798,6 +843,15 @@ export type FlowRules_Serialize = {
 	/**  The response came from Map Local or a breakpoint, not the upstream. */
 	mocked: boolean,
 };
+
+/**  Which flows of a store to save or export. */
+export type FlowSelection = 
+/**  Every flow in the store. */
+{ kind: "all" } | 
+/**  The rows of a view, in its order (the current filter and sort). */
+{ kind: "view"; view: number } | 
+/**  These flows, in this order. */
+{ kind: "ids"; ids: number[] };
 
 /**  Lifecycle state of a flow. Drives the state dot and the status pill colour. */
 export type FlowState = 
@@ -855,6 +909,8 @@ export type FlowSummary_Deserialize = {
 	tls: TlsStatus,
 	/**  Operation name of a GraphQL request, shown in the URL column. */
 	graphql_op?: string | null,
+	/**  Set for flows Proxymate sent itself (Replay, Compose, an agent). */
+	sent_by?: SentBy | null,
 };
 
 /**
@@ -894,6 +950,8 @@ export type FlowSummary_Serialize = {
 	tls: TlsStatus,
 	/**  Operation name of a GraphQL request, shown in the URL column. */
 	graphql_op: string | null,
+	/**  Set for flows Proxymate sent itself (Replay, Compose, an agent). */
+	sent_by: SentBy | null,
 };
 
 /**
@@ -1227,6 +1285,49 @@ export type RequestHead = {
 	headers: Header[],
 };
 
+/**
+ *  A request to send. `url` is absolute (`http://` or `https://`); the
+ *  headers go out as given, except that hop-by-hop headers are dropped and
+ *  `Content-Length` is set from the body.
+ */
+export type RequestSpec = RequestSpec_Serialize | RequestSpec_Deserialize;
+
+/**
+ *  A request to send. `url` is absolute (`http://` or `https://`); the
+ *  headers go out as given, except that hop-by-hop headers are dropped and
+ *  `Content-Length` is set from the body.
+ */
+export type RequestSpec_Deserialize = {
+	method: string,
+	url: string,
+	headers?: Header[],
+	/**  The body; `None` sends none. */
+	body?: string | null,
+	/**
+	 *  True if `body` is base64 (a binary body), false if it is the text
+	 *  itself (sent as UTF-8).
+	 */
+	body_base64?: boolean,
+};
+
+/**
+ *  A request to send. `url` is absolute (`http://` or `https://`); the
+ *  headers go out as given, except that hop-by-hop headers are dropped and
+ *  `Content-Length` is set from the body.
+ */
+export type RequestSpec_Serialize = {
+	method: string,
+	url: string,
+	headers: Header[],
+	/**  The body; `None` sends none. */
+	body: string | null,
+	/**
+	 *  True if `body` is base64 (a binary body), false if it is the text
+	 *  itself (sent as UTF-8).
+	 */
+	body_base64: boolean,
+};
+
 export type ResponseHead = {
 	status: number,
 	/**  Reason phrase from the status line, or the canonical one. */
@@ -1377,8 +1478,46 @@ export type Rule_Serialize = {
 	actions: Action_Serialize[],
 };
 
+/**
+ *  Progress of a background save (session or HAR), pushed as it goes. The
+ *  last update has `finished` set, with `error` if it failed.
+ */
+export type SaveProgress = SaveProgress_Serialize | SaveProgress_Deserialize;
+
+/**
+ *  Progress of a background save (session or HAR), pushed as it goes. The
+ *  last update has `finished` set, with `error` if it failed.
+ */
+export type SaveProgress_Deserialize = {
+	done: number,
+	total: number,
+	finished: boolean,
+	error?: string | null,
+	/**  The file written. */
+	path: string,
+};
+
+/**
+ *  Progress of a background save (session or HAR), pushed as it goes. The
+ *  last update has `finished` set, with `error` if it failed.
+ */
+export type SaveProgress_Serialize = {
+	done: number,
+	total: number,
+	finished: boolean,
+	error: string | null,
+	/**  The file written. */
+	path: string,
+};
+
 /**  URL scheme of a flow as seen by the client. */
 export type Scheme = "http" | "https" | "ws" | "wss";
+
+/**
+ *  The flow-table marker of a flow Proxymate sent itself (the summary's
+ *  `sent_by`); `None` there for traffic that came through the proxy.
+ */
+export type SentBy = "user" | "agent";
 
 /**
  *  The sidebar's Apps and Domains, aggregated over every flow in the store.

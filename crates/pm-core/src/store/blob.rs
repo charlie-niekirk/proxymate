@@ -28,6 +28,17 @@ pub(crate) enum BlobRef {
 }
 
 impl BlobRef {
+    /// Like [`BlobRef::read`], for stores that may have no segment files
+    /// (a saved session keeps everything inline).
+    pub fn read_from(&self, segments: Option<&SegmentStore>) -> io::Result<Vec<u8>> {
+        match (self, segments) {
+            (_, Some(segments)) => self.read(segments),
+            (BlobRef::Segments(_), None) => Err(io::Error::other("this store has no segment files")),
+            (BlobRef::Empty, None) => Ok(Vec::new()),
+            (BlobRef::Inline(bytes), None) => Ok(bytes.clone()),
+        }
+    }
+
     pub fn read(&self, segments: &SegmentStore) -> io::Result<Vec<u8>> {
         match self {
             BlobRef::Empty => Ok(Vec::new()),

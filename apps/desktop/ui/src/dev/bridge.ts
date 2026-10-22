@@ -10,4 +10,5 @@ export const bridge: {
   testRule?: () => void;
   executeBreakpoint?: (edits: MessageEdits_Deserialize | null) => Promise<void>;
   abortBreakpoint?: () => Promise<void>;
+  sendCompose?: () => Promise<void>;
 } = {};

@@ -2,6 +2,9 @@
 //! rewritten whole body, or a buffered prefix followed by the rest of the
 //! stream (a body over the rewrite cap). Any of them can be throttled by a
 //! token bucket.
+//!
+//! What an exchange reads is an [`Inbound`]: the client's body off the
+//! wire, or bytes Proxymate sends itself (`Engine::send`).
 
 use std::collections::VecDeque;
 use std::pin::Pin;
@@ -14,6 +17,53 @@ use http_body_util::BodyExt;
 use hyper::body::Incoming;
 use tokio::time::Sleep;
 
+/// A request (or response) body as an exchange receives it. An enum
+/// rather than a boxed body, so proxied traffic pays no allocation.
+pub enum Inbound {
+    Wire(Incoming),
+    /// A whole body held in memory (sent by `Engine::send`).
+    Local(Option<Bytes>),
+}
+
+impl Inbound {
+    pub fn local(bytes: impl Into<Bytes>) -> Inbound {
+        let bytes = bytes.into();
+        Inbound::Local((!bytes.is_empty()).then_some(bytes))
+    }
+}
+
+impl From<Incoming> for Inbound {
+    fn from(body: Incoming) -> Inbound {
+        Inbound::Wire(body)
+    }
+}
+
+impl Body for Inbound {
+    type Data = Bytes;
+    type Error = hyper::Error;
+
+    fn poll_frame(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Result<Frame<Bytes>, hyper::Error>>> {
+        match &mut *self {
+            Inbound::Wire(body) => Pin::new(body).poll_frame(cx),
+            Inbound::Local(bytes) => Poll::Ready(bytes.take().map(|b| Ok(Frame::data(b)))),
+        }
+    }
+
+    fn is_end_stream(&self) -> bool {
+        match self {
+            Inbound::Wire(body) => body.is_end_stream(),
+            Inbound::Local(bytes) => bytes.is_none(),
+        }
+    }
+
+    fn size_hint(&self) -> SizeHint {
+        match self {
+            Inbound::Wire(body) => body.size_hint(),
+            Inbound::Local(bytes) => SizeHint::with_exact(bytes.as_ref().map_or(0, |b| b.len() as u64)),
+        }
+    }
+}
+
 pub struct RuleBody {
     source: Source,
     throttle: Option<Bucket>,
@@ -22,15 +72,15 @@ pub struct RuleBody {
 }
 
 enum Source {
-    Stream(Incoming),
+    Stream(Inbound),
     Whole(Option<Bytes>),
     /// A buffered prefix, then the rest of the stream.
-    Chain(VecDeque<Bytes>, Incoming),
+    Chain(VecDeque<Bytes>, Inbound),
 }
 
 impl RuleBody {
-    pub fn stream(body: Incoming) -> RuleBody {
-        RuleBody::new(Source::Stream(body))
+    pub fn stream(body: impl Into<Inbound>) -> RuleBody {
+        RuleBody::new(Source::Stream(body.into()))
     }
 
     pub fn whole(bytes: impl Into<Bytes>) -> RuleBody {
@@ -42,7 +92,7 @@ impl RuleBody {
         RuleBody::new(Source::Whole(None))
     }
 
-    pub fn chain(prefix: VecDeque<Bytes>, rest: Incoming) -> RuleBody {
+    pub fn chain(prefix: VecDeque<Bytes>, rest: Inbound) -> RuleBody {
         RuleBody::new(Source::Chain(prefix, rest))
     }
 
@@ -195,11 +245,11 @@ impl Bucket {
 pub enum Buffered {
     Whole(Bytes),
     /// Over the cap: what was read, and the rest still to come.
-    Over(VecDeque<Bytes>, Incoming),
+    Over(VecDeque<Bytes>, Inbound),
 }
 
 /// Reads `body` until it ends or passes `cap` bytes. Trailers are dropped.
-pub async fn buffer(mut body: Incoming, cap: usize) -> Result<Buffered, hyper::Error> {
+pub async fn buffer(mut body: Inbound, cap: usize) -> Result<Buffered, hyper::Error> {
     let mut chunks = VecDeque::new();
     let mut len = 0usize;
     while let Some(frame) = body.frame().await {

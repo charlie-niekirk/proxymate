@@ -1,7 +1,7 @@
-import { Lock, LockOpen, ShieldAlert } from "lucide-react";
+import { Bot, Lock, LockOpen, Repeat2, ShieldAlert } from "lucide-react";
 import type { CSSProperties } from "react";
 
-import type { FlowState, TlsStatus } from "@/bindings";
+import type { FlowState, SentBy, TlsStatus } from "@/bindings";
 import { methodToken, statusLabel, statusToken, urlParts, type Row } from "@/lib/flow";
 import { sslTitle } from "@/lib/tls";
 import { cn } from "@/lib/utils";
@@ -61,20 +61,41 @@ export function StateDot({ state }: { state: FlowState }) {
   );
 }
 
+/** Marks a flow Proxymate sent itself: replayed or composed, or by an agent. */
+export function SentBadge({ by }: { by: SentBy }) {
+  const agent = by === "agent";
+  const Icon = agent ? Bot : Repeat2;
+  return (
+    <span
+      className={cn(pillBase, "mr-1.5 gap-0.5 px-1 align-[1px] font-sans tracking-normal")}
+      style={pillStyle(agent ? "sent-agent" : "sent")}
+      title={agent ? "Sent by an agent through Proxymate" : "Sent from Proxymate (Replay or Compose)"}
+      data-testid="sent-badge"
+    >
+      <Icon className="size-2.5" />
+      {agent ? "AI" : "Replay"}
+    </span>
+  );
+}
+
 export function UrlText({
   row,
   operation,
+  sentBy,
   className,
 }: {
   row: Pick<Row, "scheme" | "host" | "port" | "path" | "query">;
   /** GraphQL operation name, shown as a badge before the URL. */
   operation?: string | null;
+  /** Who sent a flow Proxymate made itself, shown as a badge first. */
+  sentBy?: SentBy | null;
   className?: string;
 }) {
   const u = urlParts(row);
   const part = cn(ON_SELECTED);
   return (
     <span className={cn("truncate font-mono", className)}>
+      {sentBy && <SentBadge by={sentBy} />}
       {operation && (
         <span
           className={cn(pillBase, "mr-1.5 align-[1px] font-sans tracking-normal")}

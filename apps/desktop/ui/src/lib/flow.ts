@@ -1,4 +1,4 @@
-import type { ContentKind, FlowRow_Serialize, FlowState, HttpVersion, Scheme, TlsStatus } from "@/bindings";
+import type { ContentKind, FlowRow_Serialize, FlowState, HttpVersion, Scheme, SentBy, TlsStatus } from "@/bindings";
 
 /** A decoded `FlowRow` tuple. Field order mirrors `pm_model::FlowRow`. */
 export interface Row {
@@ -22,6 +22,8 @@ export interface Row {
   tls: TlsStatus;
   /** GraphQL operation name, shown in the URL column. */
   graphqlOp: string | null;
+  /** Set for flows Proxymate sent itself (Replay, Compose, an agent). */
+  sentBy: SentBy | null;
 }
 
 export function decodeRow(t: FlowRow_Serialize): Row {
@@ -45,6 +47,7 @@ export function decodeRow(t: FlowRow_Serialize): Row {
     httpVersion: t[16],
     tls: t[17],
     graphqlOp: t[18],
+    sentBy: t[19],
   };
 }
 

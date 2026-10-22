@@ -18,10 +18,10 @@ describe("mock backend", () => {
 
   it("filters by app and by domain like the engine", async () => {
     const backend = createMockBackend(1_000);
-    const safari = await backend.createView({ ...all, client: "Safari" }, { key: "id", dir: "asc" });
+    const safari = await backend.createView(0, { ...all, client: "Safari" }, { key: "id", dir: "asc" });
     expect(safari.len).toBe(200);
-    const github = await backend.createView({ ...all, host: "*.github.com" }, { key: "id", dir: "asc" });
-    const exact = await backend.createView({ ...all, host: "api.github.com" }, { key: "id", dir: "asc" });
+    const github = await backend.createView(0, { ...all, host: "*.github.com" }, { key: "id", dir: "asc" });
+    const exact = await backend.createView(0, { ...all, host: "api.github.com" }, { key: "id", dir: "asc" });
     expect(github.len).toBe(exact.len);
     expect(github.len).toBeGreaterThan(0);
   });

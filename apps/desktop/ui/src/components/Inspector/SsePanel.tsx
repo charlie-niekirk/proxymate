@@ -22,16 +22,17 @@ const GRID = "grid-cols-[40px_84px_96px_64px_minmax(0,1fr)]";
 export function SsePanel({ id }: { id: number }) {
   const [text, setText] = useState("");
   const [selected, setSelected] = useState<SseEvent_Serialize | null>(null);
+  const store = useUi((st) => st.store);
 
   const { data: head } = useQuery({
-    queryKey: [...streamKey(id), "sse", text],
-    queryFn: () => backend.getSseEvents(id, text, 0, 0),
+    queryKey: [...streamKey(store, id), "sse", text],
+    queryFn: () => backend.getSseEvents(store, id, text, 0, 0),
     placeholderData: keepPreviousData,
   });
   const len = head?.len ?? 0;
   const [[first, last], setRange] = useState<[number, number]>([0, -1]);
-  const event = usePagedList(["sse-page", id, text], len, first, last, async (start, count) =>
-    (await backend.getSseEvents(id, text, start, count)).events,
+  const event = usePagedList(["sse-page", store, id, text], len, first, last, async (start, count) =>
+    (await backend.getSseEvents(store, id, text, start, count)).events,
   );
 
   // With Auto Select on, the newest event is inspected until one is clicked.

@@ -5,6 +5,7 @@ use specta::Type;
 
 use crate::detail::HttpVersion;
 use crate::flow::{ContentKind, FlowId, FlowState, FlowSummary, Scheme};
+use crate::send::SentBy;
 use crate::tls::TlsStatus;
 
 /// Handle to a live, filtered and sorted view over a flow store.
@@ -45,7 +46,7 @@ pub struct ViewInfo {
 ///
 /// Field order: `id, state, scheme, method, host, port, path, query, status,
 /// content_kind, client, started_at_ms, duration_ms, req_size, resp_size, edited,
-/// http_version, tls, graphql_op`.
+/// http_version, tls, graphql_op, sent_by`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct FlowRow(
     pub FlowId,
@@ -67,6 +68,7 @@ pub struct FlowRow(
     pub HttpVersion,
     pub TlsStatus,
     pub Option<Arc<str>>,
+    pub Option<SentBy>,
 );
 
 impl From<&FlowSummary> for FlowRow {
@@ -91,6 +93,7 @@ impl From<&FlowSummary> for FlowRow {
             f.http_version,
             f.tls,
             f.graphql_op.clone(),
+            f.sent_by,
         )
     }
 }
@@ -131,11 +134,12 @@ mod tests {
             http_version: HttpVersion::Http2,
             tls: TlsStatus::Intercepted,
             graphql_op: Some("GetUser".into()),
+            sent_by: Some(SentBy::User),
         };
         let json = serde_json::to_string(&FlowRow::from(&summary)).unwrap();
         assert_eq!(
             json,
-            r#"[7,"completed","https","GET","api.example.com",443,"/v1/users","page=2",200,"json","Safari",1.5,42,0,1024,false,"HTTP/2","intercepted","GetUser"]"#
+            r#"[7,"completed","https","GET","api.example.com",443,"/v1/users","page=2",200,"json","Safari",1.5,42,0,1024,false,"HTTP/2","intercepted","GetUser","user"]"#
         );
     }
 }

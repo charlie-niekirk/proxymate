@@ -454,6 +454,7 @@ mod tests {
             http_version: HttpVersion::Http2,
             tls: TlsStatus::Intercepted,
             graphql_op: None,
+            sent_by: None,
         }
     }
 
