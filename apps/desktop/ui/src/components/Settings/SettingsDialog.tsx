@@ -1,18 +1,33 @@
-import { Bot, Settings, type LucideIcon } from "lucide-react";
+import { Bot, HardDrive, Laptop, Palette, Settings, ShieldCheck, SlidersHorizontal, Wifi, type LucideIcon } from "lucide-react";
 
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { useUi, type SettingsPage } from "@/store/ui";
 
+import { AdvancedPage } from "./AdvancedPage";
+import { AppearancePage } from "./AppearancePage";
+import { ClientsPage } from "./ClientsPage";
 import { McpPage } from "./McpPage";
+import { ProxyPage } from "./ProxyPage";
+import { SslPage } from "./SslPage";
+import { StoragePage } from "./StoragePage";
 
-const PAGES: { id: SettingsPage; label: string; icon: LucideIcon }[] = [{ id: "mcp", label: "MCP", icon: Bot }];
+const PAGES: { id: SettingsPage; label: string; icon: LucideIcon; page: () => React.ReactNode }[] = [
+  { id: "proxy", label: "Proxy", icon: Wifi, page: () => <ProxyPage /> },
+  { id: "ssl", label: "SSL Proxying", icon: ShieldCheck, page: () => <SslPage /> },
+  { id: "clients", label: "Clients", icon: Laptop, page: () => <ClientsPage /> },
+  { id: "storage", label: "Storage", icon: HardDrive, page: () => <StoragePage /> },
+  { id: "appearance", label: "Appearance", icon: Palette, page: () => <AppearancePage /> },
+  { id: "advanced", label: "Advanced", icon: SlidersHorizontal, page: () => <AdvancedPage /> },
+  { id: "mcp", label: "MCP", icon: Bot, page: () => <McpPage /> },
+];
 
-/** Settings: a page list beside the chosen page. MCP is the first page; M10 adds the rest. */
+/** Settings: a page list beside the chosen page. */
 export function SettingsDialog() {
   const { open, page } = useUi((s) => s.settings);
   const openSettings = useUi((s) => s.openSettings);
   const close = useUi((s) => s.closeSettings);
+  const current = PAGES.find((p) => p.id === page) ?? PAGES[0]!;
   return (
     <Dialog open={open} onOpenChange={(o) => !o && close()}>
       <DialogContent
@@ -28,11 +43,12 @@ export function SettingsDialog() {
           <DialogDescription className="sr-only">Proxymate settings</DialogDescription>
         </DialogHeader>
         <div className="flex min-h-0 flex-1">
-          <nav className="bg-muted/30 flex w-[168px] shrink-0 flex-col gap-0.5 border-r p-2">
+          <nav className="bg-muted/30 flex w-[168px] shrink-0 flex-col gap-0.5 border-r p-2" aria-label="Settings pages">
             {PAGES.map((p) => (
               <button
                 key={p.id}
                 onClick={() => openSettings(p.id)}
+                aria-current={page === p.id ? "page" : undefined}
                 className={cn(
                   "flex h-7 items-center gap-2 rounded-md px-2 text-left text-xs",
                   page === p.id ? "bg-accent text-accent-foreground font-medium" : "hover:bg-accent/60",
@@ -45,7 +61,7 @@ export function SettingsDialog() {
             ))}
           </nav>
           {/* A plain scroller: Radix's viewport lets wide code blocks widen the page. */}
-          <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">{open && page === "mcp" && <McpPage />}</div>
+          <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">{open && current.page()}</div>
         </div>
       </DialogContent>
     </Dialog>

@@ -6,13 +6,14 @@ import type { McpAuditEntry_Serialize, McpCallOutcome, McpSettings, McpStatus_Se
 import { CopyField } from "@/components/DeviceSetup/parts";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { errorText } from "@/lib/actions";
 import { backend } from "@/lib/backend";
 import { claudeAddCommand, mcpJsonConfig, maskToken } from "@/lib/mcp";
 import { mcpAuditKey, mcpTokenKey, queryClient } from "@/lib/query";
 import { cn } from "@/lib/utils";
 import { useMcp } from "@/store/mcp";
 
-const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+import { Section } from "./parts";
 
 /**
  * Settings › MCP: the server on/off, read-only mode, how to connect an
@@ -71,31 +72,6 @@ export function McpPage() {
       <ClientsSection status={status} />
       <AuditSection />
     </div>
-  );
-}
-
-function Section({
-  title,
-  description,
-  aside,
-  children,
-}: {
-  title: string;
-  description?: ReactNode;
-  aside?: ReactNode;
-  children?: ReactNode;
-}) {
-  return (
-    <section className="flex flex-col gap-2">
-      <div className="flex items-start gap-3">
-        <div className="min-w-0 flex-1">
-          <h3 className="text-[13px] font-semibold">{title}</h3>
-          {description && <p className="text-muted-foreground mt-0.5 leading-4">{description}</p>}
-        </div>
-        {aside}
-      </div>
-      {children}
-    </section>
   );
 }
 

@@ -25,9 +25,12 @@ export async function clearFlows() {
   queryClient.removeQueries({ queryKey: ["flow", LIVE_STORE] });
 }
 
+/** An error's message, for display. */
+export const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
 /** A failed action, as a toast: what was being done, then why. */
 export function reportError(what: string, err: unknown) {
-  toast.error(what, { description: err instanceof Error ? err.message : String(err) });
+  toast.error(what, { description: errorText(err) });
 }
 
 /** Pins or unpins live flows: pinned flows are kept when old flows are evicted. */
