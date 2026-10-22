@@ -271,7 +271,10 @@ mod tests {
             .into_iter()
             .any(|fd| socket_info(me, fd).is_some_and(|info| listens_on(&info, port)));
         assert!(found);
-        assert_eq!(LibProc.listener_pid(port), None);
+        // Not `None`: while a parallel test spawns `sleep` or `true`, the
+        // child briefly holds copies of our fds (this listener included)
+        // until exec closes them, and it is another pid that really listens.
+        assert_ne!(LibProc.listener_pid(port), Some(std::process::id()));
     }
 
     #[test]
