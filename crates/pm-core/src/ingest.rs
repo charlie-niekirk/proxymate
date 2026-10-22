@@ -65,6 +65,11 @@ pub(crate) enum FlowEvent {
         id: FlowId,
         client: Arc<str>,
     },
+    /// The user pinned (or unpinned) flows: pinned flows outlive eviction.
+    Pin {
+        ids: Vec<FlowId>,
+        pinned: bool,
+    },
     /// Bulk append with ids already assigned (synthetic data, benches).
     Insert(Vec<FlowSummary>),
     /// Bulk replace by id.

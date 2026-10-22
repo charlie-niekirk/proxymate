@@ -137,11 +137,12 @@ pub(crate) async fn bind(config: &ProxyConfig) -> std::io::Result<TcpListener> {
 /// Starts the accept loop on the current tokio runtime.
 pub(crate) fn spawn(engine: Weak<Engine>, listener: TcpListener) -> std::io::Result<ProxyHandle> {
     let addr = listener.local_addr()?;
+    let pool = engine.upgrade().map(|e| e.proxy_settings()).unwrap_or_default();
     let (stop_tx, mut stop_rx) = watch::channel(());
     let (closed_tx, closed) = oneshot::channel();
     let ctx = Arc::new(ProxyCtx {
         engine,
-        client: upstream_client(),
+        client: upstream_client(&pool),
         addr,
     });
     tokio::spawn(async move {
@@ -178,13 +179,14 @@ struct ProxyCtx {
 /// connector never consults `HTTP_PROXY` or the system proxy settings, which
 /// matters: once Proxymate is the system proxy (M4), using it here would
 /// send every request back to ourselves.
-fn upstream_client() -> UpstreamClient {
+fn upstream_client(settings: &pm_model::ProxySettings) -> UpstreamClient {
     let mut connector = HttpConnector::new();
     connector.set_nodelay(true);
-    connector.set_connect_timeout(Some(CONNECT_TIMEOUT));
+    connector.set_connect_timeout(Some(Duration::from_secs(settings.connect_timeout_secs.into())));
     Client::builder(TokioExecutor::new())
         .http1_preserve_header_case(true)
-        .pool_idle_timeout(Duration::from_secs(90))
+        .pool_idle_timeout(Duration::from_secs(settings.pool_idle_secs.into()))
+        .pool_max_idle_per_host(settings.pool_max_idle_per_host as usize)
         .build(connector)
 }
 
@@ -430,6 +432,7 @@ fn record_request(engine: &Arc<Engine>, req: &Request<Incoming>, origin: Origin)
         tls: origin.tls,
         graphql_op: None,
         sent_by: None,
+        pinned: false,
     };
     let headers = headers(req.headers());
     let detail = FlowDetail {

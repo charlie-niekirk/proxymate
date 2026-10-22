@@ -62,6 +62,10 @@ pub struct DeviceClient {
     pub last_seen_ms: Option<f64>,
     /// Connections currently held while the decision is pending.
     pub waiting: u32,
+    /// When the newest held connection gives up and is refused, epoch ms
+    /// (for the prompt's countdown).
+    #[serde(default)]
+    pub held_until_ms: Option<f64>,
 }
 
 /// Traffic from local clients of one kind (the Simulator, the emulator).

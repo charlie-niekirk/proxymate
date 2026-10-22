@@ -1,7 +1,11 @@
 //! Compiled form of a [`FilterSpec`], evaluated against summaries only.
+//! Header and body terms are kept aside for the view's deep search.
+
+use std::sync::Arc;
 
 use pm_model::{ContentGroup, FilterSpec, FlowSummary, ProtocolFilter};
 
+use super::deep::DeepQuery;
 use super::query::FlowQuery;
 
 #[derive(Debug, Clone, Default)]
@@ -13,18 +17,26 @@ pub struct CompiledFilter {
     content_mask: u16,
     host: Option<String>,
     client: Option<String>,
+    deep: Option<Arc<DeepQuery>>,
 }
 
 impl CompiledFilter {
     pub fn compile(spec: &FilterSpec) -> Self {
         let content_mask = spec.content.iter().fold(0u16, |mask, group| mask | group_bit(*group));
+        let query = FlowQuery::parse_lenient(&spec.text);
         CompiledFilter {
-            query: FlowQuery::parse_lenient(&spec.text),
+            deep: query.deep().map(Arc::new),
+            query,
             protocol: spec.protocol,
             content_mask,
             host: spec.host.clone().filter(|h| !h.is_empty()),
             client: spec.client.clone().filter(|c| !c.is_empty()),
         }
+    }
+
+    /// Header and body terms, which a deep search judges.
+    pub fn deep(&self) -> Option<&Arc<DeepQuery>> {
+        self.deep.as_ref()
     }
 
     /// True if the filter accepts every flow, so views can skip evaluation.
@@ -109,6 +121,7 @@ mod tests {
             tls: TlsStatus::None,
             graphql_op: None,
             sent_by: None,
+            pinned: false,
         }
     }
 

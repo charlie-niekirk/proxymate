@@ -3,11 +3,15 @@
 //! (a saved session or an imported HAR) each have a [`Store`]; their
 //! details and bodies come from a [`BlobBackend`].
 //!
-//! Flow ids are never reused. `flows[0]` holds id `base`; a clear empties the
-//! arena and moves `base` up to the next id.
+//! Flow ids are never reused and the arena stays in id order. A clear
+//! empties it; the flow cap evicts the oldest flows but keeps pinned and
+//! in-flight ones, so after an eviction a few old flows may sit before a
+//! gap. Lookups by id count back from the newest flow, and fall back to a
+//! binary search for those.
 
 mod backend;
 mod blob;
+mod deep;
 mod detail;
 mod filter;
 mod messages;
@@ -19,12 +23,15 @@ mod view;
 
 use std::collections::HashMap;
 use std::ops::Range;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::SyncSender;
 
 use pm_model::{FilterSpec, FlowId, FlowState, FlowSummary, RowsPage, SortSpec, ViewDelta, ViewId, ViewInfo};
 
 pub(crate) use backend::BlobBackend;
 pub(crate) use blob::Capture;
+pub use deep::DeepQuery;
 pub(crate) use detail::{DetailStore, StoredDetail};
 pub use filter::CompiledFilter;
 pub(crate) use messages::{SseLog, WsLog, page_events, sse_event};
@@ -32,19 +39,40 @@ pub use query::FlowQuery;
 pub(crate) use segments::SegmentStore;
 pub use sidebar::{SidebarCounts, in_domain, registrable_domain};
 pub(crate) use sqlite::{Opened, SavedFlow, SavedWs, SessionWriter, SqliteBackend};
-pub use view::View;
+pub use view::{DeepJob, View};
 
 use crate::Error;
 use crate::ingest::FlowEvent;
 
 #[derive(Default)]
 pub struct Store {
-    base: FlowId,
+    /// The id the next appended flow gets.
+    next: FlowId,
     flows: Vec<FlowSummary>,
     views: HashMap<ViewId, View>,
     next_view: ViewId,
     sidebar: SidebarCounts,
+    /// Flows evicted by the limits so far.
+    evicted: u64,
+    pinned: u32,
+    /// An eviction that found nothing it may drop (everything old is
+    /// pinned or in flight) isn't tried again below this many flows.
+    evict_retry_at: u32,
 }
+
+/// Flows dropped by one eviction, for the engine to forget their details.
+#[derive(Debug, Default, PartialEq)]
+pub(crate) struct Eviction {
+    pub evicted: Vec<FlowId>,
+    /// Flows older than the newest evicted one that stay (pinned or in flight).
+    pub kept: Vec<FlowId>,
+    /// The newest evicted id.
+    pub through: FlowId,
+}
+
+/// Evicting stops this far under the flow cap, so it runs once per
+/// twentieth of the cap rather than on every new flow.
+const EVICT_SLACK_DIVISOR: u32 = 20;
 
 /// Views of a document's store have ids `store << VIEW_STORE_SHIFT | n`,
 /// so a view id alone says which store it is over (the live store's are
@@ -73,16 +101,38 @@ impl Store {
 
     /// The id of the oldest flow still in the store.
     pub fn first_id(&self) -> FlowId {
-        self.base
+        self.flows.first().map_or(self.next, |f| f.id)
     }
 
     /// The id the next appended flow must carry.
     pub fn next_id(&self) -> FlowId {
-        self.base + self.flows.len() as FlowId
+        self.next
     }
 
     pub fn get(&self, id: FlowId) -> Option<&FlowSummary> {
-        self.flows.get(id.checked_sub(self.base)? as usize)
+        self.pos_of(id).map(|pos| &self.flows[pos])
+    }
+
+    /// Flows evicted by the limits so far.
+    pub fn evicted(&self) -> u64 {
+        self.evicted
+    }
+
+    /// Pinned flows in the store.
+    pub fn pinned(&self) -> u32 {
+        self.pinned
+    }
+
+    /// The arena position of flow `id`.
+    fn pos_of(&self, id: FlowId) -> Option<usize> {
+        let back = self.next.checked_sub(id)? as usize;
+        let len = self.flows.len();
+        // Every flow newer than the last eviction sits at its distance
+        // from the end.
+        if (1..=len).contains(&back) && self.flows[len - back].id == id {
+            return Some(len - back);
+        }
+        self.flows.binary_search_by_key(&id, |f| f.id).ok()
     }
 
     /// Appends flows, assigning their ids, and updates every view.
@@ -170,12 +220,22 @@ impl Store {
                         f.state = state;
                     }
                 }),
+                FlowEvent::Pin { ids, pinned } => {
+                    for id in ids {
+                        if self.get(id).is_some_and(|f| f.pinned != pinned) {
+                            self.modify(id, first_new, |f| f.pinned = pinned);
+                            self.pinned = if pinned { self.pinned + 1 } else { self.pinned - 1 };
+                        }
+                    }
+                }
                 FlowEvent::Clear => {
-                    self.base = self.next_id();
                     self.flows.clear();
+                    self.pinned = 0;
+                    self.evict_retry_at = 0;
                     self.sidebar.clear();
                     first_new = 0;
                     for view in self.views.values_mut() {
+                        view.reset_deep();
                         view.rebuild(&[]);
                     }
                 }
@@ -192,21 +252,61 @@ impl Store {
     }
 
     fn push(&mut self, flow: FlowSummary) {
-        // Ids are allocated and queued under one lock, so they arrive in order.
-        debug_assert_eq!(flow.id, self.next_id(), "flows must arrive in id order");
+        // Ids are allocated and queued under one lock, so they arrive in
+        // order; a clear skips ahead.
+        debug_assert!(flow.id >= self.next, "flows must arrive in id order");
+        self.next = flow.id + 1;
+        self.pinned += u32::from(flow.pinned);
         self.sidebar.add(&flow);
         self.flows.push(flow);
+    }
+
+    /// Evicts the oldest flows: down to 95% of `max_flows` once the store
+    /// holds more (0 is no cap), and every flow up to `through`. Pinned and
+    /// in-flight flows stay. Views rebuild over the new positions.
+    pub(crate) fn evict(&mut self, max_flows: u32, through: Option<FlowId>) -> Option<Eviction> {
+        let len = self.flows.len() as u32;
+        let mut budget = if max_flows > 0 && len > max_flows && len >= self.evict_retry_at {
+            len - (max_flows - max_flows / EVICT_SLACK_DIVISOR)
+        } else {
+            0
+        };
+        if budget == 0 && through.is_none_or(|t| t < self.first_id()) {
+            return None;
+        }
+        let mut evicted = Vec::new();
+        let sidebar = &mut self.sidebar;
+        self.flows.retain(|f| {
+            let kept = f.pinned || matches!(f.state, FlowState::Active | FlowState::Paused);
+            let due = budget > 0 || through.is_some_and(|t| f.id <= t);
+            if kept || !due {
+                return true;
+            }
+            budget = budget.saturating_sub(1);
+            sidebar.remove(f);
+            evicted.push(f.id);
+            false
+        });
+        let Some(&through) = evicted.last() else {
+            self.evict_retry_at = len + max_flows / EVICT_SLACK_DIVISOR;
+            return None;
+        };
+        self.evict_retry_at = 0;
+        let kept = self.flows.iter().map(|f| f.id).take_while(|&id| id < through).collect();
+        self.evicted += evicted.len() as u64;
+        for view in self.views.values_mut() {
+            view.rebuild(&self.flows);
+        }
+        Some(Eviction { evicted, kept, through })
     }
 
     /// Changes a flow in place. Flows appended earlier in this batch are not
     /// reported to views yet, so only older ones produce view updates.
     fn modify(&mut self, id: FlowId, first_new: usize, change: impl FnOnce(&mut FlowSummary)) {
-        let Some(pos) = id.checked_sub(self.base).map(|p| p as usize) else {
+        let Some(pos) = self.pos_of(id) else {
             return;
         };
-        let Some(slot) = self.flows.get_mut(pos) else {
-            return;
-        };
+        let slot = &mut self.flows[pos];
         if pos >= first_new {
             change(slot);
             return;
@@ -226,10 +326,8 @@ impl Store {
             return;
         };
         self.modify(id, first_new, change);
-        if let Some(pos) = id.checked_sub(self.base).map(|p| p as usize)
-            && let Some(new) = self.flows.get(pos)
-        {
-            self.sidebar.change(&old.0, old.1.as_ref(), new);
+        if let Some(pos) = self.pos_of(id) {
+            self.sidebar.change(&old.0, old.1.as_ref(), &self.flows[pos]);
         }
     }
 
@@ -263,6 +361,22 @@ impl Store {
 
     pub fn drop_view(&mut self, id: ViewId) -> bool {
         self.views.remove(&id).is_some()
+    }
+
+    /// Hands the deep search job of view `id` its next candidates.
+    pub(crate) fn take_deep_batch(&mut self, id: ViewId, cancel: &Arc<AtomicBool>, max: usize) -> Option<Vec<FlowId>> {
+        self.views.get_mut(&id)?.take_deep_batch(cancel, max)
+    }
+
+    /// Records what the deep search job of view `id` found.
+    pub(crate) fn deep_results(&mut self, id: ViewId, cancel: &Arc<AtomicBool>, checked: u32, hits: &[FlowId]) {
+        let hits: Vec<(FlowId, Option<view::Pos>)> = hits
+            .iter()
+            .map(|&id| (id, self.pos_of(id).map(|p| p as view::Pos)))
+            .collect();
+        if let Some(view) = self.views.get_mut(&id) {
+            view.deep_results(&self.flows, cancel, checked, &hits);
+        }
     }
 
     pub fn view(&self, id: ViewId) -> Option<&View> {
@@ -299,11 +413,13 @@ impl Store {
     }
 
     fn info(&self, id: ViewId, elapsed_us: u32) -> ViewInfo {
+        let view = &self.views[&id];
         ViewInfo {
             view: id,
             total: self.total(),
-            len: self.views[&id].len(),
+            len: view.len(),
             elapsed_us,
+            deep: view.deep_progress(),
         }
     }
 }

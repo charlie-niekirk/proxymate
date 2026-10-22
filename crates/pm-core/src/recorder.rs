@@ -81,8 +81,8 @@ impl FlowRecorder {
             started: now,
             state: Mutex::new(LiveState {
                 detail,
-                request: Capture::default(),
-                response: Capture::default(),
+                request: Capture::new(id),
+                response: Capture::new(id),
                 last_progress: now,
                 request_sent: None,
                 response_at: None,
@@ -331,7 +331,7 @@ impl FlowRecorder {
     /// `101`: from here on it records messages, and stays Active until
     /// [`WsRecorder::closed`].
     pub fn websocket(&self) -> WsRecorder {
-        let log = Arc::new(WsLog::new());
+        let log = Arc::new(WsLog::new(self.flow.id));
         if let Some(engine) = self.flow.engine.upgrade() {
             engine.details().add_ws(self.flow.id, log.clone());
         }
@@ -436,8 +436,9 @@ impl WsRecorder {
         if details.is_cleared(id) {
             return;
         }
+        let max = engine.storage_settings().max_ws_messages as usize;
         self.log
-            .push(&details.segments, direction, opcode, payload, close_code, now_ms());
+            .push(&details.segments, direction, opcode, payload, close_code, now_ms(), max);
         engine.ingest().send(FlowEvent::WsMsg {
             id,
             direction,
@@ -476,6 +477,21 @@ impl LiveFlow {
             detail,
             request_body: Default::default(),
             response_body: Default::default(),
+        }
+    }
+
+    /// Adds the segment files the flow's bodies live in so far.
+    pub fn segments_used(&self, out: &mut std::collections::HashSet<u32>) {
+        let state = self.state.lock();
+        match &state.finished {
+            Some(stored) => {
+                stored.request_body.segments_used(out);
+                stored.response_body.segments_used(out);
+            }
+            None => {
+                state.request.segments_used(out);
+                state.response.segments_used(out);
+            }
         }
     }
 

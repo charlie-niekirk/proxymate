@@ -5,6 +5,7 @@
 
 use std::io;
 
+use pm_model::FlowId;
 use serde::{Deserialize, Serialize};
 
 use super::segments::{Extent, SegmentStore};
@@ -39,6 +40,13 @@ impl BlobRef {
         }
     }
 
+    /// Adds the segment files this blob lives in.
+    pub fn segments_used(&self, out: &mut std::collections::HashSet<u32>) {
+        if let BlobRef::Segments(extents) = self {
+            out.extend(extents.iter().map(|e| e.seg));
+        }
+    }
+
     pub fn read(&self, segments: &SegmentStore) -> io::Result<Vec<u8>> {
         match self {
             BlobRef::Empty => Ok(Vec::new()),
@@ -55,6 +63,8 @@ impl BlobRef {
 /// One body being captured.
 #[derive(Debug, Default)]
 pub(crate) struct Capture {
+    /// The flow the body belongs to; segment files track their owners.
+    owner: FlowId,
     /// Bytes not yet spilled.
     buf: Vec<u8>,
     extents: Vec<Extent>,
@@ -69,6 +79,13 @@ pub(crate) struct Capture {
 }
 
 impl Capture {
+    pub fn new(owner: FlowId) -> Self {
+        Capture {
+            owner,
+            ..Default::default()
+        }
+    }
+
     pub fn push(&mut self, data: &[u8], segments: &SegmentStore) {
         self.size += data.len() as u64;
         if self.truncated {
@@ -105,6 +122,11 @@ impl Capture {
         BlobRef::Segments(std::mem::take(&mut self.extents))
     }
 
+    /// Adds the segment files spilled to so far.
+    pub fn segments_used(&self, out: &mut std::collections::HashSet<u32>) {
+        out.extend(self.extents.iter().map(|e| e.seg));
+    }
+
     /// The bytes captured so far, for inspecting a body still streaming.
     pub fn snapshot(&self, segments: &SegmentStore) -> io::Result<Vec<u8>> {
         let mut out = Vec::with_capacity(self.captured as usize);
@@ -117,7 +139,7 @@ impl Capture {
         if self.buf.is_empty() {
             return;
         }
-        match segments.append(&self.buf) {
+        match segments.append(self.owner, &self.buf) {
             Ok(extent) => self.extents.push(extent),
             Err(_) => {
                 // Keep forwarding; the recording just ends here.

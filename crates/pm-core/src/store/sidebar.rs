@@ -24,6 +24,15 @@ impl SidebarCounts {
         self.dirty = true;
     }
 
+    /// Takes an evicted flow out of the counts.
+    pub fn remove(&mut self, f: &FlowSummary) {
+        drop_one(&mut self.hosts, &f.host);
+        if let Some(app) = &f.client {
+            drop_one(&mut self.apps, app);
+        }
+        self.dirty = true;
+    }
+
     /// Moves a flow's counts after its host or client changed.
     pub fn change(&mut self, old_host: &Arc<str>, old_client: Option<&Arc<str>>, new: &FlowSummary) {
         if **old_host != *new.host {

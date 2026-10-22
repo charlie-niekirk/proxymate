@@ -31,6 +31,7 @@ zstd.workspace = true
 rustls.workspace = true
 tokio-rustls.workspace = true
 rustls-platform-verifier.workspace = true
+rustls-native-certs.workspace = true
 rcgen.workspace = true
 x509-parser.workspace = true
 time.workspace = true

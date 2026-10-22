@@ -16,6 +16,12 @@
 //! - `state:` `active paused completed failed blocked tunnel`; `is:edited`.
 //! - `dur` (ms, or with `s`), `size` (response), `reqsize`, `id`: compare with
 //!   `> >= < <= =`; sizes take `b kb mb gb`.
+//! - `is:pinned`.
+//! - Deep terms, which need the flow's detail or bodies: `header:` (a
+//!   substring of any `name: value` line; `reqheader:`/`resheader:` for one
+//!   side) and `body:` (a substring of the decoded body; `reqbody:`,
+//!   `resbody:`). [`FlowQuery::matches`] can't judge them from a summary
+//!   and passes them; [`FlowQuery::deep`] has them for a deep search.
 //! - Anything else (or a quoted phrase) is a case-insensitive substring of
 //!   `host[:port]/path?query`.
 //!
@@ -25,6 +31,7 @@
 use globset::{GlobBuilder, GlobMatcher};
 use pm_model::{ContentGroup, ContentKind, FlowId, FlowState, FlowSummary, Scheme};
 
+use super::deep::{DeepQuery, DeepTerm, Side};
 use super::filter::contains_ignore_ascii_case;
 
 #[derive(Debug, Clone, Default)]
@@ -46,7 +53,10 @@ enum Term {
     App(Vec<u8>),
     State(Vec<FlowState>),
     Edited,
+    Pinned,
     Num(Field, Cmp, f64),
+    /// Needs the detail or a body: judged by a deep search.
+    Deep(DeepTerm),
 }
 
 #[derive(Debug, Clone)]
@@ -73,7 +83,7 @@ enum Cmp {
     Eq,
 }
 
-const KEYS: &str = "host, path, method, scheme, status, ct, app, state, is, dur, size, reqsize, id";
+const KEYS: &str = "host, path, method, scheme, status, ct, app, state, is, dur, size, reqsize, id, header, reqheader, resheader, body, reqbody, resbody";
 
 impl FlowQuery {
     /// Parses a query; a term that doesn't parse is an error naming it.
@@ -101,8 +111,24 @@ impl FlowQuery {
         self.terms.is_empty()
     }
 
+    /// Judges every term a summary can; deep terms pass.
     pub fn matches(&self, f: &FlowSummary) -> bool {
-        self.terms.iter().all(|(negate, term)| term.matches(f) != *negate)
+        self.terms
+            .iter()
+            .all(|(negate, term)| matches!(term, Term::Deep(_)) || term.matches(f) != *negate)
+    }
+
+    /// The header and body terms, if there are any.
+    pub fn deep(&self) -> Option<DeepQuery> {
+        let terms: Vec<(bool, DeepTerm)> = self
+            .terms
+            .iter()
+            .filter_map(|(negate, term)| match term {
+                Term::Deep(deep) => Some((*negate, deep.clone())),
+                _ => None,
+            })
+            .collect();
+        (!terms.is_empty()).then(|| DeepQuery::new(terms))
     }
 }
 
@@ -215,11 +241,18 @@ fn parse_term(token: &Token) -> Result<(bool, Term), String> {
         ),
         "is" => match value.to_ascii_lowercase().as_str() {
             "edited" => Term::Edited,
+            "pinned" => Term::Pinned,
             other => match state(other) {
                 Some(s) => Term::State(vec![s]),
-                None => return Err(bad("is: takes edited or a state")),
+                None => return Err(bad("is: takes edited, pinned or a state")),
             },
         },
+        "header" | "headers" => Term::Deep(DeepTerm::header(Side::Both, value)),
+        "reqheader" | "req.header" => Term::Deep(DeepTerm::header(Side::Request, value)),
+        "resheader" | "respheader" | "res.header" => Term::Deep(DeepTerm::header(Side::Response, value)),
+        "body" => Term::Deep(DeepTerm::body(Side::Both, value)),
+        "reqbody" | "req.body" => Term::Deep(DeepTerm::body(Side::Request, value)),
+        "resbody" | "respbody" | "res.body" => Term::Deep(DeepTerm::body(Side::Response, value)),
         _ => return Err(format!("{body:?}: unknown key {key:?} (known: {KEYS})")),
     };
     Ok((negate, term))
@@ -381,6 +414,8 @@ impl Term {
                 .is_some_and(|c| needle.is_empty() || contains_ignore_ascii_case(c.as_bytes(), needle)),
             Term::State(states) => states.contains(&f.state),
             Term::Edited => f.edited,
+            Term::Pinned => f.pinned,
+            Term::Deep(_) => true,
             Term::Num(field, cmp, value) => {
                 let actual = match field {
                     Field::Duration => match f.duration_ms {
@@ -455,6 +490,7 @@ mod tests {
             tls: TlsStatus::Intercepted,
             graphql_op: None,
             sent_by: None,
+            pinned: false,
         }
     }
 
@@ -517,6 +553,16 @@ mod tests {
         assert!(FlowQuery::parse("status:abc").unwrap_err().contains("status"));
         assert!(FlowQuery::parse("dur>fast").is_err());
         assert!(FlowQuery::parse("").unwrap().is_empty());
+    }
+
+    #[test]
+    fn deep_terms_pass_the_summary_and_are_kept_for_a_deep_search() {
+        let q = FlowQuery::parse("host:*.example.com body:needle -reqheader:\"x-debug: 1\"").unwrap();
+        assert!(q.matches(&flow()));
+        assert_eq!(q.deep().map(|d| d.len()), Some(2));
+        assert!(FlowQuery::parse("host:*.example.com").unwrap().deep().is_none());
+        assert!(!FlowQuery::parse("host:other.com body:x").unwrap().matches(&flow()));
+        assert!(matches("is:pinned") == flow().pinned);
     }
 
     #[test]

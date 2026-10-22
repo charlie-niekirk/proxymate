@@ -26,13 +26,20 @@ use crate::mcp::McpState;
 use crate::proxy::{self, ProxyConfig, ProxyHandle};
 use crate::recorder::{FlowRecorder, is_event_stream};
 use crate::rules::Rules;
-use crate::store::{BlobBackend, DetailStore, SegmentStore, Store, VIEW_STORE_SHIFT, page_events, sse_event};
+use crate::settings::Settings;
+use crate::store::{BlobBackend, DeepJob, DetailStore, SegmentStore, Store, VIEW_STORE_SHIFT, page_events, sse_event};
 use crate::tls::{CertAuthority, SslPolicy, TlsContext};
 
 const SSL_SETTINGS_FILE: &str = "ssl.json";
 
 /// Deltas are published at 20 Hz.
 pub const PUBLISH_INTERVAL: Duration = Duration::from_millis(50);
+
+/// A deep search hands the rayon pool this many flows at a time, then
+/// reports what it found, so matches stream into the view.
+const DEEP_BATCH: usize = 512;
+/// An idle deep search (every candidate checked) looks for new ones this often.
+const DEEP_IDLE: Duration = Duration::from_millis(40);
 
 /// Receives a view's deltas. Returning `false` unsubscribes (e.g. the
 /// webview's channel was closed).
@@ -81,6 +88,8 @@ pub struct Engine {
     pub(crate) platform: Platform,
     pub(crate) rules: Rules,
     pub(crate) mcp: McpState,
+    /// Storage limits and proxy settings.
+    pub(crate) settings: Settings,
     /// Opened sessions and HAR imports.
     pub(crate) docs: Documents,
     /// `Engine::send`'s client, made on first use.
@@ -109,6 +118,7 @@ impl Engine {
         let rules = Rules::load(config.data_dir.as_deref());
         let mcp = McpState::load(config.data_dir.as_deref());
         let devices = DeviceRegistry::load(config.data_dir.as_deref(), devices::HOLD);
+        let app_settings = Settings::load(config.data_dir.as_deref());
         let root = config
             .data_dir
             .unwrap_or_else(|| std::env::temp_dir().join("proxymate"));
@@ -151,6 +161,7 @@ impl Engine {
             ssl: RwLock::new(Arc::new(policy)),
             rules,
             mcp,
+            settings: app_settings,
             docs: Documents::default(),
             sender: OnceLock::new(),
         });
@@ -318,6 +329,7 @@ impl Engine {
                 messages: Vec::new(),
                 open: false,
                 close: None,
+                dropped: 0,
             }),
             None => Err(Error::UnknownFlow(id)),
         }
@@ -412,12 +424,61 @@ impl Engine {
                 Ok(addr)
             }
             Err(err) => {
-                let ports = format!("{}–{}", config.ports.start(), config.ports.end());
-                let message = format!("can't listen on {} ports {ports}: {err}", config.ip);
+                let message = self.bind_error(&config, &err);
                 *state = ProxyState::Failed(message.clone());
                 Err(Error::Proxy(message))
             }
         }
+    }
+
+    /// Why the listener couldn't bind, and what to do about it.
+    fn bind_error(&self, config: &ProxyConfig, err: &std::io::Error) -> String {
+        let (first, last) = (*config.ports.start(), *config.ports.end());
+        let ports = if first == last {
+            format!("port {first}")
+        } else {
+            format!("ports {first}–{last}")
+        };
+        match err.kind() {
+            std::io::ErrorKind::AddrInUse => {
+                let owner = self
+                    .platform
+                    .clients
+                    .port_owner(first)
+                    .map(|app| format!(" ({app} is using {first})"))
+                    .unwrap_or_default();
+                format!(
+                    "{ports} {} in use{owner}. Quit the app using it, or pick another port in Settings › Proxy.",
+                    if first == last { "is" } else { "are all" }
+                )
+            }
+            std::io::ErrorKind::PermissionDenied => {
+                format!("not allowed to listen on {ports}: pick a port from 1024 up in Settings › Proxy.")
+            }
+            std::io::ErrorKind::AddrNotAvailable => {
+                format!(
+                    "can't listen on {}: that address isn't on this Mac any more.",
+                    config.ip
+                )
+            }
+            _ => format!("can't listen on {} {ports}: {err}", config.ip),
+        }
+    }
+
+    /// Stops the listener and starts it again with the current settings,
+    /// on the same interfaces: on the configured port if `new_port`, else
+    /// on the port it had.
+    pub(crate) async fn restart_proxy(self: &Arc<Self>, new_port: bool) -> Result<SocketAddr, Error> {
+        let old = std::mem::take(&mut *self.proxy.lock());
+        let mut config = self.configured_proxy();
+        if let ProxyState::Listening(handle) = old {
+            config.ip = handle.addr.ip();
+            if !new_port {
+                config.ports = handle.addr.port()..=handle.addr.port();
+            }
+            handle.stop().await;
+        }
+        self.start_proxy(config).await
     }
 
     /// Moves the listener to `ip` on the same port (LAN access). If that
@@ -455,7 +516,7 @@ impl Engine {
                 Ok(addr)
             }
             Err((err, back)) => {
-                let message = format!("can't listen on {ip} port {port}: {err}");
+                let message = self.bind_error(&ProxyConfig { ip, ports: port..=port }, &err);
                 *state = match back {
                     Some(handle) => ProxyState::Listening(handle),
                     None => ProxyState::Failed(message.clone()),
@@ -568,23 +629,102 @@ impl Engine {
     }
 
     /// A view over the live store.
-    pub fn create_view(&self, filter: FilterSpec, sort: SortSpec) -> ViewInfo {
-        self.store.write().create_view(filter, sort)
+    pub fn create_view(self: &Arc<Self>, filter: FilterSpec, sort: SortSpec) -> ViewInfo {
+        let (info, job) = {
+            let mut store = self.store.write();
+            let info = store.create_view(filter, sort);
+            (info, store.view(info.view).and_then(|v| v.deep_job()))
+        };
+        self.spawn_deep_search(info.view, job);
+        info
     }
 
     /// A view over any store. Its id says which store it is over, so the
     /// other view methods need no store.
-    pub fn create_view_in(&self, store: StoreId, filter: FilterSpec, sort: SortSpec) -> Result<ViewInfo, Error> {
+    pub fn create_view_in(
+        self: &Arc<Self>,
+        store: StoreId,
+        filter: FilterSpec,
+        sort: SortSpec,
+    ) -> Result<ViewInfo, Error> {
         match store {
             LIVE_STORE => Ok(self.create_view(filter, sort)),
-            _ => Ok(self.docs.get(store)?.store.write().create_view(filter, sort)),
+            _ => {
+                let doc = self.docs.get(store)?;
+                let (info, job) = {
+                    let mut store = doc.store.write();
+                    let info = store.create_view(filter, sort);
+                    (info, store.view(info.view).and_then(|v| v.deep_job()))
+                };
+                self.spawn_deep_search(info.view, job);
+                Ok(info)
+            }
         }
     }
 
     /// Refilters synchronously and returns the new length, so callers can
-    /// fetch rows straight away instead of waiting for the next delta.
-    pub fn set_filter(&self, view: ViewId, filter: FilterSpec) -> Result<ViewInfo, Error> {
-        self.with_view_store(view, |store| store.set_filter(view, filter))
+    /// fetch rows straight away instead of waiting for the next delta. A
+    /// filter with header or body terms starts a deep search: its matches
+    /// stream into the view, with progress in the view's deltas.
+    pub fn set_filter(self: &Arc<Self>, view: ViewId, filter: FilterSpec) -> Result<ViewInfo, Error> {
+        let (info, job) = self.with_view_store(view, |store| {
+            let info = store.set_filter(view, filter)?;
+            Ok((info, store.view(view).and_then(|v| v.deep_job())))
+        })?;
+        self.spawn_deep_search(view, job);
+        Ok(info)
+    }
+
+    /// Runs a view's deep search on its own thread, checking candidates on
+    /// the rayon pool a batch at a time, until the filter changes or the
+    /// view is dropped.
+    fn spawn_deep_search(self: &Arc<Self>, view: ViewId, job: Option<DeepJob>) {
+        let Some(DeepJob { query, cancel }) = job else {
+            return;
+        };
+        let engine = Arc::downgrade(self);
+        let store = view >> VIEW_STORE_SHIFT;
+        let spawned = std::thread::Builder::new()
+            .name("pm-deep-search".into())
+            .spawn(move || {
+                use rayon::prelude::*;
+                loop {
+                    if cancel.load(Ordering::Acquire) {
+                        return;
+                    }
+                    let Some(engine) = engine.upgrade() else {
+                        return;
+                    };
+                    let batch = engine.with_view_store(view, |s| Ok(s.take_deep_batch(view, &cancel, DEEP_BATCH)));
+                    let Ok(Some(batch)) = batch else {
+                        return;
+                    };
+                    if batch.is_empty() {
+                        drop(engine);
+                        std::thread::sleep(DEEP_IDLE);
+                        continue;
+                    }
+                    let hits: Vec<FlowId> = engine
+                        .with_backend(store, |backend| {
+                            Ok(batch
+                                .par_iter()
+                                .filter(|&&id| !cancel.load(Ordering::Relaxed) && query.matches(backend, id))
+                                .copied()
+                                .collect())
+                        })
+                        .unwrap_or_default();
+                    if cancel.load(Ordering::Acquire) {
+                        return;
+                    }
+                    let _ = engine.with_view_store(view, |s| {
+                        s.deep_results(view, &cancel, batch.len() as u32, &hits);
+                        Ok(())
+                    });
+                }
+            });
+        if let Err(err) = spawned {
+            eprintln!("proxymate: can't start a deep search: {err}");
+        }
     }
 
     pub fn set_sort(&self, view: ViewId, sort: SortSpec) -> Result<ViewInfo, Error> {
@@ -640,6 +780,7 @@ impl Engine {
     /// and headless tools.
     pub fn publish_tick(&self) {
         self.publish_sidebar();
+        self.publish_storage();
         self.rules.breakpoints.publish();
         self.rules.publish();
         self.publish_mcp();
@@ -668,9 +809,23 @@ impl Engine {
         }
     }
 
-    /// Applies one ingest batch under a single write lock.
+    /// Applies one ingest batch under a single write lock, then evicts
+    /// past the storage limits.
     pub(crate) fn apply_events(&self, batch: Vec<FlowEvent>) -> Vec<std::sync::mpsc::SyncSender<()>> {
-        self.store.write().apply(batch)
+        let (acks, eviction) = {
+            let mut store = self.store.write();
+            let acks = store.apply(batch);
+            let eviction = self.evict_locked(&mut store);
+            (acks, eviction)
+        };
+        if let Some(eviction) = eviction {
+            self.after_eviction(eviction);
+        }
+        acks
+    }
+
+    pub(crate) fn interned(&self) -> &Mutex<HashSet<Arc<str>>> {
+        &self.interned
     }
 
     pub(crate) fn ingest(&self) -> &IngestTx {
@@ -693,7 +848,7 @@ impl Engine {
 }
 
 /// A body's bytes from `backend`; see [`Engine::body_head`].
-fn body_head(
+pub(crate) fn body_head(
     backend: &dyn BlobBackend,
     id: FlowId,
     part: BodyPart,

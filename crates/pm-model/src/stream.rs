@@ -78,6 +78,10 @@ pub struct WsPage {
     /// False once the connection has closed.
     pub open: bool,
     pub close: Option<WsClose>,
+    /// Older messages dropped by the per-connection limit; `total` and the
+    /// page count from what is kept.
+    #[serde(default)]
+    pub dropped: u32,
 }
 
 /// One event of a `text/event-stream` response.
