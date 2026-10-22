@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Circle, ListChecks, Plus, Settings, ShieldAlert, Trash2 } from "lucide-react";
+import { Circle, ListChecks, Plus, Settings, ShieldAlert, Smartphone, Trash2 } from "lucide-react";
 
 import type { ProxyStatus_Serialize } from "@/bindings";
 import { BreakpointBadge } from "@/components/Breakpoints/BreakpointBadge";
@@ -13,6 +13,8 @@ import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { clearFlows, setRecording } from "@/lib/actions";
 import { backend } from "@/lib/backend";
+import { shortcutLabel } from "@/lib/commands";
+import { useDevices } from "@/store/devices";
 import { proxyStatusKey } from "@/lib/query";
 import { LIVE_STORE, useUi } from "@/store/ui";
 
@@ -42,7 +44,9 @@ export function Toolbar() {
             <Circle className={recording ? "fill-[var(--m-delete)] text-[var(--m-delete)]" : "text-muted-foreground"} />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>{recording ? "Recording · click to pause" : "Paused · traffic is forwarded but not recorded"}</TooltipContent>
+        <TooltipContent>
+          {recording ? "Recording · click to pause" : "Paused · traffic is forwarded but not recorded"} · {shortcutLabel("e")}
+        </TooltipContent>
       </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
@@ -58,11 +62,12 @@ export function Toolbar() {
             <Trash2 />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Clear all flows</TooltipContent>
+        <TooltipContent>Clear all flows · {shortcutLabel("Backspace")}</TooltipContent>
       </Tooltip>
 
-      <div data-tauri-drag-region className="flex flex-1 justify-center">
+      <div data-tauri-drag-region className="flex flex-1 items-center justify-center gap-2">
         <ListeningStatus status={status} />
+        <WaitingDevices />
       </div>
 
       <RulesButton />
@@ -87,7 +92,7 @@ function SettingsButton() {
           <Settings />
         </Button>
       </TooltipTrigger>
-      <TooltipContent>Settings</TooltipContent>
+      <TooltipContent>Settings · {shortcutLabel(",")}</TooltipContent>
     </Tooltip>
   );
 }
@@ -130,8 +135,36 @@ function TrustWarning({ listening }: { listening: boolean }) {
   );
 }
 
+/** LAN devices waiting for an answer whose prompt was closed: click to answer. */
+function WaitingDevices() {
+  const devices = useDevices((s) => s.snapshot.devices);
+  const reopen = useDevices((s) => s.reopen);
+  const dismissed = useDevices((s) => s.dismissed);
+  const waiting = devices.filter((d) => d.decision === "pending" && dismissed.has(d.ip)).length;
+  if (waiting === 0) return null;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="outline"
+          size="sm"
+          className="border-[var(--s-4xx)]/50 text-[var(--s-4xx)] hover:text-[var(--s-4xx)]"
+          onClick={reopen}
+          data-testid="devices-waiting"
+        >
+          <Smartphone />
+          {waiting} device{waiting === 1 ? "" : "s"} waiting
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>A device on your network wants to use the proxy · click to allow or deny it</TooltipContent>
+    </Tooltip>
+  );
+}
+
 function ListeningStatus({ status }: { status: ProxyStatus_Serialize | undefined }) {
   const openDeviceSetup = useUi((s) => s.setDeviceSetupOpen);
+  const openSettings = useUi((s) => s.openSettings);
+  const failed = !!status && !status.listening;
   const [dot, text] = !status
     ? ["var(--s-1xx)", "Starting proxy…"]
     : status.listening
@@ -143,13 +176,15 @@ function ListeningStatus({ status }: { status: ProxyStatus_Serialize | undefined
         <button
           className="text-muted-foreground hover:bg-accent flex h-7 max-w-[520px] items-center gap-2 rounded-md border px-3 text-xs"
           data-testid="listening-status"
-          onClick={() => openDeviceSetup(true)}
+          onClick={() => (failed ? openSettings("proxy") : openDeviceSetup(true))}
         >
           <span className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: dot }} />
           <span className="truncate">{text}</span>
         </button>
       </TooltipTrigger>
-      <TooltipContent>Device setup · connect a phone, simulator or emulator</TooltipContent>
+      <TooltipContent className="max-w-96">
+        {failed ? `${status?.error ?? "The proxy isn't running."} Click to change the port.` : "Device setup · connect a phone, simulator or emulator"}
+      </TooltipContent>
     </Tooltip>
   );
 }

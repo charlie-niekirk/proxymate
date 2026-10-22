@@ -5,6 +5,7 @@ import { useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { useTrustStatus } from "@/hooks/useTrustStatus";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Switch } from "@/components/ui/switch";
 import { regenerateCa } from "@/lib/actions";
 import { backend } from "@/lib/backend";
 import { caInfoKey, proxyStatusKey } from "@/lib/query";
@@ -23,6 +24,10 @@ export function CertificateMenu() {
   const [open, setOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  // Removing the old CA's trust is the default when this Mac trusts it.
+  const [untrust, setUntrust] = useState<boolean | null>(null);
+  const removeOld = untrust ?? trust?.keychain === "trusted";
   const proxy = status?.listening ? `http://${status.listening}` : "http://127.0.0.1:9090";
   const curl = ca ? `curl -x ${proxy} --cacert "${ca.cert_path}" https://example.com/` : "";
 
@@ -32,7 +37,11 @@ export function CertificateMenu() {
       return;
     }
     setConfirming(false);
-    regenerateCa().catch((e: unknown) => setError(String(e)));
+    setError(null);
+    setBusy(true);
+    regenerateCa(removeOld)
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setBusy(false));
   };
 
   return (
@@ -95,17 +104,31 @@ export function CertificateMenu() {
             </Field>
           </div>
         )}
-        <div className="flex items-center justify-between gap-2 border-t px-3 py-2">
-          <span className="text-muted-foreground">A new CA must be trusted again.</span>
-          <Button
-            variant={confirming ? "destructive" : "outline"}
-            size="xs"
-            onClick={onRegenerate}
-            data-testid="regenerate-ca"
-          >
-            <RefreshCw />
-            {confirming ? "Replace CA?" : "Regenerate"}
-          </Button>
+        <div className="flex flex-col gap-2 border-t px-3 py-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-muted-foreground">
+              {confirming ? "Every device must trust the new CA again." : "A new CA must be trusted again."}
+            </span>
+            <Button
+              variant={confirming ? "destructive" : "outline"}
+              size="xs"
+              disabled={busy}
+              onClick={onRegenerate}
+              data-testid="regenerate-ca"
+            >
+              <RefreshCw className={busy ? "animate-spin" : undefined} />
+              {confirming ? "Replace CA" : "Regenerate…"}
+            </Button>
+          </div>
+          {confirming && (
+            <label className="flex items-center gap-2" data-testid="untrust-old-ca">
+              <Switch checked={removeOld} onCheckedChange={setUntrust} />
+              <span>
+                Remove trust for the old CA from this Mac
+                <span className="text-muted-foreground block">macOS asks for your password; other devices keep their copy.</span>
+              </span>
+            </label>
+          )}
         </div>
         {error && <div className="border-t px-3 py-2 text-[var(--s-failed)]">{error}</div>}
       </PopoverContent>

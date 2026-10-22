@@ -5,10 +5,12 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use parking_lot::Mutex;
-use pm_model::{AppCount, KeychainTrust, SidebarSnapshot, SslSettings, SystemProxyStatus, TrustStatus};
+use pm_model::{
+    AppCount, KeychainTrust, LIVE_STORE, SidebarSnapshot, SslSettings, StoreId, SystemProxyStatus, TrustStatus,
+};
 use pm_platform::PlatformError;
 use pm_platform::sysproxy::SystemProxy;
 use pm_platform::trust::{CaCert, TrustState, TrustStore};
@@ -33,6 +35,9 @@ pub(crate) struct Platform {
     guardian_exe: Option<PathBuf>,
     guardian_spawned: AtomicBool,
     sidebar_sink: Mutex<Option<SidebarSink>>,
+    /// The store the sidebar counts: the live capture or the document tab
+    /// the UI shows.
+    sidebar_store: AtomicU32,
     pub devices: DeviceRegistry,
 }
 
@@ -46,6 +51,7 @@ impl Platform {
             guardian_exe,
             guardian_spawned: AtomicBool::new(false),
             sidebar_sink: Mutex::new(None),
+            sidebar_store: AtomicU32::new(LIVE_STORE),
             devices,
         }
     }
@@ -54,11 +60,22 @@ impl Platform {
 impl Engine {
     // ---- Sidebar ----
 
-    /// Apps and Domains with their flow counts, aggregated in the store.
+    /// Apps and Domains with their flow counts, aggregated in the store
+    /// the sidebar follows ([`Engine::set_sidebar_store`]).
     pub fn sidebar(&self) -> SidebarSnapshot {
-        let store = self.store.read();
+        let which = self.platform.sidebar_store.load(Ordering::Relaxed);
+        let doc = match which {
+            LIVE_STORE => None,
+            _ => self.docs.get(which).ok(),
+        };
+        let guard = match &doc {
+            Some(doc) => doc.store.read(),
+            None => self.store.read(),
+        };
+        let store = &*guard;
         let counts = store.sidebar();
         SidebarSnapshot {
+            store: if doc.is_some() { which } else { LIVE_STORE },
             total: store.total(),
             apps: counts
                 .apps()
@@ -81,8 +98,28 @@ impl Engine {
     /// Sends the sidebar to `sink` now and again on every tick it changes,
     /// replacing any previous subscriber.
     pub fn subscribe_sidebar(&self, sink: SidebarSink) {
-        self.store.write().sidebar_mut().mark_dirty();
         *self.platform.sidebar_sink.lock() = Some(sink);
+        self.mark_sidebar_dirty();
+    }
+
+    /// Makes the sidebar count `store` (the tab the UI shows); a closed
+    /// document falls back to the live capture.
+    pub fn set_sidebar_store(&self, store: StoreId) {
+        self.platform.sidebar_store.store(store, Ordering::Relaxed);
+        self.mark_sidebar_dirty();
+    }
+
+    fn mark_sidebar_dirty(&self) {
+        match self.platform.sidebar_store.load(Ordering::Relaxed) {
+            LIVE_STORE => self.store.write().sidebar_mut().mark_dirty(),
+            doc => match self.docs.get(doc) {
+                Ok(doc) => doc.store.write().sidebar_mut().mark_dirty(),
+                Err(_) => {
+                    self.platform.sidebar_store.store(LIVE_STORE, Ordering::Relaxed);
+                    self.store.write().sidebar_mut().mark_dirty();
+                }
+            },
+        }
     }
 
     /// Part of the publisher tick.
@@ -91,7 +128,18 @@ impl Engine {
         let Some(send) = sink.as_mut() else {
             return;
         };
-        if !self.store.write().sidebar_mut().take_dirty() {
+        let dirty = match self.platform.sidebar_store.load(Ordering::Relaxed) {
+            LIVE_STORE => self.store.write().sidebar_mut().take_dirty(),
+            doc => match self.docs.get(doc) {
+                Ok(doc) => doc.store.write().sidebar_mut().take_dirty(),
+                // Its tab closed: back to the live capture.
+                Err(_) => {
+                    self.platform.sidebar_store.store(LIVE_STORE, Ordering::Relaxed);
+                    true
+                }
+            },
+        };
+        if !dirty {
             return;
         }
         if !send(self.sidebar()) {
@@ -157,6 +205,44 @@ impl Engine {
             .await
             .map_err(|e| Error::Platform(PlatformError::Os(e.to_string())))??;
         Ok(self.trust_status().await)
+    }
+
+    /// Replaces the root CA. With `remove_old_trust`, the old CA's trust
+    /// setting is removed from the keychain afterwards (macOS prompts); if
+    /// that fails the new CA is still in place and the error says so.
+    pub async fn regenerate_ca_and_untrust(
+        self: &Arc<Self>,
+        remove_old_trust: bool,
+    ) -> Result<pm_model::CaInfo, Error> {
+        let old = remove_old_trust.then(|| {
+            self.with_ca(|ca| {
+                let copy = ca.pem_path.with_file_name("previous-ca.pem");
+                let _ = std::fs::copy(ca.pem_path, &copy);
+                (ca.der.to_vec(), ca.sha1_hex.to_owned(), copy)
+            })
+        });
+        let info = self.regenerate_ca()?;
+        let Some((der, sha1_hex, pem_path)) = old else {
+            return Ok(info);
+        };
+        let engine = self.clone();
+        let removed = tokio::task::spawn_blocking(move || {
+            let result = engine.platform.trust.uninstall(CaCert {
+                der: &der,
+                pem_path: &pem_path,
+                sha1_hex: &sha1_hex,
+            });
+            let _ = std::fs::remove_file(&pem_path);
+            result
+        })
+        .await
+        .map_err(|e| PlatformError::Os(e.to_string()));
+        match removed {
+            Ok(Ok(())) => Ok(info),
+            Ok(Err(err)) | Err(err) => Err(Error::Tls(format!(
+                "the new CA is in place, but the old one is still trusted: {err}"
+            ))),
+        }
     }
 
     /// Removes the CA's trust setting and deletes it from the keychain.
@@ -282,22 +368,54 @@ impl Engine {
             Some(addr) => format!("http://{addr}"),
             None => "http://127.0.0.1:9090".into(),
         };
-        let pem = shell_quote(&self.ca_info().cert_path);
+        let ca = self.ca_info().cert_path;
+        // These replace a tool's roots rather than add to them, so they get
+        // the OS roots too; Node's variable adds to its own.
+        let bundle = match self.write_ca_bundle(Path::new(&ca)) {
+            Ok(path) => path.display().to_string(),
+            Err(err) => {
+                eprintln!("proxymate: can't write the CA bundle ({err}); using the CA alone");
+                ca.clone()
+            }
+        };
         let mut lines = Vec::new();
         for var in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"] {
             lines.push(format!("export {var}={proxy}"));
         }
-        for var in [
-            "NODE_EXTRA_CA_CERTS",
-            "SSL_CERT_FILE",
-            "REQUESTS_CA_BUNDLE",
-            "CURL_CA_BUNDLE",
-        ] {
-            lines.push(format!("export {var}={pem}"));
+        lines.push(format!("export NODE_EXTRA_CA_CERTS={}", shell_quote(&ca)));
+        for var in ["SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE"] {
+            lines.push(format!("export {var}={}", shell_quote(&bundle)));
         }
         lines.join("\n") + "\n"
     }
+
+    /// Writes `ca/bundle.pem` beside the CA: the OS's trusted roots, then
+    /// our CA. Rewritten each time, so it follows a regenerated CA.
+    fn write_ca_bundle(&self, ca_pem: &Path) -> std::io::Result<PathBuf> {
+        use base64::Engine as _;
+        let ours = std::fs::read_to_string(ca_pem)?;
+        let roots = rustls_native_certs::load_native_certs();
+        let mut out = String::with_capacity(roots.certs.len() * 2048 + ours.len());
+        for cert in &roots.certs {
+            out.push_str("-----BEGIN CERTIFICATE-----\n");
+            let b64 = base64::engine::general_purpose::STANDARD.encode(cert.as_ref());
+            for line in b64.as_bytes().chunks(64) {
+                out.push_str(std::str::from_utf8(line).unwrap_or_default());
+                out.push('\n');
+            }
+            out.push_str("-----END CERTIFICATE-----\n");
+        }
+        out.push_str(&ours);
+        let path = ca_pem.with_file_name(CA_BUNDLE_FILE);
+        let tmp = path.with_extension("pem.tmp");
+        std::fs::write(&tmp, out)?;
+        std::fs::rename(&tmp, &path)?;
+        Ok(path)
+    }
 }
+
+/// The OS roots plus our CA, for `SSL_CERT_FILE` and friends.
+const CA_BUNDLE_FILE: &str = "bundle.pem";
 
 /// Single-quotes `s` for POSIX shells.
 fn shell_quote(s: &str) -> String {
@@ -322,6 +440,16 @@ mod tests {
         assert!(env.contains("export http_proxy=http://127.0.0.1:9090\n"));
         let pem = engine.ca_info().cert_path;
         assert!(env.contains(&format!("export NODE_EXTRA_CA_CERTS='{pem}'\n")), "{env}");
+        // The bundle holds the OS roots and ends with our CA.
+        let bundle = std::path::Path::new(&pem).with_file_name(CA_BUNDLE_FILE);
+        assert!(
+            env.contains(&format!("export SSL_CERT_FILE='{}'\n", bundle.display())),
+            "{env}"
+        );
+        let text = std::fs::read_to_string(&bundle).unwrap();
+        assert!(text.ends_with(&std::fs::read_to_string(&pem).unwrap()));
+        #[cfg(target_os = "macos")]
+        assert!(text.matches("BEGIN CERTIFICATE").count() > 50);
         assert_eq!(shell_quote("it's"), r"'it'\''s'");
         let _ = std::fs::remove_dir_all(dir.parent().unwrap());
     }

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { ShieldAlert, ShieldOff } from "lucide-react";
+import { CircleAlert, ShieldAlert, ShieldOff } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import type { FlowDetail_Serialize, FlowSummary_Serialize } from "@/bindings";
@@ -19,6 +19,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { addSslBypass, setInsecureUpstream } from "@/lib/actions";
 import { backend } from "@/lib/backend";
+import { explainFailure, type FailureHelp } from "@/lib/errors";
 import { formatDuration, formatSize } from "@/lib/flow";
 import { displayHeaderName, queryPairs } from "@/lib/http";
 import { flowKey, sslSettingsKey } from "@/lib/query";
@@ -93,6 +94,7 @@ export function DetailPane() {
             The client rejected Proxymate&apos;s certificate: it pins its certificates, or doesn&apos;t trust the
             Proxymate CA yet.
           </span>
+          <CertWizardButton />
           <BypassButton host={flow.host} />
         </div>
       )}
@@ -157,21 +159,15 @@ function RequestPane({ flow, detail }: Inspected & { detail: FlowDetail_Serializ
 function ResponsePane({ flow, detail }: Inspected & { detail: FlowDetail_Serialize }) {
   const tab = useUi((s) => s.responseTab);
   const setTab = useUi((s) => s.setResponseTab);
-  const { response, response_body: info, error, tls } = detail;
+  const { response, response_body: info, error } = detail;
   // A 101 has no body: the connection carries WebSocket messages instead.
   const finished = flow.state !== "active" || response?.status === 101;
-  // The upstream presented a certificate but the handshake failed: offer to
-  // accept it unverified (self-signed dev servers and the like).
-  const certRejected = flow.state === "failed" && flow.tls === "intercepted" && !!tls && tls.version === "" && tls.chain.length > 0;
+  // A pinning client gets its own banner above both panes.
+  const help = flow.tls === "likely_pinned" ? null : explainFailure(flow, detail);
   const noResponse = <Placeholder text={error ? "No response" : "Waiting for the response…"} />;
   return (
     <MessageTabs title="Response" tabs={["Header", "Body", "Raw", "TLS", "Timing"]} value={tab} onChange={setTab}>
-      {error && (
-        <div className="flex items-start gap-2 border-b px-2 py-1.5 text-xs text-[var(--s-failed)]" data-selectable>
-          <span className="min-w-0 flex-1">{error}</span>
-          {certRejected && <InsecureUpstreamButton host={flow.host} />}
-        </div>
-      )}
+      {help && <FailureBanner help={help} host={flow.host} />}
       {flow.tls === "passthrough" && (
         <div className="text-muted-foreground border-b px-2 py-1.5 text-xs" data-testid="tunnel-note">
           Not decrypted: {flow.host} is in the SSL exclude or bypass list. {formatSize(flow.req_size)} sent,{" "}
@@ -244,6 +240,54 @@ function BypassButton({ host, compact = false }: { host: string; compact?: boole
         {error ?? (bypassed ? `${host} is no longer decrypted` : `Stop decrypting ${host}: new connections are tunnelled as is`)}
       </TooltipContent>
     </Tooltip>
+  );
+}
+
+/** Why the flow failed, in a line, with the fixes that apply. */
+function FailureBanner({ help, host }: { help: FailureHelp; host: string }) {
+  const openSettings = useUi((s) => s.openSettings);
+  return (
+    <div className="flex items-start gap-2 border-b bg-[var(--s-5xx-bg)] px-2 py-1.5 text-xs" role="alert" data-testid="failure-banner">
+      <CircleAlert className="mt-px size-3.5 shrink-0 text-[var(--s-failed)]" />
+      <div className="min-w-0 flex-1" data-selectable>
+        <div className="font-medium text-[var(--s-failed)]">{help.title}</div>
+        <div className="text-muted-foreground leading-4">{help.detail}</div>
+      </div>
+      <div className="flex shrink-0 flex-wrap justify-end gap-1">
+        {help.actions.map((action) => {
+          switch (action) {
+            case "cert-wizard":
+              return <CertWizardButton key={action} />;
+            case "bypass":
+              return <BypassButton key={action} host={host} compact />;
+            case "insecure-upstream":
+              return <InsecureUpstreamButton key={action} host={host} />;
+            case "timeouts":
+              return (
+                <Button key={action} variant="outline" size="xs" className="text-foreground" onClick={() => openSettings("advanced")}>
+                  Timeouts…
+                </Button>
+              );
+            case "tls-settings":
+              return (
+                <Button key={action} variant="outline" size="xs" className="text-foreground" onClick={() => openSettings("ssl")}>
+                  SSL Proxying…
+                </Button>
+              );
+          }
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** The device may simply not trust the CA yet: the wizard checks and installs it. */
+function CertWizardButton() {
+  const openWizard = useUi((s) => s.setCertWizardOpen);
+  return (
+    <Button variant="outline" size="xs" className="text-foreground shrink-0" onClick={() => openWizard(true)}>
+      Certificate wizard…
+    </Button>
   );
 }
 

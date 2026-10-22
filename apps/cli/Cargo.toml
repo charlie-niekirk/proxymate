@@ -11,7 +11,14 @@ pm-core.workspace = true
 pm-model.workspace = true
 pm-mcp.workspace = true
 pm-platform.workspace = true
-tokio = { workspace = true, features = ["signal", "rt-multi-thread"] }
+pm-testkit.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+http.workspace = true
+http-body-util.workspace = true
+bytes.workspace = true
+parking_lot.workspace = true
+tokio = { workspace = true, features = ["signal", "rt-multi-thread", "time", "sync"] }
 
 [lints]
 workspace = true

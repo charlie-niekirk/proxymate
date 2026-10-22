@@ -18,9 +18,12 @@ import type {
   SslSettings,
   SystemProxyStatus_Serialize,
   TlsInfo_Serialize,
+  ProxySettings_Serialize,
+  StorageSettings_Serialize,
+  StorageStatus_Serialize,
   TrustStatus_Serialize,
   UpdateSettings,
-  ViewDelta,
+  ViewDelta_Serialize,
   WsMessage_Serialize,
 } from "@/bindings";
 import type { Backend } from "@/lib/backend";
@@ -79,6 +82,7 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
       tunnel ? "passthrough" : pinned ? "likely_pinned" : https ? "intercepted" : "none",
       !connect && kinds[(i * 5) % kinds.length] === "graphql" ? "GetViewer" : null,
       i % 211 === 3 ? "user" : null,
+      false,
     ];
     // A few are WebSockets and event streams, for the message panels.
     if (!connect && i % 61 === 13) return asStream(row, "websocket");
@@ -104,6 +108,24 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
   };
   let sysproxy: SystemProxyStatus_Serialize = { enabled: false, services: [], supported: true, error: null };
   let onSidebar: ((s: SidebarSnapshot_Deserialize) => void) | null = null;
+  let sidebarStore = 0;
+  const deltaSinks = new Map<number, (d: ViewDelta_Serialize) => void>();
+  let storageSettings: StorageSettings_Serialize = { max_flows: 250_000, max_disk_mb: 4096, max_ws_messages: 50_000 };
+  let proxySettings: ProxySettings_Serialize = { port: 9090, pool_idle_secs: 90, pool_max_idle_per_host: 32, connect_timeout_secs: 10 };
+  let onStorage: ((s: StorageStatus_Serialize) => void) | null = null;
+  const storageStatus = (): StorageStatus_Serialize => ({
+    flows: flows.length,
+    pinned: flows.filter((f) => f[20]).length,
+    disk_bytes: flows.length * 2_300,
+    evicted: 0,
+    // `?diskFull`: the footer's disk-full warning.
+    error: typeof window !== "undefined" && new URLSearchParams(window.location.search).has("diskFull")
+      ? "the disk is full: free some space, or lower the disk limit in Settings › Storage"
+      : null,
+    dir: "/Users/you/Library/Application Support/Proxymate/live/mock",
+    sent_bytes: 0,
+    received_bytes: 0,
+  });
   const ca: CaInfo = {
     common_name: "Proxymate CA (mock, 2026-10-21)",
     cert_path: "/Users/you/Library/Application Support/Proxymate/ca/proxymate-ca.pem",
@@ -171,14 +193,24 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
       if (filter.content.length > 0 && !filter.content.includes(groupOf(f[9]))) continue;
       if (filter.host && !hostMatches(f[4], filter.host)) continue;
       if (filter.client && f[10] !== filter.client) continue;
-      if (text && !`${f[4]}${f[6]}${f[7]}`.toLowerCase().includes(text)) continue;
+      // The DSL lives in Rust; the mock knows `is:pinned` and plain text.
+      const words = text.split(/\s+/).filter(Boolean);
+      if (words.includes("is:pinned") && !f[20]) continue;
+      const plain = words.filter((w) => !w.includes(":")).join(" ");
+      if (plain && !`${f[4]}${f[6]}${f[7]}`.toLowerCase().includes(plain)) continue;
       out.push(f[0]);
     }
     return out;
   }
 
   function info(view: number, start: number) {
-    return { view, total: flows.length, len: views.get(view)!.length, elapsed_us: Math.round((performance.now() - start) * 1000) };
+    return {
+      view,
+      total: flows.length,
+      len: views.get(view)!.length,
+      elapsed_us: Math.round((performance.now() - start) * 1000),
+      deep: null,
+    };
   }
 
   return {
@@ -218,11 +250,16 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
         status: f[8], content_kind: f[9], client: f[10], started_at_ms: f[11], duration_ms: f[12],
         req_size: f[13], resp_size: f[14], edited: f[15], http_version: f[16], tls: f[17], graphql_op: f[18],
         sent_by: f[19],
+        pinned: f[20],
       };
     },
-    async subscribe(view, onDelta: (d: ViewDelta) => void) {
+    async subscribe(view, onDelta: (d: ViewDelta_Serialize) => void) {
       const len = views.get(view)?.length ?? 0;
-      setTimeout(() => onDelta({ view, seq: 1, total: flows.length, len, appended: 0, changed: [], structural: true }), 0);
+      deltaSinks.set(view, onDelta);
+      setTimeout(
+        () => onDelta({ view, seq: 1, total: flows.length, len, appended: 0, changed: [], structural: true, deep: null }),
+        0,
+      );
     },
     async getFlowDetail(_store, id): Promise<FlowDetail_Serialize | null> {
       await ready;
@@ -329,7 +366,15 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
         (m) => (query.direction === null || m.direction === query.direction) && (!text || m.preview.toLowerCase().includes(text)),
       );
       const close = all.length ? { code: 1000, reason: "bye", by: "sent" as const } : null;
-      return { total: all.length, len: matching.length, start, messages: matching.slice(start, start + n), open: false, close };
+      return {
+        total: all.length,
+        len: matching.length,
+        start,
+        messages: matching.slice(start, start + n),
+        open: false,
+        close,
+        dropped: 0,
+      };
     },
     async getWebsocketPayload(_store, id, index) {
       const m = mockMessages(flows[id]?.[11] ?? 0)[index];
@@ -346,7 +391,7 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
       await ready;
       flows = [];
       for (const view of views.keys()) views.set(view, []);
-      onSidebar?.(sidebar(flows));
+      onSidebar?.(sidebar(flows, 0));
     },
     async setRecording(on) {
       await ready;
@@ -365,6 +410,43 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
       await ready;
       return ca;
     },
+    async getStorageSettings() {
+      return storageSettings;
+    },
+    async setStorageSettings(settings) {
+      if (settings.max_flows !== 0 && settings.max_flows < 100) throw new Error("keep at least 100 flows (or 0 for no limit)");
+      storageSettings = settings;
+      return settings;
+    },
+    async subscribeStorage(cb) {
+      onStorage = cb;
+      setTimeout(() => cb(storageStatus()), 0);
+    },
+    async pinFlows(ids, pinned) {
+      await ready;
+      for (const id of ids) {
+        const f = flows[id];
+        if (f) f[20] = pinned;
+      }
+      for (const [view, sink] of deltaSinks) {
+        sink({ view, seq: 0, total: flows.length, len: views.get(view)?.length ?? 0, appended: 0, changed: ids, structural: false, deep: null });
+      }
+      onStorage?.(storageStatus());
+    },
+    async getProxySettings() {
+      return proxySettings;
+    },
+    async setProxySettings(settings) {
+      if (settings.port < 1024) throw new Error("pick a port from 1024 up: lower ones need administrator rights");
+      if (settings.port === 8080) throw new Error("port 8080 is in use (Charles, pid 4242). Quit the app using it, or pick another port.");
+      proxySettings = settings;
+      return settings;
+    },
+    async setSidebarStore(store) {
+      sidebarStore = store;
+      onSidebar?.(sidebar(storeFlows(store), store));
+    },
+    async setWindowTheme() {},
     async getSslSettings() {
       await ready;
       return ssl;
@@ -387,7 +469,7 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
     },
     async subscribeSidebar(cb) {
       onSidebar = cb;
-      setTimeout(() => cb(sidebar(flows)), 0);
+      setTimeout(() => cb(sidebar(storeFlows(sidebarStore), sidebarStore)), 0);
     },
     async setAppSslExcluded(app, excluded) {
       const rest = (ssl.exclude_apps ?? []).filter((a) => a.toLowerCase() !== app.toLowerCase());
@@ -564,7 +646,7 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
         [
           id, "completed", https ? "https" : "http", spec.method, url.hostname, Number(url.port) || (https ? 443 : 80),
           url.pathname, url.search.slice(1), 200, "json", "Proxymate", Date.now(), 120, (spec.body ?? "").length, 512,
-          false, "HTTP/1.1", https ? "intercepted" : "none", null, "user",
+          false, "HTTP/1.1", https ? "intercepted" : "none", null, "user", false,
         ],
       ];
       return id;
@@ -641,7 +723,7 @@ function hostMatches(host: string, pattern: string): boolean {
 }
 
 /** The engine aggregates this in Rust; the mock does it the simple way. */
-function sidebar(flows: FlowRow_Serialize[]): SidebarSnapshot_Deserialize {
+function sidebar(flows: FlowRow_Serialize[], store: number): SidebarSnapshot_Deserialize {
   const apps = new Map<string, number>();
   const hosts = new Map<string, number>();
   for (const f of flows) {
@@ -655,6 +737,7 @@ function sidebar(flows: FlowRow_Serialize[]): SidebarSnapshot_Deserialize {
     domains.set(domain, [...(domains.get(domain) ?? []), { host, count }]);
   }
   return {
+    store,
     total: flows.length,
     apps: [...apps]
       .sort(([a], [b]) => a.toLowerCase().localeCompare(b.toLowerCase()))

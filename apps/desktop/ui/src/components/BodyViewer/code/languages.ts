@@ -1,10 +1,12 @@
-import { css } from "@codemirror/lang-css";
-import { html } from "@codemirror/lang-html";
-import { javascript } from "@codemirror/lang-javascript";
-import { json } from "@codemirror/lang-json";
-import { xml } from "@codemirror/lang-xml";
+/**
+ * CodeMirror languages for the viewers and editors. The two small stream
+ * modes (GraphQL, raw HTTP) are always here; the Lezer grammars (JSON, XML,
+ * HTML, JavaScript, CSS) are big, so each loads on first use and the editor
+ * swaps it into a `Compartment` when it arrives (`applyLanguage`).
+ */
 import { StreamLanguage, type StringStream } from "@codemirror/language";
-import type { Extension } from "@codemirror/state";
+import type { Compartment, Extension } from "@codemirror/state";
+import type { EditorView } from "@codemirror/view";
 
 export type CodeLanguage = "json" | "xml" | "html" | "javascript" | "css" | "graphql" | "http" | "text";
 
@@ -101,23 +103,70 @@ function bodyToken(stream: StringStream): string | null {
   return "punctuation";
 }
 
-export function languageExtension(lang: CodeLanguage): Extension {
+type LoadedLanguage = "json" | "xml" | "html" | "javascript" | "css";
+
+const LOADERS: Record<LoadedLanguage, () => Promise<Extension>> = {
+  json: () => import("@codemirror/lang-json").then((m) => m.json()),
+  xml: () => import("@codemirror/lang-xml").then((m) => m.xml()),
+  html: () => import("@codemirror/lang-html").then((m) => m.html({ matchClosingTags: true, autoCloseTags: false })),
+  javascript: () => import("@codemirror/lang-javascript").then((m) => m.javascript()),
+  css: () => import("@codemirror/lang-css").then((m) => m.css()),
+};
+
+const loaded = new Map<CodeLanguage, Extension>();
+const loading = new Map<CodeLanguage, Promise<Extension>>();
+
+/** The language's extension if it is available right now, else null (see `loadLanguage`). */
+export function readyLanguage(lang: CodeLanguage): Extension | null {
   switch (lang) {
-    case "json":
-      return json();
-    case "xml":
-      return xml();
-    case "html":
-      return html({ matchClosingTags: true, autoCloseTags: false });
-    case "javascript":
-      return javascript();
-    case "css":
-      return css();
     case "graphql":
       return graphqlLanguage;
     case "http":
       return httpLanguage;
     case "text":
       return [];
+    default:
+      return loaded.get(lang) ?? null;
   }
+}
+
+/** The language's extension, loading its grammar the first time (later calls share it). */
+export function loadLanguage(lang: CodeLanguage): Promise<Extension> {
+  const ready = readyLanguage(lang);
+  if (ready !== null) return Promise.resolve(ready);
+  let pending = loading.get(lang);
+  if (!pending) {
+    pending = LOADERS[lang as LoadedLanguage]().then((ext) => {
+      loaded.set(lang, ext);
+      return ext;
+    });
+    // A failed chunk load may work next time.
+    pending.catch(() => loading.delete(lang));
+    loading.set(lang, pending);
+  }
+  return pending;
+}
+
+/**
+ * Keeps `compartment` of a live editor on `lang`: the extension now if it
+ * is ready, otherwise nothing until its grammar arrives. Returns a cancel
+ * for when the editor goes away (or the language changes first).
+ */
+export function applyLanguage(view: EditorView, compartment: Compartment, lang: CodeLanguage): () => void {
+  const ready = readyLanguage(lang);
+  if (ready !== null) {
+    if (compartment.get(view.state) !== ready) view.dispatch({ effects: compartment.reconfigure(ready) });
+    return () => {};
+  }
+  let live = true;
+  loadLanguage(lang).then(
+    (ext) => {
+      if (live) view.dispatch({ effects: compartment.reconfigure(ext) });
+    },
+    // The text stays plain; highlighting is a nicety.
+    () => {},
+  );
+  return () => {
+    live = false;
+  };
 }

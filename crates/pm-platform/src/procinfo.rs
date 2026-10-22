@@ -30,6 +30,11 @@ pub trait ProcessInfo: Send + Sync {
     fn app_for_pid(&self, pid: u32) -> Option<AppInfo>;
     /// The bundle's icon as a PNG, `size` points square at the screen's scale.
     fn icon_png(&self, bundle_path: &Path, size: u32) -> Option<Vec<u8>>;
+    /// The process listening on TCP `port`, if this user can see it (to
+    /// say who holds a port the proxy wants).
+    fn listener_pid(&self, _port: u16) -> Option<u32> {
+        None
+    }
 }
 
 /// This OS's implementation.

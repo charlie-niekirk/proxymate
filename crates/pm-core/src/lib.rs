@@ -16,6 +16,7 @@ mod recorder;
 mod replay;
 pub mod rules;
 mod search;
+mod settings;
 pub mod store;
 pub mod synth;
 pub mod tls;
@@ -32,6 +33,7 @@ pub use proxy::ProxyConfig;
 pub use recorder::{BodyEnd, FlowRecorder, WsRecorder};
 pub use rules::{BreakpointSink, RuleError, RulesSink};
 pub use search::{FlowPage, SearchHit, SearchMatch, SearchPage};
+pub use settings::StorageSink;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -69,4 +71,7 @@ pub enum Error {
     Document(String),
     #[error("unknown store {0}")]
     UnknownStore(pm_model::StoreId),
+    /// A setting out of range, with what is allowed.
+    #[error("{0}")]
+    Invalid(String),
 }

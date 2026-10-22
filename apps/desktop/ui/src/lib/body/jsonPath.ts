@@ -1,7 +1,10 @@
 /**
  * Path filters for the JSON viewer: an RFC 6901 pointer (`/items/0/name`)
  * or a JSONPath subset (`$.items[*].name`, `$..id`, `$['a b'][0:2]`).
+ * Works on `parseLossless` values: a JsonNumber is a leaf, not an object.
  */
+
+import { isJsonNumber } from "./losslessJson";
 
 export type PathSegment = string | number;
 
@@ -35,6 +38,11 @@ export function evaluatePath(root: unknown, expr: string): PathResult {
   return { matches: current };
 }
 
+/** A JSON object (not an array, null or a JsonNumber). */
+function isObject(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === "object" && !Array.isArray(v) && !isJsonNumber(v);
+}
+
 function pointer(root: unknown, expr: string): PathResult {
   const tokens = expr
     .slice(1)
@@ -46,8 +54,8 @@ function pointer(root: unknown, expr: string): PathResult {
     if (Array.isArray(value) && /^(0|[1-9]\d*)$/.test(t) && Number(t) < value.length) {
       value = value[Number(t)];
       path.push(Number(t));
-    } else if (value !== null && typeof value === "object" && !Array.isArray(value) && Object.hasOwn(value, t)) {
-      value = (value as Record<string, unknown>)[t];
+    } else if (isObject(value) && Object.hasOwn(value, t)) {
+      value = value[t];
       path.push(t);
     } else {
       return { matches: [] };
@@ -106,9 +114,7 @@ function parseJsonPath(e: string): Step[] {
 function children(m: PathMatch): PathMatch[] {
   const v = m.value;
   if (Array.isArray(v)) return v.map((value, i) => ({ path: [...m.path, i], value }));
-  if (v !== null && typeof v === "object") {
-    return Object.entries(v as Record<string, unknown>).map(([k, value]) => ({ path: [...m.path, k], value }));
-  }
+  if (isObject(v)) return Object.entries(v).map(([k, value]) => ({ path: [...m.path, k], value }));
   return [];
 }
 
@@ -116,9 +122,7 @@ function apply(step: Step, m: PathMatch): PathMatch[] {
   const v = m.value;
   switch (step.kind) {
     case "key":
-      return v !== null && typeof v === "object" && !Array.isArray(v) && Object.hasOwn(v, step.key)
-        ? [{ path: [...m.path, step.key], value: (v as Record<string, unknown>)[step.key] }]
-        : [];
+      return isObject(v) && Object.hasOwn(v, step.key) ? [{ path: [...m.path, step.key], value: v[step.key] }] : [];
     case "index": {
       if (!Array.isArray(v)) return [];
       const i = step.index < 0 ? v.length + step.index : step.index;

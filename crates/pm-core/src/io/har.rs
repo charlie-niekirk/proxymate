@@ -857,6 +857,7 @@ fn flow(entry: &Entry) -> Option<SavedFlow> {
         },
         graphql_op: graphql.and_then(|g| g.operation).map(Arc::from),
         sent_by: None,
+        pinned: false,
     };
     let detail = FlowDetail {
         id: 0,
@@ -1101,6 +1102,7 @@ mod tests {
             tls: TlsStatus::None,
             graphql_op: None,
             sent_by: None,
+            pinned: false,
         }
     }
 

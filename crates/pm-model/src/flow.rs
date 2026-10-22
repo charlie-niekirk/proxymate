@@ -128,6 +128,9 @@ pub struct FlowSummary {
     /// Set for flows Proxymate sent itself (Replay, Compose, an agent).
     #[serde(default)]
     pub sent_by: Option<SentBy>,
+    /// Pinned by the user: kept when the flow cap evicts older flows.
+    #[serde(default)]
+    pub pinned: bool,
 }
 
 impl FlowSummary {

@@ -394,6 +394,7 @@ fn summary(row: &Row<'_>, interned: &mut Interner) -> rusqlite::Result<FlowSumma
             Some(_) => Some(text_enum(row, 19)?),
             None => None,
         },
+        pinned: false,
     })
 }
 

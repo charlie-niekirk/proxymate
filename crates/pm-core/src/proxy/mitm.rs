@@ -452,6 +452,7 @@ fn record_connect(
         tls,
         graphql_op: None,
         sent_by: None,
+        pinned: false,
     };
     let detail = FlowDetail {
         id: 0,

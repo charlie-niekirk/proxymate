@@ -1,6 +1,9 @@
 //! `proxymate-cli`: headless entry point. `serve` runs the proxy and logs
 //! flows (and with `--mcp`, the MCP server); `mcp-stdio` bridges a stdio
-//! MCP client to a running app or `serve --mcp`; `bench` times the store.
+//! MCP client to a running app or `serve --mcp`; `bench` times the store,
+//! or with `--rps` soaks a proxy with a steady mix of traffic.
+
+mod soak;
 
 use std::net::{Ipv4Addr, SocketAddr};
 use std::process::ExitCode;
@@ -21,7 +24,11 @@ const USAGE: &str = "usage:
   proxymate-cli mcp-stdio [--port MCP_PORT] [--no-launch]
                                 relay a stdio MCP client to the MCP endpoint, starting the Proxymate app if
                                 nothing listens; the token is read from PROXYMATE_DATA_DIR (default: the app's)
-  proxymate-cli bench [FLOWS]   seed FLOWS synthetic flows (default 100000) and time refilters";
+  proxymate-cli bench [FLOWS]   seed FLOWS synthetic flows (default 100000) and time refilters
+  proxymate-cli bench --rps N [--duration SECS] [--interval SECS] [--max-flows N] [--proxy HOST:PORT --pid PID]
+                                soak: N requests a second of mixed bodies through a proxy to a local test upstream,
+                                printing CSV (rate, latency, failures, RSS, flows, disk) every interval (default 30 s);
+                                its own engine unless --proxy names one (e.g. the app, whose pid RSS is sampled)";
 
 /// The desktop app's bundle id, for starting it from `mcp-stdio`.
 const APP_BUNDLE_ID: &str = "dev.proxymate.desktop";
@@ -30,6 +37,16 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("mcp-stdio") => mcp_stdio(&args[1..]),
+        Some("bench") if args.iter().any(|a| a == "--rps") => match soak_config(&args[1..]) {
+            Some(config) => {
+                soak::run(config);
+                ExitCode::SUCCESS
+            }
+            None => {
+                eprintln!("{USAGE}");
+                ExitCode::FAILURE
+            }
+        },
         Some("bench") => {
             let flows = match args.get(1).map(|s| s.parse::<usize>()) {
                 None => 100_000,
@@ -77,6 +94,32 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// `--rps N [--duration S] [--interval S] [--max-flows N] [--proxy A] [--pid P]`.
+fn soak_config(args: &[String]) -> Option<soak::SoakConfig> {
+    let mut config = soak::SoakConfig {
+        rps: 500,
+        duration: std::time::Duration::from_secs(60),
+        interval: std::time::Duration::from_secs(30),
+        proxy: None,
+        pid: None,
+        max_flows: None,
+    };
+    let mut rest = args.iter();
+    while let Some(flag) = rest.next() {
+        let value = rest.next()?;
+        match flag.as_str() {
+            "--rps" => config.rps = value.parse().ok().filter(|&n| n > 0)?,
+            "--duration" => config.duration = std::time::Duration::from_secs(value.parse().ok()?),
+            "--interval" => config.interval = std::time::Duration::from_secs(value.parse().ok().filter(|&n| n > 0)?),
+            "--max-flows" => config.max_flows = Some(value.parse().ok()?),
+            "--proxy" => config.proxy = Some(value.parse().ok()?),
+            "--pid" => config.pid = Some(value.parse().ok()?),
+            _ => return None,
+        }
+    }
+    Some(config)
 }
 
 fn bench(flows: usize) {

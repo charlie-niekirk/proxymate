@@ -1,5 +1,5 @@
 import { Download } from "lucide-react";
-import { useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 
 import type { BodyInfo, BodyPart, ContentKind, Header } from "@/bindings";
 import { useBody, useBodyUrl } from "@/components/Inspector/useBody";
@@ -12,11 +12,13 @@ import { formatSize } from "@/lib/flow";
 import { headerValue } from "@/lib/http";
 import { useUi } from "@/store/ui";
 
-import { Operations } from "./GraphQlView";
+import { loadViewers, preloadViewer } from "./code/load";
 import { Bar, Centered, Note } from "./parts";
 import { pickViewer, VIEWERS, viewersFor, type ViewerId } from "./registry";
 import { HIGHLIGHT_LIMIT, LOAD_LIMIT, suggestedFileName } from "./util";
 import { Viewer } from "./Viewer";
+
+const Operations = lazy(() => loadViewers().then((m) => ({ default: m.Operations })));
 
 /**
  * The Body tab: picks the best viewer for the body's detected kind (the
@@ -54,10 +56,18 @@ export function BodyViewer({
   const body = useBody(id, part, info, true, finished, capped ? LOAD_LIMIT : null, def.source === "bytes");
   const bodyUrl = useBodyUrl(id, part, info, finished, def.source === "url");
   const mime = info.mime ?? (essence(contentType) || "application/octet-stream");
+  // Fetch the viewer's code alongside the body rather than after it.
+  useEffect(() => preloadViewer(viewer, def.code), [viewer, def.code]);
 
   if (info.size === 0 && kind === "graphql") {
     const op = parseGraphQlQueryString(url);
-    if (op) return <Operations ops={[op]} />;
+    if (op) {
+      return (
+        <Suspense fallback={<Centered>Loading…</Centered>}>
+          <Operations ops={[op]} />
+        </Suspense>
+      );
+    }
   }
   if (info.size === 0) return <Centered>{finished ? "No body" : "Waiting for body…"}</Centered>;
   if (!finished) return <Centered>Body streaming · {formatSize(info.size)} so far</Centered>;

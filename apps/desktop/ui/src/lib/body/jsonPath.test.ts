@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { evaluatePath, toJsonPath, toPointer } from "./jsonPath";
+import { numberText, parseLossless, type JsonNumber } from "./losslessJson";
 
 const doc = {
   items: [
@@ -37,6 +38,20 @@ describe("evaluatePath", () => {
   it("reports errors", () => {
     expect(evaluatePath(doc, "items")).toHaveProperty("error");
     expect(evaluatePath(doc, "$.items[?(@.id)]")).toHaveProperty("error");
+  });
+
+  it("treats lossless numbers as leaves", () => {
+    const big = parseLossless('{"items":[{"id":12345678901234567890},{"id":1.50}]}');
+    const r = evaluatePath(big, "$..id");
+    if ("error" in r) throw new Error(r.error);
+    expect(r.matches.map((m) => [toJsonPath(m.path), numberText(m.value as JsonNumber)])).toEqual([
+      ["$.items[0].id", "12345678901234567890"],
+      ["$.items[1].id", "1.50"],
+    ]);
+    // A JsonNumber is a String object underneath; its characters are not children.
+    expect(evaluatePath(big, "$.items[0].id.length")).toEqual({ matches: [] });
+    expect(evaluatePath(big, "/items/0/id/0")).toEqual({ matches: [] });
+    expect(evaluatePath(big, "$.items[0].id.*")).toEqual({ matches: [] });
   });
 
   it("builds pointers and paths", () => {

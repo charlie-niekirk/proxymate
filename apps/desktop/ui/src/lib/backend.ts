@@ -41,9 +41,14 @@ import {
   type SslSettings,
   type SystemProxyStatus_Serialize,
   type TrustStatus_Serialize,
+  type ProxySettings_Serialize,
+  type StorageSettings_Serialize,
+  type StorageStatus_Deserialize,
+  type StorageStatus_Serialize,
   type UpdateSettings,
-  type ViewDelta,
-  type ViewInfo,
+  type ViewDelta_Deserialize,
+  type ViewDelta_Serialize,
+  type ViewInfo_Serialize,
   type WsPage_Serialize,
   type WsQuery_Deserialize,
 } from "@/bindings";
@@ -56,13 +61,13 @@ import { createMockBackend } from "@/lib/mockBackend";
  * capture, or an opened document's. View ids already name their store.
  */
 export interface Backend {
-  createView(store: number, filter: FilterSpec_Deserialize, sort: SortSpec): Promise<ViewInfo>;
-  setFilter(view: number, filter: FilterSpec_Deserialize): Promise<ViewInfo>;
-  setSort(view: number, sort: SortSpec): Promise<ViewInfo>;
+  createView(store: number, filter: FilterSpec_Deserialize, sort: SortSpec): Promise<ViewInfo_Serialize>;
+  setFilter(view: number, filter: FilterSpec_Deserialize): Promise<ViewInfo_Serialize>;
+  setSort(view: number, sort: SortSpec): Promise<ViewInfo_Serialize>;
   dropView(view: number): Promise<void>;
   getRows(view: number, start: number, count: number): Promise<RowsPage_Serialize>;
   getFlow(store: number, id: number): Promise<FlowSummary_Serialize | null>;
-  subscribe(view: number, onDelta: (delta: ViewDelta) => void): Promise<void>;
+  subscribe(view: number, onDelta: (delta: ViewDelta_Serialize) => void): Promise<void>;
   getFlowDetail(store: number, id: number): Promise<FlowDetail_Serialize | null>;
   /**
    * Body bytes; with `decoded`, content-encoding undone (rejects if that
@@ -92,7 +97,8 @@ export interface Backend {
   setRecording(on: boolean): Promise<ProxyStatus_Serialize>;
   getProxyStatus(): Promise<ProxyStatus_Serialize>;
   getCaInfo(): Promise<CaInfo>;
-  regenerateCa(): Promise<CaInfo>;
+  /** Replaces the CA; with `removeOldTrust`, the old one's keychain trust is removed (macOS prompts). */
+  regenerateCa(removeOldTrust: boolean): Promise<CaInfo>;
   getSslSettings(): Promise<SslSettings>;
   setSslSettings(settings: SslSettings): Promise<SslSettings>;
   /** Stops decrypting `host`: new CONNECTs to it are tunnelled. */
@@ -219,6 +225,21 @@ export interface Backend {
   /** File menu clicks (`open`, `import-har`, `save-session`, `export-har`, `compose`). */
   onMenu(handler: (id: string) => void): Promise<() => void>;
 
+  // ---- Storage, proxy and appearance (M10) ----
+  getStorageSettings(): Promise<StorageSettings_Serialize>;
+  /** Saves the limits; the capture is evicted down to them straight away. */
+  setStorageSettings(settings: StorageSettings_Serialize): Promise<StorageSettings_Serialize>;
+  /** Flows, disk use and write errors, pushed now and whenever they change. */
+  subscribeStorage(onStatus: (status: StorageStatus_Serialize) => void): Promise<void>;
+  /** Pinned flows are never evicted. */
+  pinFlows(ids: number[], pinned: boolean): Promise<void>;
+  getProxySettings(): Promise<ProxySettings_Serialize>;
+  /** Restarts the listener if the port or pool changed; rejects if the port can't be bound. */
+  setProxySettings(settings: ProxySettings_Serialize): Promise<ProxySettings_Serialize>;
+  /** Makes the sidebar count the store the table shows. */
+  setSidebarStore(store: number): Promise<void>;
+  /** The native window's appearance (vibrancy, traffic lights); null follows the system. */
+  setWindowTheme(theme: "light" | "dark" | null): Promise<void>;
   // ---- Updates (M11) ----
   /** The app's version (`tauri.conf.json`). */
   appVersion(): Promise<string>;
@@ -247,9 +268,10 @@ const tauriBackend: Backend = {
   getRows: (view, start, count) => unwrap(commands.getRows(view, start, count)),
   getFlow: (store, id) => commands.getFlow(store, id),
   subscribe: async (view, onDelta) => {
-    const channel = new Channel<ViewDelta>();
+    // The channel carries what Rust serializes; the binding names the other shape.
+    const channel = new Channel<ViewDelta_Serialize>();
     channel.onmessage = onDelta;
-    await unwrap(commands.subscribeView(view, channel));
+    await unwrap(commands.subscribeView(view, channel as unknown as Channel<ViewDelta_Deserialize>));
   },
   getFlowDetail: (store, id) => unwrap(commands.getFlowDetail(store, id)),
   // `get_body` answers with a raw ipc::Response, which arrives as an ArrayBuffer;
@@ -268,7 +290,7 @@ const tauriBackend: Backend = {
   setRecording: (on) => commands.setRecording(on),
   getProxyStatus: () => commands.getProxyStatus(),
   getCaInfo: () => commands.getCaInfo(),
-  regenerateCa: () => unwrap(commands.regenerateCa()),
+  regenerateCa: (removeOldTrust) => unwrap(commands.regenerateCa(removeOldTrust)),
   getSslSettings: () => commands.getSslSettings(),
   setSslSettings: (settings) => unwrap(commands.setSslSettings(settings)),
   addSslBypass: (host) => unwrap(commands.addSslBypass(host)),
@@ -358,6 +380,21 @@ const tauriBackend: Backend = {
   exportHar: (store, selection, path, fileName, onProgress) =>
     unwrap(commands.exportHar(store, selection, path, fileName, progressChannel(onProgress))),
   onMenu: (handler) => listen<string>("pm-menu", (e) => handler(e.payload)),
+  getStorageSettings: () => commands.getStorageSettings(),
+  setStorageSettings: (settings) => unwrap(commands.setStorageSettings(settings)),
+  subscribeStorage: async (onStatus) => {
+    const channel = new Channel<StorageStatus_Serialize>();
+    channel.onmessage = onStatus;
+    await commands.subscribeStorage(channel as unknown as Channel<StorageStatus_Deserialize>);
+  },
+  pinFlows: (ids, pinned) => commands.pinFlows(ids, pinned),
+  getProxySettings: () => commands.getProxySettings(),
+  setProxySettings: (settings) => unwrap(commands.setProxySettings(settings)),
+  setSidebarStore: (store) => commands.setSidebarStore(store),
+  setWindowTheme: async (theme) => {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    await getCurrentWindow().setTheme(theme);
+  },
   appVersion: () => getVersion(),
   getUpdateSettings: () => commands.getUpdateSettings(),
   setUpdateSettings: (settings) => unwrap(commands.setUpdateSettings(settings)),

@@ -6,9 +6,10 @@ use pm_core::Engine;
 use pm_model::{
     AndroidStatus, BodyPart, BreakpointId, BreakpointInfo, BreakpointResolution, CaInfo, DeviceAccess, DevicesSnapshot,
     DocumentInfo, FilterSpec, FlowDetail, FlowId, FlowSelection, FlowSummary, McpAuditPage, McpSettings, McpStatus,
-    PresetKind, ProxyStatus, RequestSpec, RowsPage, Rule, RuleId, RuleSettings, RuleTestResult, SaveProgress, SendOpts,
-    SendOrigin, SidebarSnapshot, SimInstallResult, SimulatorStatus, SortSpec, SsePage, SslSettings, StoreId,
-    SystemProxyStatus, TrustStatus, UpdateSettings, ViewDelta, ViewId, ViewInfo, WsPage, WsQuery,
+    PresetKind, ProxySettings, ProxyStatus, RequestSpec, RowsPage, Rule, RuleId, RuleSettings, RuleTestResult,
+    SaveProgress, SendOpts, SendOrigin, SidebarSnapshot, SimInstallResult, SimulatorStatus, SortSpec, SsePage,
+    SslSettings, StorageSettings, StorageStatus, StoreId, SystemProxyStatus, TrustStatus, UpdateSettings, ViewDelta,
+    ViewId, ViewInfo, WsPage, WsQuery,
 };
 use tauri::State;
 use tauri::ipc::{Channel, InvokeResponseBody, IpcResponse};
@@ -191,8 +192,11 @@ pub fn get_ca_info(engine: EngineState<'_>) -> CaInfo {
 
 #[tauri::command]
 #[specta::specta]
-pub fn regenerate_ca(engine: EngineState<'_>) -> Result<CaInfo, String> {
-    engine.regenerate_ca().map_err(|e| e.to_string())
+pub async fn regenerate_ca(engine: EngineState<'_>, remove_old_trust: bool) -> Result<CaInfo, String> {
+    engine
+        .regenerate_ca_and_untrust(remove_old_trust)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -726,7 +730,63 @@ pub fn clear_mcp_audit(engine: EngineState<'_>) -> Result<(), String> {
     engine.clear_mcp_audit().map_err(|e| e.to_string())
 }
 
-// ---- Updates ----
+// ---- Storage, proxy and sidebar settings (M10) ----
+
+#[tauri::command]
+#[specta::specta]
+pub fn get_storage_settings(engine: EngineState<'_>) -> StorageSettings {
+    engine.storage_settings()
+}
+
+/// Saves new limits; flows past them are evicted straight away.
+#[tauri::command]
+#[specta::specta]
+pub fn set_storage_settings(engine: EngineState<'_>, settings: StorageSettings) -> Result<StorageSettings, String> {
+    engine.set_storage_settings(settings).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn get_storage_status(engine: EngineState<'_>) -> StorageStatus {
+    engine.storage_status()
+}
+
+/// Streams the storage status (flows, disk use, write errors) as it changes.
+#[tauri::command]
+#[specta::specta]
+pub fn subscribe_storage(engine: EngineState<'_>, on_status: Channel<StorageStatus>) {
+    engine.subscribe_storage(Box::new(move |status| on_status.send(status).is_ok()));
+}
+
+/// Pins or unpins live flows; pinned flows are never evicted.
+#[tauri::command]
+#[specta::specta]
+pub fn pin_flows(engine: EngineState<'_>, ids: Vec<FlowId>, pinned: bool) {
+    engine.pin_flows(ids, pinned);
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn get_proxy_settings(engine: EngineState<'_>) -> ProxySettings {
+    engine.proxy_settings()
+}
+
+/// Saves the port and upstream pool settings, restarting the listener if
+/// they changed. A port that can't be bound is an error; the old one stays.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_proxy_settings(engine: EngineState<'_>, settings: ProxySettings) -> Result<ProxySettings, String> {
+    engine.set_proxy_settings(settings).await.map_err(|e| e.to_string())
+}
+
+/// Makes the sidebar's Apps and Domains count the tab the UI shows.
+#[tauri::command]
+#[specta::specta]
+pub fn set_sidebar_store(engine: EngineState<'_>, store: StoreId) {
+    engine.set_sidebar_store(store);
+}
+
+// ---- Updates (M11) ----
 
 #[tauri::command]
 #[specta::specta]

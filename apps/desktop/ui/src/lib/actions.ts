@@ -1,3 +1,5 @@
+import { toast } from "sonner";
+
 import type { FlowSelection, PresetKind, RequestSpec_Deserialize, SaveProgress_Serialize } from "@/bindings";
 import { backend } from "@/lib/backend";
 import {
@@ -23,6 +25,20 @@ export async function clearFlows() {
   queryClient.removeQueries({ queryKey: ["flow", LIVE_STORE] });
 }
 
+/** An error's message, for display. */
+export const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/** A failed action, as a toast: what was being done, then why. */
+export function reportError(what: string, err: unknown) {
+  toast.error(what, { description: errorText(err) });
+}
+
+/** Pins or unpins live flows: pinned flows are kept when old flows are evicted. */
+export async function pinFlows(ids: number[], pinned: boolean) {
+  await backend.pinFlows(ids, pinned);
+  for (const id of ids) void queryClient.invalidateQueries({ queryKey: ["flow", LIVE_STORE, id] });
+}
+
 /** Pauses or resumes recording; traffic is forwarded either way. */
 export async function setRecording(on: boolean) {
   queryClient.setQueryData(proxyStatusKey, await backend.setRecording(on));
@@ -38,10 +54,18 @@ export async function setInsecureUpstream(host: string, allow: boolean) {
   queryClient.setQueryData(sslSettingsKey, await backend.setInsecureUpstream(host, allow));
 }
 
-/** Replaces the root CA; clients must trust the new one. */
-export async function regenerateCa() {
-  queryClient.setQueryData(caInfoKey, await backend.regenerateCa());
-  await queryClient.invalidateQueries({ queryKey: trustStatusKey });
+/**
+ * Replaces the root CA; clients must trust the new one. With
+ * `removeOldTrust`, the old CA is also removed from the keychain.
+ */
+export async function regenerateCa(removeOldTrust = false) {
+  try {
+    queryClient.setQueryData(caInfoKey, await backend.regenerateCa(removeOldTrust));
+  } finally {
+    // A failure to untrust the old CA still leaves the new one in place.
+    await queryClient.invalidateQueries({ queryKey: caInfoKey });
+    await queryClient.invalidateQueries({ queryKey: trustStatusKey });
+  }
 }
 
 /** Installs and trusts the CA (macOS prompts), then re-checks trust. */

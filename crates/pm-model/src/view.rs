@@ -30,6 +30,24 @@ pub struct ViewDelta {
     pub changed: Vec<FlowId>,
     /// Rows were inserted, removed or reordered: drop every cached row.
     pub structural: bool,
+    /// Progress of the deep search (header and body terms), while the
+    /// filter has any.
+    pub deep: Option<DeepProgress>,
+}
+
+/// A view's deep search: header and body predicates checked in the
+/// background, with matching flows streaming into the view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, Type)]
+pub struct DeepProgress {
+    /// Flows checked so far.
+    pub checked: u32,
+    /// Flows to check: those matching the rest of the filter.
+    pub total: u32,
+    /// Flows found to match.
+    pub matched: u32,
+    /// False once every candidate has been checked (new flows are still
+    /// checked as they finish).
+    pub running: bool,
 }
 
 /// Result of creating a view or changing its filter or sort.
@@ -40,13 +58,15 @@ pub struct ViewInfo {
     pub len: u32,
     /// Time the engine spent refiltering and sorting, in microseconds.
     pub elapsed_us: u32,
+    /// Set when the filter has header or body terms: a deep search started.
+    pub deep: Option<DeepProgress>,
 }
 
 /// One flow table row in a compact positional form (a JSON array on the wire).
 ///
 /// Field order: `id, state, scheme, method, host, port, path, query, status,
 /// content_kind, client, started_at_ms, duration_ms, req_size, resp_size, edited,
-/// http_version, tls, graphql_op, sent_by`.
+/// http_version, tls, graphql_op, sent_by, pinned`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct FlowRow(
     pub FlowId,
@@ -69,6 +89,7 @@ pub struct FlowRow(
     pub TlsStatus,
     pub Option<Arc<str>>,
     pub Option<SentBy>,
+    pub bool,
 );
 
 impl From<&FlowSummary> for FlowRow {
@@ -94,6 +115,7 @@ impl From<&FlowSummary> for FlowRow {
             f.tls,
             f.graphql_op.clone(),
             f.sent_by,
+            f.pinned,
         )
     }
 }
@@ -135,11 +157,12 @@ mod tests {
             tls: TlsStatus::Intercepted,
             graphql_op: Some("GetUser".into()),
             sent_by: Some(SentBy::User),
+            pinned: true,
         };
         let json = serde_json::to_string(&FlowRow::from(&summary)).unwrap();
         assert_eq!(
             json,
-            r#"[7,"completed","https","GET","api.example.com",443,"/v1/users","page=2",200,"json","Safari",1.5,42,0,1024,false,"HTTP/2","intercepted","GetUser","user"]"#
+            r#"[7,"completed","https","GET","api.example.com",443,"/v1/users","page=2",200,"json","Safari",1.5,42,0,1024,false,"HTTP/2","intercepted","GetUser","user",true]"#
         );
     }
 }
