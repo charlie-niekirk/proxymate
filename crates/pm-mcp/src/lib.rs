@@ -19,3 +19,15 @@ mod tools;
 pub use handler::ProxymateMcp;
 pub use http::{McpServer, serve, spawn_managed};
 pub use tools::tool_names;
+
+/// Makes `ring` the process's default rustls provider, unless one is set.
+/// rmcp's reqwest client needs one as soon as anything in the build turns
+/// on reqwest's `rustls-no-provider` (the desktop app's updater does, and
+/// Cargo unifies features across the workspace), even for plain-HTTP
+/// loopback. Call it before building an MCP client.
+pub fn install_crypto_provider() {
+    if rustls::crypto::CryptoProvider::get_default().is_none() {
+        // Losing a race to another installer is fine: one is set either way.
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    }
+}

@@ -185,6 +185,7 @@ Targets:
 - The guardian and the MCP bridge are modes of the one signed binary. A sidecar would need signing too.
 - Bump the version in `tauri.conf.json`, the workspace `Cargo.toml` and `apps/desktop/ui/package.json` together. The release tag must match `tauri.conf.json`.
 - The updater lives in `src-tauri/src/updater.rs` (Rust-side; no JS plugin permissions). Its public key is in `tauri.conf.json`; the private key never enters the repo.
+- The updater turns on reqwest's `rustls-no-provider` for the whole workspace. Any reqwest/rmcp client (the stdio bridge, MCP tests) must call `pm_mcp::install_crypto_provider()` before it's built, or it panics.
 
 **Replay, cURL, HAR and sessions (M8)**
 - `Engine::send(RequestSpec, SendOpts)` is the one way Proxymate sends a request itself (Replay, Compose, MCP). It goes through `proxy/exchange.rs` like proxied traffic; the flow's summary gets `sent_by`.

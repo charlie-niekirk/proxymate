@@ -64,6 +64,7 @@ impl Harness {
 
     async fn client(&self) -> (RunningService<RoleClient, Recorder>, mpsc::UnboundedReceiver<Event>) {
         let (tx, rx) = mpsc::unbounded_channel();
+        pm_mcp::install_crypto_provider();
         let transport = StreamableHttpClientTransport::from_config(
             StreamableHttpClientTransportConfig::with_uri(self.server.url()).auth_header(self.engine.mcp_token()),
         );

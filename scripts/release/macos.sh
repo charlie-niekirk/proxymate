@@ -69,6 +69,8 @@ fi
 
 # ---- Build (Tauri signs the binary and the app, notarises and staples the app, signs the DMG) ----
 note "Building Proxymate $VERSION for $TARGET (identity: $IDENTITY, notarise: $NOTARISE, updater: $UPDATER)"
+# A leftover DMG (an interrupted build) makes hdiutil fail with "File exists".
+rm -rf "$BUNDLE/dmg" "$BUNDLE/macos"
 # CI=true also skips the DMG's Finder layout script, which needs Automation access.
 (cd "$ROOT" && CI=true npm run tauri -- build --ci --target "$TARGET" --bundles app,dmg ${config[@]+"${config[@]}"} "$@")
 
@@ -94,15 +96,18 @@ echo "architectures: $archs"
 # Every Mach-O in the bundle must be signed; today that's only the main
 # binary, which also runs as `--sysproxy-guardian` and `mcp-stdio`.
 while IFS= read -r file; do
-  if file -b "$file" | grep -q Mach-O; then
+  if [[ $(file -b "$file") == *Mach-O* ]]; then
     codesign --verify --strict --verbose=2 "$file"
-    codesign -dv "$file" 2>&1 | grep -q 'flags=.*runtime' || die "$file is signed without the hardened runtime"
+    # (Captured first: `grep -q` exiting early would fail the pipe under pipefail.)
+    info=$(codesign -dv "$file" 2>&1)
+    [[ $info == *flags=*runtime* ]] || die "$file is signed without the hardened runtime"
   fi
 done < <(find "$APP" -type f)
 codesign --verify --deep --strict --verbose=2 "$APP"
 codesign -dv --verbose=2 "$APP" 2>&1 | grep -E '^(Identifier|Authority|TeamIdentifier|Timestamp|Runtime Version|CodeDirectory)' || true
 if [[ $IDENTITY != "-" ]]; then
-  if codesign -dv "$DMG" 2>&1 | grep -q '^Authority=Developer ID Application'; then
+  dmg_info=$(codesign -dv --verbose=2 "$DMG" 2>&1 || true)
+  if [[ $dmg_info == *"Authority=Developer ID Application"* ]]; then
     codesign --verify --strict --verbose=2 "$DMG"
   elif [[ ${PROXYMATE_ALLOW_UNSIGNED_DMG:-0} != 1 ]]; then
     die "the DMG isn't signed with the Developer ID"

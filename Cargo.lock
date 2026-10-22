@@ -3171,6 +3171,7 @@ dependencies = [
  "pm-model",
  "pm-testkit",
  "rmcp",
+ "rustls",
  "schemars 1.2.3",
  "serde",
  "serde_json",
