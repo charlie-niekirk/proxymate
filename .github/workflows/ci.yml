@@ -42,6 +42,15 @@ jobs:
   ui:
     name: ui
     runs-on: ubuntu-latest
+    # The Playwright image pins the browsers and fonts, so the Linux pixel
+    # baselines (e2e/__snapshots__/*-linux.png) are made and checked in the
+    # same environment. Missing baselines are written and fail the run; they
+    # come back in the playwright-report artifact to be committed.
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble
+      options: --ipc=host
+    env:
+      HOME: /root
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -53,14 +62,10 @@ jobs:
       - run: npm run lint
       - run: npm run test
       - run: npm run build
-      - name: Install Playwright browsers
-        run: npx -w @proxymate/ui playwright install --with-deps webkit chromium
-      # Viewer rendering and preview-safety checks against the zoo fixtures.
-      # Snapshot baselines are macOS-only for now, so Linux skips the pixel diffs.
+      # Viewer rendering (pixel snapshots), preview safety and UI flows
+      # against the mock backend.
       - name: Playwright
         run: npm run e2e -w @proxymate/ui
-        env:
-          PM_E2E_IGNORE_SNAPSHOTS: "1"
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
@@ -68,4 +73,5 @@ jobs:
           path: |
             apps/desktop/ui/playwright-report/
             apps/desktop/ui/test-results/
+            apps/desktop/ui/e2e/__snapshots__/*-linux.png
           retention-days: 7

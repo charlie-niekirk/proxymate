@@ -3272,10 +3272,17 @@ dependencies = [
 name = "proxymate-cli"
 version = "0.1.0"
 dependencies = [
+ "bytes",
+ "http",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "parking_lot 0.13.0",
  "pm-core",
  "pm-mcp",
  "pm-model",
  "pm-platform",
+ "pm-testkit",
  "tokio",
 ]
 
