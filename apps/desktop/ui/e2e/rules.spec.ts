@@ -52,7 +52,17 @@ test("a paused flow opens the Breakpoint Editor and Execute lets it go", async (
   await expect(editor).toBeVisible();
   await expect(page.getByTestId("breakpoint-badge")).toContainText("1");
   await expect(editor.getByTestId("bp-url")).toHaveValue("https://api.stripe.com/v1/charges?expand=customer");
-  await expect(editor.getByTestId("bp-body")).toHaveValue(/"amount": 4200/);
+  // The body is in CodeMirror, highlighted as its Content-Type.
+  const body = editor.getByTestId("bp-body");
+  await expect(body).toContainText('"amount": 4200');
+  await expect(body).toHaveAttribute("data-language", "json");
+  // Token spans appear once the lazily loaded JSON grammar is in.
+  await expect(body.locator(".cm-line span").first()).toBeVisible();
+  await body.locator(".cm-content").click();
+  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.type(" ");
+  await editor.getByTestId("bp-respond").click();
+  await expect(editor.getByTestId("bp-respond-body")).toHaveAttribute("data-language", "json");
   await editor.getByTestId("bp-execute").click();
   await expect(editor).toBeHidden();
   await expect(page.getByTestId("breakpoint-badge")).not.toContainText("1");
