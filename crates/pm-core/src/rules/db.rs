@@ -1,5 +1,6 @@
 //! `app.sqlite`: the app database (WAL). It holds the rules, the rule
-//! settings, and (M9) the LAN client allow-list and LAN access settings;
+//! settings, (M9) the LAN client allow-list and LAN access settings, and
+//! (M7) the MCP settings, bearer token and audit log (`mcp.rs`);
 //! the SSL lists stay in `ssl.json` until they move here. The rules engine
 //! and the device registry each open their own connection.
 //!
@@ -54,6 +55,11 @@ impl AppDb {
              CREATE TABLE IF NOT EXISTS devices (ip TEXT PRIMARY KEY, nickname TEXT, allowed INTEGER NOT NULL);",
         )?;
         Ok(AppDb { conn })
+    }
+
+    /// For tables owned by other modules (the MCP audit log).
+    pub fn conn(&self) -> &Connection {
+        &self.conn
     }
 
     /// Every stored rule. Rows that no longer parse are skipped (and

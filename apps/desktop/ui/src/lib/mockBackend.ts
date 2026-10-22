@@ -25,6 +25,7 @@ import type {
 import type { Backend } from "@/lib/backend";
 import { GLOBAL_THROTTLE_RULE_ID, emptyMatcher, matcherSummary, normalizeRule, type Rule } from "@/lib/rules";
 import { createMockDevices } from "@/lib/mockDevices";
+import { createMockMcp } from "@/lib/mockMcp";
 
 /** A fully specified mock flow with bodies (the dev zoo, see `dev/zoo.ts`). */
 export interface MockFlow {
@@ -523,6 +524,10 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
       ruleSettings = settings;
       return settings;
     },
+    async subscribeRules(cb) {
+      // The mock has no agents; the editor's own saves refetch the list.
+      setTimeout(() => cb(sorted()), 0);
+    },
     async subscribeBreakpoints(cb) {
       onBreakpoints = cb;
       setTimeout(pushBreakpoints, 0);
@@ -611,6 +616,7 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
     async onMenu() {
       return () => {};
     },
+    ...createMockMcp(now),
   };
 }
 

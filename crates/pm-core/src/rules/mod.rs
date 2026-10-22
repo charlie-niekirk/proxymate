@@ -30,6 +30,7 @@ pub(crate) use breakpoints::{BreakpointManager, Outcome};
 pub use compile::{CompiledRuleSet, PATTERN_MAX_LEN, REGEX_SIZE_LIMIT};
 pub use db::APP_DB_FILE;
 
+use crate::notify::Notifier;
 use crate::{Engine, Error};
 use compile::CompiledRule;
 use db::AppDb;
@@ -90,7 +91,14 @@ pub(crate) struct Rules {
     compiled: ArcSwap<CompiledRuleSet>,
     settings: RwLock<RuleSettings>,
     pub breakpoints: BreakpointManager,
+    /// The Rules Editor and MCP sessions, told when anyone (the UI or an
+    /// agent) changes the list.
+    changes: Notifier<Vec<Rule>>,
 }
+
+/// Receives the rule list (in evaluation order) whenever it changes.
+/// Returning `false` unsubscribes.
+pub type RulesSink = crate::notify::Sink<Vec<Rule>>;
 
 impl Rules {
     /// Loads `<dir>/app.sqlite`, or an in-memory database without a
@@ -129,7 +137,13 @@ impl Rules {
             list: RwLock::new(rules),
             compiled: ArcSwap::from_pointee(compiled),
             settings: RwLock::new(settings),
+            changes: Notifier::new(),
         }
+    }
+
+    /// Part of the publisher tick.
+    pub fn publish(&self) {
+        self.changes.publish(|| sorted(self.list.read().clone()));
     }
 }
 
@@ -281,7 +295,14 @@ impl Engine {
         self.rules.db.lock().save_rules(&next).map_err(RuleError::from)?;
         *list = next;
         self.rules.compiled.store(Arc::new(compiled));
+        self.rules.changes.changed();
         Ok(out)
+    }
+
+    /// Sends the rule list to `sink` on the next tick and whenever it
+    /// changes, so an open Rules Editor follows edits made by agents.
+    pub fn subscribe_rules(&self, sink: RulesSink) {
+        self.rules.changes.subscribe(sink);
     }
 
     /// The rule set a new flow evaluates against.
@@ -517,7 +538,9 @@ impl Engine {
         Ok(self.rules.breakpoints.resolve(id, resolution)?)
     }
 
-    /// Sends the breakpoint queue to `sink` now and whenever it changes.
+    /// Sends the breakpoint queue to `sink` on the next tick and whenever it
+    /// changes. Every subscriber (the UI, each MCP session) gets its own
+    /// pushes.
     pub fn subscribe_breakpoints(&self, sink: BreakpointSink) {
         self.rules.breakpoints.subscribe(sink);
     }

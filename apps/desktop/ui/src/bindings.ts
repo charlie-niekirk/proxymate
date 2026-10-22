@@ -98,6 +98,18 @@ export const commands = {
 	setAndroidProxy: (serial: string, on: boolean) => typedError<AndroidStatus_Serialize, string>(__TAURI_INVOKE("set_android_proxy", { serial, on })),
 	/**  Copies the CA to the device's Downloads; returns the path on the device. */
 	pushAndroidCert: (serial: string) => typedError<string, string>(__TAURI_INVOKE("push_android_cert", { serial })),
+	/**  Streams the rule list whenever anyone (the UI or an agent) changes it. */
+	subscribeRules: (onRules: Channel<Rule_Deserialize[]>) => __TAURI_INVOKE<void>("subscribe_rules", { onRules }),
+	getMcpStatus: () => __TAURI_INVOKE<McpStatus_Serialize>("get_mcp_status"),
+	/**  Streams the MCP status (connected clients, settings, errors). */
+	subscribeMcp: (onStatus: Channel<McpStatus_Deserialize>) => __TAURI_INVOKE<void>("subscribe_mcp", { onStatus }),
+	setMcpSettings: (settings: McpSettings) => typedError<McpSettings, string>(__TAURI_INVOKE("set_mcp_settings", { settings })),
+	/**  The bearer token, for the copy buttons. */
+	getMcpToken: () => __TAURI_INVOKE<string>("get_mcp_token"),
+	regenerateMcpToken: () => typedError<string, string>(__TAURI_INVOKE("regenerate_mcp_token")),
+	/**  Audit entries older than `before` (all, without), newest first. */
+	getMcpAudit: (before: number | null, limit: number) => typedError<McpAuditPage_Serialize, string>(__TAURI_INVOKE("get_mcp_audit", { before, limit })),
+	clearMcpAudit: () => typedError<null, string>(__TAURI_INVOKE("clear_mcp_audit")),
 	/**
 	 *  Sends a composed (or edited) request from the app; resolves to the new
 	 *  flow's id once it is recorded.
@@ -673,16 +685,18 @@ export type DomainNode = {
 /**
  *  What a view shows. Shared by the filter row, the sidebar and (from M7) MCP.
  * 
- *  `text` is the search box. Until the filter DSL parser lands it is matched as
- *  a case-insensitive substring of `host + path + query`.
+ *  `text` is the search box, in the filter DSL (`pm-core/src/store/query.rs`:
+ *  `host:*.example.com status:4xx dur>500 …`); plain words are matched as a
+ *  case-insensitive substring of `host + path + query`.
  */
 export type FilterSpec = FilterSpec_Serialize | FilterSpec_Deserialize;
 
 /**
  *  What a view shows. Shared by the filter row, the sidebar and (from M7) MCP.
  * 
- *  `text` is the search box. Until the filter DSL parser lands it is matched as
- *  a case-insensitive substring of `host + path + query`.
+ *  `text` is the search box, in the filter DSL (`pm-core/src/store/query.rs`:
+ *  `host:*.example.com status:4xx dur>500 …`); plain words are matched as a
+ *  case-insensitive substring of `host + path + query`.
  */
 export type FilterSpec_Deserialize = {
 	text: string,
@@ -701,8 +715,9 @@ export type FilterSpec_Deserialize = {
 /**
  *  What a view shows. Shared by the filter row, the sidebar and (from M7) MCP.
  * 
- *  `text` is the search box. Until the filter DSL parser lands it is matched as
- *  a case-insensitive substring of `host + path + query`.
+ *  `text` is the search box, in the filter DSL (`pm-core/src/store/query.rs`:
+ *  `host:*.example.com status:4xx dur>500 …`); plain words are matched as a
+ *  case-insensitive substring of `host + path + query`.
  */
 export type FilterSpec_Serialize = {
 	text: string,
@@ -1072,6 +1087,109 @@ export type Matcher_Serialize = {
 	/**  The client app's name (e.g. `Safari`, `curl`). */
 	client_app: Pattern_Serialize | null,
 	response: ResponseMatcher_Serialize | null,
+};
+
+/**  One tool call, as recorded in the audit log. */
+export type McpAuditEntry = McpAuditEntry_Serialize | McpAuditEntry_Deserialize;
+
+/**  One tool call, as recorded in the audit log. */
+export type McpAuditEntry_Deserialize = {
+	/**  Increasing; also the cursor for older entries. */
+	id: number,
+	/**  Milliseconds since the Unix epoch. */
+	time_ms: number | null,
+	client: string,
+	session?: string | null,
+	tool: string,
+	/**  The arguments as JSON, cut at 4 KB. */
+	arguments: string,
+	outcome: McpCallOutcome,
+	/**  The error the agent got, if the call failed or was refused. */
+	error?: string | null,
+	duration_ms: number,
+};
+
+/**  One tool call, as recorded in the audit log. */
+export type McpAuditEntry_Serialize = {
+	/**  Increasing; also the cursor for older entries. */
+	id: number,
+	/**  Milliseconds since the Unix epoch. */
+	time_ms: number | null,
+	client: string,
+	session: string | null,
+	tool: string,
+	/**  The arguments as JSON, cut at 4 KB. */
+	arguments: string,
+	outcome: McpCallOutcome,
+	/**  The error the agent got, if the call failed or was refused. */
+	error: string | null,
+	duration_ms: number,
+};
+
+/**  A page of the audit log, newest first. */
+export type McpAuditPage = McpAuditPage_Serialize | McpAuditPage_Deserialize;
+
+/**  A page of the audit log, newest first. */
+export type McpAuditPage_Deserialize = {
+	entries: McpAuditEntry_Deserialize[],
+	/**  Pass as `before` for the next (older) page. */
+	next?: number | null,
+};
+
+/**  A page of the audit log, newest first. */
+export type McpAuditPage_Serialize = {
+	entries: McpAuditEntry_Serialize[],
+	/**  Pass as `before` for the next (older) page. */
+	next: number | null,
+};
+
+export type McpCallOutcome = "ok" | "error" | 
+/**  A mutating tool called while the server is read-only. */
+"refused";
+
+/**  An MCP client with an open session. */
+export type McpClient = {
+	/**  Proxymate's id for the session; the client's rules carry it too. */
+	session: string,
+	/**  `clientInfo.name` from `initialize`, e.g. `claude-code`. */
+	name: string,
+	version: string,
+	/**  Milliseconds since the Unix epoch. */
+	connected_at_ms: number | null,
+};
+
+/**  Kept in `app.sqlite`. Agents get full access unless `read_only` is set. */
+export type McpSettings = {
+	/**  Serve MCP on `127.0.0.1:<port>/mcp`. */
+	enabled: boolean,
+	/**
+	 *  Hide and refuse every tool that changes something (rules,
+	 *  breakpoints, recording, clearing).
+	 */
+	read_only: boolean,
+};
+
+/**  What the toolbar indicator and the Settings page show. */
+export type McpStatus = McpStatus_Serialize | McpStatus_Deserialize;
+
+/**  What the toolbar indicator and the Settings page show. */
+export type McpStatus_Deserialize = {
+	settings: McpSettings,
+	/**  `http://127.0.0.1:<port>/mcp` while serving. */
+	url?: string | null,
+	/**  Why the server isn't serving, if it should be. */
+	error?: string | null,
+	clients: McpClient[],
+};
+
+/**  What the toolbar indicator and the Settings page show. */
+export type McpStatus_Serialize = {
+	settings: McpSettings,
+	/**  `http://127.0.0.1:<port>/mcp` while serving. */
+	url: string | null,
+	/**  Why the server isn't serving, if it should be. */
+	error: string | null,
+	clients: McpClient[],
 };
 
 /**  Edits to a paused message. Unset fields stay as they are. */

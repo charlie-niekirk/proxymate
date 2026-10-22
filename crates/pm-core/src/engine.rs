@@ -22,6 +22,7 @@ use crate::documents::Documents;
 use crate::ingest::{self, FlowEvent, IngestTx};
 use crate::integration::Platform;
 use crate::io::{decode, sse};
+use crate::mcp::McpState;
 use crate::proxy::{self, ProxyConfig, ProxyHandle};
 use crate::recorder::{FlowRecorder, is_event_stream};
 use crate::rules::Rules;
@@ -40,8 +41,9 @@ pub type DeltaSink = Box<dyn FnMut(ViewDelta) -> bool + Send>;
 #[derive(Debug, Clone, Default)]
 pub struct EngineConfig {
     /// Root for live segment files (`<data_dir>/live/<uuid>/`), the CA
-    /// (`<data_dir>/ca/`), `ssl.json` and `app.sqlite` (rules and the device
-    /// allow-list; in memory without a data dir). Defaults to a `proxymate`
+    /// (`<data_dir>/ca/`), `ssl.json` and `app.sqlite` (rules, the device
+    /// allow-list and the MCP settings, token and audit log; in memory
+    /// without a data dir). Defaults to a `proxymate`
     /// directory under the system temp dir.
     pub data_dir: Option<PathBuf>,
     /// DER certificates trusted for upstream TLS on top of the OS trust
@@ -78,6 +80,7 @@ pub struct Engine {
     ssl: RwLock<Arc<SslPolicy>>,
     pub(crate) platform: Platform,
     pub(crate) rules: Rules,
+    pub(crate) mcp: McpState,
     /// Opened sessions and HAR imports.
     pub(crate) docs: Documents,
     /// `Engine::send`'s client, made on first use.
@@ -104,6 +107,7 @@ impl Engine {
         // Without a data directory (tests, throwaway engines) rules live
         // in memory, so engines never share them through the temp dir.
         let rules = Rules::load(config.data_dir.as_deref());
+        let mcp = McpState::load(config.data_dir.as_deref());
         let devices = DeviceRegistry::load(config.data_dir.as_deref(), devices::HOLD);
         let root = config
             .data_dir
@@ -146,6 +150,7 @@ impl Engine {
             tls: RwLock::new(Arc::new(tls)),
             ssl: RwLock::new(Arc::new(policy)),
             rules,
+            mcp,
             docs: Documents::default(),
             sender: OnceLock::new(),
         });
@@ -636,6 +641,8 @@ impl Engine {
     pub fn publish_tick(&self) {
         self.publish_sidebar();
         self.rules.breakpoints.publish();
+        self.rules.publish();
+        self.publish_mcp();
         self.device_registry().publish();
         let mut sinks = self.sinks.lock();
         if sinks.is_empty() {

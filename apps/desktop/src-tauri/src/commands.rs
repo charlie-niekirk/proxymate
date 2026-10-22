@@ -5,10 +5,10 @@ use std::sync::Arc;
 use pm_core::Engine;
 use pm_model::{
     AndroidStatus, BodyPart, BreakpointId, BreakpointInfo, BreakpointResolution, CaInfo, DeviceAccess, DevicesSnapshot,
-    DocumentInfo, FilterSpec, FlowDetail, FlowId, FlowSelection, FlowSummary, PresetKind, ProxyStatus, RequestSpec,
-    RowsPage, Rule, RuleId, RuleSettings, RuleTestResult, SaveProgress, SendOpts, SendOrigin, SidebarSnapshot,
-    SimInstallResult, SimulatorStatus, SortSpec, SsePage, SslSettings, StoreId, SystemProxyStatus, TrustStatus,
-    ViewDelta, ViewId, ViewInfo, WsPage, WsQuery,
+    DocumentInfo, FilterSpec, FlowDetail, FlowId, FlowSelection, FlowSummary, McpAuditPage, McpSettings, McpStatus,
+    PresetKind, ProxyStatus, RequestSpec, RowsPage, Rule, RuleId, RuleSettings, RuleTestResult, SaveProgress, SendOpts,
+    SendOrigin, SidebarSnapshot, SimInstallResult, SimulatorStatus, SortSpec, SsePage, SslSettings, StoreId,
+    SystemProxyStatus, TrustStatus, ViewDelta, ViewId, ViewInfo, WsPage, WsQuery,
 };
 use tauri::State;
 use tauri::ipc::{Channel, InvokeResponseBody, IpcResponse};
@@ -670,4 +670,58 @@ impl specta::Type for RawBytes {
     fn definition(types: &mut specta::Types) -> specta::datatype::DataType {
         <specta_typescript::Unknown as specta::Type>::definition(types)
     }
+}
+
+/// Streams the rule list whenever anyone (the UI or an agent) changes it.
+#[tauri::command]
+#[specta::specta]
+pub fn subscribe_rules(engine: EngineState<'_>, on_rules: Channel<Vec<Rule>>) {
+    engine.subscribe_rules(Box::new(move |rules| on_rules.send(rules).is_ok()));
+}
+
+// ---- MCP (M7) ----
+
+#[tauri::command]
+#[specta::specta]
+pub fn get_mcp_status(engine: EngineState<'_>) -> McpStatus {
+    engine.mcp_status()
+}
+
+/// Streams the MCP status (connected clients, settings, errors).
+#[tauri::command]
+#[specta::specta]
+pub fn subscribe_mcp(engine: EngineState<'_>, on_status: Channel<McpStatus>) {
+    engine.subscribe_mcp(Box::new(move |status| on_status.send(status).is_ok()));
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn set_mcp_settings(engine: EngineState<'_>, settings: McpSettings) -> Result<McpSettings, String> {
+    engine.set_mcp_settings(settings).map_err(|e| e.to_string())
+}
+
+/// The bearer token, for the copy buttons.
+#[tauri::command]
+#[specta::specta]
+pub fn get_mcp_token(engine: EngineState<'_>) -> String {
+    engine.mcp_token()
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn regenerate_mcp_token(engine: EngineState<'_>) -> Result<String, String> {
+    engine.regenerate_mcp_token().map_err(|e| e.to_string())
+}
+
+/// Audit entries older than `before` (all, without), newest first.
+#[tauri::command]
+#[specta::specta]
+pub fn get_mcp_audit(engine: EngineState<'_>, before: Option<i64>, limit: u32) -> Result<McpAuditPage, String> {
+    engine.mcp_audit(before, limit).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn clear_mcp_audit(engine: EngineState<'_>) -> Result<(), String> {
+    engine.clear_mcp_audit().map_err(|e| e.to_string())
 }

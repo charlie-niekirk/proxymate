@@ -30,7 +30,9 @@ Run these from the repo root unless noted.
 | Run the app | `npm run tauri dev` |
 | Run the app with the perf probe | `PROXYMATE_SYNTH_FLOWS=100000 VITE_PM_PERF_PROBE=1 npm run tauri dev`. Scroll and filter timings print in the terminal as `[perf-probe]` |
 | Run the app with Auto Select on | `VITE_PM_AUTO_SELECT=1 npm run tauri dev`. New traffic is selected and inspected without a click (for verifying from a shell) |
-| Headless proxy | `cargo run -p proxymate-cli -- serve [PORT]`. Logs each finished flow |
+| Headless proxy | `cargo run -p proxymate-cli -- serve [PORT]`. Logs each finished flow. `--mcp[=PORT]` also serves MCP (prints the `claude mcp add` line) |
+| MCP Inspector against the app | `npx @modelcontextprotocol/inspector --cli http://127.0.0.1:9095/mcp --transport http --header "Authorization: Bearer $(sqlite3 ~/Library/Application\ Support/Proxymate/app.sqlite "select json from settings where key='mcp_token'" \| tr -d '"')" --method tools/list` (add `--strict` for schema portability) |
+| Stdio MCP bridge | `proxymate mcp-stdio` (app binary) or `cargo run -p proxymate-cli -- mcp-stdio [--port N] [--no-launch]` (token from `PROXYMATE_DATA_DIR`, else the app's data dir) |
 | Test upstream by hand | `cargo run -p pm-testkit --bin upstream`, then `curl -x http://127.0.0.1:9090 http://127.0.0.1:<port>/json`. It also serves a WebSocket echo at `/ws` and a slow event stream at `/sse?count=N&interval_ms=M` |
 | WebSocket client through the proxy | `cargo run -p pm-testkit --bin ws-client -- ws://127.0.0.1:<port>/ws` (CONNECT; `--absolute` for absolute form) or `wss://localhost:<port>/ws` against the TLS upstream. `--count`, `--interval-ms`, `--server-close` |
 | TLS test upstream (h2 + h1) | `cargo run -p pm-testkit --bin upstream -- --tls` prints its port and CA file. Start the app with `PROXYMATE_EXTRA_UPSTREAM_CA=<that file>`, then `curl -x http://127.0.0.1:9090 --cacert ~/Library/Application\ Support/Proxymate/ca/proxymate-ca.pem https://localhost:<port>/json --http2 -v` |
@@ -39,7 +41,7 @@ Run these from the repo root unless noted.
 | Body-viewer zoo through the proxy | `cargo run -p pm-testkit --bin upstream -- --zoo [127.0.0.1:9090]` sends one flow per fixture in `crates/pm-testkit/fixtures/zoo/` |
 | Zoo in the browser UI | `npm run dev`, then open `http://localhost:1420/?zoo` (mock backend serving the zoo; `&select=<id>&theme=light&requestTab=Body`) |
 | Viewer snapshots + preview safety (Playwright) | `npm run e2e` (first time: `npx -w @proxymate/ui playwright install webkit chromium`). `-- --update-snapshots` after an intended visual change; `PM_E2E_PORT` picks the dev server port (default 1425) |
-| Open the app with the cert wizard / a search | `VITE_PM_OPEN=cert-wizard`, `VITE_PM_FILTER=<text>` (dev only, for screenshots) |
+| Open the app with the cert wizard / a search | `VITE_PM_OPEN=cert-wizard` (or `settings:mcp`), `VITE_PM_FILTER=<text>` (dev only, for screenshots) |
 | Open the app on device setup | `VITE_PM_OPEN=device-setup:iphone` (or `simulator`, `android`, `emulator`). With `VITE_PM_REMOTE=1`, `{"deviceTab":"android"}` switches tabs and `{"click":"<data-testid>"}` clicks a control (e.g. `simulator-install`, `lan-access`) |
 | Allow prompt in the browser UI | `npm run dev`, then open `http://localhost:1420/?devicePrompt=192.168.1.42` (mock LAN client waiting to be allowed) |
 | Run the app as the system proxy | `PROXYMATE_SYSTEM_PROXY=1 npm run tauri dev`. Changes the real macOS proxy settings: restored on quit, on signals, and by the guardian after `kill -9` |
@@ -72,7 +74,9 @@ crates/pm-platform   OS integration traits; macos/ impls, stub.rs elsewhere: fs 
                      restore over a ProxyBackend; networksetup), trust (keychain), procinfo (libproc port scan, app
                      bundles, icons), process (kqueue exit wait), netif (if-addrs), simctl and adb (over a
                      command::Runner, faked in tests)
-crates/pm-mcp        MCP server over Arc<Engine>, empty until M7
+crates/pm-mcp        MCP server over Arc<Engine> (rmcp, pinned): http.rs (axum endpoint, bearer token, managed start/stop),
+                     handler.rs (sessions, read-only, audit, notifications), tools.rs, resources.rs, prompts.rs,
+                     bridge.rs (mcp-stdio); tests/mcp.rs drives an rmcp client against a headless engine
 crates/pm-testkit    test upstreams (h1, TLS h1/h2 with a test CA, WS echo, slow SSE), the body-viewer zoo (fixtures/zoo),
                      proxy, HTTPS and WebSocket clients; re-export of pm_core::synth
 apps/desktop/src-tauri   thin Tauri adapters (commands.rs), the pmbody:// scheme (body_scheme.rs), window chrome (window.rs),
@@ -152,6 +156,12 @@ Targets:
 - Rules live in `<data dir>/app.sqlite` (in memory without a data dir, so tests never share rules). Mutations go through `Engine::change_rules`: validate, save, swap the `CompiledRuleSet`.
 - Patterns compile with a size limit; never compile a user or agent regex without `rules::compile::compile_pattern`.
 - A service error (`proxy::Reset`) is how a Block reset or a breakpoint Abort reaches the client: h1 closes, h2 resets the stream.
+
+**MCP (M7)**
+- The server is an adapter: tools call only `Engine`. MCP state the UI also sees (settings, token, audit log, connected clients) lives in `pm-core/src/mcp.rs`; the server reports serving/clients there.
+- Add a tool in `tools.rs`: a parameter struct deriving `JsonSchema` (reuse `pm-model` types), a `def!` entry with its kind (`Read`, `Write`, `Destructive`: read-only mode hides every non-`Read`) and a `call` arm. Return JSON; errors the agent should read are `ToolError`.
+- Filters are the DSL in `store/query.rs` (`FlowQuery::parse` strict for MCP, `parse_lenient` for the search box).
+- `PROXYMATE_MCP_PORT` moves the app's endpoint off 9095 (parallel dev instances). Every dev instance shares the token and audit log in `app.sqlite`.
 
 **macOS integration (M4)**
 - Tests never change the machine's settings. System proxy logic is tested in `pm-platform` against a fake `ProxyBackend`; trust tests only read the keychain. Real keychain and proxy changes need the user's OK.

@@ -2,7 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import App from "@/App";
-import { useUi, type DeviceTab, type RequestTab, type ResponseTab } from "@/store/ui";
+import { useUi, type DeviceTab, type RequestTab, type ResponseTab, type SettingsPage } from "@/store/ui";
 import "@/styles/index.css";
 
 // Lets tokens.css switch the sidebar to vibrancy on macOS.
@@ -56,7 +56,7 @@ if (filterText) {
 
 // Dev only: open the certificate wizard, the Rules Editor or the Breakpoint
 // Editor or device setup at launch, for screenshots
-// (`VITE_PM_OPEN=cert-wizard|rules|breakpoints|device-setup:<tab>`).
+// (`VITE_PM_OPEN=cert-wizard|rules|breakpoints|device-setup:<tab>|settings:mcp`).
 if (import.meta.env.DEV && import.meta.env.VITE_PM_OPEN === "cert-wizard") {
   useUi.getState().setCertWizardOpen(true);
 }
@@ -67,6 +67,9 @@ if (import.meta.env.DEV && import.meta.env.VITE_PM_OPEN === "breakpoints") {
   useUi.getState().setBreakpointsOpen(true);
 }
 const openDevices = import.meta.env.DEV ? (import.meta.env.VITE_PM_OPEN as string | undefined) : undefined;
+if (openDevices?.startsWith("settings")) {
+  useUi.getState().openSettings((openDevices.split(":")[1] as SettingsPage | undefined) ?? "mcp");
+}
 if (openDevices?.startsWith("device-setup")) {
   const tab = openDevices.split(":")[1] as DeviceTab | undefined;
   if (tab) useUi.getState().setDeviceTab(tab);

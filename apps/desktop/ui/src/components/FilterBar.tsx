@@ -89,7 +89,7 @@ export function FilterBar() {
           id={SEARCH_INPUT_ID}
           value={filter.text}
           onChange={(e) => setText(e.target.value)}
-          placeholder="Filter URL (DSL arrives in M10)"
+          placeholder="Filter: text, host:*.example.com status:4xx dur>500…"
           spellCheck={false}
           className="h-6 pr-6 pl-6 font-mono"
         />

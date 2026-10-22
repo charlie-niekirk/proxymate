@@ -1,9 +1,26 @@
 //! Process liveness, and waiting for another process to exit. The system
 //! proxy guardian uses these to restore the proxy after a crash or SIGKILL.
+//! Also launching the app by bundle id (the `mcp-stdio` bridge, M7).
 
 use std::time::Duration;
 
 use crate::PlatformError;
+
+/// Starts an installed app by bundle id without waiting for it (macOS
+/// `open -b`). Elsewhere: unsupported for now.
+pub fn launch_app(bundle_id: &str) -> Result<(), PlatformError> {
+    if !cfg!(target_os = "macos") {
+        return Err(PlatformError::Unsupported);
+    }
+    let status = std::process::Command::new("/usr/bin/open")
+        .args(["-g", "-b", bundle_id])
+        .status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(PlatformError::Os(format!("open -b {bundle_id} failed ({status})")))
+    }
+}
 
 /// True if a process with this pid exists (it may belong to another user).
 #[cfg(unix)]

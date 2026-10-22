@@ -9,10 +9,13 @@ mod engine;
 mod ingest;
 mod integration;
 pub mod io;
+pub mod mcp;
+mod notify;
 pub mod proxy;
 mod recorder;
 mod replay;
 pub mod rules;
+mod search;
 pub mod store;
 pub mod synth;
 pub mod tls;
@@ -23,9 +26,11 @@ pub use devices::{DevicesSink, HOLD as DEVICE_HOLD, ONBOARDING_HOST};
 pub use documents::ProgressSink;
 pub use engine::{BodyBytes, DeltaSink, Engine, EngineConfig, PUBLISH_INTERVAL};
 pub use integration::SidebarSink;
+pub use mcp::McpSink;
 pub use proxy::ProxyConfig;
 pub use recorder::{BodyEnd, FlowRecorder, WsRecorder};
-pub use rules::{BreakpointSink, RuleError};
+pub use rules::{BreakpointSink, RuleError, RulesSink};
+pub use search::{FlowPage, SearchHit, SearchMatch, SearchPage};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -49,6 +54,9 @@ pub enum Error {
     Platform(#[from] pm_platform::PlatformError),
     #[error(transparent)]
     Rule(#[from] rules::RuleError),
+    /// A filter DSL query or search pattern that doesn't parse.
+    #[error("filter: {0}")]
+    Query(String),
     /// Device setup: a bad address, a missing tool, a non-emulator serial.
     #[error("{0}")]
     Device(String),

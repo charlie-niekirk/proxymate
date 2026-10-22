@@ -1,23 +1,35 @@
 //! `proxymate-cli`: headless entry point. `serve` runs the proxy and logs
-//! flows; `bench` times the store. `mcp-stdio` arrives with MCP (M7).
+//! flows (and with `--mcp`, the MCP server); `mcp-stdio` bridges a stdio
+//! MCP client to a running app or `serve --mcp`; `bench` times the store.
 
+use std::net::{Ipv4Addr, SocketAddr};
 use std::process::ExitCode;
 use std::time::Instant;
 
 use pm_core::{Engine, EngineConfig, ProxyConfig, synth};
 use pm_model::{
-    ContentGroup, FilterSpec, FlowState, FlowSummary, ProtocolFilter, SortDir, SortKey, SortSpec, TlsStatus,
+    ContentGroup, FilterSpec, FlowState, FlowSummary, MCP_DEFAULT_PORT, ProtocolFilter, SortDir, SortKey, SortSpec,
+    TlsStatus,
 };
 
 const USAGE: &str = "usage:
-  proxymate-cli serve [PORT]    run the proxy on 127.0.0.1:PORT (default 9090, falls back up to 9099) and log flows
-                                env: PROXYMATE_DATA_DIR (CA, settings; default: a temp dir),
+  proxymate-cli serve [PORT] [--mcp[=MCP_PORT]]
+                                run the proxy on 127.0.0.1:PORT (default 9090, falls back up to 9099) and log flows;
+                                with --mcp also serve MCP on 127.0.0.1:MCP_PORT/mcp (default 9095)
+                                env: PROXYMATE_DATA_DIR (CA, settings, MCP token; default: a temp dir),
                                      PROXYMATE_EXTRA_UPSTREAM_CA (PEM of extra upstream roots)
+  proxymate-cli mcp-stdio [--port MCP_PORT] [--no-launch]
+                                relay a stdio MCP client to the MCP endpoint, starting the Proxymate app if
+                                nothing listens; the token is read from PROXYMATE_DATA_DIR (default: the app's)
   proxymate-cli bench [FLOWS]   seed FLOWS synthetic flows (default 100000) and time refilters";
+
+/// The desktop app's bundle id, for starting it from `mcp-stdio`.
+const APP_BUNDLE_ID: &str = "dev.proxymate.desktop";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
+        Some("mcp-stdio") => mcp_stdio(&args[1..]),
         Some("bench") => {
             let flows = match args.get(1).map(|s| s.parse::<usize>()) {
                 None => 100_000,
@@ -31,18 +43,34 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Some("serve") => {
-            let ports = match args.get(1).map(|s| s.parse::<u16>()) {
-                None => ProxyConfig::default().ports,
-                Some(Ok(port)) => port..=port,
-                Some(Err(_)) => {
-                    eprintln!("{USAGE}");
-                    return ExitCode::FAILURE;
+            let mut ports = ProxyConfig::default().ports;
+            let mut mcp = None;
+            for arg in &args[1..] {
+                match arg.as_str() {
+                    "--mcp" => mcp = Some(MCP_DEFAULT_PORT),
+                    a if a.starts_with("--mcp=") => match a["--mcp=".len()..].parse() {
+                        Ok(port) => mcp = Some(port),
+                        Err(_) => {
+                            eprintln!("{USAGE}");
+                            return ExitCode::FAILURE;
+                        }
+                    },
+                    a => match a.parse::<u16>() {
+                        Ok(port) => ports = port..=port,
+                        Err(_) => {
+                            eprintln!("{USAGE}");
+                            return ExitCode::FAILURE;
+                        }
+                    },
                 }
-            };
-            serve(ProxyConfig {
-                ports,
-                ..Default::default()
-            })
+            }
+            serve(
+                ProxyConfig {
+                    ports,
+                    ..Default::default()
+                },
+                mcp,
+            )
         }
         _ => {
             eprintln!("{USAGE}");
@@ -107,7 +135,7 @@ fn bench(flows: usize) {
     );
 }
 
-fn serve(config: ProxyConfig) -> ExitCode {
+fn serve(config: ProxyConfig, mcp: Option<u16>) -> ExitCode {
     let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
     runtime.block_on(async {
         let extra_upstream_roots = match std::env::var_os("PROXYMATE_EXTRA_UPSTREAM_CA") {
@@ -138,6 +166,31 @@ fn serve(config: ProxyConfig) -> ExitCode {
             "HTTPS CA: {}  (try: curl -x http://{addr} --cacert {} https://example.com/)",
             ca.common_name, ca.cert_path
         );
+        let _mcp = match mcp {
+            Some(port) => match tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, port)).await {
+                Ok(listener) => match pm_mcp::serve(engine.clone(), listener).await {
+                    Ok(server) => {
+                        engine.set_mcp_serving(Some(server.url()), None);
+                        println!("MCP: {}", server.url());
+                        println!(
+                            "  claude mcp add --transport http proxymate {} --header \"Authorization: Bearer {}\"",
+                            server.url(),
+                            engine.mcp_token()
+                        );
+                        Some(server)
+                    }
+                    Err(err) => {
+                        eprintln!("MCP: {err}");
+                        return ExitCode::FAILURE;
+                    }
+                },
+                Err(err) => {
+                    eprintln!("MCP: can't listen on 127.0.0.1:{port}: {err}");
+                    return ExitCode::FAILURE;
+                }
+            },
+            None => None,
+        };
 
         // Log each flow once it finishes. Short flows arrive finished, as
         // appended rows; longer ones finish later and come back as changes.
@@ -165,6 +218,51 @@ fn serve(config: ProxyConfig) -> ExitCode {
         engine.shutdown();
         ExitCode::SUCCESS
     })
+}
+
+fn mcp_stdio(args: &[String]) -> ExitCode {
+    let mut port = MCP_DEFAULT_PORT;
+    let mut launch = true;
+    let mut rest = args.iter();
+    while let Some(arg) = rest.next() {
+        match arg.as_str() {
+            "--port" => match rest.next().and_then(|p| p.parse().ok()) {
+                Some(p) => port = p,
+                None => {
+                    eprintln!("{USAGE}");
+                    return ExitCode::FAILURE;
+                }
+            },
+            "--no-launch" => launch = false,
+            _ => {
+                eprintln!("{USAGE}");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+    let Some(data_dir) = std::env::var_os("PROXYMATE_DATA_DIR")
+        .map(Into::into)
+        .or_else(pm_platform::fs::app_data_dir)
+    else {
+        eprintln!("proxymate-cli mcp-stdio: no data directory; set PROXYMATE_DATA_DIR");
+        return ExitCode::FAILURE;
+    };
+    let config = pm_mcp::bridge::BridgeConfig {
+        addr: SocketAddr::from((Ipv4Addr::LOCALHOST, port)),
+        data_dir,
+        launch: launch.then(|| {
+            Box::new(|| pm_platform::process::launch_app(APP_BUNDLE_ID).map_err(std::io::Error::other))
+                as Box<dyn Fn() -> std::io::Result<()> + Send>
+        }),
+    };
+    let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+    match runtime.block_on(pm_mcp::bridge::run(config)) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            eprintln!("proxymate-cli mcp-stdio: {err}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 fn describe(flow: &FlowSummary) -> String {

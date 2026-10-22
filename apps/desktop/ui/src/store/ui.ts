@@ -25,6 +25,9 @@ export type ResponseTab = "Header" | "Body" | "Raw" | "TLS" | "Timing";
 /** Device Setup Wizard tabs. */
 export type DeviceTab = "simulator" | "iphone" | "android" | "emulator";
 
+/** Settings pages; more arrive with M10. */
+export type SettingsPage = "mcp";
+
 /** The live capture's store; opened documents have their own. */
 export const LIVE_STORE = 0;
 
@@ -74,6 +77,7 @@ interface UiState {
   selectedBreakpoint: number | null;
   deviceSetupOpen: boolean;
   deviceTab: DeviceTab;
+  settings: { open: boolean; page: SettingsPage };
 
   /** Switches tabs; the selection doesn't carry over (ids are per store). */
   setStore(store: number): void;
@@ -102,6 +106,8 @@ interface UiState {
   selectBreakpoint(id: number | null): void;
   setDeviceSetupOpen(open: boolean): void;
   setDeviceTab(tab: DeviceTab): void;
+  openSettings(page?: SettingsPage): void;
+  closeSettings(): void;
 }
 
 export const useUi = create<UiState>()((set) => ({
@@ -125,6 +131,7 @@ export const useUi = create<UiState>()((set) => ({
   selectedBreakpoint: null,
   deviceSetupOpen: false,
   deviceTab: "simulator",
+  settings: { open: false, page: "mcp" },
 
   setStore: (store) => set((s) => (s.store === store ? {} : { store, selectedId: null, stats: { len: 0, total: 0 } })),
   setDocuments: (documents) => set({ documents }),
@@ -168,4 +175,6 @@ export const useUi = create<UiState>()((set) => ({
   selectBreakpoint: (selectedBreakpoint) => set({ selectedBreakpoint }),
   setDeviceSetupOpen: (deviceSetupOpen) => set({ deviceSetupOpen }),
   setDeviceTab: (deviceTab) => set({ deviceTab }),
+  openSettings: (page) => set((s) => ({ settings: { open: true, page: page ?? s.settings.page } })),
+  closeSettings: () => set((s) => ({ settings: { ...s.settings, open: false } })),
 }));
