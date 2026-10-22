@@ -1,12 +1,17 @@
-# Builds, signs, notarises and staples the macOS release, then uploads the DMG
-# and the updater files (latest.json, the .app.tar.gz and its signature) to a
-# DRAFT GitHub Release for the tag. Publishing the draft is a human step, and
-# it is what makes `releases/latest/download/latest.json` (the app's update
-# feed) point at the new version. See docs/RELEASING.md.
+# Builds the universal macOS release, then uploads the DMG and the updater
+# files (latest.json, the .app.tar.gz and its signature) to a DRAFT GitHub
+# Release for the tag. Publishing the draft is a human step, and it is what
+# makes `releases/latest/download/latest.json` (the app's update feed) point
+# at the new version. See docs/RELEASING.md.
 #
-# - Tag push `v*`: the real release. Uses the repository secrets.
-# - Manual run (workflow_dispatch): the same build with the secrets, as a
-#   dry run: artifacts are attached to the run, no release is made.
+# Releases are ad-hoc signed and not notarised (no paid Apple Developer
+# account), so the draft's notes tell users how to allow the app past
+# Gatekeeper. Developer ID signing and notarisation turn on by themselves if
+# the APPLE_* secrets are ever added.
+#
+# - Tag push `v*`: the real release. Needs the TAURI_SIGNING_PRIVATE_KEY secret.
+# - Manual run (workflow_dispatch): the same build as a dry run: artifacts
+#   are attached to the run, no release is made.
 # - Pull requests touching the packaging: an ad-hoc build with a throwaway
 #   updater key and no secrets, to keep the pipeline working.
 name: Release
@@ -52,9 +57,10 @@ jobs:
           key: release-universal
       - run: npm ci
 
-      # Secrets only reach tag pushes and manual runs. The certificate is
-      # imported by Tauri's bundler (APPLE_CERTIFICATE) into a temporary
-      # keychain; the notarytool key file lives in RUNNER_TEMP.
+      # Secrets only reach tag pushes and manual runs. The APPLE_* ones are
+      # optional (unset today: the build is ad-hoc signed). If set, Tauri's
+      # bundler imports the certificate into a temporary keychain, and the
+      # notarytool key file lives in RUNNER_TEMP.
       - name: Credentials
         env:
           EVENT: ${{ github.event_name }}
@@ -105,7 +111,7 @@ jobs:
           put TAURI_SIGNING_PRIVATE_KEY "$TAURI_SIGNING_PRIVATE_KEY"
           put TAURI_SIGNING_PRIVATE_KEY_PASSWORD "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD"
 
-      - name: Build, sign, notarise
+      - name: Build and sign
         env:
           RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || '' }}
           OUT_DIR: ${{ runner.temp }}/release
@@ -121,9 +127,6 @@ jobs:
             ls -l "$RUNNER_TEMP/release"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-          if [[ $SIGNING == ad-hoc && ${{ github.event_name }} != pull_request ]]; then
-            echo "::warning::This build is ad-hoc signed and not notarised (no Developer ID secrets). See docs/RELEASING.md."
-          fi
           echo "$SIGNING" > "$RUNNER_TEMP/release/signing.txt"
 
       - uses: actions/upload-artifact@v4
@@ -143,6 +146,9 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/release
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -164,16 +170,19 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
+          notes="$RUNNER_TEMP/notes.md"
+          printf 'Proxymate %s.\n' "${TAG#v}" > "$notes"
+          # Ad-hoc builds need the one-time Gatekeeper override.
+          if grep -q ad-hoc artifacts/signing.txt; then
+            printf '\n' >> "$notes"
+            sed "s/<version>/${TAG#v}/" scripts/release/install-notes-macos.md >> "$notes"
+          fi
           cd artifacts
           files=(*.dmg *.app.tar.gz *.app.tar.gz.sig latest.json)
           if gh release view "$TAG" > /dev/null 2>&1; then
             gh release upload "$TAG" "${files[@]}" --clobber
           else
-            notes="Proxymate ${TAG#v}."
-            if grep -q ad-hoc signing.txt; then
-              notes+=$'\n\n> [!WARNING]\n> This build is ad-hoc signed and not notarised. macOS blocks it on first launch: open it once, then allow it in System Settings › Privacy & Security › "Open Anyway".'
-            fi
             gh release create "$TAG" "${files[@]}" --draft --verify-tag \
-              --title "Proxymate ${TAG#v}" --notes "$notes" \
+              --title "Proxymate ${TAG#v}" --notes-file "$notes" \
               $([[ $TAG == *-* ]] && echo --prerelease)
           fi

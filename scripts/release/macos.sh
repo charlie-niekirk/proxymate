@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
-# Builds the universal (arm64 + x86_64) macOS release, signs it, notarises
-# and staples it when credentials are present, checks the result, and stages
-# what a GitHub release needs in $OUT_DIR:
+# Builds the universal (arm64 + x86_64) macOS release, signs it (ad-hoc by
+# default; Developer ID, notarised and stapled if credentials are present),
+# checks the result, and stages what a GitHub release needs in $OUT_DIR:
 #
 #   Proxymate_<version>_universal.dmg
 #   Proxymate_<version>_universal.app.tar.gz(.sig)   updater bundle + signature
 #   updater-darwin.json                               latest.json `platforms` entries
 #
 # Credentials are Tauri's bundler environment variables (docs/RELEASING.md):
+#   TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD (updater)
+#   Optional, for later (needs a paid Apple Developer account):
 #   APPLE_SIGNING_IDENTITY, APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD
 #   APPLE_API_KEY, APPLE_API_ISSUER, APPLE_API_KEY_PATH          (notarytool)
-#   TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD (updater)
-# Without a signing identity the app is ad-hoc signed and not notarised;
-# without the updater key no updater bundle is made. Both are reported.
+# Without a signing identity the app is ad-hoc signed and not notarised (the
+# normal case today); without the updater key no updater bundle is made.
 #
 # Other settings:
 #   OUT_DIR       where to stage (default target/release/macos)
@@ -50,7 +51,7 @@ IDENTITY=${APPLE_SIGNING_IDENTITY:--}
 export APPLE_SIGNING_IDENTITY=$IDENTITY
 NOTARISE=0
 if [[ $IDENTITY == "-" ]]; then
-  warn "no APPLE_SIGNING_IDENTITY: the app is ad-hoc signed and NOT notarised. Gatekeeper blocks it on other Macs until the user allows it (docs/RELEASING.md)."
+  echo "Ad-hoc signing (no APPLE_SIGNING_IDENTITY): not notarised; users allow it once past Gatekeeper (scripts/release/install-notes-macos.md)."
   # Tauri would try to notarise an ad-hoc app if these were set.
   unset APPLE_API_KEY APPLE_API_ISSUER APPLE_API_KEY_PATH APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID
 elif [[ -n ${APPLE_API_KEY:-} && -n ${APPLE_API_ISSUER:-} && -n ${APPLE_API_KEY_PATH:-} ]]; then

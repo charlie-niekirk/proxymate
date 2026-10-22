@@ -194,6 +194,7 @@ Targets:
 
 **Release and updates (M11)**
 - `docs/RELEASING.md` covers secrets, cutting a release (tag `v*` → draft GitHub Release) and key rotation. `.github/workflows/release.yml` runs `scripts/release/macos.sh`.
+- Releases are **ad-hoc signed and not notarised** (no paid Apple Developer account); users allow the app once past Gatekeeper (`scripts/release/install-notes-macos.md`, added to each draft). Developer ID signing and notarisation stay dormant until the `APPLE_*` secrets exist.
 - Hardened runtime with no App Sandbox and an empty `Entitlements.plist`. Don't add an entitlement without its reason in RELEASING.md.
 - The guardian and the MCP bridge are modes of the one signed binary. A sidecar would need signing too.
 - Bump the version in `tauri.conf.json`, the workspace `Cargo.toml` and `apps/desktop/ui/package.json` together. The release tag must match `tauri.conf.json`.
