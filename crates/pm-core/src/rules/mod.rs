@@ -101,6 +101,11 @@ pub(crate) struct Rules {
 pub type RulesSink = crate::notify::Sink<Vec<Rule>>;
 
 impl Rules {
+    /// The app database, for settings that aren't the rules' (`updates.rs`).
+    pub(crate) fn db(&self) -> parking_lot::MutexGuard<'_, AppDb> {
+        self.db.lock()
+    }
+
     /// Loads `<dir>/app.sqlite`, or an in-memory database without a
     /// directory. A database that can't be opened falls back to memory.
     pub fn load(dir: Option<&Path>) -> Rules {

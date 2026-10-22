@@ -138,6 +138,13 @@ export const commands = {
 	 *  [`save_session`].
 	 */
 	exportHar: (store: number, selection: FlowSelection, path: string | null, fileName: string, onProgress: Channel<SaveProgress_Deserialize>) => typedError<string | null, string>(__TAURI_INVOKE("export_har", { store, selection, path, fileName, onProgress })),
+	getUpdateSettings: () => __TAURI_INVOKE<UpdateSettings>("get_update_settings"),
+	setUpdateSettings: (settings: UpdateSettings) => typedError<UpdateSettings, string>(__TAURI_INVOKE("set_update_settings", { settings })),
+	/**
+	 *  Settings › Updates' "Check Now": the same check as the menu item, which
+	 *  answers with a native dialog.
+	 */
+	checkForUpdates: () => __TAURI_INVOKE<void>("check_for_updates"),
 };
 
 /* Types */
@@ -1888,6 +1895,14 @@ export type TrustStatus_Serialize = {
 	verified: boolean,
 	/**  Why verification failed, if it did. */
 	detail: string | null,
+};
+
+export type UpdateSettings = {
+	/**
+	 *  Look for a new release quietly at launch; only an available update
+	 *  is shown. "Check for Updates…" works either way.
+	 */
+	check_at_launch: boolean,
 };
 
 export type Value = null | boolean | number | string | Value[] | { [key in string]: Value };

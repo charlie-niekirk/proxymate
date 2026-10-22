@@ -1,12 +1,16 @@
-import { Bot, Settings, type LucideIcon } from "lucide-react";
+import { Bot, RefreshCw, Settings, type LucideIcon } from "lucide-react";
 
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { useUi, type SettingsPage } from "@/store/ui";
 
 import { McpPage } from "./McpPage";
+import { UpdatesPage } from "./UpdatesPage";
 
-const PAGES: { id: SettingsPage; label: string; icon: LucideIcon }[] = [{ id: "mcp", label: "MCP", icon: Bot }];
+const PAGES: { id: SettingsPage; label: string; icon: LucideIcon }[] = [
+  { id: "mcp", label: "MCP", icon: Bot },
+  { id: "updates", label: "Updates", icon: RefreshCw },
+];
 
 /** Settings: a page list beside the chosen page. MCP is the first page; M10 adds the rest. */
 export function SettingsDialog() {
@@ -45,7 +49,10 @@ export function SettingsDialog() {
             ))}
           </nav>
           {/* A plain scroller: Radix's viewport lets wide code blocks widen the page. */}
-          <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">{open && page === "mcp" && <McpPage />}</div>
+          <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
+            {open && page === "mcp" && <McpPage />}
+            {open && page === "updates" && <UpdatesPage />}
+          </div>
         </div>
       </DialogContent>
     </Dialog>

@@ -215,7 +215,7 @@ We build our own engine and use hudsucker only as a reading reference. Its handl
   - Phones are set up by hand (Wi-Fi proxy, the CA as a user certificate, a debug-only `network_security_config.xml` for the user's own apps); the wizard shows the steps and a QR code of the setup page.
   - Emulators are set up over `adb` (from the SDK's usual places, then `PATH`): `settings put global http_proxy 10.0.2.2:<port>`, cleared with `:0` on quit, and `adb push` of the DER to `/sdcard/Download/` for the user to install.
 - **Commands (M9).** `simctl` and `adb` run behind a `command::Runner` trait in `pm-platform`, so their command lines and output parsing are tested with a fake runner.
-- **Linux and Windows equivalents (M11).**
+- **Linux and Windows equivalents (M12).**
   - Linux: `pkexec update-ca-certificates`/`update-ca-trust` plus NSS `certutil`; proxy via gsettings or kwriteconfig; app detection via netlink sock_diag and `/proc`.
   - Windows: the CurrentUser ROOT store; proxy via the HKCU Internet Settings registry key and `InternetSetOption`; app detection via `GetExtendedTcpTable`; the guardian uses `WaitForSingleObject`.
 
@@ -354,6 +354,28 @@ Tokens are CSS variables set per `[data-theme]`. Pills use a tinted background w
 - **URL parts:** scheme dim, host bright, path normal, query dim-accent.
 - **Selection:** orange.
 - **Theme:** dark first, with light mode in M10. The body viewers already use tokens for both (`--syntax-*`, `--code-*`, `--checker-*`).
+
+## Packaging, signing and updates (M11)
+The details, secrets and key rotation are in `docs/RELEASING.md`.
+- **Bundle.** The bundle is one universal (`universal-apple-darwin`) `Proxymate.app` and a DMG.
+  - Bundle id `dev.proxymate.desktop`, category Developer Tools, minimum macOS 13.3. That is the first release with WebKit 16.4, which the Tailwind v4 CSS (`color-mix()`, `@property`) needs.
+  - `bundle.macOS.signingIdentity` is `-` (ad-hoc). `APPLE_SIGNING_IDENTITY` overrides it, and the release workflow sets it.
+- **Hardened runtime, no App Sandbox, no entitlements.** `Entitlements.plist` is deliberately empty; RELEASING.md lists each exception and why it isn't needed.
+  - The bundle holds a single Mach-O, and the same binary runs as `--sysproxy-guardian` and `mcp-stdio`, so one signature covers every executable that gets launched. There are no sidecars.
+  - `scripts/release/macos.sh` fails if any Mach-O in the bundle is unsigned or lacks the runtime flag.
+- **Signing and notarisation.** These use Tauri's bundler variables:
+  - `APPLE_CERTIFICATE` (base64 `.p12`) is imported into a temporary keychain.
+  - `APPLE_API_KEY`/`APPLE_API_ISSUER`/`APPLE_API_KEY_PATH` drive notarytool.
+  - Tauri notarises and staples the app and signs the DMG. `macos.sh` then notarises and staples the DMG and checks both with `spctl` and `stapler validate`.
+  - Without a Developer ID the build is ad-hoc and un-notarised, with a warning in the run and in the draft's notes.
+- **Updater.** `tauri-plugin-updater`, driven from Rust (`src-tauri/src/updater.rs`).
+  - The feed is `releases/latest/download/latest.json` on GitHub, so drafts and prereleases never reach installs. It lists `darwin-aarch64` and `darwin-x86_64`, both pointing at the universal `.app.tar.gz`, which is minisign-signed with the Tauri updater key; the public key is in `tauri.conf.json`.
+  - A quiet check runs 5 s after launch, with an opt-out: `UpdateSettings.check_at_launch`, the `updates` row in `app.sqlite`, shown in Settings › Updates.
+  - "Check for Updates…" sits in the app menu (Help on Linux/Windows). Native dialogs ask before installing. The restart goes through the normal exit path, so the system proxy is restored first.
+  - Update requests bypass the system proxy. Debug bundles with `PROXYMATE_UPDATE_TEST=1` check and install without asking, for end-to-end tests.
+- **Release workflow** (`.github/workflows/release.yml`).
+  - A `v*` tag builds on `macos-15`, then a separate job merges the `updater-<os>.json` fragments into `latest.json` and uploads everything to a **draft** release. Publishing it is the human step. M12 adds its build jobs beside the macOS one.
+  - Manual runs are signed dry runs, with artifacts only. Pull requests that touch packaging run an ad-hoc build with a throwaway updater key.
 
 ## Delivery workflow: one Claude session and one PR per milestone
 - **Repository.** M0 creates a new GitHub repository, private by default, called `proxymate`, with `gh repo create`. It's created under the user's account, and the name and visibility are confirmed when M0 starts.

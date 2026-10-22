@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened-runtime entitlements for Proxymate.app (bundle.macOS.entitlements).
+
+  Deliberately empty. Proxymate runs under the hardened runtime WITHOUT the
+  App Sandbox (no com.apple.security.app-sandbox): the system proxy
+  (networksetup), CA trust in the login keychain (SecTrustSettings), client
+  app detection (libproc on other processes), the iOS Simulator and adb
+  (spawning xcrun/adb) and the sysproxy guardian all need an unsandboxed
+  process, and none of them needs a hardened-runtime exception:
+
+  - No JIT or unsigned executable memory: WKWebView's JavaScript JIT runs
+    in WebKit's own (Apple-signed) WebContent process, not ours.
+  - No disable-library-validation: everything is statically linked; we
+    load only system frameworks (and dlsym one libsystem symbol).
+  - No allow-dyld-environment-variables, no get-task-allow (debugging;
+    notarisation rejects it).
+  - No automation.apple-events: we send no Apple Events to other apps.
+  - Network client/server, files and keychain need no entitlement outside
+    the sandbox.
+
+  Add a key here only with a reason in docs/RELEASING.md.
+-->
+<plist version="1.0">
+<dict/>
+</plist>

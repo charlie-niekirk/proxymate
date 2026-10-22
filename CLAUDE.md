@@ -51,7 +51,9 @@ Run these from the repo root unless noted.
 | Regenerate TS bindings | `cargo test -p proxymate-desktop export_bindings`. Debug app launches also regenerate them |
 | Engine micro-bench | `cargo run --release -p proxymate-cli -- bench [FLOWS]` |
 | Ingest bench (criterion, target < 2 s per 100k flows) | `cargo bench -p pm-core --bench ingest` |
-| Release bundle | `npm run tauri build` |
+| Release bundle | `npm run tauri build` (host arch, ad-hoc signed) |
+| macOS release build (universal DMG, checks, staging) | `scripts/release/macos.sh` (needs `rustup target add x86_64-apple-darwin`; ad-hoc unless the signing variables in `docs/RELEASING.md` are set; output in `target/release/macos`) |
+| Updater end to end | Debug bundle (`npm run tauri -- build --debug`) launched with `PROXYMATE_UPDATE_TEST=1`: checks at launch and installs without asking. Recipe in `docs/RELEASING.md` |
 
 CI (`.github/workflows/ci.yml`):
 - Rust: `fmt --check`, `clippy -D warnings`, `test` and a bindings-drift check, on macOS and Linux.
@@ -80,7 +82,8 @@ crates/pm-mcp        MCP server over Arc<Engine> (rmcp, pinned): http.rs (axum e
 crates/pm-testkit    test upstreams (h1, TLS h1/h2 with a test CA, WS echo, slow SSE), the body-viewer zoo (fixtures/zoo),
                      proxy, HTTPS and WebSocket clients; re-export of pm_core::synth
 apps/desktop/src-tauri   thin Tauri adapters (commands.rs), the pmbody:// scheme (body_scheme.rs), window chrome (window.rs),
-                         the menu bar (menu.rs: File items reach the UI as `pm-menu` events)
+                         the menu bar (menu.rs: File items reach the UI as `pm-menu` events); updater.rs (tauri-plugin-updater,
+                         Check for Updates…, the launch check)
 apps/desktop/ui          Vite + React 19 + TS strict + Tailwind v4 + shadcn/ui
 apps/cli                 proxymate-cli (headless; `bench` today)
 ```
@@ -175,6 +178,13 @@ Targets:
 - Every accepted connection goes through `Engine::admit` first: loopback and our own addresses pass, LAN IPs wait up to 30 s for the "Allow?" prompt. Tests can't make a non-local peer, so the hold/allow/deny logic is unit-tested on `DeviceRegistry` directly.
 - LAN access rebinds to `0.0.0.0` on the same port. Use `Engine::proxy_addr()` (loopback) for anything this machine connects to, and `display_addr` for what the user sees.
 - Tests never change the machine: no simulator boot or keychain install, no emulator proxy. Real `simctl`/`adb` runs need the user's OK.
+
+**Release and updates (M11)**
+- `docs/RELEASING.md` covers secrets, cutting a release (tag `v*` → draft GitHub Release) and key rotation. `.github/workflows/release.yml` runs `scripts/release/macos.sh`.
+- Hardened runtime with no App Sandbox and an empty `Entitlements.plist`. Don't add an entitlement without its reason in RELEASING.md.
+- The guardian and the MCP bridge are modes of the one signed binary. A sidecar would need signing too.
+- Bump the version in `tauri.conf.json`, the workspace `Cargo.toml` and `apps/desktop/ui/package.json` together. The release tag must match `tauri.conf.json`.
+- The updater lives in `src-tauri/src/updater.rs` (Rust-side; no JS plugin permissions). Its public key is in `tauri.conf.json`; the private key never enters the repo.
 
 **Replay, cURL, HAR and sessions (M8)**
 - `Engine::send(RequestSpec, SendOpts)` is the one way Proxymate sends a request itself (Replay, Compose, MCP). It goes through `proxy/exchange.rs` like proxied traffic; the flow's summary gets `sent_by`.

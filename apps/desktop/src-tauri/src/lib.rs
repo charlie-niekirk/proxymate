@@ -4,6 +4,7 @@
 mod body_scheme;
 mod commands;
 mod menu;
+mod updater;
 mod window;
 
 use std::path::PathBuf;
@@ -92,6 +93,9 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::close_document,
             commands::save_session,
             commands::export_har,
+            commands::get_update_settings,
+            commands::set_update_settings,
+            commands::check_for_updates,
         ])
         // Sizes are u64 but stay far below 2^53.
         .dangerously_cast_bigints_to_number()
@@ -116,6 +120,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .menu(menu::build)
         .on_menu_event(menu::on_event)
         .invoke_handler(builder.invoke_handler())
@@ -147,6 +152,7 @@ pub fn run() {
             if let Some(main) = app.get_webview_window("main") {
                 window::style_main_window(&main);
             }
+            updater::check_at_launch(app.handle());
             Ok(())
         })
         .build(tauri::generate_context!())

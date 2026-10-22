@@ -20,6 +20,7 @@ pub mod store;
 pub mod synth;
 pub mod tls;
 pub mod trust;
+mod updates;
 
 pub use client::{ClientApp, ClientKind};
 pub use devices::{DevicesSink, HOLD as DEVICE_HOLD, ONBOARDING_HOST};

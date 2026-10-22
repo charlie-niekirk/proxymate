@@ -1,3 +1,4 @@
+import { getVersion } from "@tauri-apps/api/app";
 import { Channel, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
@@ -40,6 +41,7 @@ import {
   type SslSettings,
   type SystemProxyStatus_Serialize,
   type TrustStatus_Serialize,
+  type UpdateSettings,
   type ViewDelta,
   type ViewInfo,
   type WsPage_Serialize,
@@ -216,6 +218,14 @@ export interface Backend {
   ): Promise<string | null>;
   /** File menu clicks (`open`, `import-har`, `save-session`, `export-har`, `compose`). */
   onMenu(handler: (id: string) => void): Promise<() => void>;
+
+  // ---- Updates (M11) ----
+  /** The app's version (`tauri.conf.json`). */
+  appVersion(): Promise<string>;
+  getUpdateSettings(): Promise<UpdateSettings>;
+  setUpdateSettings(settings: UpdateSettings): Promise<UpdateSettings>;
+  /** Same as the app menu's "Check for Updates…"; the answer is a native dialog. */
+  checkForUpdates(): Promise<void>;
 }
 
 type Result<T> = { status: "ok"; data: T } | { status: "error"; error: string };
@@ -348,6 +358,10 @@ const tauriBackend: Backend = {
   exportHar: (store, selection, path, fileName, onProgress) =>
     unwrap(commands.exportHar(store, selection, path, fileName, progressChannel(onProgress))),
   onMenu: (handler) => listen<string>("pm-menu", (e) => handler(e.payload)),
+  appVersion: () => getVersion(),
+  getUpdateSettings: () => commands.getUpdateSettings(),
+  setUpdateSettings: (settings) => unwrap(commands.setUpdateSettings(settings)),
+  checkForUpdates: () => commands.checkForUpdates(),
 };
 
 function progressChannel(onProgress: (p: SaveProgress_Serialize) => void) {

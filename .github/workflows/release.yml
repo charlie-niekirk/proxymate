@@ -1,0 +1,179 @@
+# Builds, signs, notarises and staples the macOS release, then uploads the DMG
+# and the updater files (latest.json, the .app.tar.gz and its signature) to a
+# DRAFT GitHub Release for the tag. Publishing the draft is a human step, and
+# it is what makes `releases/latest/download/latest.json` (the app's update
+# feed) point at the new version. See docs/RELEASING.md.
+#
+# - Tag push `v*`: the real release. Uses the repository secrets.
+# - Manual run (workflow_dispatch): the same build with the secrets, as a
+#   dry run: artifacts are attached to the run, no release is made.
+# - Pull requests touching the packaging: an ad-hoc build with a throwaway
+#   updater key and no secrets, to keep the pipeline working.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - scripts/release/**
+      - apps/desktop/src-tauri/tauri.conf.json
+      - apps/desktop/src-tauri/Entitlements.plist
+      - apps/desktop/src-tauri/Cargo.toml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  macos:
+    name: macOS (universal)
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-universal
+      - run: npm ci
+
+      # Secrets only reach tag pushes and manual runs. The certificate is
+      # imported by Tauri's bundler (APPLE_CERTIFICATE) into a temporary
+      # keychain; the notarytool key file lives in RUNNER_TEMP.
+      - name: Credentials
+        env:
+          EVENT: ${{ github.event_name }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          put() { # name value: an env var for the later steps
+            local delim="EOF_$RANDOM$RANDOM"
+            printf '%s<<%s\n%s\n%s\n' "$1" "$delim" "$2" "$delim" >> "$GITHUB_ENV"
+          }
+          if [[ $EVENT == pull_request ]]; then
+            echo "Pull request: ad-hoc signing, throwaway updater key."
+            APPLE_CERTIFICATE= APPLE_SIGNING_IDENTITY= TAURI_SIGNING_PRIVATE_KEY=
+          fi
+          if [[ -n $APPLE_CERTIFICATE && -n $APPLE_SIGNING_IDENTITY ]]; then
+            put APPLE_CERTIFICATE "$APPLE_CERTIFICATE"
+            put APPLE_CERTIFICATE_PASSWORD "$APPLE_CERTIFICATE_PASSWORD"
+            put APPLE_SIGNING_IDENTITY "$APPLE_SIGNING_IDENTITY"
+            if [[ -n $APPLE_API_PRIVATE_KEY && -n $APPLE_API_KEY && -n $APPLE_API_ISSUER ]]; then
+              key="$RUNNER_TEMP/AuthKey_$APPLE_API_KEY.p8"
+              printf '%s\n' "$APPLE_API_PRIVATE_KEY" > "$key"
+              chmod 600 "$key"
+              put APPLE_API_KEY "$APPLE_API_KEY"
+              put APPLE_API_ISSUER "$APPLE_API_ISSUER"
+              put APPLE_API_KEY_PATH "$key"
+            fi
+            echo "SIGNING=developer-id" >> "$GITHUB_ENV"
+          else
+            echo "SIGNING=ad-hoc" >> "$GITHUB_ENV"
+          fi
+          if [[ -z $TAURI_SIGNING_PRIVATE_KEY ]]; then
+            if [[ $EVENT == push ]]; then
+              echo "::error::TAURI_SIGNING_PRIVATE_KEY is not set: a release needs signed updater files."
+              exit 1
+            fi
+            npx tauri signer generate --ci -w "$RUNNER_TEMP/throwaway-updater.key" > /dev/null
+            TAURI_SIGNING_PRIVATE_KEY=$(cat "$RUNNER_TEMP/throwaway-updater.key")
+            TAURI_SIGNING_PRIVATE_KEY_PASSWORD=
+          fi
+          echo "::add-mask::$TAURI_SIGNING_PRIVATE_KEY"
+          put TAURI_SIGNING_PRIVATE_KEY "$TAURI_SIGNING_PRIVATE_KEY"
+          put TAURI_SIGNING_PRIVATE_KEY_PASSWORD "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD"
+
+      - name: Build, sign, notarise
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || '' }}
+          OUT_DIR: ${{ runner.temp }}/release
+        run: scripts/release/macos.sh
+
+      - name: Summary
+        run: |
+          {
+            echo "### macOS release build"
+            echo "- Signing: \`$SIGNING\`"
+            echo "- Notarised: $([[ -n ${APPLE_API_KEY_PATH:-} ]] && echo yes || echo no)"
+            echo '```'
+            ls -l "$RUNNER_TEMP/release"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [[ $SIGNING == ad-hoc && ${{ github.event_name }} != pull_request ]]; then
+            echo "::warning::This build is ad-hoc signed and not notarised (no Developer ID secrets). See docs/RELEASING.md."
+          fi
+          echo "$SIGNING" > "$RUNNER_TEMP/release/signing.txt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: proxymate-macos
+          path: ${{ runner.temp }}/release/
+          retention-days: ${{ github.event_name == 'pull_request' && 3 || 14 }}
+          if-no-files-found: error
+
+  # Separate from the build so Linux and Windows (M12) can add their own
+  # build jobs and `updater-<os>.json` entries before one release is made.
+  draft-release:
+    name: Draft GitHub Release
+    needs: macos
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: latest.json
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          jq -s --arg version "${TAG#v}" --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg notes "See https://github.com/${{ github.repository }}/releases/tag/$TAG" \
+            '{version: $version, notes: $notes, pub_date: $date, platforms: (add)}' \
+            artifacts/updater-*.json > artifacts/latest.json
+          cat artifacts/latest.json
+      - name: Create or update the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          cd artifacts
+          files=(*.dmg *.app.tar.gz *.app.tar.gz.sig latest.json)
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" "${files[@]}" --clobber
+          else
+            notes="Proxymate ${TAG#v}."
+            if grep -q ad-hoc signing.txt; then
+              notes+=$'\n\n> [!WARNING]\n> This build is ad-hoc signed and not notarised. macOS blocks it on first launch: open it once, then allow it in System Settings › Privacy & Security › "Open Anyway".'
+            fi
+            gh release create "$TAG" "${files[@]}" --draft --verify-tag \
+              --title "Proxymate ${TAG#v}" --notes "$notes" \
+              $([[ $TAG == *-* ]] && echo --prerelease)
+          fi

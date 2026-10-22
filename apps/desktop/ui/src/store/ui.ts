@@ -26,7 +26,7 @@ export type ResponseTab = "Header" | "Body" | "Raw" | "TLS" | "Timing";
 export type DeviceTab = "simulator" | "iphone" | "android" | "emulator";
 
 /** Settings pages; more arrive with M10. */
-export type SettingsPage = "mcp";
+export type SettingsPage = "mcp" | "updates";
 
 /** The live capture's store; opened documents have their own. */
 export const LIVE_STORE = 0;
