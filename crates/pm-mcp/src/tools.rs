@@ -15,6 +15,7 @@ use pm_model::{
     Action, BodyPart, BreakpointId, BreakpointResolution, FlowDetail, FlowId, FlowSummary, Header, MapLocalSource,
     Matcher, Pattern, Phase, PresetKind, Rule, RuleOrigin, Scheme, SearchScope, WsDirection, WsQuery,
 };
+use pm_model::{FlowSelection, LIVE_STORE, RequestSpec, SendOpts, SendOrigin};
 use rmcp::handler::server::common::schema_for_type;
 use rmcp::model::{JsonObject, Tool, ToolAnnotations};
 use schemars::JsonSchema;
@@ -29,6 +30,8 @@ const BODY_DEFAULT: usize = 64 * 1024;
 const BODY_MAX: usize = 1024 * 1024;
 /// JSON is parsed (for `format: json` and `json_pointer`) up to this size.
 const JSON_PARSE_MAX: usize = 32 * 1024 * 1024;
+/// HAR documents returned inline stop here; bigger exports should go to a file in the app.
+const HAR_MAX: usize = 4 * 1024 * 1024;
 const WAIT_DEFAULT_MS: u64 = 30_000;
 const WAIT_MAX_MS: u64 = 120_000;
 
@@ -211,6 +214,30 @@ fn defs() -> Vec<Def> {
             NoParams,
             "Delete every recorded flow and its bodies."
         ),
+        def!(
+            "export_curl",
+            Read,
+            FlowIdParam,
+            "A curl command that sends a recorded request again (method, URL, headers and body)."
+        ),
+        def!(
+            "export_har",
+            Read,
+            ExportHar,
+            "Recorded flows as a HAR 1.2 document (JSON): the listed ids, or the flows matching a filter (oldest first, up to `limit`)."
+        ),
+        def!(
+            "replay_flow",
+            Write,
+            ReplayFlow,
+            "Send a recorded request again, optionally modified (method, URL, headers, body). The new flow is recorded and marked as sent by you; with `wait` (default) the result has its response status."
+        ),
+        def!(
+            "send_request",
+            Write,
+            SendRequest,
+            "Send a new HTTP(S) request through Proxymate. It is recorded like proxied traffic and marked as sent by you; with `apply_rules` (default) rules such as Map Local apply to it."
+        ),
     ]
 }
 
@@ -345,6 +372,16 @@ pub(crate) async fn call(ctx: &Ctx<'_>, name: &str, args: JsonObject) -> ToolRes
             let before = ctx.engine.total();
             ctx.engine.clear();
             Ok(json!({ "cleared": before }))
+        }
+        "export_curl" => {
+            let p: FlowIdParam = parse(args)?;
+            Ok(json!({ "id": p.id, "command": ctx.engine.curl_command(LIVE_STORE, p.id)? }))
+        }
+        "export_har" => export_har(ctx, parse(args)?),
+        "replay_flow" => replay_flow(ctx, parse(args)?).await,
+        "send_request" => {
+            let p: SendRequest = parse(args)?;
+            send(ctx, p.request, p.apply_rules, p.wait).await
         }
         other => Err(ToolError(format!("unknown tool {other:?}"))),
     }
@@ -701,6 +738,70 @@ struct ResolveBreakpoint {
 #[derive(Deserialize, JsonSchema)]
 struct SetRecording {
     recording: bool,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct FlowIdParam {
+    id: FlowId,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct ExportHar {
+    /// These flows, in this order. Without, the flows matching `filter`.
+    #[serde(default)]
+    ids: Option<Vec<FlowId>>,
+    /// Filter DSL; empty exports everything (up to `limit`).
+    #[serde(default)]
+    filter: String,
+    /// 1–500, default 50.
+    #[serde(default)]
+    limit: Option<u32>,
+}
+
+/// Changes to a recorded request before it is sent again. Unset fields
+/// stay as recorded.
+#[derive(Deserialize, JsonSchema, Default)]
+struct RequestEdits {
+    #[serde(default)]
+    method: Option<String>,
+    /// An absolute URL.
+    #[serde(default)]
+    url: Option<String>,
+    /// Headers to set (replacing any of the same name).
+    #[serde(default)]
+    set_headers: Vec<Header>,
+    #[serde(default)]
+    remove_headers: Vec<String>,
+    /// Replaces the body (the recorded one is decoded first, so edits are text).
+    #[serde(default)]
+    body: Option<String>,
+    /// `body` is base64.
+    #[serde(default)]
+    body_base64: bool,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct ReplayFlow {
+    id: FlowId,
+    #[serde(default)]
+    modify: Option<RequestEdits>,
+    /// Run it through the rules like proxied traffic (default true).
+    #[serde(default = "yes")]
+    apply_rules: bool,
+    /// Wait for the response (default true).
+    #[serde(default = "yes")]
+    wait: bool,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct SendRequest {
+    request: RequestSpec,
+    /// Run it through the rules like proxied traffic (default true).
+    #[serde(default = "yes")]
+    apply_rules: bool,
+    /// Wait for the response (default true).
+    #[serde(default = "yes")]
+    wait: bool,
 }
 
 // ---- Shapes returned ----
@@ -1095,7 +1196,88 @@ fn get_breakpoint(ctx: &Ctx<'_>, p: GetBreakpoint) -> ToolResult {
     Ok(out)
 }
 
+fn export_har(ctx: &Ctx<'_>, p: ExportHar) -> ToolResult {
+    let ids = match p.ids {
+        Some(ids) => ids,
+        None => ctx
+            .engine
+            .find_flows(&p.filter, None, None, limit(p.limit, 50, 500), false)?
+            .flows
+            .iter()
+            .map(|f| f.id)
+            .collect(),
+    };
+    if ids.is_empty() {
+        return Err(ToolError("no flows to export".into()));
+    }
+    let har = ctx
+        .engine
+        .har_json(LIVE_STORE, &FlowSelection::Ids { ids: ids.clone() })?;
+    if har.len() > HAR_MAX {
+        return Err(ToolError(format!(
+            "the HAR is {} KB, over the {} KB limit: export fewer flows (ids or a tighter filter)",
+            har.len() / 1024,
+            HAR_MAX / 1024
+        )));
+    }
+    let har: Value = serde_json::from_str(&har)?;
+    Ok(json!({ "flows": ids.len(), "har": har }))
+}
+
 // ---- Write tools ----
+
+/// Sends `spec` as this agent and describes the new flow.
+async fn send(ctx: &Ctx<'_>, spec: RequestSpec, apply_rules: bool, wait: bool) -> ToolResult {
+    let opts = SendOpts {
+        apply_rules,
+        wait,
+        origin: SendOrigin::Agent {
+            client: ctx.client.to_owned(),
+        },
+    };
+    let id = ctx.engine.send(spec, opts).await?;
+    let flow = ctx.engine.get_flow(id).map(|f| brief(&f));
+    let error = ctx.engine.flow_detail(id).ok().flatten().and_then(|d| d.error);
+    Ok(json!({ "id": id, "flow": flow, "error": error }))
+}
+
+async fn replay_flow(ctx: &Ctx<'_>, p: ReplayFlow) -> ToolResult {
+    let Some(edits) = p.modify else {
+        let opts = SendOpts {
+            apply_rules: p.apply_rules,
+            wait: p.wait,
+            origin: SendOrigin::Agent {
+                client: ctx.client.to_owned(),
+            },
+        };
+        let id = ctx.engine.replay(LIVE_STORE, p.id, opts).await?;
+        let flow = ctx.engine.get_flow(id).map(|f| brief(&f));
+        let error = ctx.engine.flow_detail(id).ok().flatten().and_then(|d| d.error);
+        return Ok(json!({ "id": id, "replayed": p.id, "flow": flow, "error": error }));
+    };
+    let mut spec = ctx.engine.request_spec(LIVE_STORE, p.id, true)?;
+    if let Some(method) = edits.method {
+        spec.method = method;
+    }
+    if let Some(url) = edits.url {
+        spec.url = url;
+    }
+    let drop: Vec<String> = edits
+        .remove_headers
+        .iter()
+        .chain(edits.set_headers.iter().map(|h| &h.name))
+        .map(|n| n.to_ascii_lowercase())
+        .collect();
+    spec.headers.retain(|h| !drop.contains(&h.name.to_ascii_lowercase()));
+    spec.headers.extend(edits.set_headers);
+    if let Some(body) = edits.body {
+        spec.body = Some(body);
+        spec.body_base64 = edits.body_base64;
+    }
+    let mut out = send(ctx, spec, p.apply_rules, p.wait).await?;
+    out["replayed"] = json!(p.id);
+    Ok(out)
+}
 
 fn agent_origin(ctx: &Ctx<'_>) -> RuleOrigin {
     RuleOrigin::Agent {

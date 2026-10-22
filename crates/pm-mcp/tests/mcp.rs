@@ -276,6 +276,59 @@ async fn agents_mock_endpoints_with_tagged_rules() {
 }
 
 #[tokio::test]
+async fn agents_replay_send_and_export() {
+    let h = Harness::start().await;
+    let upstream = Upstream::start().await;
+    let (status, _) = client::get(h.proxy, &upstream.url("/json")).await;
+    assert_eq!(status, 200);
+    h.engine.flush();
+    let (client, _) = h.client().await;
+    let id = ok(&client, "list_flows", json!({ "filter": "path:/json" })).await["flows"][0]["id"]
+        .as_u64()
+        .unwrap();
+
+    let replay = ok(&client, "replay_flow", json!({ "id": id })).await;
+    assert_eq!(replay["flow"]["status"], 200);
+    assert_eq!(replay["flow"]["url"], upstream.url("/json"));
+
+    // Modified: another path, a body; /echo sends the body back.
+    let edited = ok(
+        &client,
+        "replay_flow",
+        json!({ "id": id, "modify": { "method": "POST", "url": upstream.url("/echo"), "body": "hello agent",
+                "set_headers": [{ "name": "content-type", "value": "text/plain" }] } }),
+    )
+    .await;
+    let echo = edited["id"].as_u64().unwrap();
+    let body = ok(&client, "get_flow_body", json!({ "id": echo, "format": "text" })).await;
+    assert_eq!(body["body"], "hello agent");
+
+    let sent = ok(
+        &client,
+        "send_request",
+        json!({ "request": { "method": "GET", "url": upstream.url("/status/418") } }),
+    )
+    .await;
+    assert_eq!(sent["flow"]["status"], 418);
+    let summary = h.engine.get_flow(sent["id"].as_u64().unwrap() as u32).unwrap();
+    assert_eq!(summary.sent_by, Some(pm_model::SentBy::Agent));
+
+    let curl = ok(&client, "export_curl", json!({ "id": echo })).await;
+    let command = curl["command"].as_str().unwrap();
+    assert!(command.starts_with("curl") && command.contains("/echo"), "{command}");
+
+    let har = ok(&client, "export_har", json!({ "filter": "status:2xx" })).await;
+    assert_eq!(har["har"]["log"]["version"], "1.2");
+    assert_eq!(
+        har["har"]["log"]["entries"].as_array().unwrap().len(),
+        har["flows"].as_u64().unwrap() as usize
+    );
+
+    client.cancel().await.unwrap();
+    h.stop().await;
+}
+
+#[tokio::test]
 async fn read_only_mode_changes_the_tool_list_live() {
     let h = Harness::start().await;
     let (client, mut events) = h.client().await;
