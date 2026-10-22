@@ -34,7 +34,7 @@ export const commands = {
 	setRecording: (on: boolean) => __TAURI_INVOKE<ProxyStatus_Serialize>("set_recording", { on }),
 	getProxyStatus: () => __TAURI_INVOKE<ProxyStatus_Serialize>("get_proxy_status"),
 	getCaInfo: () => __TAURI_INVOKE<CaInfo>("get_ca_info"),
-	regenerateCa: () => typedError<CaInfo, string>(__TAURI_INVOKE("regenerate_ca")),
+	regenerateCa: (removeOldTrust: boolean) => typedError<CaInfo, string>(__TAURI_INVOKE("regenerate_ca", { removeOldTrust })),
 	getSslSettings: () => __TAURI_INVOKE<SslSettings_Serialize>("get_ssl_settings"),
 	setSslSettings: (settings: SslSettings_Deserialize) => typedError<SslSettings_Serialize, string>(__TAURI_INVOKE("set_ssl_settings", { settings })),
 	addSslBypass: (host: string) => typedError<SslSettings_Serialize, string>(__TAURI_INVOKE("add_ssl_bypass", { host })),
@@ -138,6 +138,22 @@ export const commands = {
 	 *  [`save_session`].
 	 */
 	exportHar: (store: number, selection: FlowSelection, path: string | null, fileName: string, onProgress: Channel<SaveProgress_Deserialize>) => typedError<string | null, string>(__TAURI_INVOKE("export_har", { store, selection, path, fileName, onProgress })),
+	getStorageSettings: () => __TAURI_INVOKE<StorageSettings_Serialize>("get_storage_settings"),
+	/**  Saves new limits; flows past them are evicted straight away. */
+	setStorageSettings: (settings: StorageSettings_Deserialize) => typedError<StorageSettings_Serialize, string>(__TAURI_INVOKE("set_storage_settings", { settings })),
+	getStorageStatus: () => __TAURI_INVOKE<StorageStatus_Serialize>("get_storage_status"),
+	/**  Streams the storage status (flows, disk use, write errors) as it changes. */
+	subscribeStorage: (onStatus: Channel<StorageStatus_Deserialize>) => __TAURI_INVOKE<void>("subscribe_storage", { onStatus }),
+	/**  Pins or unpins live flows; pinned flows are never evicted. */
+	pinFlows: (ids: number[], pinned: boolean) => __TAURI_INVOKE<void>("pin_flows", { ids, pinned }),
+	getProxySettings: () => __TAURI_INVOKE<ProxySettings_Serialize>("get_proxy_settings"),
+	/**
+	 *  Saves the port and upstream pool settings, restarting the listener if
+	 *  they changed. A port that can't be bound is an error; the old one stays.
+	 */
+	setProxySettings: (settings: ProxySettings_Deserialize) => typedError<ProxySettings_Serialize, string>(__TAURI_INVOKE("set_proxy_settings", { settings })),
+	/**  Makes the sidebar's Apps and Domains count the tab the UI shows. */
+	setSidebarStore: (store: number) => __TAURI_INVOKE<void>("set_sidebar_store", { store }),
 };
 
 /* Types */
@@ -624,6 +640,11 @@ export type DeviceClient_Deserialize = {
 	last_seen_ms?: number | null,
 	/**  Connections currently held while the decision is pending. */
 	waiting: number,
+	/**
+	 *  When the newest held connection gives up and is refused, epoch ms
+	 *  (for the prompt's countdown).
+	 */
+	held_until_ms?: number | null,
 };
 
 /**  A LAN client: one IP address, with its nickname and what it sent. */
@@ -645,6 +666,11 @@ export type DeviceClient_Serialize = {
 	last_seen_ms: number | null,
 	/**  Connections currently held while the decision is pending. */
 	waiting: number,
+	/**
+	 *  When the newest held connection gives up and is refused, epoch ms
+	 *  (for the prompt's countdown).
+	 */
+	held_until_ms: number | null,
 };
 
 /**  What the user decided about a LAN client. */
@@ -1276,6 +1302,42 @@ export type PresetKind = "map_local" | "breakpoint" | "rewrite" | "map_remote" |
 /**  Protocol chip in the filter row. */
 export type ProtocolFilter = "all" | "http" | "https" | "websocket";
 
+/**
+ *  The proxy listener and its upstream client. A port or pool change
+ *  restarts the listener.
+ */
+export type ProxySettings = ProxySettings_Serialize | ProxySettings_Deserialize;
+
+/**
+ *  The proxy listener and its upstream client. A port or pool change
+ *  restarts the listener.
+ */
+export type ProxySettings_Deserialize = {
+	/**  The port tried first; the next nine are fallbacks. */
+	port?: number,
+	/**  Seconds an idle upstream connection is kept for reuse (plain HTTP). */
+	pool_idle_secs?: number,
+	/**  Idle upstream connections kept per host (plain HTTP). */
+	pool_max_idle_per_host?: number,
+	/**  Seconds to wait for an upstream TCP connection. */
+	connect_timeout_secs?: number,
+};
+
+/**
+ *  The proxy listener and its upstream client. A port or pool change
+ *  restarts the listener.
+ */
+export type ProxySettings_Serialize = {
+	/**  The port tried first; the next nine are fallbacks. */
+	port: number,
+	/**  Seconds an idle upstream connection is kept for reuse (plain HTTP). */
+	pool_idle_secs: number,
+	/**  Idle upstream connections kept per host (plain HTTP). */
+	pool_max_idle_per_host: number,
+	/**  Seconds to wait for an upstream TCP connection. */
+	connect_timeout_secs: number,
+};
+
 /**  State of the proxy listener, for the toolbar. */
 export type ProxyStatus = ProxyStatus_Serialize | ProxyStatus_Deserialize;
 
@@ -1753,6 +1815,81 @@ export type SslSettings_Serialize = {
 export type StatusRange = {
 	from: number,
 	to: number,
+};
+
+/**
+ *  Limits on what the live capture keeps. Older flows are evicted (pinned
+ *  and in-flight ones excepted) once either limit is passed.
+ */
+export type StorageSettings = StorageSettings_Serialize | StorageSettings_Deserialize;
+
+/**
+ *  Limits on what the live capture keeps. Older flows are evicted (pinned
+ *  and in-flight ones excepted) once either limit is passed.
+ */
+export type StorageSettings_Deserialize = {
+	/**  Flows kept in the live capture; the oldest go first. 0 keeps all. */
+	max_flows?: number,
+	/**
+	 *  Disk used by bodies and details, in MB; the oldest flows go first.
+	 *  0 is unlimited.
+	 */
+	max_disk_mb?: number,
+	/**  WebSocket messages kept per connection; the oldest go first. */
+	max_ws_messages?: number,
+};
+
+/**
+ *  Limits on what the live capture keeps. Older flows are evicted (pinned
+ *  and in-flight ones excepted) once either limit is passed.
+ */
+export type StorageSettings_Serialize = {
+	/**  Flows kept in the live capture; the oldest go first. 0 keeps all. */
+	max_flows: number,
+	/**
+	 *  Disk used by bodies and details, in MB; the oldest flows go first.
+	 *  0 is unlimited.
+	 */
+	max_disk_mb: number,
+	/**  WebSocket messages kept per connection; the oldest go first. */
+	max_ws_messages: number,
+};
+
+/**  What the live capture holds now, for Settings › Storage and the footer. */
+export type StorageStatus = StorageStatus_Serialize | StorageStatus_Deserialize;
+
+/**  What the live capture holds now, for Settings › Storage and the footer. */
+export type StorageStatus_Deserialize = {
+	flows: number,
+	pinned: number,
+	/**  Bytes of segment files on disk. */
+	disk_bytes: number,
+	/**  Flows evicted by the limits since launch. */
+	evicted: number,
+	/**
+	 *  The last failed write to the segment files (a full disk, say):
+	 *  bodies are no longer recorded until writes succeed again.
+	 */
+	error?: string | null,
+	/**  Where the segment files live. */
+	dir: string,
+};
+
+/**  What the live capture holds now, for Settings › Storage and the footer. */
+export type StorageStatus_Serialize = {
+	flows: number,
+	pinned: number,
+	/**  Bytes of segment files on disk. */
+	disk_bytes: number,
+	/**  Flows evicted by the limits since launch. */
+	evicted: number,
+	/**
+	 *  The last failed write to the segment files (a full disk, say):
+	 *  bodies are no longer recorded until writes succeed again.
+	 */
+	error: string | null,
+	/**  Where the segment files live. */
+	dir: string,
 };
 
 /**  Whether the OS proxy points at Proxymate. */
