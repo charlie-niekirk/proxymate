@@ -166,29 +166,42 @@ impl DetailStore {
         }
         let mut keep = HashSet::new();
         for &id in kept {
-            self.segments_used(id, &mut keep);
+            // Without knowing where a kept flow's data is, deleting anything
+            // could lose it: keep every file this time.
+            if !self.segments_used(id, &mut keep) {
+                return 0;
+            }
         }
         self.segments.drop_through(through, &keep)
     }
 
-    /// Adds the segment files a flow's detail, bodies and messages live in.
-    fn segments_used(&self, id: FlowId, out: &mut HashSet<u32>) {
+    /// Adds the segment files a flow's detail, bodies and messages live
+    /// in. False if its detail couldn't be read.
+    fn segments_used(&self, id: FlowId, out: &mut HashSet<u32>) -> bool {
         if let Some(extent) = self.persisted.lock().get(&id) {
             out.insert(extent.seg);
         }
         let live = self.live.lock().get(&id).cloned();
-        match live {
-            Some(flow) => flow.segments_used(out),
-            None => {
-                if let Ok(Some(stored)) = self.get(id) {
+        let read = match live {
+            Some(flow) => {
+                flow.segments_used(out);
+                true
+            }
+            None => match self.get(id) {
+                Ok(Some(stored)) => {
                     stored.request_body.segments_used(out);
                     stored.response_body.segments_used(out);
+                    true
                 }
-            }
-        }
+                // A flow with no detail (synthetic) has no data to keep.
+                Ok(None) => true,
+                Err(_) => false,
+            },
+        };
         if let Some(log) = self.ws(id) {
             log.segments_used(out);
         }
+        read
     }
 
     /// Forgets every flow below `base` and deletes the segment files.

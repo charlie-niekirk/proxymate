@@ -94,6 +94,9 @@ pub struct Engine {
     pub(crate) docs: Documents,
     /// `Engine::send`'s client, made on first use.
     pub(crate) sender: OnceLock<proxy::Sender>,
+    /// Held while the listener is moved (port change, LAN access), so two
+    /// moves never both bind.
+    restart: tokio::sync::Mutex<()>,
 }
 
 #[derive(Default)]
@@ -164,6 +167,7 @@ impl Engine {
             settings: app_settings,
             docs: Documents::default(),
             sender: OnceLock::new(),
+            restart: tokio::sync::Mutex::new(()),
         });
         let weak = Arc::downgrade(&engine);
         std::thread::Builder::new()
@@ -465,6 +469,10 @@ impl Engine {
         }
     }
 
+    pub(crate) fn restart_lock(&self) -> &tokio::sync::Mutex<()> {
+        &self.restart
+    }
+
     /// Stops the listener and starts it again with the current settings,
     /// on the same interfaces: on the configured port if `new_port`, else
     /// on the port it had.
@@ -484,9 +492,10 @@ impl Engine {
     /// Moves the listener to `ip` on the same port (LAN access). If that
     /// port can't be bound there, the old listener comes back.
     pub(crate) async fn rebind_proxy(self: &Arc<Self>, ip: IpAddr) -> Result<SocketAddr, Error> {
+        let _restart = self.restart.lock().await;
         let old = std::mem::take(&mut *self.proxy.lock());
         let ProxyState::Listening(handle) = old else {
-            let ports = ProxyConfig::default().ports;
+            let ports = self.configured_proxy().ports;
             return self.start_proxy(ProxyConfig { ip, ports }).await;
         };
         let previous = handle.addr;

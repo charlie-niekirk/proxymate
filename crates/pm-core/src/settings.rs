@@ -204,17 +204,37 @@ impl Engine {
     /// Saves new proxy settings. A port or upstream pool change restarts
     /// the listener (on the same interfaces); if the new port can't be
     /// bound, the error says why and the old listener stays.
+    /// The system proxy and the emulators Proxymate pointed at itself
+    /// follow the new port.
     pub async fn set_proxy_settings(self: &Arc<Self>, settings: ProxySettings) -> Result<ProxySettings, Error> {
         check_proxy(&settings)?;
+        let _restart = self.restart_lock().lock().await;
         let old = self.proxy_settings();
-        if old == settings {
+        if old == settings && self.proxy_addr().is_some() {
             return Ok(settings);
         }
+        let new_port = old.port != settings.port;
+        let engine = self.clone();
+        // Read before the move: afterwards it no longer points at us.
+        let system_proxy = new_port
+            && tokio::task::spawn_blocking(move || engine.system_proxy_status().enabled)
+                .await
+                .unwrap_or(false);
         *self.settings.proxy.write() = settings;
-        if let Err(err) = self.restart_proxy(old.port != settings.port).await {
+        if let Err(err) = self.restart_proxy(new_port).await {
             *self.settings.proxy.write() = old;
             let _ = self.restart_proxy(true).await;
             return Err(err);
+        }
+        if system_proxy {
+            let engine = self.clone();
+            let status = tokio::task::spawn_blocking(move || engine.set_system_proxy(true)).await;
+            if let Ok(Some(err)) = status.map(|s| s.error) {
+                eprintln!("proxymate: the system proxy didn't follow the new port: {err}");
+            }
+        }
+        if new_port {
+            self.repoint_android_proxies().await;
         }
         self.settings
             .db

@@ -115,6 +115,13 @@ impl Store {
         self.pos_of(id).map(|pos| &self.flows[pos])
     }
 
+    /// The flows with ids in `low..high`, oldest first.
+    pub fn flows_in(&self, low: FlowId, high: FlowId) -> &[FlowSummary] {
+        let from = self.flows.partition_point(|f| f.id < low);
+        let to = self.flows.partition_point(|f| f.id < high).max(from);
+        &self.flows[from..to]
+    }
+
     /// Flows evicted by the limits so far.
     pub fn evicted(&self) -> u64 {
         self.evicted
@@ -175,6 +182,16 @@ impl Store {
                 FlowEvent::Insert(batch) => batch.into_iter().for_each(|f| self.push(f)),
                 FlowEvent::Update(batch) => {
                     for flow in batch {
+                        let pinned = flow.pinned;
+                        if let Some(old) = self.get(flow.id).map(|f| f.pinned)
+                            && old != pinned
+                        {
+                            self.pinned = if pinned {
+                                self.pinned + 1
+                            } else {
+                                self.pinned.saturating_sub(1)
+                            };
+                        }
                         self.modify_identity(flow.id, first_new, |f| *f = flow);
                     }
                 }
@@ -232,7 +249,11 @@ impl Store {
                     for id in ids {
                         if self.get(id).is_some_and(|f| f.pinned != pinned) {
                             self.modify(id, first_new, |f| f.pinned = pinned);
-                            self.pinned = if pinned { self.pinned + 1 } else { self.pinned - 1 };
+                            self.pinned = if pinned {
+                                self.pinned + 1
+                            } else {
+                                self.pinned.saturating_sub(1)
+                            };
                         }
                     }
                 }
@@ -284,6 +305,7 @@ impl Store {
         if budget == 0 && through.is_none_or(|t| t < self.first_id()) {
             return None;
         }
+        let by_count = budget > 0;
         let mut evicted = Vec::new();
         let sidebar = &mut self.sidebar;
         self.flows.retain(|f| {
@@ -297,15 +319,35 @@ impl Store {
             evicted.push(f.id);
             false
         });
-        let Some(&through) = evicted.last() else {
-            self.evict_retry_at = len + max_flows / EVICT_SLACK_DIVISOR;
-            return None;
+        // The disk cap asks to go through an id even when every flow up to
+        // it is kept (a long WebSocket): segments only they don't use can
+        // still go.
+        if by_count {
+            // Everything old is pinned or in flight: don't rescan every batch.
+            self.evict_retry_at = if evicted.is_empty() {
+                len + max_flows / EVICT_SLACK_DIVISOR
+            } else {
+                0
+            };
+        }
+        let through = match (evicted.last(), through) {
+            (Some(&last), Some(t)) => last.max(t),
+            (Some(&last), None) => last,
+            (None, Some(t)) => t,
+            (None, None) => return None,
         };
-        self.evict_retry_at = 0;
-        let kept = self.flows.iter().map(|f| f.id).take_while(|&id| id < through).collect();
+        let kept = self
+            .flows
+            .iter()
+            .map(|f| f.id)
+            .take_while(|&id| id <= through)
+            .collect();
         self.evicted += evicted.len() as u64;
-        for view in self.views.values_mut() {
-            view.rebuild(&self.flows);
+        if !evicted.is_empty() {
+            for view in self.views.values_mut() {
+                view.forget_deep(&evicted);
+                view.rebuild(&self.flows);
+            }
         }
         Some(Eviction { evicted, kept, through })
     }
@@ -616,6 +658,36 @@ mod tests {
         let delta = store.take_delta(view).unwrap();
         assert_eq!((delta.len, delta.appended), (1, 1));
         assert_eq!(store.get(0).unwrap().status, Some(200));
+    }
+
+    #[test]
+    fn eviction_keeps_pinned_and_active_flows_and_reports_disk_only_passes() {
+        let mut store = store_with(10);
+        let mut pinned = store.get(1).unwrap().clone();
+        pinned.pinned = true;
+        let mut active = store.get(2).unwrap().clone();
+        active.state = FlowState::Active;
+        store.update([pinned, active]);
+        assert_eq!(store.pinned(), 1);
+
+        // The disk cap asks for everything through id 2; only 0 can go.
+        let eviction = store.evict(0, Some(2)).unwrap();
+        assert_eq!(
+            (eviction.evicted, eviction.kept, eviction.through),
+            (vec![0], vec![1, 2], 2)
+        );
+        assert_eq!(store.first_id(), 1);
+        assert_eq!(store.get(5).map(|f| f.id), Some(5));
+        assert_eq!(
+            store.flows_in(2, 5).iter().map(|f| f.id).collect::<Vec<_>>(),
+            vec![2, 3, 4]
+        );
+
+        // Nothing left to evict through 2: segments may still be freed.
+        let again = store.evict(0, Some(2)).unwrap();
+        assert!(again.evicted.is_empty());
+        assert_eq!(again.kept, vec![1, 2]);
+        assert_eq!(store.evict(0, None), None);
     }
 
     #[test]

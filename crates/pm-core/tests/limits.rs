@@ -222,6 +222,15 @@ fn the_disk_cap_evicts_by_bytes() {
 
 /// Waits for a view's deep search to have checked all `total` candidates.
 fn settled(rx: &mpsc::Receiver<ViewDelta>, total: u32) -> ViewDelta {
+    settled_where(rx, total, |_| true)
+}
+
+/// Like [`settled`], ignoring deltas whose progress fails `this_search`.
+fn settled_where(
+    rx: &mpsc::Receiver<ViewDelta>,
+    total: u32,
+    this_search: impl Fn(&pm_model::DeepProgress) -> bool,
+) -> ViewDelta {
     let deadline = Instant::now() + Duration::from_secs(20);
     loop {
         let delta = rx
@@ -229,7 +238,7 @@ fn settled(rx: &mpsc::Receiver<ViewDelta>, total: u32) -> ViewDelta {
             .expect("deep search progress");
         if delta
             .deep
-            .is_some_and(|d| !d.running && d.checked == total && d.total == total)
+            .is_some_and(|d| this_search(&d) && !d.running && d.checked == total && d.total == total)
         {
             return delta;
         }
@@ -322,7 +331,9 @@ fn deep_search_streams_header_and_body_matches_into_the_view() {
         )
         .unwrap();
     assert_eq!(info.len, 0, "rows wait for the deep search");
-    let done = settled(&rx, 3002);
+    // The first search also ends at 3002 checked (31 matches): skip its
+    // deltas still in flight.
+    let done = settled_where(&rx, 3002, |d| d.matched <= 6);
     assert_eq!(done.deep.unwrap().matched, 6);
     assert_eq!(engine.get_rows(view, 0, 100).unwrap().len, 6);
 
@@ -334,5 +345,32 @@ fn deep_search_streams_header_and_body_matches_into_the_view() {
     // Dropping the filter's deep terms stops the search.
     let info = engine.set_filter(view, FilterSpec::default()).unwrap();
     assert_eq!(info.deep, None);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_flow_that_matches_only_after_it_finished_is_still_searched() {
+    let dir = temp_dir();
+    let engine = engine(&dir);
+    let mut generator = Generator::new(5);
+    let info = engine.create_view(
+        FilterSpec {
+            text: "app:latecomer body:needle".into(),
+            ..Default::default()
+        },
+        SortSpec::default(),
+    );
+    let id = record(&engine, &mut generator, 0, b"a needle", vec![]);
+    engine.flush();
+    // Its client resolves after it finished (a fast request), as
+    // `ClientResolved` can arrive late.
+    let mut flow = engine.get_flow(id).unwrap();
+    flow.client = Some("latecomer".into());
+    engine.update_flows(vec![flow]);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while engine.get_rows(info.view, 0, 10).unwrap().len != 1 {
+        assert!(Instant::now() < deadline, "the flow never joined the deep view");
+        std::thread::sleep(Duration::from_millis(20));
+    }
     let _ = std::fs::remove_dir_all(dir);
 }

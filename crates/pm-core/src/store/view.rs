@@ -180,7 +180,8 @@ impl View {
             return;
         };
         deep.in_flight = deep.in_flight.saturating_sub(checked);
-        deep.checked += checked;
+        // A batch handed out before a clear reports after it.
+        deep.checked = (deep.checked + checked).min(deep.total);
         deep.dirty = true;
         let mut in_order = true;
         let mut added = 0u32;
@@ -213,6 +214,15 @@ impl View {
             deep.matched.clear();
             deep.checked = 0;
             deep.total = 0;
+            deep.in_flight = 0;
+            deep.dirty = true;
+        }
+    }
+
+    /// Forgets evicted flows' deep matches (`evicted` is sorted).
+    pub fn forget_deep(&mut self, evicted: &[FlowId]) {
+        if let Some(deep) = &mut self.deep {
+            deep.matched.retain(|id| evicted.binary_search(id).is_err());
             deep.dirty = true;
         }
     }
@@ -310,10 +320,12 @@ impl View {
 
     /// Called after the flow at `pos` was replaced by `new`.
     pub fn on_update(&mut self, pos: Pos, old: &FlowSummary, new: &FlowSummary) {
+        // A flow becomes a candidate once it is finished and passes the rest
+        // of the filter: on finishing, or later (its client resolved, a pin).
         if let Some(deep) = &mut self.deep
-            && !is_finished(old)
             && is_finished(new)
             && self.filter.matches(new)
+            && !(is_finished(old) && self.filter.matches(old))
         {
             deep.queue(new.id);
         }

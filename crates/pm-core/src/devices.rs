@@ -725,6 +725,16 @@ impl Engine {
         .map_err(|e| Error::Device(e.to_string()))?
     }
 
+    /// Points the emulators we set up at the listener's new port.
+    pub(crate) async fn repoint_android_proxies(self: &Arc<Self>) {
+        let serials: Vec<String> = self.platform.devices.emulator_proxies.lock().iter().cloned().collect();
+        for serial in serials {
+            if let Err(err) = self.set_android_proxy(&serial, true).await {
+                eprintln!("proxymate: {serial} didn't follow the new port: {err}");
+            }
+        }
+    }
+
     /// Clears the proxy of every emulator we pointed at us. Blocking; for
     /// quit and signal handlers.
     pub fn restore_android_proxies(&self) {

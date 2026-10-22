@@ -4,8 +4,10 @@ import { defineConfig, devices } from "@playwright/test";
  * Viewer snapshots and preview-safety checks against the UI in a browser,
  * with the mock backend serving the zoo fixtures (`?zoo`). WebKit is the
  * engine the app runs on (WKWebView, WebKitGTK); Chromium also runs the
- * safety checks. Snapshot baselines are per platform; CI on Linux sets
- * PM_E2E_IGNORE_SNAPSHOTS until Linux baselines are committed.
+ * safety checks. Snapshot baselines are per platform: macOS ones are made
+ * locally, Linux ones in CI's Playwright Docker image (a missing baseline
+ * is written there and comes back in the playwright-report artifact).
+ * PM_E2E_IGNORE_SNAPSHOTS turns the pixel diffs off.
  */
 const port = Number(process.env.PM_E2E_PORT ?? 1425);
 
