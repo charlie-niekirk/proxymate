@@ -27,7 +27,6 @@ export function jsonNumber(raw: string): number | JsonNumber {
   // Up to 15 digits, no fraction or exponent: the double is exact and prints back the same.
   const digits = raw.charCodeAt(0) === 45 ? raw.length - 1 : raw.length;
   if (digits <= 15 && raw !== "-0" && /^-?\d+$/.test(raw)) return Number(raw);
-  // eslint-disable-next-line no-new-wrappers -- deliberate, see JsonNumber.
   return new String(raw) as JsonNumber;
 }
 

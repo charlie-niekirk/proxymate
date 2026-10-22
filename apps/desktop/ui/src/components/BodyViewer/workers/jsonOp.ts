@@ -7,7 +7,7 @@ import { parseLossless } from "@/lib/body/losslessJson";
  */
 export function jsonOp(text: string, op: "parse" | "pretty"): unknown {
   if (op === "parse") return parseLossless(text);
-  const body = text.replace(/^﻿/, "");
+  const body = text.replace(/^\uFEFF/, "");
   try {
     // The native parser is the fastest validator.
     JSON.parse(body);
