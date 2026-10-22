@@ -114,3 +114,24 @@ test("pinning a flow lists it under Pinned", async ({ page }) => {
   await expect(page.getByTestId("flow-search")).toHaveValue("is:pinned");
   await expect(page.getByTestId("row-count")).toContainText("1 of 100,000 rows");
 });
+
+test("columns resize from their edge and move by dragging the header", async ({ page }) => {
+  await page.goto("/?theme=dark");
+  const header = page.getByTestId("flow-table-header");
+  const client = header.locator('[data-column="client"]');
+  const before = (await client.boundingBox())!.width;
+  const handle = (await page.getByTestId("resize-client").boundingBox())!;
+  await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(handle.x + 80, handle.y + handle.height / 2, { steps: 5 });
+  await page.mouse.up();
+  expect(Math.round((await client.boundingBox())!.width - before)).toBeGreaterThanOrEqual(70);
+
+  await header.locator('[data-column="method"]').dragTo(header.locator('[data-column="url"]'));
+  const order = await header.locator("[data-column]").evaluateAll((els) => els.map((e) => e.getAttribute("data-column")));
+  expect(order.indexOf("method")).toBeLessThan(order.indexOf("url"));
+
+  await page.reload();
+  const widthAfter = (await page.getByTestId("flow-table-header").locator('[data-column="client"]').boundingBox())!.width;
+  expect(Math.round(widthAfter - before)).toBeGreaterThanOrEqual(70);
+});
