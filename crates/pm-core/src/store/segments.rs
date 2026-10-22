@@ -2,16 +2,24 @@
 //! large bodies and encoded flow details. Nothing here is durable: the
 //! directory is removed on clear, on shutdown and when the store is dropped,
 //! and a later run sweeps directories whose owner died.
+//!
+//! Each segment remembers the newest flow that wrote to it. Flow ids grow
+//! with time and only the newest segment is written, so once every flow up
+//! to that id has been evicted (bar the few kept, whose segments the caller
+//! names), the whole file can go.
 
+use std::collections::{BTreeMap, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use parking_lot::Mutex;
+use pm_model::FlowId;
 use serde::{Deserialize, Serialize};
 
-/// A segment is closed and a new one started past this size.
-const SEGMENT_SIZE: u64 = 256 * 1024 * 1024;
+/// A segment is closed and a new one started past this size. Small enough
+/// that eviction frees disk in useful steps.
+const SEGMENT_SIZE: u64 = 64 * 1024 * 1024;
 const LOCK_FILE: &str = "lock";
 
 /// A byte range in one segment file.
@@ -36,6 +44,19 @@ struct Inner {
     /// Numbers keep increasing across clears, so a stale extent from a
     /// cleared flow can never alias new data.
     next_seg: u32,
+    /// Every segment on disk, the current one included.
+    segs: BTreeMap<u32, SegInfo>,
+    /// Bytes in `segs`.
+    bytes: u64,
+    /// The last write failure, until a write succeeds again.
+    error: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SegInfo {
+    len: u64,
+    /// The newest flow that wrote to the segment.
+    max_owner: FlowId,
 }
 
 struct Writer {
@@ -56,11 +77,18 @@ impl SegmentStore {
         }
     }
 
-    pub fn append(&self, bytes: &[u8]) -> io::Result<Extent> {
+    /// Appends `bytes` on behalf of flow `owner`.
+    pub fn append(&self, owner: FlowId, bytes: &[u8]) -> io::Result<Extent> {
         let len = u32::try_from(bytes.len()).map_err(|_| io::Error::other("blob larger than 4 GiB"))?;
         let mut inner = self.inner.lock();
+        let result = self.write(&mut inner, owner, bytes, len);
+        inner.error = result.as_ref().err().map(describe_write_error);
+        result
+    }
+
+    fn write(&self, inner: &mut Inner, owner: FlowId, bytes: &[u8], len: u32) -> io::Result<Extent> {
         if inner.current.as_ref().is_none_or(|w| w.len >= SEGMENT_SIZE) {
-            self.rotate(&mut inner)?;
+            self.rotate(inner)?;
         }
         let writer = inner.current.as_mut().expect("rotate opened a segment");
         let extent = Extent {
@@ -70,7 +98,66 @@ impl SegmentStore {
         };
         writer.file.write_all(bytes)?;
         writer.len += bytes.len() as u64;
+        let info = inner.segs.entry(extent.seg).or_insert(SegInfo { len: 0, max_owner: 0 });
+        info.len += bytes.len() as u64;
+        info.max_owner = info.max_owner.max(owner);
+        inner.bytes += bytes.len() as u64;
         Ok(extent)
+    }
+
+    /// Bytes of segment files on disk.
+    pub fn disk_bytes(&self) -> u64 {
+        self.inner.lock().bytes
+    }
+
+    /// Why the last write failed, if the next hasn't succeeded yet.
+    pub fn error(&self) -> Option<String> {
+        self.inner.lock().error.clone()
+    }
+
+    pub fn dir_path(&self) -> &Path {
+        &self.dir
+    }
+
+    /// Deletes the finished segments only flows up to `through` wrote to,
+    /// except `keep` (segments flows that outlive eviction still use).
+    /// Returns the bytes freed.
+    pub fn drop_through(&self, through: FlowId, keep: &HashSet<u32>) -> u64 {
+        let mut inner = self.inner.lock();
+        let current = inner.current.as_ref().map(|w| w.seg);
+        let doomed: Vec<u32> = inner
+            .segs
+            .iter()
+            .filter(|(seg, info)| Some(**seg) != current && info.max_owner <= through && !keep.contains(seg))
+            .map(|(seg, _)| *seg)
+            .collect();
+        let mut freed = 0;
+        for seg in doomed {
+            if let Some(info) = inner.segs.remove(&seg) {
+                freed += info.len;
+            }
+            let _ = fs::remove_file(self.segment_path(seg));
+        }
+        inner.bytes -= freed;
+        freed
+    }
+
+    /// The flow id through which eviction must go so that deleting the
+    /// oldest segments brings the disk use to `target` bytes or less
+    /// (`None` if it already is, or only the current segment is left).
+    pub fn owner_to_free(&self, target: u64) -> Option<FlowId> {
+        let inner = self.inner.lock();
+        let current = inner.current.as_ref().map(|w| w.seg);
+        let mut bytes = inner.bytes;
+        let mut through = None;
+        for (seg, info) in &inner.segs {
+            if bytes <= target || Some(*seg) == current {
+                break;
+            }
+            bytes -= info.len;
+            through = Some(through.map_or(info.max_owner, |t: FlowId| t.max(info.max_owner)));
+        }
+        through
     }
 
     /// Appends the bytes of `extents` to `out`.
@@ -108,9 +195,11 @@ impl SegmentStore {
     pub fn clear(&self) {
         let mut inner = self.inner.lock();
         inner.current = None;
-        for seg in 0..inner.next_seg {
+        for seg in std::mem::take(&mut inner.segs).into_keys() {
             let _ = fs::remove_file(self.segment_path(seg));
         }
+        inner.bytes = 0;
+        inner.error = None;
     }
 
     /// Deletes the whole directory.
@@ -118,6 +207,8 @@ impl SegmentStore {
         let mut inner = self.inner.lock();
         inner.current = None;
         inner.lock = None;
+        inner.segs.clear();
+        inner.bytes = 0;
         let _ = fs::remove_dir_all(&self.dir);
     }
 
@@ -143,6 +234,7 @@ impl SegmentStore {
             .write(true)
             .open(self.segment_path(seg))?;
         inner.next_seg += 1;
+        inner.segs.insert(seg, SegInfo { len: 0, max_owner: 0 });
         inner.current = Some(Writer {
             seg,
             file: BufWriter::with_capacity(64 * 1024, file),
@@ -159,6 +251,19 @@ impl SegmentStore {
 impl Drop for SegmentStore {
     fn drop(&mut self) {
         self.remove_all();
+    }
+}
+
+/// A write failure as the user should read it: a full disk says so.
+fn describe_write_error(err: &io::Error) -> String {
+    match err.kind() {
+        io::ErrorKind::StorageFull | io::ErrorKind::QuotaExceeded => {
+            "the disk is full: free some space, or lower the disk limit in Settings › Storage".into()
+        }
+        io::ErrorKind::ReadOnlyFilesystem | io::ErrorKind::PermissionDenied => {
+            format!("can't write to the capture directory: {err}")
+        }
+        _ => format!("can't write captured data: {err}"),
     }
 }
 
@@ -196,8 +301,8 @@ mod tests {
     fn appends_read_back_across_extents() {
         let root = temp_root();
         let store = SegmentStore::new(&root);
-        let a = store.append(b"hello ").unwrap();
-        let b = store.append(b"world").unwrap();
+        let a = store.append(0, b"hello ").unwrap();
+        let b = store.append(1, b"world").unwrap();
         assert_eq!(b.offset, 6);
         let mut out = Vec::new();
         store.read_into(&[a, b], &mut out).unwrap();
@@ -210,11 +315,12 @@ mod tests {
     fn clear_and_drop_remove_files() {
         let root = temp_root();
         let store = SegmentStore::new(&root);
-        let a = store.append(b"x").unwrap();
+        let a = store.append(0, b"x").unwrap();
         let dir = store.dir().to_owned();
         store.clear();
         assert!(store.read(a).is_err());
-        let b = store.append(b"y").unwrap();
+        assert_eq!(store.disk_bytes(), 0);
+        let b = store.append(1, b"y").unwrap();
         assert_ne!(a.seg, b.seg);
         drop(store);
         assert!(!dir.exists());
@@ -225,7 +331,7 @@ mod tests {
     fn orphaned_directories_are_swept_but_live_ones_kept() {
         let root = temp_root();
         let live = SegmentStore::new(&root);
-        live.append(b"keep").unwrap();
+        live.append(0, b"keep").unwrap();
         let orphan = root.join("live").join("orphan");
         fs::create_dir_all(&orphan).unwrap();
         File::create(orphan.join(LOCK_FILE)).unwrap();
@@ -233,6 +339,39 @@ mod tests {
         let _other = SegmentStore::new(&root);
         assert!(!orphan.exists());
         assert!(live.dir().exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn old_segments_are_dropped_once_their_flows_are_gone() {
+        let root = temp_root();
+        let store = SegmentStore::new(&root);
+        let chunk = vec![0u8; 1024 * 1024];
+        // Flows 0..64 fill segment 0; 64..128 segment 1; then segment 2.
+        let mut extents = Vec::new();
+        for id in 0..130u32 {
+            extents.push(store.append(id, &chunk).unwrap());
+        }
+        assert_eq!(extents[0].seg, 0);
+        assert_eq!(extents[64].seg, 1);
+        assert_eq!(extents[129].seg, 2);
+        let total = store.disk_bytes();
+        assert_eq!(total, 130 * 1024 * 1024);
+
+        // Freeing down to 70 MB means evicting through the newest owner of
+        // segment 0 (63), then segment 1 (127).
+        assert_eq!(store.owner_to_free(100 * 1024 * 1024), Some(63));
+        assert_eq!(store.owner_to_free(10 * 1024 * 1024), Some(127));
+
+        // Segment 0 is kept while a pinned flow still uses it.
+        assert_eq!(store.drop_through(100, &HashSet::from([0])), 0);
+        assert!(store.read(extents[0]).is_ok());
+        assert_eq!(store.drop_through(127, &HashSet::new()), 128 * 1024 * 1024);
+        assert!(store.read(extents[0]).is_err());
+        assert!(store.read(extents[129]).is_ok());
+        // The current segment is never dropped.
+        assert_eq!(store.drop_through(u32::MAX, &HashSet::new()), 0);
+        assert_eq!(store.disk_bytes(), 2 * 1024 * 1024);
         let _ = fs::remove_dir_all(root);
     }
 }

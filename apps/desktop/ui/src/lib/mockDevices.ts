@@ -55,6 +55,7 @@ export function createMockDevices(port: number, pendingIp: string | null = null)
             onboarding: false,
             last_seen_ms: null,
             waiting: 2,
+            held_until_ms: Date.now() + 30_000,
           },
         ]
       : [],
@@ -111,6 +112,7 @@ export function createMockDevices(port: number, pendingIp: string | null = null)
                 ...d,
                 decision: allow ? "allowed" : "denied",
                 waiting: 0,
+                held_until_ms: null,
                 nickname,
                 label: nickname ? `${nickname} (${ip})` : ip,
               }

@@ -33,3 +33,5 @@ export const simulatorKey = ["simulator"] as const;
 export const androidKey = ["android"] as const;
 export const mcpTokenKey = ["mcp-token"] as const;
 export const mcpAuditKey = ["mcp-audit"] as const;
+export const proxySettingsKey = ["proxy-settings"] as const;
+export const storageSettingsKey = ["storage-settings"] as const;

@@ -3,6 +3,7 @@ import { create } from "zustand";
 import type {
   ContentGroup,
   ContentKind,
+  DeepProgress,
   DocumentInfo,
   FilterSpec_Deserialize,
   ProtocolFilter,
@@ -12,6 +13,7 @@ import type {
 } from "@/bindings";
 import type { ViewerId } from "@/components/BodyViewer/registry";
 import type { Rule } from "@/lib/rules";
+import { usePrefs } from "@/store/prefs";
 
 export interface ViewStats {
   len: number;
@@ -25,8 +27,8 @@ export type ResponseTab = "Header" | "Body" | "Raw" | "TLS" | "Timing";
 /** Device Setup Wizard tabs. */
 export type DeviceTab = "simulator" | "iphone" | "android" | "emulator";
 
-/** Settings pages; more arrive with M10. */
-export type SettingsPage = "mcp";
+/** Settings pages, in the order the dialog lists them. */
+export type SettingsPage = "proxy" | "ssl" | "clients" | "storage" | "appearance" | "advanced" | "mcp";
 
 /** The live capture's store; opened documents have their own. */
 export const LIVE_STORE = 0;
@@ -59,6 +61,8 @@ interface UiState {
   sort: SortSpec;
   selectedId: number | null;
   stats: ViewStats;
+  /** The table's deep search (header and body terms), while its filter has any. */
+  deep: DeepProgress | null;
   filterTiming: FilterTiming | null;
   /** Keep the newest row in view while traffic arrives. */
   autoScroll: boolean;
@@ -78,6 +82,7 @@ interface UiState {
   deviceSetupOpen: boolean;
   deviceTab: DeviceTab;
   settings: { open: boolean; page: SettingsPage };
+  paletteOpen: boolean;
 
   /** Switches tabs; the selection doesn't carry over (ids are per store). */
   setStore(store: number): void;
@@ -94,6 +99,7 @@ interface UiState {
   setSort(sort: SortSpec): void;
   select(id: number | null): void;
   setStats(stats: ViewStats): void;
+  setDeep(deep: DeepProgress | null): void;
   setFilterTiming(timing: FilterTiming): void;
   setAutoScroll(on: boolean): void;
   setRequestTab(tab: RequestTab): void;
@@ -108,6 +114,7 @@ interface UiState {
   setDeviceTab(tab: DeviceTab): void;
   openSettings(page?: SettingsPage): void;
   closeSettings(): void;
+  setPaletteOpen(open: boolean): void;
 }
 
 export const useUi = create<UiState>()((set) => ({
@@ -117,9 +124,11 @@ export const useUi = create<UiState>()((set) => ({
   compose: { open: false, spec: null, seq: 0 },
   save: null,
   filter: { text: "", protocol: "all", content: [], host: null, client: null },
-  sort: { key: "id", dir: "asc" },
+  // Remembered across launches (store/prefs.ts).
+  sort: usePrefs.getState().sort,
   selectedId: null,
   stats: { len: 0, total: 0 },
+  deep: null,
   filterTiming: null,
   autoScroll: false,
   requestTab: "Header",
@@ -131,7 +140,8 @@ export const useUi = create<UiState>()((set) => ({
   selectedBreakpoint: null,
   deviceSetupOpen: false,
   deviceTab: "simulator",
-  settings: { open: false, page: "mcp" },
+  settings: { open: false, page: "proxy" },
+  paletteOpen: false,
 
   setStore: (store) => set((s) => (s.store === store ? {} : { store, selectedId: null, stats: { len: 0, total: 0 } })),
   setDocuments: (documents) => set({ documents }),
@@ -151,9 +161,13 @@ export const useUi = create<UiState>()((set) => ({
     }),
   clearContent: () => set((s) => ({ filter: { ...s.filter, content: [] } })),
   setScope: ({ host = null, client = null }) => set((s) => ({ filter: { ...s.filter, host, client } })),
-  setSort: (sort) => set({ sort }),
+  setSort: (sort) => {
+    usePrefs.getState().setSort(sort);
+    set({ sort });
+  },
   select: (selectedId) => set({ selectedId }),
   setStats: (stats) => set({ stats }),
+  setDeep: (deep) => set((s) => (sameDeep(s.deep, deep) ? {} : { deep })),
   setFilterTiming: (filterTiming) => set({ filterTiming }),
   setAutoScroll: (autoScroll) => set({ autoScroll }),
   setRequestTab: (requestTab) => set({ requestTab }),
@@ -177,4 +191,10 @@ export const useUi = create<UiState>()((set) => ({
   setDeviceTab: (deviceTab) => set({ deviceTab }),
   openSettings: (page) => set((s) => ({ settings: { open: true, page: page ?? s.settings.page } })),
   closeSettings: () => set((s) => ({ settings: { ...s.settings, open: false } })),
+  setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
 }));
+
+function sameDeep(a: DeepProgress | null, b: DeepProgress | null): boolean {
+  if (a === null || b === null) return a === b;
+  return a.checked === b.checked && a.total === b.total && a.matched === b.matched && a.running === b.running;
+}

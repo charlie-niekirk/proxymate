@@ -6,7 +6,9 @@
  *      --ssl-* (SSL column), --timing-* (Timing tab phases), --code-* and --checker-*
  *      (body viewers), --ws-* (message direction).
  * Pills use a tinted *-bg with the saturated foreground (>= 4.5:1 contrast).
- * Dark is the primary theme; the light values get a full pass in M10.
+ * Dark is the primary theme; light had its full pass in M10. Every text token
+ * reaches 4.5:1 on what it's drawn on, in both themes: src/styles/contrast.test.ts
+ * checks it (pills composited over the table), so run it after changing a value.
  */
 
 :root,
@@ -23,6 +25,9 @@
   --popover-foreground: var(--foreground);
   --primary: oklch(0.72 0.17 50);
   --primary-foreground: oklch(0.18 0.02 50);
+  /* Selected filter chips: a primary tint under primary text. */
+  --primary-chip-bg: oklch(0.72 0.17 50 / 20%);
+  --primary-chip-fg: var(--primary);
   --secondary: oklch(0.27 0.005 270);
   --secondary-foreground: var(--foreground);
   --muted: oklch(0.25 0.004 270);
@@ -30,6 +35,16 @@
   --accent: oklch(0.29 0.006 270);
   --accent-foreground: var(--foreground);
   --destructive: oklch(0.65 0.2 25);
+  --destructive-foreground: oklch(0.99 0 0);
+  /* Filled destructive buttons, dark enough for white text. */
+  --destructive-solid: oklch(0.54 0.19 25);
+  /* Behind modal dialogs and sheets. */
+  --overlay: oklch(0 0 0 / 50%);
+  /* A pill's background on the orange selected row. */
+  --pill-on-selection: oklch(1 0 0 / 20%);
+  /* Paper for previews that need a known background: HTML documents and
+   * QR codes (scanners want dark on light). */
+  --paper: oklch(1 0 0);
   --border: oklch(1 0 0 / 9%);
   --input: oklch(1 0 0 / 12%);
   --ring: oklch(0.72 0.17 50 / 60%);
@@ -55,9 +70,9 @@
   --pane-header: oklch(0.205 0.004 270);
 
   /* ---- selection (orange, Proxyman-style) ---- */
-  --selection-bg: oklch(0.62 0.17 48);
+  --selection-bg: oklch(0.56 0.16 45);
   --selection-fg: oklch(0.99 0 0);
-  --selection-inactive-bg: oklch(0.62 0.17 48 / 35%);
+  --selection-inactive-bg: oklch(0.56 0.16 45 / 35%);
 
   /* ---- HTTP methods ---- */
   --m-get: oklch(0.76 0.13 245);
@@ -135,9 +150,9 @@
   --ws-received: var(--m-get);
 
   /* ---- colourised URL ---- */
-  --url-scheme: oklch(0.58 0.01 270);
+  --url-scheme: oklch(0.63 0.01 270);
   --url-host: oklch(0.96 0.005 270);
-  --url-port: oklch(0.58 0.01 270);
+  --url-port: oklch(0.63 0.01 270);
   --url-path: oklch(0.8 0.008 270);
   --url-query: oklch(0.7 0.07 245);
 
@@ -149,7 +164,7 @@
   --syntax-keyword: oklch(0.74 0.15 330);
   --syntax-tag: oklch(0.72 0.16 25);
   --syntax-attr: oklch(0.8 0.12 85);
-  --syntax-comment: oklch(0.58 0.02 270);
+  --syntax-comment: oklch(0.64 0.02 270);
   --syntax-variable: oklch(0.8 0.1 200);
   --syntax-type: oklch(0.8 0.11 180);
   --syntax-punct: oklch(0.66 0.01 270);
@@ -157,11 +172,11 @@
 
   /* ---- body viewers ---- */
   --code-gutter: oklch(0.2 0.004 270);
-  --code-gutter-fg: oklch(0.5 0.01 270);
+  --code-gutter-fg: oklch(0.63 0.01 270);
   --code-active-line: oklch(1 0 0 / 3.5%);
   --code-selection: oklch(0.72 0.17 50 / 28%);
   --code-match: oklch(0.82 0.15 80 / 30%);
-  --code-match-current: oklch(0.82 0.15 80 / 55%);
+  --code-match-current: oklch(0.82 0.15 80 / 32%);
   --code-guide: oklch(1 0 0 / 7%);
   --code-row-hover: oklch(1 0 0 / 4.5%);
   --checker-a: oklch(0.27 0.004 270);
@@ -177,18 +192,22 @@
   --card-foreground: var(--foreground);
   --popover: oklch(1 0 0);
   --popover-foreground: var(--foreground);
-  --primary: oklch(0.62 0.18 48);
+  --primary: oklch(0.55 0.17 45);
   --primary-foreground: oklch(0.99 0 0);
+  --primary-chip-bg: oklch(0.55 0.17 45 / 12%);
+  --primary-chip-fg: oklch(0.49 0.15 45);
   --secondary: oklch(0.95 0.002 270);
   --secondary-foreground: var(--foreground);
   --muted: oklch(0.96 0.002 270);
   --muted-foreground: oklch(0.5 0.01 270);
   --accent: oklch(0.94 0.003 270);
   --accent-foreground: var(--foreground);
-  --destructive: oklch(0.58 0.22 27);
+  --destructive: oklch(0.55 0.21 27);
+  --destructive-solid: var(--destructive);
+  --overlay: oklch(0.2 0.004 270 / 35%);
   --border: oklch(0 0 0 / 10%);
   --input: oklch(0 0 0 / 14%);
-  --ring: oklch(0.62 0.18 48 / 50%);
+  --ring: oklch(0.55 0.17 45 / 55%);
   --sidebar: oklch(0.96 0.002 270);
   --sidebar-foreground: oklch(0.3 0.005 270);
   --sidebar-accent: oklch(0 0 0 / 6%);
@@ -201,37 +220,37 @@
   --pane-row-hover: oklch(0 0 0 / 4%);
   --pane-header: oklch(0.975 0.002 270);
 
-  --selection-bg: oklch(0.66 0.17 48);
+  --selection-bg: oklch(0.56 0.16 45);
   --selection-fg: oklch(1 0 0);
-  --selection-inactive-bg: oklch(0.66 0.17 48 / 25%);
+  --selection-inactive-bg: oklch(0.56 0.16 45 / 22%);
 
   --m-get: oklch(0.5 0.15 250);
   --m-get-bg: oklch(0.5 0.15 250 / 12%);
-  --m-post: oklch(0.5 0.14 150);
-  --m-post-bg: oklch(0.5 0.14 150 / 12%);
+  --m-post: oklch(0.47 0.13 150);
+  --m-post-bg: oklch(0.47 0.13 150 / 12%);
   --m-put: oklch(0.52 0.14 55);
   --m-put-bg: oklch(0.52 0.14 55 / 12%);
   --m-patch: oklch(0.5 0.17 300);
   --m-patch-bg: oklch(0.5 0.17 300 / 12%);
   --m-delete: oklch(0.52 0.2 25);
   --m-delete-bg: oklch(0.52 0.2 25 / 12%);
-  --m-head: oklch(0.5 0.1 195);
-  --m-head-bg: oklch(0.5 0.1 195 / 12%);
+  --m-head: oklch(0.47 0.09 195);
+  --m-head-bg: oklch(0.47 0.09 195 / 12%);
   --m-connect: oklch(0.5 0.01 270);
   --m-connect-bg: oklch(0.5 0.01 270 / 10%);
 
   --s-1xx: oklch(0.5 0.03 250);
   --s-1xx-bg: oklch(0.5 0.03 250 / 12%);
-  --s-2xx: oklch(0.5 0.14 150);
-  --s-2xx-bg: oklch(0.5 0.14 150 / 12%);
+  --s-2xx: oklch(0.47 0.13 150);
+  --s-2xx-bg: oklch(0.47 0.13 150 / 12%);
   --s-3xx: oklch(0.5 0.1 210);
   --s-3xx-bg: oklch(0.5 0.1 210 / 12%);
-  --s-4xx: oklch(0.55 0.14 70);
-  --s-4xx-bg: oklch(0.55 0.14 70 / 14%);
+  --s-4xx: oklch(0.5 0.12 65);
+  --s-4xx-bg: oklch(0.5 0.12 65 / 13%);
   --s-5xx: oklch(0.52 0.2 25);
   --s-5xx-bg: oklch(0.52 0.2 25 / 12%);
-  --s-active: oklch(0.55 0.14 70);
-  --s-active-bg: oklch(0.55 0.14 70 / 14%);
+  --s-active: oklch(0.5 0.12 65);
+  --s-active-bg: oklch(0.5 0.12 65 / 13%);
   --s-paused: oklch(0.5 0.17 300);
   --s-paused-bg: oklch(0.5 0.17 300 / 12%);
   --s-failed: oklch(0.52 0.2 25);
@@ -241,12 +260,12 @@
   --graphql: oklch(0.5 0.18 330);
   --graphql-bg: oklch(0.5 0.18 330 / 12%);
 
-  --rule-agent: oklch(0.5 0.12 185);
-  --rule-agent-bg: oklch(0.5 0.12 185 / 12%);
+  --rule-agent: oklch(0.46 0.1 185);
+  --rule-agent-bg: oklch(0.46 0.1 185 / 12%);
 
-  --url-scheme: oklch(0.6 0.01 270);
+  --url-scheme: oklch(0.52 0.01 270);
   --url-host: oklch(0.2 0.004 270);
-  --url-port: oklch(0.6 0.01 270);
+  --url-port: oklch(0.52 0.01 270);
   --url-path: oklch(0.38 0.006 270);
   --url-query: oklch(0.5 0.1 250);
 
@@ -257,16 +276,16 @@
   --syntax-keyword: oklch(0.5 0.18 330);
   --syntax-tag: oklch(0.52 0.18 25);
   --syntax-attr: oklch(0.52 0.12 70);
-  --syntax-comment: oklch(0.58 0.015 270);
+  --syntax-comment: oklch(0.5 0.015 270);
   --syntax-variable: oklch(0.5 0.1 210);
   --syntax-type: oklch(0.5 0.1 180);
   --syntax-punct: oklch(0.45 0.01 270);
   --syntax-meta: oklch(0.52 0.04 270);
 
   --code-gutter: oklch(0.975 0.002 270);
-  --code-gutter-fg: oklch(0.6 0.01 270);
+  --code-gutter-fg: oklch(0.5 0.01 270);
   --code-active-line: oklch(0 0 0 / 3%);
-  --code-selection: oklch(0.66 0.17 48 / 22%);
+  --code-selection: oklch(0.56 0.16 45 / 20%);
   --code-match: oklch(0.82 0.15 80 / 35%);
   --code-match-current: oklch(0.75 0.16 70 / 55%);
   --code-guide: oklch(0 0 0 / 8%);

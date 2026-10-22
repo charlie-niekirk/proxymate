@@ -7,7 +7,7 @@ use pm_model::{BodyPart, FlowId, FlowState, FlowSummary, Header, Pattern, Patter
 use regex::bytes::Regex;
 
 use crate::rules::compile::{Use, compile_pattern};
-use crate::store::FlowQuery;
+use crate::store::{FlowQuery, Store};
 use crate::{Engine, Error};
 
 /// Bodies are searched up to this many (decoded) bytes.
@@ -50,29 +50,30 @@ pub struct SearchPage {
     pub next: Option<FlowId>,
 }
 
-/// Ids to visit, oldest first or newest first, starting past `cursor`
-/// and never at or below `since`.
-fn id_range(
-    first: FlowId,
-    end: FlowId,
+/// Flows to visit, oldest first or newest first, starting past `cursor`
+/// and never at or below `since`. Walks the arena, so ids evicted from
+/// between kept old flows and newer ones cost nothing.
+fn visit<'a>(
+    store: &'a Store,
     since: Option<FlowId>,
     cursor: Option<FlowId>,
     newest_first: bool,
-) -> Vec<FlowId> {
-    let low = since.map_or(first, |s| s.saturating_add(1).max(first));
+) -> Box<dyn Iterator<Item = &'a FlowSummary> + 'a> {
+    let low = since.map_or(0, |s| s.saturating_add(1));
     if newest_first {
-        let high = cursor.map_or(end, |c| c.min(end));
-        (low..high).rev().collect()
+        let high = cursor.unwrap_or(FlowId::MAX);
+        Box::new(store.flows_in(low, high).iter().rev())
     } else {
         let low = cursor.map_or(low, |c| c.saturating_add(1).max(low));
-        (low..end).collect()
+        Box::new(store.flows_in(low, FlowId::MAX).iter())
     }
 }
 
 impl Engine {
     /// Flows matching `query` (the filter DSL; empty matches all) with ids
     /// above `since`, `limit` at a time. `cursor` is the previous page's
-    /// `next`.
+    /// `next`. Header and body terms are checked flow by flow, only until
+    /// the page is full; `matched` then counts what was checked.
     pub fn find_flows(
         &self,
         query: &str,
@@ -82,22 +83,44 @@ impl Engine {
         newest_first: bool,
     ) -> Result<FlowPage, Error> {
         let query = FlowQuery::parse(query).map_err(Error::Query)?;
-        let store = self.store.read();
-        let ids = id_range(store.first_id(), store.next_id(), since, cursor, newest_first);
+        let deep = query.deep();
         let mut flows = Vec::new();
         let mut matched = 0u32;
         let mut next = None;
-        for id in ids {
-            let Some(flow) = store.get(id) else { continue };
-            if !query.matches(flow) {
+        let Some(deep) = deep else {
+            let store = self.store.read();
+            for flow in visit(&store, since, cursor, newest_first) {
+                if !query.matches(flow) {
+                    continue;
+                }
+                matched += 1;
+                if flows.len() < limit {
+                    flows.push(flow.clone());
+                } else if next.is_none() {
+                    next = flows.last().map(|f: &FlowSummary| f.id);
+                }
+            }
+            return Ok(FlowPage { flows, matched, next });
+        };
+        // Bodies are read without holding the store lock.
+        let candidates: Vec<FlowId> = {
+            let store = self.store.read();
+            visit(&store, since, cursor, newest_first)
+                .filter(|f| query.matches(f))
+                .map(|f| f.id)
+                .collect()
+        };
+        for id in candidates {
+            if !deep.matches(self.details(), id) {
                 continue;
             }
-            matched += 1;
-            if flows.len() < limit {
-                flows.push(flow.clone());
-            } else if next.is_none() {
+            if flows.len() == limit {
                 next = flows.last().map(|f: &FlowSummary| f.id);
+                break;
             }
+            let Some(flow) = self.get_flow(id) else { continue };
+            matched += 1;
+            flows.push(flow);
         }
         Ok(FlowPage { flows, matched, next })
     }
@@ -126,9 +149,7 @@ impl Engine {
         let re = compile_pattern(&pattern, Use::Find, false).map_err(Error::Query)?;
         let candidates: Vec<FlowSummary> = {
             let store = self.store.read();
-            id_range(store.first_id(), store.next_id(), None, cursor, true)
-                .into_iter()
-                .filter_map(|id| store.get(id))
+            visit(&store, None, cursor, true)
                 .filter(|f| query.matches(f))
                 .take(SEARCH_SCAN_MAX)
                 .cloned()
@@ -216,12 +237,17 @@ impl Engine {
     /// True once a flow matching `query` (above `since`) has finished, or
     /// with `active`, as soon as one has started. Returns the first one.
     pub fn first_flow_matching(&self, query: &FlowQuery, since: Option<FlowId>, active: bool) -> Option<FlowSummary> {
-        let store = self.store.read();
-        id_range(store.first_id(), store.next_id(), since, None, false)
+        let deep = query.deep();
+        let candidates: Vec<FlowSummary> = {
+            let store = self.store.read();
+            visit(&store, since, None, false)
+                .filter(|f| (active || !matches!(f.state, FlowState::Active | FlowState::Paused)) && query.matches(f))
+                .cloned()
+                .collect()
+        };
+        candidates
             .into_iter()
-            .filter_map(|id| store.get(id))
-            .find(|f| (active || !matches!(f.state, FlowState::Active | FlowState::Paused)) && query.matches(f))
-            .cloned()
+            .find(|f| deep.as_ref().is_none_or(|d| d.matches(self.details(), f.id)))
     }
 }
 

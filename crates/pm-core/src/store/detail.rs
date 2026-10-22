@@ -3,7 +3,7 @@
 //! into the segment files, with an LRU of decoded details in front.
 //! WebSocket and SSE message logs are kept beside them, by flow id.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -78,7 +78,7 @@ impl DetailStore {
             return Ok(());
         }
         let encoded = postcard::to_allocvec(&*stored).map_err(io::Error::other)?;
-        let result = self.segments.append(&encoded).map(|extent| {
+        let result = self.segments.append(id, &encoded).map(|extent| {
             self.persisted.lock().insert(id, extent);
         });
         // Cached either way, so the detail stays readable for a while even if
@@ -145,6 +145,63 @@ impl DetailStore {
 
     pub fn sse(&self, id: FlowId) -> Option<Arc<SseLog>> {
         self.sse.lock().get(&id).cloned()
+    }
+
+    /// Forgets evicted flows. Their segment files go once nothing kept uses
+    /// them: `kept` are the older flows that stay (pinned or in flight),
+    /// and `through` the newest evicted id. Returns the bytes freed.
+    pub fn evict(&self, evicted: &[FlowId], kept: &[FlowId], through: FlowId) -> u64 {
+        {
+            let mut persisted = self.persisted.lock();
+            let mut live = self.live.lock();
+            let mut ws = self.ws.lock();
+            let mut sse = self.sse.lock();
+            for id in evicted {
+                persisted.remove(id);
+                live.remove(id);
+                ws.remove(id);
+                sse.remove(id);
+                self.cache.invalidate(id);
+            }
+        }
+        let mut keep = HashSet::new();
+        for &id in kept {
+            // Without knowing where a kept flow's data is, deleting anything
+            // could lose it: keep every file this time.
+            if !self.segments_used(id, &mut keep) {
+                return 0;
+            }
+        }
+        self.segments.drop_through(through, &keep)
+    }
+
+    /// Adds the segment files a flow's detail, bodies and messages live
+    /// in. False if its detail couldn't be read.
+    fn segments_used(&self, id: FlowId, out: &mut HashSet<u32>) -> bool {
+        if let Some(extent) = self.persisted.lock().get(&id) {
+            out.insert(extent.seg);
+        }
+        let live = self.live.lock().get(&id).cloned();
+        let read = match live {
+            Some(flow) => {
+                flow.segments_used(out);
+                true
+            }
+            None => match self.get(id) {
+                Ok(Some(stored)) => {
+                    stored.request_body.segments_used(out);
+                    stored.response_body.segments_used(out);
+                    true
+                }
+                // A flow with no detail (synthetic) has no data to keep.
+                Ok(None) => true,
+                Err(_) => false,
+            },
+        };
+        if let Some(log) = self.ws(id) {
+            log.segments_used(out);
+        }
+        read
     }
 
     /// Forgets every flow below `base` and deletes the segment files.

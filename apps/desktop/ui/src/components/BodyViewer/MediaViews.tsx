@@ -84,6 +84,12 @@ export function ImageView({ url, mime, size, onSave }: { url: string; mime: stri
       setCopied(`Couldn't copy: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
+  // A load that finished before React committed the element (the viewers
+  // render lazily, concurrently) has no onLoad; read the size here instead.
+  useEffect(() => {
+    const el = img.current;
+    if (el?.complete && el.naturalWidth > 0) setDims({ w: el.naturalWidth, h: el.naturalHeight });
+  }, [url]);
   useEffect(() => {
     if (!copied) return;
     const t = setTimeout(() => setCopied(null), 1500);
@@ -160,11 +166,19 @@ function formatTime(s: number): string {
 export function MediaView({ url, mime, size, kind }: { url: string; mime: string; size: number; kind: "video" | "audio" }) {
   const [meta, setMeta] = useState<{ duration: number; w: number; h: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const onMeta = (e: React.SyntheticEvent<HTMLVideoElement | HTMLAudioElement>) => {
-    const el = e.currentTarget;
+  const media = useRef<HTMLVideoElement & HTMLAudioElement>(null);
+  const readMeta = (el: HTMLVideoElement | HTMLAudioElement) =>
     setMeta({ duration: el.duration, w: "videoWidth" in el ? el.videoWidth : 0, h: "videoHeight" in el ? el.videoHeight : 0 });
-  };
+  const onMeta = (e: React.SyntheticEvent<HTMLVideoElement | HTMLAudioElement>) => readMeta(e.currentTarget);
   const onError = () => setError(`The webview can't play this ${formatLabel(mime)} file.`);
+  // In a concurrent render (the viewers load lazily) the element exists before
+  // React commits it, and React drops media events that arrive in between.
+  useEffect(() => {
+    const el = media.current;
+    if (el?.error) onError();
+    else if (el && el.readyState >= HTMLMediaElement.HAVE_METADATA) readMeta(el);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per source, after commit.
+  }, [url]);
   return (
     <div className="flex h-full flex-col" data-testid={`${kind}-view`}>
       <Bar>
@@ -175,9 +189,9 @@ export function MediaView({ url, mime, size, kind }: { url: string; mime: string
       ) : (
         <div className="flex min-h-0 flex-1 items-center justify-center bg-[var(--pane-table)] p-3">
           {kind === "video" ? (
-            <video src={url} controls preload="metadata" onLoadedMetadata={onMeta} onError={onError} className="max-h-full max-w-full" />
+            <video ref={media} src={url} controls preload="metadata" onLoadedMetadata={onMeta} onError={onError} className="max-h-full max-w-full" />
           ) : (
-            <audio src={url} controls preload="metadata" onLoadedMetadata={onMeta} onError={onError} className="w-full max-w-md" />
+            <audio ref={media} src={url} controls preload="metadata" onLoadedMetadata={onMeta} onError={onError} className="w-full max-w-md" />
           )}
         </div>
       )}

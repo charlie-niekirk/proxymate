@@ -13,6 +13,7 @@ mod mcp;
 mod platform;
 mod rules;
 mod send;
+mod settings;
 mod stream;
 mod tls;
 mod view;
@@ -33,6 +34,7 @@ pub use rules::{
     ResponseMatcher, Rule, RuleId, RuleOrigin, RuleSettings, RuleTestResult, StatusRange,
 };
 pub use send::{RequestSpec, SendOpts, SendOrigin, SentBy};
+pub use settings::{ProxySettings, StorageSettings, StorageStatus};
 pub use stream::{SseEvent, SsePage, WsClose, WsDirection, WsMessage, WsOpcode, WsPage, WsQuery};
 pub use tls::{CaInfo, CertSummary, SslSettings, Timing, TlsInfo, TlsStatus};
-pub use view::{FlowRow, RowsPage, ViewDelta, ViewId, ViewInfo};
+pub use view::{DeepProgress, FlowRow, RowsPage, ViewDelta, ViewId, ViewInfo};

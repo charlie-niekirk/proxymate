@@ -1,13 +1,21 @@
+import { isTauri } from "@tauri-apps/api/core";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import App from "@/App";
+import { startTheme } from "@/lib/theme";
 import { useUi, type DeviceTab, type RequestTab, type ResponseTab, type SettingsPage } from "@/store/ui";
 import "@/styles/index.css";
 
-// Lets tokens.css switch the sidebar to vibrancy on macOS.
-const platform = navigator.userAgent.includes("Mac") ? "macos" : "other";
+// Lets tokens.css switch the sidebar to vibrancy in the macOS app (a plain
+// browser has no vibrancy behind the page, so it keeps the solid colour).
+const platform = isTauri() && navigator.userAgent.includes("Mac") ? "macos" : "other";
 document.documentElement.dataset.platform = platform;
+
+// Dev only: `?theme=light` pins a theme for the Playwright snapshots.
+const pinnedTheme = import.meta.env.DEV ? new URLSearchParams(window.location.search).get("theme") : null;
+// Before the first render, so the first paint already has the right theme.
+startTheme(pinnedTheme === "light" || pinnedTheme === "dark" ? pinnedTheme : null);
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
@@ -28,15 +36,10 @@ if (responseTab) {
   useUi.getState().setResponseTab(responseTab);
 }
 
-// Dev only: `?theme=light`, `?select=<flow id>` and `?requestTab=Body` set up a
+// Dev only: `?select=<flow id>` and `?requestTab=Body` set up a
 // view for the Playwright viewer snapshots (with `?zoo`, see lib/backend.ts).
 if (import.meta.env.DEV) {
   const params = new URLSearchParams(window.location.search);
-  const theme = params.get("theme");
-  if (theme === "light" || theme === "dark") {
-    document.documentElement.dataset.theme = theme;
-    document.documentElement.classList.toggle("dark", theme === "dark");
-  }
   const select = params.get("select");
   if (select !== null) useUi.getState().select(Number(select));
   const requestTab = params.get("requestTab") as RequestTab | null;

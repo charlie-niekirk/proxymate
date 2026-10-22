@@ -6,14 +6,14 @@ import { invoke as __TAURI_INVOKE, Channel } from "@tauri-apps/api/core";
 
 /** Commands */
 export const commands = {
-	createView: (store: number, filter: FilterSpec_Deserialize, sort: SortSpec) => typedError<ViewInfo, string>(__TAURI_INVOKE("create_view", { store, filter, sort })),
-	setFilter: (view: number, filter: FilterSpec_Deserialize) => typedError<ViewInfo, string>(__TAURI_INVOKE("set_filter", { view, filter })),
-	setSort: (view: number, sort: SortSpec) => typedError<ViewInfo, string>(__TAURI_INVOKE("set_sort", { view, sort })),
+	createView: (store: number, filter: FilterSpec_Deserialize, sort: SortSpec) => typedError<ViewInfo_Serialize, string>(__TAURI_INVOKE("create_view", { store, filter, sort })),
+	setFilter: (view: number, filter: FilterSpec_Deserialize) => typedError<ViewInfo_Serialize, string>(__TAURI_INVOKE("set_filter", { view, filter })),
+	setSort: (view: number, sort: SortSpec) => typedError<ViewInfo_Serialize, string>(__TAURI_INVOKE("set_sort", { view, sort })),
 	dropView: (view: number) => __TAURI_INVOKE<void>("drop_view", { view }),
 	getRows: (view: number, start: number, count: number) => typedError<RowsPage_Serialize, string>(__TAURI_INVOKE("get_rows", { view, start, count })),
 	getFlow: (store: number, id: number) => __TAURI_INVOKE<FlowSummary_Serialize | null>("get_flow", { store, id }),
 	/**  Streams the view's 20 Hz deltas to the webview until the channel closes. */
-	subscribeView: (view: number, onDelta: Channel<ViewDelta>) => typedError<null, string>(__TAURI_INVOKE("subscribe_view", { view, onDelta })),
+	subscribeView: (view: number, onDelta: Channel<ViewDelta_Deserialize>) => typedError<null, string>(__TAURI_INVOKE("subscribe_view", { view, onDelta })),
 	getFlowDetail: (store: number, id: number) => typedError<FlowDetail_Serialize | null, string>(__TAURI_INVOKE("get_flow_detail", { store, id })),
 	/**
 	 *  A body's bytes as a raw `ArrayBuffer`, not JSON. With `decoded`, a
@@ -34,7 +34,7 @@ export const commands = {
 	setRecording: (on: boolean) => __TAURI_INVOKE<ProxyStatus_Serialize>("set_recording", { on }),
 	getProxyStatus: () => __TAURI_INVOKE<ProxyStatus_Serialize>("get_proxy_status"),
 	getCaInfo: () => __TAURI_INVOKE<CaInfo>("get_ca_info"),
-	regenerateCa: () => typedError<CaInfo, string>(__TAURI_INVOKE("regenerate_ca")),
+	regenerateCa: (removeOldTrust: boolean) => typedError<CaInfo, string>(__TAURI_INVOKE("regenerate_ca", { removeOldTrust })),
 	getSslSettings: () => __TAURI_INVOKE<SslSettings_Serialize>("get_ssl_settings"),
 	setSslSettings: (settings: SslSettings_Deserialize) => typedError<SslSettings_Serialize, string>(__TAURI_INVOKE("set_ssl_settings", { settings })),
 	addSslBypass: (host: string) => typedError<SslSettings_Serialize, string>(__TAURI_INVOKE("add_ssl_bypass", { host })),
@@ -138,6 +138,22 @@ export const commands = {
 	 *  [`save_session`].
 	 */
 	exportHar: (store: number, selection: FlowSelection, path: string | null, fileName: string, onProgress: Channel<SaveProgress_Deserialize>) => typedError<string | null, string>(__TAURI_INVOKE("export_har", { store, selection, path, fileName, onProgress })),
+	getStorageSettings: () => __TAURI_INVOKE<StorageSettings_Serialize>("get_storage_settings"),
+	/**  Saves new limits; flows past them are evicted straight away. */
+	setStorageSettings: (settings: StorageSettings_Deserialize) => typedError<StorageSettings_Serialize, string>(__TAURI_INVOKE("set_storage_settings", { settings })),
+	getStorageStatus: () => __TAURI_INVOKE<StorageStatus_Serialize>("get_storage_status"),
+	/**  Streams the storage status (flows, disk use, write errors) as it changes. */
+	subscribeStorage: (onStatus: Channel<StorageStatus_Deserialize>) => __TAURI_INVOKE<void>("subscribe_storage", { onStatus }),
+	/**  Pins or unpins live flows; pinned flows are never evicted. */
+	pinFlows: (ids: number[], pinned: boolean) => __TAURI_INVOKE<void>("pin_flows", { ids, pinned }),
+	getProxySettings: () => __TAURI_INVOKE<ProxySettings_Serialize>("get_proxy_settings"),
+	/**
+	 *  Saves the port and upstream pool settings, restarting the listener if
+	 *  they changed. A port that can't be bound is an error; the old one stays.
+	 */
+	setProxySettings: (settings: ProxySettings_Deserialize) => typedError<ProxySettings_Serialize, string>(__TAURI_INVOKE("set_proxy_settings", { settings })),
+	/**  Makes the sidebar's Apps and Domains count the tab the UI shows. */
+	setSidebarStore: (store: number) => __TAURI_INVOKE<void>("set_sidebar_store", { store }),
 };
 
 /* Types */
@@ -543,6 +559,24 @@ export type ContentKind =
 /**  No body, or not detected yet. */
 "none" | "json" | "xml" | "html" | "formurlencoded" | "multipart" | "graphql" | "javascript" | "css" | "text" | "image" | "svg" | "video" | "audio" | "font" | "pdf" | "binary";
 
+/**
+ *  A view's deep search: header and body predicates checked in the
+ *  background, with matching flows streaming into the view.
+ */
+export type DeepProgress = {
+	/**  Flows checked so far. */
+	checked: number,
+	/**  Flows to check: those matching the rest of the filter. */
+	total: number,
+	/**  Flows found to match. */
+	matched: number,
+	/**
+	 *  False once every candidate has been checked (new flows are still
+	 *  checked as they finish).
+	 */
+	running: boolean,
+};
+
 /**  LAN access as the device setup wizard shows it. */
 export type DeviceAccess = DeviceAccess_Serialize | DeviceAccess_Deserialize;
 
@@ -606,6 +640,11 @@ export type DeviceClient_Deserialize = {
 	last_seen_ms?: number | null,
 	/**  Connections currently held while the decision is pending. */
 	waiting: number,
+	/**
+	 *  When the newest held connection gives up and is refused, epoch ms
+	 *  (for the prompt's countdown).
+	 */
+	held_until_ms?: number | null,
 };
 
 /**  A LAN client: one IP address, with its nickname and what it sent. */
@@ -627,6 +666,11 @@ export type DeviceClient_Serialize = {
 	last_seen_ms: number | null,
 	/**  Connections currently held while the decision is pending. */
 	waiting: number,
+	/**
+	 *  When the newest held connection gives up and is refused, epoch ms
+	 *  (for the prompt's countdown).
+	 */
+	held_until_ms: number | null,
 };
 
 /**  What the user decided about a LAN client. */
@@ -782,7 +826,7 @@ export type FlowDetail_Serialize = {
  * 
  *  Field order: `id, state, scheme, method, host, port, path, query, status,
  *  content_kind, client, started_at_ms, duration_ms, req_size, resp_size, edited,
- *  http_version, tls, graphql_op, sent_by`.
+ *  http_version, tls, graphql_op, sent_by, pinned`.
  */
 export type FlowRow = FlowRow_Serialize | FlowRow_Deserialize;
 
@@ -791,18 +835,18 @@ export type FlowRow = FlowRow_Serialize | FlowRow_Deserialize;
  * 
  *  Field order: `id, state, scheme, method, host, port, path, query, status,
  *  content_kind, client, started_at_ms, duration_ms, req_size, resp_size, edited,
- *  http_version, tls, graphql_op, sent_by`.
+ *  http_version, tls, graphql_op, sent_by, pinned`.
  */
-export type FlowRow_Deserialize = [number, FlowState, Scheme, string, string, number, string, string, number | null, ContentKind, string | null, number | null, number | null, number, number, boolean, HttpVersion, TlsStatus, string | null, SentBy | null];
+export type FlowRow_Deserialize = [number, FlowState, Scheme, string, string, number, string, string, number | null, ContentKind, string | null, number | null, number | null, number, number, boolean, HttpVersion, TlsStatus, string | null, SentBy | null, boolean];
 
 /**
  *  One flow table row in a compact positional form (a JSON array on the wire).
  * 
  *  Field order: `id, state, scheme, method, host, port, path, query, status,
  *  content_kind, client, started_at_ms, duration_ms, req_size, resp_size, edited,
- *  http_version, tls, graphql_op, sent_by`.
+ *  http_version, tls, graphql_op, sent_by, pinned`.
  */
-export type FlowRow_Serialize = [number, FlowState, Scheme, string, string, number, string, string, number | null, ContentKind, string | null, number | null, number | null, number, number, boolean, HttpVersion, TlsStatus, string | null, SentBy | null];
+export type FlowRow_Serialize = [number, FlowState, Scheme, string, string, number, string, string, number | null, ContentKind, string | null, number | null, number | null, number, number, boolean, HttpVersion, TlsStatus, string | null, SentBy | null, boolean];
 
 /**
  *  What rules did to one flow. Drives the Edited column and the
@@ -911,6 +955,8 @@ export type FlowSummary_Deserialize = {
 	graphql_op?: string | null,
 	/**  Set for flows Proxymate sent itself (Replay, Compose, an agent). */
 	sent_by?: SentBy | null,
+	/**  Pinned by the user: kept when the flow cap evicts older flows. */
+	pinned?: boolean,
 };
 
 /**
@@ -952,6 +998,8 @@ export type FlowSummary_Serialize = {
 	graphql_op: string | null,
 	/**  Set for flows Proxymate sent itself (Replay, Compose, an agent). */
 	sent_by: SentBy | null,
+	/**  Pinned by the user: kept when the flow cap evicts older flows. */
+	pinned: boolean,
 };
 
 /**
@@ -1254,6 +1302,42 @@ export type PresetKind = "map_local" | "breakpoint" | "rewrite" | "map_remote" |
 /**  Protocol chip in the filter row. */
 export type ProtocolFilter = "all" | "http" | "https" | "websocket";
 
+/**
+ *  The proxy listener and its upstream client. A port or pool change
+ *  restarts the listener.
+ */
+export type ProxySettings = ProxySettings_Serialize | ProxySettings_Deserialize;
+
+/**
+ *  The proxy listener and its upstream client. A port or pool change
+ *  restarts the listener.
+ */
+export type ProxySettings_Deserialize = {
+	/**  The port tried first; the next nine are fallbacks. */
+	port?: number,
+	/**  Seconds an idle upstream connection is kept for reuse (plain HTTP). */
+	pool_idle_secs?: number,
+	/**  Idle upstream connections kept per host (plain HTTP). */
+	pool_max_idle_per_host?: number,
+	/**  Seconds to wait for an upstream TCP connection. */
+	connect_timeout_secs?: number,
+};
+
+/**
+ *  The proxy listener and its upstream client. A port or pool change
+ *  restarts the listener.
+ */
+export type ProxySettings_Serialize = {
+	/**  The port tried first; the next nine are fallbacks. */
+	port: number,
+	/**  Seconds an idle upstream connection is kept for reuse (plain HTTP). */
+	pool_idle_secs: number,
+	/**  Idle upstream connections kept per host (plain HTTP). */
+	pool_max_idle_per_host: number,
+	/**  Seconds to wait for an upstream TCP connection. */
+	connect_timeout_secs: number,
+};
+
 /**  State of the proxy listener, for the toolbar. */
 export type ProxyStatus = ProxyStatus_Serialize | ProxyStatus_Deserialize;
 
@@ -1530,6 +1614,8 @@ export type SidebarSnapshot = SidebarSnapshot_Serialize | SidebarSnapshot_Deseri
  *  Pushed when it changes, at most once per publisher tick.
  */
 export type SidebarSnapshot_Deserialize = {
+	/**  The store counted: the live capture or the document tab shown. */
+	store?: number,
 	total: number,
 	/**  Sorted by name, case-insensitively. */
 	apps: AppCount_Deserialize[],
@@ -1542,6 +1628,8 @@ export type SidebarSnapshot_Deserialize = {
  *  Pushed when it changes, at most once per publisher tick.
  */
 export type SidebarSnapshot_Serialize = {
+	/**  The store counted: the live capture or the document tab shown. */
+	store: number,
 	total: number,
 	/**  Sorted by name, case-insensitively. */
 	apps: AppCount_Serialize[],
@@ -1729,6 +1817,93 @@ export type StatusRange = {
 	to: number,
 };
 
+/**
+ *  Limits on what the live capture keeps. Older flows are evicted (pinned
+ *  and in-flight ones excepted) once either limit is passed.
+ */
+export type StorageSettings = StorageSettings_Serialize | StorageSettings_Deserialize;
+
+/**
+ *  Limits on what the live capture keeps. Older flows are evicted (pinned
+ *  and in-flight ones excepted) once either limit is passed.
+ */
+export type StorageSettings_Deserialize = {
+	/**  Flows kept in the live capture; the oldest go first. 0 keeps all. */
+	max_flows?: number,
+	/**
+	 *  Disk used by bodies and details, in MB; the oldest flows go first.
+	 *  0 is unlimited.
+	 */
+	max_disk_mb?: number,
+	/**  WebSocket messages kept per connection; the oldest go first. */
+	max_ws_messages?: number,
+};
+
+/**
+ *  Limits on what the live capture keeps. Older flows are evicted (pinned
+ *  and in-flight ones excepted) once either limit is passed.
+ */
+export type StorageSettings_Serialize = {
+	/**  Flows kept in the live capture; the oldest go first. 0 keeps all. */
+	max_flows: number,
+	/**
+	 *  Disk used by bodies and details, in MB; the oldest flows go first.
+	 *  0 is unlimited.
+	 */
+	max_disk_mb: number,
+	/**  WebSocket messages kept per connection; the oldest go first. */
+	max_ws_messages: number,
+};
+
+/**  What the live capture holds now, for Settings › Storage and the footer. */
+export type StorageStatus = StorageStatus_Serialize | StorageStatus_Deserialize;
+
+/**  What the live capture holds now, for Settings › Storage and the footer. */
+export type StorageStatus_Deserialize = {
+	flows: number,
+	pinned: number,
+	/**  Bytes of segment files on disk. */
+	disk_bytes: number,
+	/**  Flows evicted by the limits since launch. */
+	evicted: number,
+	/**
+	 *  The last failed write to the segment files (a full disk, say):
+	 *  bodies are no longer recorded until writes succeed again.
+	 */
+	error?: string | null,
+	/**  Where the segment files live. */
+	dir: string,
+	/**
+	 *  Body bytes sent and received through the proxy since launch; the
+	 *  footer's throughput is their rate of change.
+	 */
+	sent_bytes: number,
+	received_bytes: number,
+};
+
+/**  What the live capture holds now, for Settings › Storage and the footer. */
+export type StorageStatus_Serialize = {
+	flows: number,
+	pinned: number,
+	/**  Bytes of segment files on disk. */
+	disk_bytes: number,
+	/**  Flows evicted by the limits since launch. */
+	evicted: number,
+	/**
+	 *  The last failed write to the segment files (a full disk, say):
+	 *  bodies are no longer recorded until writes succeed again.
+	 */
+	error: string | null,
+	/**  Where the segment files live. */
+	dir: string,
+	/**
+	 *  Body bytes sent and received through the proxy since launch; the
+	 *  footer's throughput is their rate of change.
+	 */
+	sent_bytes: number,
+	received_bytes: number,
+};
+
 /**  Whether the OS proxy points at Proxymate. */
 export type SystemProxyStatus = SystemProxyStatus_Serialize | SystemProxyStatus_Deserialize;
 
@@ -1898,7 +2073,15 @@ export type Value = null | boolean | number | string | Value[] | { [key in strin
  *  The UI never receives rows in a delta; it re-fetches the visible window
  *  with `get_rows` when the delta says something in it may have changed.
  */
-export type ViewDelta = {
+export type ViewDelta = ViewDelta_Serialize | ViewDelta_Deserialize;
+
+/**
+ *  Per-tick change notification for one view, published at 20 Hz.
+ * 
+ *  The UI never receives rows in a delta; it re-fetches the visible window
+ *  with `get_rows` when the delta says something in it may have changed.
+ */
+export type ViewDelta_Deserialize = {
 	view: number,
 	/**  Monotonic per-view sequence number, starting at 1. */
 	seq: number,
@@ -1912,15 +2095,63 @@ export type ViewDelta = {
 	changed: number[],
 	/**  Rows were inserted, removed or reordered: drop every cached row. */
 	structural: boolean,
+	/**
+	 *  Progress of the deep search (header and body terms), while the
+	 *  filter has any.
+	 */
+	deep?: DeepProgress | null,
+};
+
+/**
+ *  Per-tick change notification for one view, published at 20 Hz.
+ * 
+ *  The UI never receives rows in a delta; it re-fetches the visible window
+ *  with `get_rows` when the delta says something in it may have changed.
+ */
+export type ViewDelta_Serialize = {
+	view: number,
+	/**  Monotonic per-view sequence number, starting at 1. */
+	seq: number,
+	/**  Flows in the store (unfiltered). */
+	total: number,
+	/**  Rows in the view after this tick. */
+	len: number,
+	/**  Rows appended at the end of the view since the previous tick. */
+	appended: number,
+	/**  Ids of flows already in the view whose summary changed. */
+	changed: number[],
+	/**  Rows were inserted, removed or reordered: drop every cached row. */
+	structural: boolean,
+	/**
+	 *  Progress of the deep search (header and body terms), while the
+	 *  filter has any.
+	 */
+	deep: DeepProgress | null,
 };
 
 /**  Result of creating a view or changing its filter or sort. */
-export type ViewInfo = {
+export type ViewInfo = ViewInfo_Serialize | ViewInfo_Deserialize;
+
+/**  Result of creating a view or changing its filter or sort. */
+export type ViewInfo_Deserialize = {
 	view: number,
 	total: number,
 	len: number,
 	/**  Time the engine spent refiltering and sorting, in microseconds. */
 	elapsed_us: number,
+	/**  Set when the filter has header or body terms: a deep search started. */
+	deep?: DeepProgress | null,
+};
+
+/**  Result of creating a view or changing its filter or sort. */
+export type ViewInfo_Serialize = {
+	view: number,
+	total: number,
+	len: number,
+	/**  Time the engine spent refiltering and sorting, in microseconds. */
+	elapsed_us: number,
+	/**  Set when the filter has header or body terms: a deep search started. */
+	deep: DeepProgress | null,
 };
 
 /**  How a WebSocket connection ended. */
@@ -2013,6 +2244,11 @@ export type WsPage_Deserialize = {
 	/**  False once the connection has closed. */
 	open: boolean,
 	close?: WsClose | null,
+	/**
+	 *  Older messages dropped by the per-connection limit; `total` and the
+	 *  page count from what is kept.
+	 */
+	dropped?: number,
 };
 
 /**  A window of a flow's WebSocket messages. */
@@ -2026,6 +2262,11 @@ export type WsPage_Serialize = {
 	/**  False once the connection has closed. */
 	open: boolean,
 	close: WsClose | null,
+	/**
+	 *  Older messages dropped by the per-connection limit; `total` and the
+	 *  page count from what is kept.
+	 */
+	dropped: number,
 };
 
 /**  Which messages of a flow to list. The default lists everything. */

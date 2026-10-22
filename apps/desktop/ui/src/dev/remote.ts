@@ -13,6 +13,8 @@ import {
   setThrottle,
 } from "@/lib/actions";
 import { THROTTLE_PRESETS } from "@/lib/rules";
+import { forceTheme } from "@/lib/theme";
+import { usePrefs } from "@/store/prefs";
 import { useUi, type DeviceTab, type RequestTab, type ResponseTab, type SettingsPage } from "@/store/ui";
 
 /**
@@ -24,6 +26,8 @@ import { useUi, type DeviceTab, type RequestTab, type ResponseTab, type Settings
  * per POST (fields apply in the order below):
  * - `{"select": 3}`, `{"requestTab": "Body"}`, `{"responseTab": "TLS"}`,
  *   `{"viewer": {"kind": "json", "viewer": "tree"}}`, `{"theme": "light"}`
+ * - M10: `{"appearance": "light"}` (as Settings › Appearance would),
+ *   `{"palette": true}`, `{"filter": "body:token"}`, `{"reload": true}`
  * - `{"contextMenu": 3}`: right-clicks flow 3's row (it must be on screen),
  *   opening the flow menu for a screenshot. `{"contextMenu": null}` closes it.
  * - `{"preset": {"flow": 3, "kind": "map_local"}}` (or `breakpoint`,
@@ -55,6 +59,13 @@ interface Command {
   responseTab?: ResponseTab;
   viewer?: { kind: ContentKind; viewer: ViewerId };
   theme?: "dark" | "light";
+  /** Settings › Appearance, as the user would set it (the native window follows). */
+  appearance?: "system" | "dark" | "light";
+  palette?: boolean;
+  /** Sets the search box's text (the filter DSL). */
+  filter?: string;
+  /** Reloads the page (with `VITE_PM_PERF_PROBE`, the probe runs again). */
+  reload?: boolean;
   contextMenu?: number | null;
   preset?: { flow: number; kind: PresetKind };
   rulesEditor?: boolean;
@@ -104,9 +115,12 @@ async function apply(cmd: Command) {
     const id = cmd.click;
     setTimeout(() => document.querySelector<HTMLElement>(`[data-testid="${CSS.escape(id)}"]`)?.click(), 100);
   }
+  if (cmd.appearance) usePrefs.getState().setAppearance(cmd.appearance);
+  if (cmd.palette !== undefined) useUi.getState().setPaletteOpen(cmd.palette);
+  if (cmd.filter !== undefined) useUi.getState().setText(cmd.filter);
+  if (cmd.reload) window.location.reload();
   if (cmd.theme) {
-    document.documentElement.dataset.theme = cmd.theme;
-    document.documentElement.classList.toggle("dark", cmd.theme === "dark");
+    forceTheme(cmd.theme);
   }
   if (cmd.contextMenu !== undefined) openContextMenu(cmd.contextMenu);
   if (cmd.preset) await openPreset(cmd.preset.flow, cmd.preset.kind);

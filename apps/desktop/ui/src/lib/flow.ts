@@ -24,6 +24,8 @@ export interface Row {
   graphqlOp: string | null;
   /** Set for flows Proxymate sent itself (Replay, Compose, an agent). */
   sentBy: SentBy | null;
+  /** Pinned flows outlive eviction. */
+  pinned: boolean;
 }
 
 export function decodeRow(t: FlowRow_Serialize): Row {
@@ -48,6 +50,7 @@ export function decodeRow(t: FlowRow_Serialize): Row {
     tls: t[17],
     graphqlOp: t[18],
     sentBy: t[19],
+    pinned: t[20],
   };
 }
 

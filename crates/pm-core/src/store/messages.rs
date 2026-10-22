@@ -5,10 +5,11 @@
 //! A saved session's logs are rebuilt in memory, payloads inline, when a
 //! flow is first inspected.
 
+use std::collections::{HashSet, VecDeque};
 use std::io;
 
 use parking_lot::RwLock;
-use pm_model::{SseEvent, SsePage, WsClose, WsDirection, WsMessage, WsOpcode, WsPage, WsQuery};
+use pm_model::{FlowId, SseEvent, SsePage, WsClose, WsDirection, WsMessage, WsOpcode, WsPage, WsQuery};
 
 use super::blob::{BlobRef, CAPTURE_MAX};
 use super::filter::contains_ignore_ascii_case;
@@ -23,12 +24,17 @@ const PAYLOAD_INLINE: usize = 1024;
 const PREVIEW_CHARS: usize = 256;
 
 pub(crate) struct WsLog {
+    /// The flow, for the segment files' bookkeeping.
+    owner: FlowId,
     inner: RwLock<WsInner>,
 }
 
 #[derive(Default)]
 struct WsInner {
-    records: Vec<WsRecord>,
+    records: VecDeque<WsRecord>,
+    /// Messages dropped from the front by the limit; the first kept
+    /// message has this index.
+    dropped: u32,
     open: bool,
     close: Option<WsClose>,
     sent: u64,
@@ -41,8 +47,9 @@ struct WsRecord {
 }
 
 impl WsLog {
-    pub fn new() -> Self {
+    pub fn new(owner: FlowId) -> Self {
         WsLog {
+            owner,
             inner: RwLock::new(WsInner {
                 open: true,
                 ..Default::default()
@@ -50,8 +57,9 @@ impl WsLog {
         }
     }
 
-    /// Appends one message. `payload` is cut at [`PAYLOAD_MAX`]; `len` is
-    /// its full size.
+    /// Appends one message, dropping the oldest past `max` (0 keeps all).
+    /// `payload` is cut at [`PAYLOAD_MAX`]; `len` is its full size.
+    #[allow(clippy::too_many_arguments)]
     pub fn push(
         &self,
         segments: &SegmentStore,
@@ -60,6 +68,7 @@ impl WsLog {
         payload: &[u8],
         close_code: Option<u16>,
         time_ms: f64,
+        max: usize,
     ) {
         let len = payload.len() as u64;
         let kept = &payload[..payload.len().min(PAYLOAD_MAX)];
@@ -73,7 +82,7 @@ impl WsLog {
         } else if kept.len() <= PAYLOAD_INLINE {
             BlobRef::Inline(kept.to_vec())
         } else {
-            match segments.append(kept) {
+            match segments.append(self.owner, kept) {
                 Ok(extent) => BlobRef::Segments(vec![extent]),
                 Err(_) => {
                     truncated = true;
@@ -86,8 +95,14 @@ impl WsLog {
             WsDirection::Sent => inner.sent += len,
             WsDirection::Received => inner.received += len,
         }
-        let index = inner.records.len() as u32;
-        inner.records.push(WsRecord {
+        let index = inner.dropped + inner.records.len() as u32;
+        if max > 0 {
+            while inner.records.len() >= max {
+                inner.records.pop_front();
+                inner.dropped += 1;
+            }
+        }
+        inner.records.push_back(WsRecord {
             meta: WsMessage {
                 index,
                 direction,
@@ -107,6 +122,8 @@ impl WsLog {
         let mut inner = WsInner {
             open: false,
             close,
+            // A log saved after the limit dropped its oldest messages.
+            dropped: messages.first().map_or(0, |(m, _)| m.index),
             ..Default::default()
         };
         for (meta, payload) in messages {
@@ -119,9 +136,10 @@ impl WsLog {
             } else {
                 BlobRef::Inline(payload)
             };
-            inner.records.push(WsRecord { meta, payload });
+            inner.records.push_back(WsRecord { meta, payload });
         }
         WsLog {
+            owner: 0,
             inner: RwLock::new(inner),
         }
     }
@@ -148,9 +166,7 @@ impl WsLog {
             len = inner.records.len();
             messages = inner
                 .records
-                .get(window.start.min(len)..window.end.min(len))
-                .unwrap_or_default()
-                .iter()
+                .range(window.start.min(len)..window.end.min(len))
                 .map(|r| r.meta.clone())
                 .collect();
         } else {
@@ -185,15 +201,26 @@ impl WsLog {
             messages,
             open: inner.open,
             close: inner.close.clone(),
+            dropped: inner.dropped,
         })
     }
 
-    /// The recorded payload of message `index`.
+    /// The recorded payload of message `index` (gone if it was dropped).
     pub fn payload(&self, segments: Option<&SegmentStore>, index: u32) -> io::Result<Option<Vec<u8>>> {
         let inner = self.inner.read();
-        match inner.records.get(index as usize) {
+        let Some(pos) = index.checked_sub(inner.dropped) else {
+            return Ok(None);
+        };
+        match inner.records.get(pos as usize) {
             Some(record) => record.payload.read_from(segments).map(Some),
             None => Ok(None),
+        }
+    }
+
+    /// Adds the segment files the kept payloads live in.
+    pub fn segments_used(&self, out: &mut HashSet<u32>) {
+        for record in &self.inner.read().records {
+            record.payload.segments_used(out);
         }
     }
 }
@@ -329,12 +356,20 @@ mod tests {
     #[test]
     fn ws_pages_filter_by_direction_and_text() {
         let (segs, root) = segments();
-        let log = WsLog::new();
-        log.push(&segs, WsDirection::Sent, WsOpcode::Text, b"hello", None, 1.0);
-        log.push(&segs, WsDirection::Received, WsOpcode::Text, b"HELLO back", None, 2.0);
+        let log = WsLog::new(0);
+        log.push(&segs, WsDirection::Sent, WsOpcode::Text, b"hello", None, 1.0, 0);
+        log.push(
+            &segs,
+            WsDirection::Received,
+            WsOpcode::Text,
+            b"HELLO back",
+            None,
+            2.0,
+            0,
+        );
         let big: Vec<u8> = b"needle ".iter().copied().cycle().take(5_000).collect();
-        log.push(&segs, WsDirection::Received, WsOpcode::Binary, &big, None, 3.0);
-        log.push(&segs, WsDirection::Sent, WsOpcode::Close, b"bye", Some(1000), 4.0);
+        log.push(&segs, WsDirection::Received, WsOpcode::Binary, &big, None, 3.0, 0);
+        log.push(&segs, WsDirection::Sent, WsOpcode::Close, b"bye", Some(1000), 4.0, 0);
 
         let all = log.page(Some(&segs), &WsQuery::default(), 1, 2).unwrap();
         assert_eq!((all.total, all.len), (4, 4));
@@ -362,7 +397,7 @@ mod tests {
     #[test]
     fn payloads_are_capped() {
         let (segs, root) = segments();
-        let log = WsLog::new();
+        let log = WsLog::new(0);
         log.push(
             &segs,
             WsDirection::Sent,
@@ -370,11 +405,32 @@ mod tests {
             &vec![1u8; PAYLOAD_MAX + 1],
             None,
             1.0,
+            0,
         );
         let page = log.page(Some(&segs), &WsQuery::default(), 0, 1).unwrap();
         assert!(page.messages[0].truncated);
         assert_eq!(page.messages[0].len, PAYLOAD_MAX as u64 + 1);
         assert_eq!(log.payload(Some(&segs), 0).unwrap().unwrap().len(), PAYLOAD_MAX);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn the_oldest_messages_go_past_the_limit() {
+        let (segs, root) = segments();
+        let log = WsLog::new(0);
+        for i in 0..10u8 {
+            log.push(&segs, WsDirection::Sent, WsOpcode::Text, &[b'a' + i], None, 1.0, 4);
+        }
+        let page = log.page(Some(&segs), &WsQuery::default(), 0, 10).unwrap();
+        assert_eq!((page.total, page.len, page.dropped), (4, 4, 6));
+        assert_eq!(
+            page.messages.iter().map(|m| m.index).collect::<Vec<_>>(),
+            vec![6, 7, 8, 9]
+        );
+        assert_eq!(log.payload(Some(&segs), 9).unwrap().unwrap(), b"j");
+        assert_eq!(log.payload(Some(&segs), 2).unwrap(), None);
+        // Totals still count every message.
+        assert_eq!(log.totals(), (10, 0));
         let _ = std::fs::remove_dir_all(root);
     }
 

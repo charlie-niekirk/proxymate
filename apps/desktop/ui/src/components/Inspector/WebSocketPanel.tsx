@@ -169,4 +169,4 @@ function MessageDetail({ id, message }: { id: number; message: WsMessage_Seriali
   );
 }
 
-const chip = "h-5 gap-1 rounded-sm px-2 text-xs data-[state=on]:bg-primary/20 data-[state=on]:text-primary";
+const chip = "h-5 gap-1 rounded-sm px-2 text-xs data-[state=on]:bg-primary-chip data-[state=on]:text-primary-chip-foreground";

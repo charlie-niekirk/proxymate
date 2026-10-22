@@ -3,14 +3,17 @@ import { CirclePlay, OctagonPause, Plus, Reply, X, XCircle } from "lucide-react"
 import { useEffect, useState } from "react";
 
 import type { BreakpointInfo_Serialize, Header, MessageEdits_Deserialize } from "@/bindings";
+import { CodeEditor } from "@/components/Compose/CodeEditor";
 import { MethodPill } from "@/components/FlowTable/cells";
-import { NumberInput, TextArea } from "@/components/Rules/fields";
+import { NumberInput } from "@/components/Rules/fields";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { bridge } from "@/dev/bridge";
 import { backend } from "@/lib/backend";
+import { languageFor } from "@/lib/compose";
+import { headerValue } from "@/lib/http";
 import { cleanHeaders } from "@/lib/rules";
 import { cn } from "@/lib/utils";
 import { useBreakpoints } from "@/store/breakpoints";
@@ -135,7 +138,7 @@ function BreakpointForm({ bp }: { bp: BreakpointInfo_Serialize }) {
   const [responding, setResponding] = useState(false);
   const [answer, setAnswer] = useState({ status: 200 as number | null, headers: [{ name: "content-type", value: "application/json" }] as Header[], body: "" });
   const [error, setError] = useState<string | null>(null);
-  const { data: originalBody = "" } = useQuery({
+  const { data: originalBody = "", isPending: bodyPending } = useQuery({
     queryKey: ["breakpoint-body", bp.id],
     queryFn: async () => new TextDecoder().decode(await backend.getBreakpointBody(bp.id)),
     staleTime: Infinity,
@@ -210,13 +213,15 @@ function BreakpointForm({ bp }: { bp: BreakpointInfo_Serialize }) {
               Body{bp.body.size ? ` · ${bp.body.size.toLocaleString()} bytes` : ""}
             </span>
             {bp.body.note && <span className="text-muted-foreground">{bp.body.note}</span>}
-            <TextArea
+            <BodyEditor
+              // The editor is seeded once, so it waits for the paused body.
+              loading={bodyPending}
               value={bodyText}
+              headers={headers}
               readOnly={!bp.body.editable}
-              onChange={(e) => setBody(e.target.value)}
-              rows={12}
-              className={cn(!bp.body.editable && "opacity-70")}
-              data-testid="bp-body"
+              onChange={setBody}
+              className="h-60"
+              testId="bp-body"
             />
           </div>
           {responding && (
@@ -227,7 +232,13 @@ function BreakpointForm({ bp }: { bp: BreakpointInfo_Serialize }) {
                 <NumberInput value={answer.status} onChange={(s) => setAnswer({ ...answer, status: s })} min={100} max={999} className="w-20" />
               </div>
               <HeaderTable rows={answer.headers} onChange={(h) => setAnswer({ ...answer, headers: h })} />
-              <TextArea value={answer.body} rows={6} onChange={(e) => setAnswer({ ...answer, body: e.target.value })} />
+              <BodyEditor
+                value={answer.body}
+                headers={answer.headers}
+                onChange={(text) => setAnswer((a) => ({ ...a, body: text }))}
+                className="h-32"
+                testId="bp-respond-body"
+              />
             </div>
           )}
         </div>
@@ -254,6 +265,32 @@ function BreakpointForm({ bp }: { bp: BreakpointInfo_Serialize }) {
           Execute
         </Button>
       </div>
+    </div>
+  );
+}
+
+/** A message body in CodeMirror, highlighted for its (live) Content-Type. */
+function BodyEditor({
+  value,
+  headers,
+  onChange,
+  loading = false,
+  readOnly = false,
+  className,
+  testId,
+}: {
+  value: string;
+  headers: Header[];
+  onChange: (text: string) => void;
+  loading?: boolean;
+  readOnly?: boolean;
+  className: string;
+  testId: string;
+}) {
+  const language = languageFor(headerValue(headers, "content-type")?.trim() ?? null);
+  return (
+    <div className={cn("overflow-hidden rounded-md border", className)}>
+      {loading ? null : <CodeEditor value={value} language={language} onChange={onChange} readOnly={readOnly} testId={testId} />}
     </div>
   );
 }

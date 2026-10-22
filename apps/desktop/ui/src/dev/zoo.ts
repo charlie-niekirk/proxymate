@@ -67,7 +67,7 @@ export async function loadZoo(): Promise<MockFlow[]> {
       const method = f.method ?? "GET";
       const row: FlowRow_Serialize = [
         id, "completed", "https", method, "zoo.proxymate.test", 443, `/zoo/${f.name}`, "", f.status ?? 200, f.kind, "Zoo",
-        start + id * 1000, 12 + id, request.length, raw.length, false, "HTTP/2", "intercepted", f.graphql_op ?? null, null,
+        start + id * 1000, 12 + id, request.length, raw.length, false, "HTTP/2", "intercepted", f.graphql_op ?? null, null, false,
       ];
       const headers = (type: string | undefined, length: number, encoding?: string) => [
         ...(type ? [{ name: "content-type", value: type }] : []),

@@ -54,13 +54,17 @@ apps/cli                 proxymate-cli serve|mcp-stdio|gen-flows|bench (headless
 
 ### Storage
 - **Flow summaries.** `FlowSummary` (about 200 B) lives in an in-memory `Vec`. Hosts, apps and content types are interned.
-- **Bodies.** Bodies of 8 KB or less are inlined. Larger bodies are stored still content-encoded in 256 MB rotating segment files under `~/Library/Application Support/Proxymate/live/<uuid>/`. They are decoded only when viewed.
+- **Bodies.** Bodies of 8 KB or less are inlined. Larger bodies are stored still content-encoded in rotating segment files under `~/Library/Application Support/Proxymate/live/<uuid>/` (64 MB each since M10, so eviction frees disk in useful steps; 256 MB before). They are decoded only when viewed.
 - **Flow detail.** `FlowDetail` is postcard-encoded into the segments, with a moka LRU in front of them. A flow still in flight is read from its live recorder instead.
 - **Message logs (M6).** WebSocket messages and server-sent events live in per-flow logs beside the detail, not inside it, so a long-lived connection never makes its detail slow to load. They are paged through the engine (`websocket_messages`, `websocket_payload`, `sse_events`) with direction and text filters evaluated in Rust. WebSocket payloads are capped at 1 MB each; those over 1 KB spill to the segment files. SSE event data is capped at 1 MB per event.
 - **Live directory lifetime.** Clear deletes the segment files and quit deletes the directory. Each live directory holds an exclusive file lock, so the next launch sweeps directories left behind by a crash or a signal.
 - **Caps.**
   - Body capture is capped at 64 MB. Above that the recorded copy is truncated, but forwarding is never affected.
   - Flows are capped at 250k with ring eviction. Pinned flows are kept.
+  - (M10) Limits are `StorageSettings` (`app.sqlite` row `storage`, Settings › Storage): flows kept (250,000; 0 = no cap), disk (4,096 MB; 0 = no cap) and WebSocket messages per connection (50,000). After every ingest batch the live store evicts the oldest flows past a limit, down to 95% of the flow cap (so eviction runs once per twentieth of the cap), keeping pinned flows and flows still in flight; the arena stays in id order, and a few kept old flows may sit before a gap (lookups count back from the newest flow, then binary-search). Views rebuild over the new positions; the sidebar counts drop the evicted flows.
+  - (M10) Each segment file remembers the newest flow that wrote to it. An eviction through id N deletes every finished segment whose newest writer is at most N, except the segments kept flows (pinned or in flight, older than N) still use. The disk cap evicts through the newest writer of the oldest segments it must delete to get back under 90%.
+  - (M10) A WebSocket log keeps its newest messages up to the limit; older ones are dropped but keep their indexes (`WsPage.dropped`).
+  - (M10) A failed segment write (a full disk) is reported in `StorageStatus.error` and the footer until a write succeeds; forwarding never stops.
 - **Sessions.** A saved session (`.proxymate`) is a single SQLite file. A `BlobBackend` trait lets the same store and view code read live segments, saved sessions and imported HARs.
   - (M8) Tables: `meta` (format, version, saved time, app version), `flows` (the summary fields as columns, enums as their serde names; the `FlowDetail` as a postcard blob; the WebSocket message list and parsed SSE events as zstd'd postcard blobs), `bodies` (zstd, still content-encoded) and `messages` (WebSocket payloads, zstd). Flow ids are renumbered `0..n` in the order saved.
   - (M8) Saves run on a background thread with progress, into a temporary file in the target directory that replaces the target only once complete. HAR exports stream one entry per line the same way.
@@ -74,7 +78,9 @@ apps/cli                 proxymate-cli serve|mcp-stdio|gen-flows|bench (headless
 - **Views.** Each `View` holds `{CompiledFilter, SortSpec, indices: Vec<u32>}` and is maintained incrementally as flows arrive and change.
 - **Refilter speed.** A full refilter is a linear scan of the summaries (rayon above 50k), with a target under 10 ms.
 - **Deep filters.** Header and body predicates run as a cancellable background job that streams matching ids into the view.
-- **Filter DSL.** One handwritten parser (`store/query.rs`, M7) is shared by the search box and MCP. Example: `host:*.example.com method:POST status:4xx ct:json app:Safari dur>500 size>1mb -host:*.google.com "text"`.
+  - (M10) The DSL's `header:`/`reqheader:`/`resheader:` (a substring of a `name: value` line) and `body:`/`reqbody:`/`resbody:` (a substring of the decoded body, its first 4 MB) are deep terms (`store/deep.rs`). The summary pass treats them as unknown; a view whose filter has any queues every finished flow that passes the rest as a candidate, and a `pm-deep-search` thread per view checks them 512 at a time on the rayon pool and adds the matches (appended in arrival order, else a resort). Flows still in flight are checked when they finish. A filter change or dropping the view cancels the job. `ViewDelta.deep`/`ViewInfo.deep` carry `{checked, total, matched, running}` for the footer.
+  - (M10) MCP's `list_flows`/`wait_for_flow` evaluate the same terms inline, flow by flow, only until the page is full.
+- **Filter DSL.** One handwritten parser (`store/query.rs`, M7) is shared by the search box and MCP. Example: `host:*.example.com method:POST status:4xx ct:json app:Safari dur>500 size>1mb -host:*.google.com body:token "text"`. (M10) `is:pinned`; the search box autocompletes keys, operators and known hosts, apps and content types (`ui/src/lib/dsl.ts`).
 
 ## Proxy engine (pm-core)
 
@@ -128,7 +134,8 @@ We build our own engine and use hudsucker only as a reading reference. Its handl
    - The flow's scheme is `ws`/`wss`, its status pill reads "Active" while open, and the close (code, reason, which side) is recorded; a connection that drops without a close frame is recorded as `1006`.
 7. **Streaming.** Bodies are tee'd by default, so SSE and LLM token streams stay live in the UI. A `text/event-stream` response is also parsed incrementally into events (id, event, data, retry), each timestamped as it completes.
 8. **Port.** Listen on 9090. If it's taken, try 9091–9099 and show the port in use.
-9. **Proxied terminal.** "Copy terminal env" sets `HTTP(S)_PROXY`, `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE` and `CURL_CA_BUNDLE`.
+   - (M10) The port and the plain-HTTP pool (idle timeout, idle connections per host, connect timeout) are `ProxySettings` (`app.sqlite` row `proxy`, Settings › Proxy and Advanced); a change restarts the listener on the same interfaces and keeps the old one if the new port can't be bound. A bind failure says which app holds the port (`ProcessInfo::listener_pid`) and points at Settings.
+9. **Proxied terminal.** "Copy terminal env" sets `HTTP(S)_PROXY`, `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE` and `CURL_CA_BUNDLE`. (M10) The last three replace a tool's roots, so they point at `<data dir>/ca/bundle.pem` (the OS roots from `rustls-native-certs`, then our CA), rewritten each time; Node's adds to its own and gets the CA alone.
 
 ### Known limitations (documented in the UI)
 - The Raw tab is a reconstruction, not the exact wire bytes.
@@ -138,6 +145,8 @@ We build our own engine and use hudsucker only as a reading reference. Its handl
 - WebSocket messages are reassembled and re-framed, so fragmentation on the wire may differ from what the peer sent. Pings are forwarded and also answered by the proxy, so a pinging side may see two pongs.
 - A compressed (`Content-Encoding`) event stream is parsed once it is complete, without per-event times.
 - The flow table's Status column shows `101` for a closed WebSocket; the close code and reason are in the WebSocket panel.
+- Pins belong to the live capture: a saved session doesn't keep them, and Clear drops pinned flows too.
+- A deep search reads each candidate's detail and decoded body (its first 4 MB) from disk, so on a large capture it takes seconds; rows stream in as it goes.
 - HTTP/1.1 header names are forwarded with their original case, but recorded lower-cased (hyper doesn't expose its case map) and shown in Title-Case.
 - LAN clients are identified by IP address: a device that gets a new address is asked about again, and renaming a device doesn't relabel its earlier flows. LAN access listens on IPv4 only.
 
@@ -171,6 +180,7 @@ We build our own engine and use hudsucker only as a reading reference. Its handl
   3. **Recording.** Each flow records which rules applied (`FlowDetail.rules`: applied rules with their phase, `rewrite_skipped`, `breakpoint_timeout`, `mocked`) and sets `edited`. That drives the Edited column and the inspector badges. The recorded request and response are what was sent after rules, not the originals (keeping both is a follow-up).
   - Rules don't apply to WebSocket handshakes yet.
 - **Breakpoints.**
+  - (M10) The Breakpoint Editor edits bodies in CodeMirror, highlighted from the Content-Type.
   - `BreakpointManager` keeps a `DashMap<BpId, Pending{snapshot, oneshot::Sender<Resolution>}>`.
   - A resolution is `Continue{edits}`, `Abort` or `Respond`. Edits can change the method, URL (another origin is dialled directly), status, headers and body.
   - The timeout comes from the rule settings: 300 s by default, 0 waits forever. On timeout the flow continues unmodified and is marked `breakpoint_timeout`.
@@ -294,12 +304,17 @@ We build our own engine and use hudsucker only as a reading reference. Its handl
   - Request | Response split, with tabs Header, Query, Cookies, Body, Raw, JSON, Form, Hex, Preview, Timing and TLS. Timing and TLS sit in the Response pane; the URL bar shows the HTTP version.
   - A WebSocket frame panel and an SSE event list.
 - **Footer.** Clear, Filter, Auto Select, "n/m rows selected", ↑↓ throughput and deep-search progress.
+  - (M10) Throughput is the rate of change of the body bytes the store has seen (`StorageStatus.sent_bytes`/`received_bytes`, pushed with the storage status); a disk-full write error shows as "Not recording bodies".
+- **Keyboard (M10).** `ui/src/lib/commands.ts` is the one list of commands: the ⌘K palette (shadcn `Command`) lists them all, and the ones with a key run from `hooks/useShortcuts.ts`: ⌘R replay, ⌘⌫ clear (not while typing), ⌘E record, ⌘F search flows (in a body viewer CodeMirror's own search), ⌘L filter apps and domains, ⌘, settings. The table takes ↑/↓, PgUp/PgDn, Home/End and Enter (to the inspector); Escape in the inspector returns. Every focusable element has a visible ring.
+- **Columns (M10).** Resize by the header's edges (double-click resets), reorder by dragging headers, hide from the header's context menu; widths, order, visibility and the sort persist in the webview's local storage (`store/prefs.ts`).
 - **Replay and documents (M8).**
   - `Engine::send` runs the request through the same `proxy/exchange.rs` pipeline as proxied traffic (rules on or off), from a client that is Proxymate itself: plain HTTP on the pooled client, HTTPS over a one-off HTTP/1.1 TLS connection (no pooled HTTPS client). The flow is recorded even while recording is paused, its summary carries `sent_by` (`FlowRow`'s last field), and the URL column shows a "Replay" (or "AI") badge.
   - Replay sends the recorded bytes as they were (still content-encoded); Edit & Replay opens Compose with the body decoded and `Content-Encoding` dropped. Host, Content-Length and hop-by-hop headers are derived when sending. WebSocket flows can't be sent yet.
   - Copy as cURL (`io/curl.rs`) single-quotes everything, turns an `Accept-Encoding` curl can decode into `--compressed`, sends text bodies with `--data-raw` and binary or content-encoded ones with `--data-binary @-` from embedded base64 (or a file the user saves first, above 256 KB).
   - HAR 1.2 (`io/har.rs`, our own serde types) reads Chrome's `_webSocketMessages`, `_resourceType`, `_error`, base64 bodies and h2 pseudo-headers (dropped). Imported bodies are the decoded text the HAR holds, so they are stored without a content-encoding.
   - Opened documents show as tabs above the filter row and in the sidebar's Saved section. File → New Request…, Open…, Import HAR…, Save Session… (the active tab, all flows) and Export HAR… (what the table shows); the flow menu's Export HAR… exports that flow.
+- **Settings (M10).** Proxy (port, LAN access and interface, system proxy, terminal env), SSL Proxying (decrypt, never decrypt, bypass and insecure-upstream lists, apps never decrypted), Clients (the LAN allow-list: allow, deny, rename, forget), Storage (usage and limits), Appearance (theme, reset columns), Advanced (breakpoint timeout, upstream pool) and MCP. A closed "Allow?" prompt leaves the device pending with a "device waiting" button in the toolbar; the prompt counts down to when held connections are refused (`DeviceClient.held_until_ms`).
+- **Errors (M10).** A failed flow's inspector leads with what went wrong and the fixes that apply (`ui/src/lib/errors.ts`): the certificate wizard and SSL bypass for a client refusing our certificate, insecure upstream for an untrusted server certificate, SSL bypass for old TLS, the timeouts for timeouts. Regenerating the CA offers to remove the old CA's keychain trust.
 - **Windows.** Compose, Rules Editor (drag to reorder, MatcherBuilder, ActionListEditor, dry run), Breakpoint Editor (queue plus editable message with Execute/Abort/Respond), Cert Wizard, Device Setup Wizard (Simulator / iPhone / Android / Android emulator, with QR codes and a live "waiting for device…" state), Settings and Session Manager.
 
 ### Body viewers and previews
@@ -352,8 +367,9 @@ Tokens are CSS variables set per `[data-theme]`. Pills use a tinted background w
   - 1xx slate, 2xx green, 3xx cyan, 4xx amber, 5xx red.
   - Active: amber with a pulse. Paused: violet. Failed: red outline. Blocked and Tunnel: grey.
 - **URL parts:** scheme dim, host bright, path normal, query dim-accent.
-- **Selection:** orange.
+- **Selection:** orange (a deeper orange since M10, so white text on it reaches 4.5:1).
 - **Theme:** dark first, with light mode in M10. The body viewers already use tokens for both (`--syntax-*`, `--code-*`, `--checker-*`).
+  - (M10) Settings › Appearance picks System, Light or Dark (stored in the webview with the column layout); the native window follows (`setTheme`), so the sidebar vibrancy and traffic lights match. `ui/src/styles/contrast.test.ts` converts every text token and the surface it is drawn on (pill tints composited over the table) from OKLCH and checks 4.5:1 in both themes. Component colours that were hard-coded (overlays, destructive buttons, preview paper, pills on the selected row) became tokens.
 
 ## Delivery workflow: one Claude session and one PR per milestone
 - **Repository.** M0 creates a new GitHub repository, private by default, called `proxymate`, with `gh repo create`. It's created under the user's account, and the name and visibility are confirmed when M0 starts.
@@ -412,11 +428,11 @@ Tokens are CSS variables set per `[data-theme]`. Pills use a tinted background w
   - Content-detection unit tests per ContentKind, covering header-less bodies, mislabelled Content-Types and compressed bodies.
 - **Body viewers:** a pm-testkit "zoo" endpoint serves one fixture per ContentKind (JSON, nested and 10 MB JSON, XML, HTML, form, multipart with an image part, GraphQL, JS, CSS, PNG, animated GIF, WebP, SVG with an embedded script, MP4, PDF, font, random binary). Playwright snapshots each viewer in dark and light. The SVG and HTML previews must not execute scripts or make network requests.
   - The fixtures and `zoo.json` live in `crates/pm-testkit/fixtures/zoo/`. Playwright runs against the UI's mock backend serving the same fixtures (`?zoo`), in WebKit (the app's engine); the preview-safety checks also run in Chromium.
-  - Snapshot baselines are committed for macOS only, so CI on Linux runs the same tests with pixel comparison off. Linux baselines (generated in the Playwright Docker image) are a follow-up.
+  - Snapshot baselines are committed per platform. (M10) CI runs the UI job in the Playwright Docker image (`mcr.microsoft.com/playwright:v1.64.1-noble`) with pixel comparison on; missing Linux baselines are written there and come back in the `playwright-report` artifact to be committed.
 - **Performance:**
   - Criterion bench: ingest 100k flows in under 2 s, and refilter or sort in under 10 ms.
   - The UI scrolls 100k rows at 60 fps (checked in the Performance panel).
-  - A 1-hour soak with `proxymate-cli bench` at 500 rps keeps RSS stable.
+  - A 1-hour soak with `proxymate-cli bench` at 500 rps keeps RSS stable. (M10) `proxymate-cli bench --rps 500 --duration 3600` sends a mix of bodies (JSON, gzip/br, 20 KB and 300 KB binaries, POSTs, errors, the zoo) through its own engine, or through the app with `--proxy 127.0.0.1:9090 --pid <pid>`, and prints rate, latency, failures, RSS, flows and disk as CSV.
 - **macOS manual checks:**
   - Safari and Chrome traffic decrypts, with app icons.
   - After `kill -9` of the app, `scutil --proxy` shows the proxy restored within 1 s.

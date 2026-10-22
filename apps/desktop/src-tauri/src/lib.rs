@@ -9,7 +9,7 @@ mod window;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use pm_core::{Engine, EngineConfig, ProxyConfig, synth};
+use pm_core::{Engine, EngineConfig, synth};
 use pm_model::MCP_DEFAULT_PORT;
 use tauri::Manager;
 
@@ -92,6 +92,14 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::close_document,
             commands::save_session,
             commands::export_har,
+            commands::get_storage_settings,
+            commands::set_storage_settings,
+            commands::get_storage_status,
+            commands::subscribe_storage,
+            commands::pin_flows,
+            commands::get_proxy_settings,
+            commands::set_proxy_settings,
+            commands::set_sidebar_store,
         ])
         // Sizes are u64 but stay far below 2^53.
         .dangerously_cast_bigints_to_number()
@@ -224,8 +232,9 @@ pub fn run_mcp_stdio(args: &[String]) -> i32 {
 /// `identifier` in `tauri.conf.json`.
 const BUNDLE_ID: &str = "dev.proxymate.desktop";
 
-/// Starts the engine and the proxy on 9090 (or the next free port up to
-/// 9099). A proxy that can't bind is reported in the toolbar, not fatal.
+/// Starts the engine and the proxy on the configured port (9090 by default,
+/// or the next free one of the nine after it). A proxy that can't bind is
+/// reported in the toolbar, not fatal.
 ///
 /// For UI and performance work, `PROXYMATE_SYNTH_FLOWS` seeds synthetic
 /// flows and `PROXYMATE_SYNTH_RATE` adds that many live ones per second.
@@ -249,7 +258,7 @@ fn start_engine(data_dir: Option<PathBuf>) -> Arc<Engine> {
         Ok(_) => {}
         Err(err) => eprintln!("can't restore an earlier run's system proxy: {err}"),
     }
-    if let Err(err) = tauri::async_runtime::block_on(engine.start_proxy(ProxyConfig::default())) {
+    if let Err(err) = tauri::async_runtime::block_on(engine.start_proxy(engine.configured_proxy())) {
         eprintln!("{err}");
     }
     if env_or("PROXYMATE_SYSTEM_PROXY", 0u8) == 1 {

@@ -230,6 +230,7 @@ impl Generator {
             },
             graphql_op,
             sent_by: None,
+            pinned: false,
         }
     }
 

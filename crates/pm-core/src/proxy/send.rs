@@ -40,10 +40,11 @@ pub(crate) struct Sender {
 
 impl Sender {
     pub fn new(engine: Weak<Engine>) -> Sender {
+        let pool = engine.upgrade().map(|e| e.proxy_settings()).unwrap_or_default();
         Sender {
             ctx: Arc::new(ProxyCtx {
                 engine,
-                client: upstream_client(),
+                client: upstream_client(&pool),
                 // Only the listener's loop check reads this; sends never loop
                 // through it.
                 addr: SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0)),
@@ -89,6 +90,7 @@ impl Sender {
             },
             graphql_op: None,
             sent_by: Some(opts.origin.sent_by()),
+            pinned: false,
         };
         let headers: Vec<Header> = super::headers_of(&request.headers);
         let detail = FlowDetail {

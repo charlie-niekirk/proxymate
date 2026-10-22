@@ -47,6 +47,16 @@ impl ProcessInfo for LibProc {
         Ok(peers)
     }
 
+    fn listener_pid(&self, port: u16) -> Option<u32> {
+        let me = std::process::id() as libc::c_int;
+        all_pids().ok()?.into_iter().filter(|&pid| pid != me).find_map(|pid| {
+            socket_fds(pid)?
+                .into_iter()
+                .any(|fd| socket_info(pid, fd).is_some_and(|info| listens_on(&info, port)))
+                .then_some(pid as u32)
+        })
+    }
+
     fn app_for_pid(&self, pid: u32) -> Option<AppInfo> {
         let path = pid_path(pid)?;
         let simulator = is_simulator(&path);
@@ -140,8 +150,13 @@ fn socket_fds(pid: libc::c_int) -> Option<Vec<libc::c_int>> {
 
 /// The local port of `fd` if it is a TCP socket connected to loopback
 /// `remote_port`.
-#[allow(unsafe_code)] // libproc FFI into a buffer owned here.
 fn tcp_peer_port(pid: libc::c_int, fd: libc::c_int, remote_port: u16) -> Option<u16> {
+    socket_peer_port(&socket_info(pid, fd)?, remote_port)
+}
+
+/// The `socket_fdinfo` of `fd`, as bytes.
+#[allow(unsafe_code)] // libproc FFI into a buffer owned here.
+fn socket_info(pid: libc::c_int, fd: libc::c_int) -> Option<Vec<u8>> {
     let mut buf = [0u64; SOCKET_FDINFO_BUF / 8];
     // SAFETY: the buffer is SOCKET_FDINFO_BUF bytes and 8-byte aligned.
     let n = unsafe {
@@ -156,8 +171,17 @@ fn tcp_peer_port(pid: libc::c_int, fd: libc::c_int, remote_port: u16) -> Option<
     if n <= INSI_FADDR as libc::c_int + 16 {
         return None;
     }
-    let bytes: Vec<u8> = buf.iter().flat_map(|w| w.to_ne_bytes()).collect();
-    socket_peer_port(&bytes, remote_port)
+    Some(buf.iter().flat_map(|w| w.to_ne_bytes()).collect())
+}
+
+/// True for a TCP socket bound to local `port` with no peer: a listener.
+fn listens_on(info: &[u8], port: u16) -> bool {
+    let i32_at = |at: usize| i32::from_ne_bytes(info[at..at + 4].try_into().unwrap());
+    let port_at = |at: usize| u16::from_be(i32_at(at) as u16);
+    i32_at(SOI_PROTOCOL) == libc::IPPROTO_TCP
+        && i32_at(SOI_KIND) == SOCKINFO_TCP
+        && port_at(INSI_FPORT) == 0
+        && port_at(INSI_LPORT) == port
 }
 
 /// Parses a `socket_fdinfo` buffer.
@@ -233,6 +257,21 @@ mod tests {
         assert_eq!(peers.get(&local), Some(&std::process::id()));
         // The accepted side (local port = `port`) is not a client of `port`.
         assert_eq!(peers.len(), 1, "{peers:?}");
+    }
+
+    #[test]
+    fn finds_a_listener() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        // Our own process is skipped (the proxy asks about others), so
+        // look at the socket directly.
+        let me = std::process::id() as libc::c_int;
+        let found = socket_fds(me)
+            .unwrap()
+            .into_iter()
+            .any(|fd| socket_info(me, fd).is_some_and(|info| listens_on(&info, port)));
+        assert!(found);
+        assert_eq!(LibProc.listener_pid(port), None);
     }
 
     #[test]

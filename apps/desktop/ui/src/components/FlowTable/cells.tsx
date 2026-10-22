@@ -14,7 +14,7 @@ function pillStyle(token: string): CSSProperties {
 
 const pillBase =
   "inline-flex h-4 min-w-0 items-center justify-center rounded-sm px-1.5 font-mono text-2xs font-semibold tracking-wide " +
-  "group-data-[selected=true]/row:!bg-white/20 " +
+  "group-data-[selected=true]/row:!bg-[var(--pill-on-selection)] " +
   ON_SELECTED;
 
 export function MethodPill({ method, className }: { method: string; className?: string }) {

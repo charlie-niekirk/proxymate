@@ -185,6 +185,15 @@ impl ClientResolver {
         app
     }
 
+    /// The app listening on `port`, by name and pid.
+    pub fn port_owner(&self, port: u16) -> Option<String> {
+        let pid = self.platform.listener_pid(port)?;
+        Some(match self.platform.app_for_pid(pid) {
+            Some(app) => format!("{}, pid {pid}", app.name),
+            None => format!("pid {pid}"),
+        })
+    }
+
     pub fn known(&self, name: &str) -> Option<Arc<ClientApp>> {
         self.known.lock().get(name).cloned()
     }

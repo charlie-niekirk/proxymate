@@ -95,6 +95,8 @@ struct Client {
     onboarding: bool,
     last_seen_ms: Option<f64>,
     waiting: u32,
+    /// When the newest held connection is refused, epoch ms.
+    held_until_ms: Option<f64>,
 }
 
 impl Client {
@@ -108,6 +110,7 @@ impl Client {
             onboarding: false,
             last_seen_ms: None,
             waiting: 0,
+            held_until_ms: None,
         }
     }
 
@@ -208,6 +211,7 @@ impl DeviceRegistry {
                 DeviceDecision::Denied => return Admission::Refused,
                 DeviceDecision::Pending => {
                     client.waiting += 1;
+                    client.held_until_ms = Some(crate::proxy::now_ms() + self.hold.as_secs_f64() * 1000.0);
                     self.mark_dirty();
                     client.decided.subscribe()
                 }
@@ -224,6 +228,9 @@ impl DeviceRegistry {
             return Admission::Refused;
         };
         client.waiting = client.waiting.saturating_sub(1);
+        if client.waiting == 0 {
+            client.held_until_ms = None;
+        }
         self.mark_dirty();
         match answer {
             Some(DeviceDecision::Allowed) => Admission::Remote(remote(ip, &label(ip, client.nickname.as_deref()))),
@@ -335,6 +342,7 @@ impl DeviceRegistry {
                 onboarding: c.onboarding,
                 last_seen_ms: c.last_seen_ms,
                 waiting: c.waiting,
+                held_until_ms: c.held_until_ms,
             })
             .collect();
         // BTreeMap order is by address; pending prompts go first.
@@ -715,6 +723,16 @@ impl Engine {
         })
         .await
         .map_err(|e| Error::Device(e.to_string()))?
+    }
+
+    /// Points the emulators we set up at the listener's new port.
+    pub(crate) async fn repoint_android_proxies(self: &Arc<Self>) {
+        let serials: Vec<String> = self.platform.devices.emulator_proxies.lock().iter().cloned().collect();
+        for serial in serials {
+            if let Err(err) = self.set_android_proxy(&serial, true).await {
+                eprintln!("proxymate: {serial} didn't follow the new port: {err}");
+            }
+        }
     }
 
     /// Clears the proxy of every emulator we pointed at us. Blocking; for

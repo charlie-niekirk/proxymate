@@ -1,5 +1,6 @@
 import { BreakpointEditor } from "@/components/Breakpoints/BreakpointEditor";
 import { CertWizard } from "@/components/CertWizard";
+import { CommandPalette } from "@/components/CommandPalette";
 import { ComposeDialog } from "@/components/Compose/ComposeDialog";
 import { DetailPane } from "@/components/DetailPane";
 import { DeviceAllowPrompt } from "@/components/DeviceAllowPrompt";
@@ -13,7 +14,11 @@ import { SettingsDialog } from "@/components/Settings/SettingsDialog";
 import { Sidebar } from "@/components/Sidebar";
 import { Toolbar } from "@/components/Toolbar";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
+import { Toaster } from "@/components/ui/sonner";
 import { useAppMenu } from "@/hooks/useAppMenu";
+import { useShortcuts } from "@/hooks/useShortcuts";
+import { startStorage } from "@/store/storage";
+import { useEffect } from "react";
 
 /**
  * Proxyman-style layout: full-height vibrant sidebar | toolbar, filter row,
@@ -21,6 +26,8 @@ import { useAppMenu } from "@/hooks/useAppMenu";
  */
 export function AppShell() {
   useAppMenu();
+  useShortcuts();
+  useEffect(startStorage, []);
   return (
     <>
     <ResizablePanelGroup orientation="horizontal" className="h-full">
@@ -53,6 +60,8 @@ export function AppShell() {
     <DeviceSetupSheet />
     <SettingsDialog />
     <DeviceAllowPrompt />
+    <CommandPalette />
+    <Toaster />
     </>
   );
 }

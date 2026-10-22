@@ -36,6 +36,9 @@ pub struct DomainNode {
 /// Pushed when it changes, at most once per publisher tick.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Type)]
 pub struct SidebarSnapshot {
+    /// The store counted: the live capture or the document tab shown.
+    #[serde(default)]
+    pub store: crate::StoreId,
     pub total: u32,
     /// Sorted by name, case-insensitively.
     pub apps: Vec<AppCount>,
