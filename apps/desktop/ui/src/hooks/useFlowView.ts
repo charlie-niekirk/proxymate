@@ -12,26 +12,30 @@ interface Live {
 }
 
 /**
- * Owns one engine view for the flow table: creates it, follows its 20 Hz
- * deltas over a Channel, applies filter/sort changes and keeps the row cache
- * in sync. Returns the cache (null until the view exists) and a version that
- * bumps whenever rows land or the view changes.
+ * Owns one engine view for the flow table: creates it over the active store
+ * (again when the tab changes), follows its 20 Hz deltas over a Channel,
+ * applies filter/sort changes and keeps the row cache in sync. Returns the
+ * cache (null until the view exists), the view id and a version that bumps
+ * whenever rows land or the view changes.
  */
 export function useFlowView() {
   const filter = useUi((s) => s.filter);
   const sort = useUi((s) => s.sort);
+  const store = useUi((s) => s.store);
   const [version, bump] = useReducer((n: number) => n + 1, 0);
   const [live, setLive] = useState<Live | null>(null);
   // Filter change start time, until the first rows of the new result are painted.
   const pendingFilter = useRef<{ t0: number; engineMs: number } | null>(null);
   const initial = useRef({ filter, sort });
 
-  // Create the view once and subscribe to its deltas.
+  // Create the view (once per store) and subscribe to its deltas.
   useEffect(() => {
     let cancelled = false;
     let created: number | null = null;
+    const { filter, sort } = useUi.getState();
+    initial.current = { filter, sort };
     void (async () => {
-      const info = await backend.createView(initial.current.filter, initial.current.sort);
+      const info = await backend.createView(store, filter, sort);
       created = info.view;
       if (cancelled) {
         void backend.dropView(info.view);
@@ -51,6 +55,7 @@ export function useFlowView() {
       cache.reset(info.len);
       useUi.getState().setStats({ len: info.len, total: info.total });
       setLive({ view: info.view, cache });
+      useUi.getState().setView(info.view);
       await backend.subscribe(info.view, (d: ViewDelta) => {
         if (cancelled) return;
         if (d.structural) cache.reset(d.len);
@@ -59,15 +64,16 @@ export function useFlowView() {
           if (d.len !== cache.len) cache.append(d.len);
         }
         useUi.getState().setStats({ len: d.len, total: d.total });
-        refreshInspected(d);
+        refreshInspected(store, d);
         bump();
       });
     })();
     return () => {
       cancelled = true;
+      setLive(null);
       if (created !== null) void backend.dropView(created);
     };
-  }, []);
+  }, [store]);
 
   // Filter changes: refilter synchronously in Rust, then refetch visible rows.
   const filterSeq = useRef(0);
@@ -94,11 +100,11 @@ export function useFlowView() {
     });
   }, [live, sort]);
 
-  return { cache: live?.cache ?? null, version };
+  return { cache: live?.cache ?? null, view: live?.view ?? null, version };
 }
 
 /** Refetches the inspected flow if this delta may have changed it. */
-function refreshInspected(d: ViewDelta) {
+function refreshInspected(store: number, d: ViewDelta) {
   const { selectedId, select } = useUi.getState();
   if (selectedId === null) return;
   if (d.total === 0) {
@@ -106,9 +112,11 @@ function refreshInspected(d: ViewDelta) {
     select(null);
     return;
   }
-  if (d.structural || d.changed.includes(selectedId)) {
-    void queryClient.invalidateQueries({ queryKey: flowKey(selectedId) });
-    void queryClient.invalidateQueries({ queryKey: streamKey(selectedId) });
+  // A selection made before the flow reached the store found nothing; retry as rows arrive.
+  const missing = d.appended > 0 && queryClient.getQueryData(flowKey(store, selectedId)) === null;
+  if (d.structural || d.changed.includes(selectedId) || missing) {
+    void queryClient.invalidateQueries({ queryKey: flowKey(store, selectedId) });
+    void queryClient.invalidateQueries({ queryKey: streamKey(store, selectedId) });
   }
 }
 

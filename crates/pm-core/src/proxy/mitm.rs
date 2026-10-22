@@ -451,6 +451,7 @@ fn record_connect(
         http_version: target.head.version,
         tls,
         graphql_op: None,
+        sent_by: None,
     };
     let detail = FlowDetail {
         id: 0,
@@ -774,6 +775,7 @@ impl MitmConn {
                     .trim_end_matches(']')
                     .to_owned(),
                 port: authority.port_u16().unwrap_or(443),
+                apply_rules: true,
             };
             return exchange.run(req).await;
         }

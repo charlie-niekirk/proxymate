@@ -6,10 +6,12 @@
 
 mod detail;
 mod device;
+mod document;
 mod filter;
 mod flow;
 mod platform;
 mod rules;
+mod send;
 mod stream;
 mod tls;
 mod view;
@@ -19,6 +21,7 @@ pub use device::{
     AndroidDevice, AndroidStatus, DeviceAccess, DeviceClient, DeviceDecision, DevicesSnapshot, LanInterface,
     LocalActivity, SimDevice, SimInstallResult, SimulatorStatus,
 };
+pub use document::{DocumentInfo, DocumentKind, FlowSelection, LIVE_STORE, SaveProgress, StoreId};
 pub use filter::{ContentGroup, FilterSpec, ProtocolFilter, SortDir, SortKey, SortSpec};
 pub use flow::{ContentKind, FlowId, FlowState, FlowSummary, Scheme};
 pub use platform::{AppCount, DomainNode, HostCount, KeychainTrust, SidebarSnapshot, SystemProxyStatus, TrustStatus};
@@ -27,6 +30,7 @@ pub use rules::{
     GLOBAL_THROTTLE_RULE_ID, KvMatch, MapLocalSource, Matcher, MessageEdits, Pattern, PatternKind, Phase, PresetKind,
     ResponseMatcher, Rule, RuleId, RuleOrigin, RuleSettings, RuleTestResult, StatusRange,
 };
+pub use send::{RequestSpec, SendOpts, SendOrigin, SentBy};
 pub use stream::{SseEvent, SsePage, WsClose, WsDirection, WsMessage, WsOpcode, WsPage, WsQuery};
 pub use tls::{CaInfo, CertSummary, SslSettings, Timing, TlsInfo, TlsStatus};
 pub use view::{FlowRow, RowsPage, ViewDelta, ViewId, ViewInfo};

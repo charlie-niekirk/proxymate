@@ -6,7 +6,6 @@ import {
   THROTTLE_PRESETS,
   actionSummary,
   activeThrottle,
-  curlCommand,
   defaultAction,
   emptyMatcher,
   formatStatusRanges,
@@ -79,22 +78,5 @@ describe("rules helpers", () => {
   it("moves list items", () => {
     expect(moveItem(["a", "b", "c"], 0, 2)).toEqual(["b", "c", "a"]);
     expect(moveItem(["a", "b", "c"], 2, 0)).toEqual(["c", "a", "b"]);
-  });
-
-  it("builds a basic curl command", () => {
-    const cmd = curlCommand({
-      request: {
-        method: "POST",
-        url: "https://api.example.com/v1/it's",
-        version: "HTTP/2",
-        headers: [
-          { name: ":authority", value: "api.example.com" },
-          { name: "host", value: "api.example.com" },
-          { name: "content-type", value: "application/json" },
-          { name: "content-length", value: "2" },
-        ],
-      },
-    });
-    expect(cmd).toBe(`curl -X POST 'https://api.example.com/v1/it'\\''s' -H 'content-type: application/json'`);
   });
 });

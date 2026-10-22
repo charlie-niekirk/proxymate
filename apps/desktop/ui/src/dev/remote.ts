@@ -1,7 +1,17 @@
-import type { ContentKind, MessageEdits_Deserialize, PresetKind } from "@/bindings";
+import type { ContentKind, MessageEdits_Deserialize, PresetKind, RequestSpec_Serialize } from "@/bindings";
 import type { ViewerId } from "@/components/BodyViewer/registry";
 import { bridge } from "@/dev/bridge";
-import { openPreset, setThrottle } from "@/lib/actions";
+import { backend } from "@/lib/backend";
+import {
+  closeDocument,
+  editAndReplay,
+  exportHar,
+  openDocument,
+  openPreset,
+  replayFlow,
+  saveSession,
+  setThrottle,
+} from "@/lib/actions";
 import { THROTTLE_PRESETS } from "@/lib/rules";
 import { useUi, type DeviceTab, type RequestTab, type ResponseTab } from "@/store/ui";
 
@@ -27,6 +37,17 @@ import { useUi, type DeviceTab, type RequestTab, type ResponseTab } from "@/stor
  *   presses Execute on the selected paused flow, merging these edits over
  *   any made in the form (`{"execute": {}}` sends the form as is);
  *   `{"breakpointAction": {"abort": true}}` presses Abort.
+ * - `{"store": 1}`: switches to that document tab (0 is the live capture).
+ * - `{"replay": 3}`, `{"editReplay": 3}`: the flow menu's Replay and Edit &
+ *   Replay, on the active tab's flow 3.
+ * - `{"compose": {"method": "POST", "url": "…", "headers": [], "body": "…"}}`
+ *   opens Compose with that request (`{"compose": null}`: a new one);
+ *   `{"composeSend": true}` presses Send.
+ * - `{"curl": 3}`: posts Copy as cURL's command for flow 3 to the mailbox's
+ *   outbox, `curl localhost:<vite port>/__pm_remote/out`.
+ * - `{"openDocument": "/path/x.har"}`, `{"closeDocument": 1}`.
+ * - `{"saveSession": "/path/x.proxymate"}` saves the active tab;
+ *   `{"exportHar": "/path/x.har"}` exports what the table shows.
  */
 interface Command {
   select?: number;
@@ -46,6 +67,16 @@ interface Command {
   deviceTab?: DeviceTab | null;
   /** Clicks the element with this `data-testid`, e.g. `simulator-install`. */
   click?: string;
+  store?: number;
+  replay?: number;
+  editReplay?: number;
+  compose?: Partial<RequestSpec_Serialize> | null;
+  composeSend?: boolean;
+  curl?: number;
+  openDocument?: string;
+  closeDocument?: number;
+  saveSession?: string;
+  exportHar?: string;
 }
 
 async function apply(cmd: Command) {
@@ -77,6 +108,24 @@ async function apply(cmd: Command) {
   if (cmd.breakpoints !== undefined) ui.setBreakpointsOpen(cmd.breakpoints);
   if (cmd.breakpointAction?.execute) await bridge.executeBreakpoint?.(cmd.breakpointAction.execute);
   if (cmd.breakpointAction?.abort) await bridge.abortBreakpoint?.();
+  if (cmd.store !== undefined) ui.setStore(cmd.store);
+  if (cmd.openDocument) await openDocument(cmd.openDocument);
+  if (cmd.closeDocument !== undefined) await closeDocument(cmd.closeDocument);
+  const store = useUi.getState().store;
+  if (cmd.replay !== undefined) await replayFlow(store, cmd.replay);
+  if (cmd.editReplay !== undefined) await editAndReplay(store, cmd.editReplay);
+  if (cmd.compose !== undefined) {
+    const spec = cmd.compose && { method: "GET", url: "", headers: [], body: null, body_base64: false, ...cmd.compose };
+    ui.openCompose(spec);
+  }
+  if (cmd.composeSend) await bridge.sendCompose?.();
+  if (cmd.curl !== undefined) await post("/__pm_remote/out", await backend.getCurl(store, cmd.curl));
+  if (cmd.saveSession) await saveSession({ kind: "all" }, cmd.saveSession);
+  if (cmd.exportHar) await exportHar(undefined, cmd.exportHar);
+}
+
+async function post(url: string, body: string) {
+  await fetch(url, { method: "POST", body });
 }
 
 /** Right-clicks a row the way a user would (Radix opens on `contextmenu`). */

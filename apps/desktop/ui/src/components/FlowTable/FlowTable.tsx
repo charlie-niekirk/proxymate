@@ -226,7 +226,7 @@ function RowCells({ row }: { row: Row }) {
         <StateDot state={row.state} />
       </div>
       <div className={cell}>
-        <UrlText row={row} operation={row.graphqlOp} />
+        <UrlText row={row} operation={row.graphqlOp} sentBy={row.sentBy} />
       </div>
       <div className={cn(cell, "gap-1.5 truncate font-sans text-xs")}>
         {row.client && <AppIcon name={row.client} />}

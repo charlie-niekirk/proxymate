@@ -13,7 +13,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { clearFlows, setRecording } from "@/lib/actions";
 import { backend } from "@/lib/backend";
 import { proxyStatusKey } from "@/lib/query";
-import { useUi } from "@/store/ui";
+import { LIVE_STORE, useUi } from "@/store/ui";
 
 function ToolButton({ icon: Icon, label, milestone }: { icon: LucideIcon; label: string; milestone: string }) {
   return (
@@ -37,6 +37,8 @@ function ToolButton({ icon: Icon, label, milestone }: { icon: LucideIcon; label:
 export function Toolbar() {
   const { data: status } = useQuery({ queryKey: proxyStatusKey, queryFn: () => backend.getProxyStatus() });
   const recording = status?.recording ?? true;
+  const openCompose = useUi((s) => s.openCompose);
+  const live = useUi((s) => s.store === LIVE_STORE);
   return (
     <header
       data-tauri-drag-region
@@ -56,10 +58,17 @@ export function Toolbar() {
         </TooltipTrigger>
         <TooltipContent>{recording ? "Recording · click to pause" : "Paused · traffic is forwarded but not recorded"}</TooltipContent>
       </Tooltip>
-      <ToolButton icon={Plus} label="Compose" milestone="M8" />
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button variant="ghost" size="icon" aria-label="Clear" onClick={() => void clearFlows()}>
+          <Button variant="ghost" size="icon" aria-label="Compose" onClick={() => openCompose()} data-testid="compose-button">
+            <Plus />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Compose a request · ⌘N</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button variant="ghost" size="icon" aria-label="Clear" disabled={!live} onClick={() => void clearFlows()}>
             <Trash2 />
           </Button>
         </TooltipTrigger>

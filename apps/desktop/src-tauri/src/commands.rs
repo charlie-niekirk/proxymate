@@ -5,9 +5,10 @@ use std::sync::Arc;
 use pm_core::Engine;
 use pm_model::{
     AndroidStatus, BodyPart, BreakpointId, BreakpointInfo, BreakpointResolution, CaInfo, DeviceAccess, DevicesSnapshot,
-    FilterSpec, FlowDetail, FlowId, FlowSummary, PresetKind, ProxyStatus, RowsPage, Rule, RuleId, RuleSettings,
-    RuleTestResult, SidebarSnapshot, SimInstallResult, SimulatorStatus, SortSpec, SsePage, SslSettings,
-    SystemProxyStatus, TrustStatus, ViewDelta, ViewId, ViewInfo, WsPage, WsQuery,
+    DocumentInfo, FilterSpec, FlowDetail, FlowId, FlowSelection, FlowSummary, PresetKind, ProxyStatus, RequestSpec,
+    RowsPage, Rule, RuleId, RuleSettings, RuleTestResult, SaveProgress, SendOpts, SendOrigin, SidebarSnapshot,
+    SimInstallResult, SimulatorStatus, SortSpec, SsePage, SslSettings, StoreId, SystemProxyStatus, TrustStatus,
+    ViewDelta, ViewId, ViewInfo, WsPage, WsQuery,
 };
 use tauri::State;
 use tauri::ipc::{Channel, InvokeResponseBody, IpcResponse};
@@ -16,8 +17,13 @@ type EngineState<'a> = State<'a, Arc<Engine>>;
 
 #[tauri::command]
 #[specta::specta]
-pub fn create_view(engine: EngineState<'_>, filter: FilterSpec, sort: SortSpec) -> ViewInfo {
-    engine.create_view(filter, sort)
+pub fn create_view(
+    engine: EngineState<'_>,
+    store: StoreId,
+    filter: FilterSpec,
+    sort: SortSpec,
+) -> Result<ViewInfo, String> {
+    engine.create_view_in(store, filter, sort).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -46,8 +52,8 @@ pub fn get_rows(engine: EngineState<'_>, view: ViewId, start: u32, count: u32) -
 
 #[tauri::command]
 #[specta::specta]
-pub fn get_flow(engine: EngineState<'_>, id: FlowId) -> Option<FlowSummary> {
-    engine.get_flow(id)
+pub fn get_flow(engine: EngineState<'_>, store: StoreId, id: FlowId) -> Option<FlowSummary> {
+    engine.get_flow_in(store, id)
 }
 
 /// Streams the view's 20 Hz deltas to the webview until the channel closes.
@@ -61,8 +67,8 @@ pub fn subscribe_view(engine: EngineState<'_>, view: ViewId, on_delta: Channel<V
 
 #[tauri::command]
 #[specta::specta]
-pub fn get_flow_detail(engine: EngineState<'_>, id: FlowId) -> Result<Option<FlowDetail>, String> {
-    engine.flow_detail(id).map_err(|e| e.to_string())
+pub fn get_flow_detail(engine: EngineState<'_>, store: StoreId, id: FlowId) -> Result<Option<FlowDetail>, String> {
+    engine.flow_detail_in(store, id).map_err(|e| e.to_string())
 }
 
 /// A body's bytes as a raw `ArrayBuffer`, not JSON. With `decoded`, a
@@ -72,6 +78,7 @@ pub fn get_flow_detail(engine: EngineState<'_>, id: FlowId) -> Result<Option<Flo
 #[specta::specta]
 pub fn get_body(
     engine: EngineState<'_>,
+    store: StoreId,
     id: FlowId,
     part: BodyPart,
     decoded: bool,
@@ -79,7 +86,7 @@ pub fn get_body(
 ) -> Result<RawBytes, String> {
     let max = max.map(|m| usize::try_from(m).unwrap_or(usize::MAX));
     engine
-        .body_head(id, part, decoded, max)
+        .body_head_in(store, id, part, decoded, max)
         .map(|body| RawBytes(tauri::ipc::Response::new(body.bytes)))
         .map_err(|e| e.to_string())
 }
@@ -91,6 +98,7 @@ pub fn get_body(
 pub async fn save_body(
     app: tauri::AppHandle,
     engine: EngineState<'_>,
+    store: StoreId,
     id: FlowId,
     part: BodyPart,
     decoded: bool,
@@ -105,7 +113,9 @@ pub async fn save_body(
         return Ok(None);
     };
     let path = path.into_path().map_err(|e| e.to_string())?;
-    engine.save_body(id, part, decoded, &path).map_err(|e| e.to_string())?;
+    engine
+        .save_body_in(store, id, part, decoded, &path)
+        .map_err(|e| e.to_string())?;
     Ok(Some(path.display().to_string()))
 }
 
@@ -113,22 +123,28 @@ pub async fn save_body(
 #[specta::specta]
 pub fn get_websocket_messages(
     engine: EngineState<'_>,
+    store: StoreId,
     id: FlowId,
     query: WsQuery,
     start: u32,
     count: u32,
 ) -> Result<WsPage, String> {
     engine
-        .websocket_messages(id, &query, start, count)
+        .websocket_messages_in(store, id, &query, start, count)
         .map_err(|e| e.to_string())
 }
 
 /// One WebSocket message's payload as a raw `ArrayBuffer`.
 #[tauri::command]
 #[specta::specta]
-pub fn get_websocket_payload(engine: EngineState<'_>, id: FlowId, index: u32) -> Result<RawBytes, String> {
+pub fn get_websocket_payload(
+    engine: EngineState<'_>,
+    store: StoreId,
+    id: FlowId,
+    index: u32,
+) -> Result<RawBytes, String> {
     engine
-        .websocket_payload(id, index)
+        .websocket_payload_in(store, id, index)
         .map(|bytes| RawBytes(tauri::ipc::Response::new(bytes)))
         .map_err(|e| e.to_string())
 }
@@ -137,12 +153,15 @@ pub fn get_websocket_payload(engine: EngineState<'_>, id: FlowId, index: u32) ->
 #[specta::specta]
 pub fn get_sse_events(
     engine: EngineState<'_>,
+    store: StoreId,
     id: FlowId,
     text: String,
     start: u32,
     count: u32,
 ) -> Result<SsePage, String> {
-    engine.sse_events(id, &text, start, count).map_err(|e| e.to_string())
+    engine
+        .sse_events_in(store, id, &text, start, count)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -460,6 +479,180 @@ pub async fn set_android_proxy(engine: EngineState<'_>, serial: String, on: bool
 #[specta::specta]
 pub async fn push_android_cert(engine: EngineState<'_>, serial: String) -> Result<String, String> {
     engine.push_android_cert(&serial).await.map_err(|e| e.to_string())
+}
+
+// ---- Replay, compose, cURL (M8) ----
+
+/// Sends a composed (or edited) request from the app; resolves to the new
+/// flow's id once it is recorded.
+#[tauri::command]
+#[specta::specta]
+pub async fn send_request(engine: EngineState<'_>, spec: RequestSpec, apply_rules: bool) -> Result<FlowId, String> {
+    let opts = SendOpts {
+        apply_rules,
+        wait: false,
+        origin: SendOrigin::User,
+    };
+    engine.send(spec, opts).await.map_err(|e| e.to_string())
+}
+
+/// Sends a recorded request again, as it was sent.
+#[tauri::command]
+#[specta::specta]
+pub async fn replay_flow(
+    engine: EngineState<'_>,
+    store: StoreId,
+    id: FlowId,
+    apply_rules: bool,
+) -> Result<FlowId, String> {
+    let opts = SendOpts {
+        apply_rules,
+        wait: false,
+        origin: SendOrigin::User,
+    };
+    engine.replay(store, id, opts).await.map_err(|e| e.to_string())
+}
+
+/// A recorded request, editable (body decoded), for Edit & Replay.
+#[tauri::command]
+#[specta::specta]
+pub fn get_request_spec(engine: EngineState<'_>, store: StoreId, id: FlowId) -> Result<RequestSpec, String> {
+    engine.request_spec(store, id, true).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn get_curl(engine: EngineState<'_>, store: StoreId, id: FlowId) -> Result<String, String> {
+    engine.curl_command(store, id).map_err(|e| e.to_string())
+}
+
+// ---- Documents: sessions and HAR (M8) ----
+
+#[tauri::command]
+#[specta::specta]
+pub fn list_documents(engine: EngineState<'_>) -> Vec<DocumentInfo> {
+    engine.documents()
+}
+
+/// Opens a session or HAR file as a document; without `path`, asks for
+/// one (only HAR files with `har`). `None` if the user cancelled.
+#[tauri::command]
+#[specta::specta]
+pub async fn open_document(
+    app: tauri::AppHandle,
+    engine: EngineState<'_>,
+    path: Option<String>,
+    har: bool,
+) -> Result<Option<DocumentInfo>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let path = match path {
+        Some(path) => std::path::PathBuf::from(path),
+        None => {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            let dialog = app.dialog().file();
+            let dialog = if har {
+                dialog.add_filter("HAR", &["har"])
+            } else {
+                dialog.add_filter("Proxymate session or HAR", &["proxymate", "har"])
+            };
+            dialog.pick_file(move |path| {
+                let _ = tx.send(path);
+            });
+            let Some(path) = rx.await.ok().flatten() else {
+                return Ok(None);
+            };
+            path.into_path().map_err(|e| e.to_string())?
+        }
+    };
+    let engine = engine.inner().clone();
+    // Loading a big session or HAR takes a moment; keep it off the IPC thread.
+    tokio::task::spawn_blocking(move || engine.open_document(&path))
+        .await
+        .map_err(|e| e.to_string())?
+        .map(Some)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn close_document(engine: EngineState<'_>, store: StoreId) -> Result<(), String> {
+    engine.close_document(store).map_err(|e| e.to_string())
+}
+
+/// Saves flows of a store as a `.proxymate` session in the background;
+/// without `path`, asks where. Resolves to the path (`None` if cancelled)
+/// once the save has started; `on_progress` hears the rest.
+#[tauri::command]
+#[specta::specta]
+pub async fn save_session(
+    app: tauri::AppHandle,
+    engine: EngineState<'_>,
+    store: StoreId,
+    selection: FlowSelection,
+    path: Option<String>,
+    file_name: String,
+    on_progress: Channel<SaveProgress>,
+) -> Result<Option<String>, String> {
+    let Some(path) = save_path(&app, path, &file_name, "Proxymate session", "proxymate").await? else {
+        return Ok(None);
+    };
+    engine
+        .save_session(store, &selection, path.clone(), progress_sink(on_progress))
+        .map_err(|e| e.to_string())?;
+    Ok(Some(path.display().to_string()))
+}
+
+/// Exports flows of a store as a HAR file in the background; like
+/// [`save_session`].
+#[tauri::command]
+#[specta::specta]
+pub async fn export_har(
+    app: tauri::AppHandle,
+    engine: EngineState<'_>,
+    store: StoreId,
+    selection: FlowSelection,
+    path: Option<String>,
+    file_name: String,
+    on_progress: Channel<SaveProgress>,
+) -> Result<Option<String>, String> {
+    let Some(path) = save_path(&app, path, &file_name, "HAR", "har").await? else {
+        return Ok(None);
+    };
+    engine
+        .export_har(store, &selection, path.clone(), progress_sink(on_progress))
+        .map_err(|e| e.to_string())?;
+    Ok(Some(path.display().to_string()))
+}
+
+async fn save_path(
+    app: &tauri::AppHandle,
+    path: Option<String>,
+    file_name: &str,
+    kind: &str,
+    extension: &str,
+) -> Result<Option<std::path::PathBuf>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    if let Some(path) = path {
+        return Ok(Some(path.into()));
+    }
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .add_filter(kind, &[extension])
+        .set_file_name(file_name)
+        .save_file(move |path| {
+            let _ = tx.send(path);
+        });
+    match rx.await.ok().flatten() {
+        Some(path) => path.into_path().map(Some).map_err(|e| e.to_string()),
+        None => Ok(None),
+    }
+}
+
+fn progress_sink(channel: Channel<SaveProgress>) -> pm_core::ProgressSink {
+    Box::new(move |progress| {
+        let _ = channel.send(progress);
+    })
 }
 
 /// Bytes sent to the webview as an `ArrayBuffer`. specta has no type for

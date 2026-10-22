@@ -2,6 +2,8 @@
 //! sit beside the flow detail rather than in it, so a long-lived connection
 //! with many messages never makes loading its detail slow. Logs are in
 //! memory; WebSocket payloads above a small size spill to the segment files.
+//! A saved session's logs are rebuilt in memory, payloads inline, when a
+//! flow is first inspected.
 
 use std::io;
 
@@ -100,6 +102,30 @@ impl WsLog {
         });
     }
 
+    /// A finished log rebuilt from saved messages and their payloads.
+    pub fn restore(messages: Vec<(WsMessage, Vec<u8>)>, close: Option<WsClose>) -> Self {
+        let mut inner = WsInner {
+            open: false,
+            close,
+            ..Default::default()
+        };
+        for (meta, payload) in messages {
+            match meta.direction {
+                WsDirection::Sent => inner.sent += meta.len,
+                WsDirection::Received => inner.received += meta.len,
+            }
+            let payload = if payload.is_empty() {
+                BlobRef::Empty
+            } else {
+                BlobRef::Inline(payload)
+            };
+            inner.records.push(WsRecord { meta, payload });
+        }
+        WsLog {
+            inner: RwLock::new(inner),
+        }
+    }
+
     /// Payload bytes sent by the client and by the server so far.
     pub fn totals(&self) -> (u64, u64) {
         let inner = self.inner.read();
@@ -112,7 +138,7 @@ impl WsLog {
         inner.close = close;
     }
 
-    pub fn page(&self, segments: &SegmentStore, query: &WsQuery, start: u32, count: u32) -> io::Result<WsPage> {
+    pub fn page(&self, segments: Option<&SegmentStore>, query: &WsQuery, start: u32, count: u32) -> io::Result<WsPage> {
         let inner = self.inner.read();
         let needle = query.text.trim().to_ascii_lowercase().into_bytes();
         let window = start as usize..(start as usize).saturating_add(count as usize);
@@ -138,7 +164,7 @@ impl WsLog {
                         BlobRef::Empty => &[][..],
                         BlobRef::Inline(bytes) => bytes.as_slice(),
                         blob => {
-                            spilled = blob.read(segments)?;
+                            spilled = blob.read_from(segments)?;
                             spilled.as_slice()
                         }
                     };
@@ -163,10 +189,10 @@ impl WsLog {
     }
 
     /// The recorded payload of message `index`.
-    pub fn payload(&self, segments: &SegmentStore, index: u32) -> io::Result<Option<Vec<u8>>> {
+    pub fn payload(&self, segments: Option<&SegmentStore>, index: u32) -> io::Result<Option<Vec<u8>>> {
         let inner = self.inner.read();
         match inner.records.get(index as usize) {
-            Some(record) => record.payload.read(segments).map(Some),
+            Some(record) => record.payload.read_from(segments).map(Some),
             None => Ok(None),
         }
     }
@@ -205,6 +231,21 @@ impl SseLog {
                 ..Default::default()
             }),
         }
+    }
+
+    /// A finished log of saved events.
+    pub fn restore(events: Vec<SseEvent>) -> Self {
+        SseLog {
+            inner: RwLock::new(SseInner {
+                events,
+                ..Default::default()
+            }),
+        }
+    }
+
+    /// Every event so far, for saving.
+    pub fn events(&self) -> Vec<SseEvent> {
+        self.inner.read().events.clone()
     }
 
     /// Parses one body chunk; events it completes are stamped `time_ms`.
@@ -295,7 +336,7 @@ mod tests {
         log.push(&segs, WsDirection::Received, WsOpcode::Binary, &big, None, 3.0);
         log.push(&segs, WsDirection::Sent, WsOpcode::Close, b"bye", Some(1000), 4.0);
 
-        let all = log.page(&segs, &WsQuery::default(), 1, 2).unwrap();
+        let all = log.page(Some(&segs), &WsQuery::default(), 1, 2).unwrap();
         assert_eq!((all.total, all.len), (4, 4));
         assert_eq!(all.messages.iter().map(|m| m.index).collect::<Vec<_>>(), vec![1, 2]);
         assert_eq!(all.messages[1].preview, "");
@@ -304,7 +345,7 @@ mod tests {
             direction: Some(WsDirection::Received),
             text: "hello".into(),
         };
-        let page = log.page(&segs, &received, 0, 10).unwrap();
+        let page = log.page(Some(&segs), &received, 0, 10).unwrap();
         assert_eq!(page.messages.iter().map(|m| m.index).collect::<Vec<_>>(), vec![1]);
 
         // Spilled payloads are searched too.
@@ -312,8 +353,8 @@ mod tests {
             direction: None,
             text: "NEEDLE".into(),
         };
-        assert_eq!(log.page(&segs, &spilled, 0, 10).unwrap().len, 1);
-        assert_eq!(log.payload(&segs, 2).unwrap().unwrap(), big);
+        assert_eq!(log.page(Some(&segs), &spilled, 0, 10).unwrap().len, 1);
+        assert_eq!(log.payload(Some(&segs), 2).unwrap().unwrap(), big);
         assert_eq!(log.totals(), (8, 5_010));
         let _ = std::fs::remove_dir_all(root);
     }
@@ -330,10 +371,10 @@ mod tests {
             None,
             1.0,
         );
-        let page = log.page(&segs, &WsQuery::default(), 0, 1).unwrap();
+        let page = log.page(Some(&segs), &WsQuery::default(), 0, 1).unwrap();
         assert!(page.messages[0].truncated);
         assert_eq!(page.messages[0].len, PAYLOAD_MAX as u64 + 1);
-        assert_eq!(log.payload(&segs, 0).unwrap().unwrap().len(), PAYLOAD_MAX);
+        assert_eq!(log.payload(Some(&segs), 0).unwrap().unwrap().len(), PAYLOAD_MAX);
         let _ = std::fs::remove_dir_all(root);
     }
 

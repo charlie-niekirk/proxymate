@@ -1,16 +1,17 @@
 //! Headless Proxymate engine.
 //!
 //! Adapters (Tauri commands, MCP tools, the CLI) talk only to [`Engine`].
-//! `io/` grows HAR, cURL and sessions in M8.
 
 mod client;
 mod devices;
+mod documents;
 mod engine;
 mod ingest;
 mod integration;
 pub mod io;
 pub mod proxy;
 mod recorder;
+mod replay;
 pub mod rules;
 pub mod store;
 pub mod synth;
@@ -19,6 +20,7 @@ pub mod trust;
 
 pub use client::{ClientApp, ClientKind};
 pub use devices::{DevicesSink, HOLD as DEVICE_HOLD, ONBOARDING_HOST};
+pub use documents::ProgressSink;
 pub use engine::{BodyBytes, DeltaSink, Engine, EngineConfig, PUBLISH_INTERVAL};
 pub use integration::SidebarSink;
 pub use proxy::ProxyConfig;
@@ -50,4 +52,12 @@ pub enum Error {
     /// Device setup: a bad address, a missing tool, a non-emulator serial.
     #[error("{0}")]
     Device(String),
+    /// `Engine::send`: the request can't be sent as given.
+    #[error("{0}")]
+    Send(String),
+    /// Saving, opening or importing a session or HAR file.
+    #[error("{0}")]
+    Document(String),
+    #[error("unknown store {0}")]
+    UnknownStore(pm_model::StoreId),
 }

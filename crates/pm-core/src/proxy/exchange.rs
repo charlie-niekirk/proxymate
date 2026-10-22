@@ -33,7 +33,7 @@ use pm_model::{
     BodyPart, BreakpointBody, BreakpointInfo, BreakpointResolution, MessageEdits, Phase, RequestHead, Scheme,
 };
 
-use super::body::{Buffered, RuleBody, buffer};
+use super::body::{Buffered, Inbound, RuleBody, buffer};
 use super::mitm::{self, MitmConn};
 use super::{
     BoxError, ProxyBody, ProxyCtx, Reset, TeeBody, content_kind, error_chain, headers_of, now_ms, response_head,
@@ -67,15 +67,17 @@ pub(super) struct Exchange<'a> {
     pub scheme: Scheme,
     pub host: String,
     pub port: u16,
+    /// False for `Engine::send` without rules: straight to the upstream.
+    pub apply_rules: bool,
 }
 
 type Reply = Result<Response<ProxyBody>, Reset>;
 
 /// A body that was (or wasn't) read ahead.
 enum Held {
-    Stream(Incoming),
+    Stream(Inbound),
     /// Over the cap: the part read, then the rest.
-    Over(std::collections::VecDeque<Bytes>, Incoming),
+    Over(std::collections::VecDeque<Bytes>, Inbound),
     /// Read whole but not decodable; sent back as is.
     Raw(Bytes),
     /// Read whole and decoded into the draft; these are the wire bytes.
@@ -135,10 +137,11 @@ enum Answer {
 }
 
 impl Exchange<'_> {
-    pub async fn run(self, req: Request<Incoming>) -> Reply {
+    pub async fn run(self, req: Request<impl Into<Inbound>>) -> Reply {
         let (mut parts, body) = req.into_parts();
+        let body = body.into();
         strip_hop_by_hop(&mut parts.headers);
-        let Some(engine) = self.ctx.engine.upgrade() else {
+        let Some(engine) = self.ctx.engine.upgrade().filter(|_| self.apply_rules) else {
             return self.plain(parts, body).await;
         };
         let rules = engine.rule_set();
@@ -158,7 +161,7 @@ impl Exchange<'_> {
     }
 
     /// No rule applies: stream both ways.
-    async fn plain(&self, parts: request::Parts, body: Incoming) -> Reply {
+    async fn plain(&self, parts: request::Parts, body: Inbound) -> Reply {
         let pq = parts
             .uri
             .path_and_query()
@@ -181,7 +184,7 @@ impl Exchange<'_> {
         &self,
         engine: &Arc<Engine>,
         mut parts: request::Parts,
-        body: Incoming,
+        body: Inbound,
         mut draft: RequestDraft,
         matched: Vec<Arc<CompiledRule>>,
     ) -> Reply {
@@ -347,7 +350,7 @@ impl Exchange<'_> {
                 upstream_head = Some(response_head(&response));
                 let (mut parts, body) = response.into_parts();
                 strip_hop_by_hop(&mut parts.headers);
-                (parts, Held::Stream(body), None)
+                (parts, Held::Stream(body.into()), None)
             }
             Answer::Local(draft) => {
                 let (mut parts, ()) = Response::new(()).into_parts();
@@ -529,7 +532,7 @@ impl Exchange<'_> {
     /// Reads a body ahead (up to the cap) and decodes it.
     async fn hold(
         &self,
-        body: Incoming,
+        body: Inbound,
         headers: &HeaderMap,
         part: BodyPart,
     ) -> Result<(Held, Option<Vec<u8>>), hyper::Error> {

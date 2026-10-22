@@ -30,16 +30,17 @@ export function WebSocketPanel({ id }: { id: number }) {
   const [text, setText] = useState("");
   const [selected, setSelected] = useState<WsMessage_Serialize | null>(null);
   const query: WsQuery_Deserialize = { direction: direction === "all" ? null : direction, text };
+  const store = useUi((st) => st.store);
 
   const { data: head } = useQuery({
-    queryKey: [...streamKey(id), "ws", query],
-    queryFn: () => backend.getWebsocketMessages(id, query, 0, 0),
+    queryKey: [...streamKey(store, id), "ws", query],
+    queryFn: () => backend.getWebsocketMessages(store, id, query, 0, 0),
     placeholderData: keepPreviousData,
   });
   const len = head?.len ?? 0;
   const [[first, last], setRange] = useState<[number, number]>([0, -1]);
-  const message = usePagedList(["ws-page", id, query], len, first, last, async (start, count) =>
-    (await backend.getWebsocketMessages(id, query, start, count)).messages,
+  const message = usePagedList(["ws-page", store, id, query], len, first, last, async (start, count) =>
+    (await backend.getWebsocketMessages(store, id, query, start, count)).messages,
   );
 
   // With Auto Select on, the newest message is inspected until one is clicked.
@@ -139,9 +140,10 @@ function DirectionArrow({ direction }: { direction: WsDirection }) {
 }
 
 function MessageDetail({ id, message }: { id: number; message: WsMessage_Serialize }) {
+  const store = useUi((st) => st.store);
   const payload = useQuery({
-    queryKey: ["ws-payload", id, message.index],
-    queryFn: async () => new Uint8Array(await backend.getWebsocketPayload(id, message.index)),
+    queryKey: ["ws-payload", store, id, message.index],
+    queryFn: async () => new Uint8Array(await backend.getWebsocketPayload(store, id, message.index)),
   });
   const notes = [
     `${message.direction === "sent" ? "Sent by the client" : "Received from the server"} · ${OPCODE_LABEL[message.opcode]} · ${message.len} bytes · ${formatTime(message.time_ms)}`,

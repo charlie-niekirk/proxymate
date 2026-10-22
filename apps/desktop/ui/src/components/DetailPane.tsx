@@ -34,11 +34,12 @@ interface Inspected {
 /** Inspector for the selected flow: URL bar over a Request | Response split. */
 export function DetailPane() {
   const id = useUi((s) => s.selectedId);
+  const store = useUi((s) => s.store);
   const { data } = useQuery({
-    queryKey: flowKey(id),
+    queryKey: flowKey(store, id),
     enabled: id !== null,
     queryFn: async (): Promise<Inspected | null> => {
-      const [flow, detail] = await Promise.all([backend.getFlow(id!), backend.getFlowDetail(id!)]);
+      const [flow, detail] = await Promise.all([backend.getFlow(store, id!), backend.getFlowDetail(store, id!)]);
       return flow ? { flow, detail } : null;
     },
   });
@@ -68,7 +69,7 @@ export function DetailPane() {
     <div className="bg-background flex h-full flex-col" data-testid="inspector">
       <div className="flex h-8 shrink-0 items-center gap-2 border-b px-2" data-selectable>
         <MethodPill method={flow.method} />
-        <UrlText row={flow} operation={flow.graphql_op} className="min-w-0 flex-1 text-xs" />
+        <UrlText row={flow} operation={flow.graphql_op} sentBy={flow.sent_by} className="min-w-0 flex-1 text-xs" />
         <StatusPill status={flow.status} state={flow.state} />
         <span
           className="text-muted-foreground rounded-sm border px-1 font-mono text-2xs leading-4"

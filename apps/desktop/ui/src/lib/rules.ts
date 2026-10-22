@@ -1,6 +1,5 @@
 import type {
   Action_Serialize,
-  FlowDetail_Serialize,
   KvMatch_Serialize,
   Matcher_Serialize,
   Pattern_Serialize,
@@ -287,25 +286,6 @@ export function formatStatusRanges(ranges: { from: number; to: number }[]): stri
   return ranges
     .map((r) => (r.from === r.to ? String(r.from) : r.from % 100 === 0 && r.to === r.from + 99 ? `${r.from / 100}xx` : `${r.from}-${r.to}`))
     .join(", ");
-}
-
-const PSEUDO = /^:/;
-
-/**
- * A `curl` command line for a recorded request. A client-side stub: bodies
- * are left out. The real exporter (bodies, HTTP/2 flags) arrives in M8.
- */
-export function curlCommand(detail: Pick<FlowDetail_Serialize, "request">): string {
-  const { method, url, headers } = detail.request;
-  const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
-  const parts = ["curl"];
-  if (method !== "GET") parts.push("-X", method);
-  parts.push(q(url));
-  for (const h of headers) {
-    if (PSEUDO.test(h.name) || ["host", "content-length"].includes(h.name.toLowerCase())) continue;
-    parts.push("-H", q(`${h.name}: ${h.value}`));
-  }
-  return parts.join(" ");
 }
 
 /** True if `text` parses as JSON. */

@@ -1,9 +1,10 @@
-import type { PresetKind } from "@/bindings";
+import type { FlowSelection, PresetKind, RequestSpec_Deserialize, SaveProgress_Serialize } from "@/bindings";
 import { backend } from "@/lib/backend";
 import {
   androidKey,
   caInfoKey,
   deviceAccessKey,
+  documentsKey,
   proxyStatusKey,
   queryClient,
   rulesKey,
@@ -11,15 +12,15 @@ import {
   systemProxyKey,
   trustStatusKey,
 } from "@/lib/query";
-import { GLOBAL_THROTTLE_RULE_ID, curlCommand, normalizeRule, withThrottle, type Rule, type ThrottlePreset } from "@/lib/rules";
-import { useUi } from "@/store/ui";
+import { GLOBAL_THROTTLE_RULE_ID, normalizeRule, withThrottle, type Rule, type ThrottlePreset } from "@/lib/rules";
+import { LIVE_STORE, useUi } from "@/store/ui";
 
-/** Clears every flow. The view's structural delta then empties the table. */
+/** Clears every live flow. The view's structural delta then empties the table. */
 export async function clearFlows() {
-  useUi.getState().select(null);
+  if (useUi.getState().store === LIVE_STORE) useUi.getState().select(null);
   await backend.clearFlows();
-  queryClient.removeQueries({ queryKey: ["body"] });
-  queryClient.removeQueries({ queryKey: ["flow"] });
+  queryClient.removeQueries({ queryKey: ["body", LIVE_STORE] });
+  queryClient.removeQueries({ queryKey: ["flow", LIVE_STORE] });
 }
 
 /** Pauses or resumes recording; traffic is forwarded either way. */
@@ -122,17 +123,110 @@ export async function setThrottle(preset: ThrottlePreset | null) {
 
 // ---- Flow menu ----
 
-export async function copyFlowUrl(flow: number) {
-  const detail = await backend.getFlowDetail(flow);
-  const summary = detail ? null : await backend.getFlow(flow);
+export async function copyFlowUrl(store: number, flow: number) {
+  const detail = await backend.getFlowDetail(store, flow);
+  const summary = detail ? null : await backend.getFlow(store, flow);
   const url = detail?.request.url ?? (summary ? `${summary.scheme}://${summary.host}${summary.path}${summary.query ? `?${summary.query}` : ""}` : "");
   if (url) await navigator.clipboard.writeText(url);
 }
 
-/** A client-side stub without bodies; the full exporter is M8. */
-export async function copyFlowCurl(flow: number) {
-  const detail = await backend.getFlowDetail(flow);
-  if (detail) await navigator.clipboard.writeText(curlCommand(detail));
+/** A shell command (built in Rust, bodies included) that sends the request again. */
+export async function copyFlowCurl(store: number, flow: number) {
+  await navigator.clipboard.writeText(await backend.getCurl(store, flow));
+}
+
+// ---- Replay and compose ----
+
+/** Shows a flow the app just sent: the live tab, with it selected. */
+function showSent(id: number) {
+  useUi.getState().setStore(LIVE_STORE);
+  useUi.getState().select(id);
+}
+
+/** Sends a recorded request again, as it was sent; the new flow is selected. */
+export async function replayFlow(store: number, flow: number) {
+  showSent(await backend.replayFlow(store, flow, true));
+}
+
+/** Opens Compose pre-filled from a recorded request (body decoded). */
+export async function editAndReplay(store: number, flow: number) {
+  useUi.getState().openCompose(await backend.getRequestSpec(store, flow));
+}
+
+/** Sends a composed request; the new flow is selected. */
+export async function sendComposed(spec: RequestSpec_Deserialize, applyRules: boolean) {
+  showSent(await backend.sendRequest(spec, applyRules));
+}
+
+// ---- Documents: sessions and HAR ----
+
+export async function refreshDocuments() {
+  const documents = await backend.listDocuments();
+  useUi.getState().setDocuments(documents);
+  queryClient.setQueryData(documentsKey, documents);
+}
+
+/** Opens a session or HAR (asking for the file without `path`) in a new tab. */
+export async function openDocument(path: string | null = null, har = false) {
+  const doc = await backend.openDocument(path, har);
+  if (!doc) return;
+  await refreshDocuments();
+  useUi.getState().setStore(doc.store);
+}
+
+export async function closeDocument(store: number) {
+  await backend.closeDocument(store);
+  if (useUi.getState().store === store) useUi.getState().setStore(LIVE_STORE);
+  queryClient.removeQueries({ queryKey: ["body", store] });
+  queryClient.removeQueries({ queryKey: ["flow", store] });
+  await refreshDocuments();
+}
+
+/** A file name for what the active tab holds, with `extension`. */
+function suggestedName(extension: string) {
+  const { store, documents } = useUi.getState();
+  const doc = documents.find((d) => d.store === store);
+  if (doc) return `${doc.name.replace(/\.(har|proxymate)$/i, "")}.${extension}`;
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `Proxymate ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}.${pad(d.getMinutes())}.${extension}`;
+}
+
+/** Saves the active tab's flows (all of them, by default) as a `.proxymate` session. */
+export async function saveSession(selection: FlowSelection = { kind: "all" }, path: string | null = null) {
+  const store = useUi.getState().store;
+  await runSave("Saving session", (onProgress) =>
+    backend.saveSession(store, selection, path, suggestedName("proxymate"), onProgress),
+  );
+}
+
+/** Exports flows of the active tab as HAR: what the table shows, by default. */
+export async function exportHar(selection?: FlowSelection, path: string | null = null) {
+  const { store, view } = useUi.getState();
+  const which: FlowSelection = selection ?? (view !== null ? { kind: "view", view } : { kind: "all" });
+  await runSave("Exporting HAR", (onProgress) => backend.exportHar(store, which, path, suggestedName("har"), onProgress));
+}
+
+/** Runs a background save, mirroring its progress in the footer. */
+async function runSave(label: string, start: (onProgress: (p: SaveProgress_Serialize) => void) => Promise<string | null>) {
+  const { setSave } = useUi.getState();
+  const onProgress = (progress: SaveProgress_Serialize) => {
+    setSave({ label, progress });
+    if (progress.finished && !progress.error) {
+      // The "saved" note stays a moment, unless another save replaced it.
+      setTimeout(() => {
+        if (useUi.getState().save?.progress === progress) setSave(null);
+      }, 4000);
+    }
+  };
+  try {
+    await start(onProgress);
+  } catch (err) {
+    setSave({
+      label,
+      progress: { done: 0, total: 0, finished: true, error: err instanceof Error ? err.message : String(err), path: "" },
+    });
+  }
 }
 
 // ---- Device setup ----

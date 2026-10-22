@@ -112,6 +112,12 @@
   --rule-agent: oklch(0.8 0.12 185);
   --rule-agent-bg: oklch(0.8 0.12 185 / 15%);
 
+  /* ---- flows Proxymate sent itself (Replay, Compose, agents) ---- */
+  --sent: var(--m-get);
+  --sent-bg: var(--m-get-bg);
+  --sent-agent: var(--rule-agent);
+  --sent-agent-bg: var(--rule-agent-bg);
+
   /* ---- TLS (SSL column, inspector) ---- */
   --ssl-passthrough: var(--s-tunnel);
   --ssl-pinned: var(--s-4xx);
