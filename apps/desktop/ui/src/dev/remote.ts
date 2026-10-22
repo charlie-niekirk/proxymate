@@ -14,6 +14,7 @@ import {
 } from "@/lib/actions";
 import { THROTTLE_PRESETS } from "@/lib/rules";
 import { forceTheme } from "@/lib/theme";
+import { usePrefs } from "@/store/prefs";
 import { useUi, type DeviceTab, type RequestTab, type ResponseTab, type SettingsPage } from "@/store/ui";
 
 /**
@@ -24,7 +25,7 @@ import { useUi, type DeviceTab, type RequestTab, type ResponseTab, type Settings
  * `curl -d '<json>' localhost:<vite port>/__pm_remote`, one command object
  * per POST (fields apply in the order below):
  * - `{"select": 3}`, `{"requestTab": "Body"}`, `{"responseTab": "TLS"}`,
- *   `{"viewer": {"kind": "json", "viewer": "tree"}}`, `{"theme": "light"}`
+ *   `{"viewer": {"kind": "json", "viewer": "tree"}}`, `{"theme": "light"}`, `{"appearance": "light"}`, `{"palette": true}`, `{"filter": "body:token"}`
  * - `{"contextMenu": 3}`: right-clicks flow 3's row (it must be on screen),
  *   opening the flow menu for a screenshot. `{"contextMenu": null}` closes it.
  * - `{"preset": {"flow": 3, "kind": "map_local"}}` (or `breakpoint`,
@@ -56,6 +57,11 @@ interface Command {
   responseTab?: ResponseTab;
   viewer?: { kind: ContentKind; viewer: ViewerId };
   theme?: "dark" | "light";
+  /** Settings › Appearance, as the user would set it (the native window follows). */
+  appearance?: "system" | "dark" | "light";
+  palette?: boolean;
+  /** Sets the search box's text (the filter DSL). */
+  filter?: string;
   contextMenu?: number | null;
   preset?: { flow: number; kind: PresetKind };
   rulesEditor?: boolean;
@@ -105,6 +111,9 @@ async function apply(cmd: Command) {
     const id = cmd.click;
     setTimeout(() => document.querySelector<HTMLElement>(`[data-testid="${CSS.escape(id)}"]`)?.click(), 100);
   }
+  if (cmd.appearance) usePrefs.getState().setAppearance(cmd.appearance);
+  if (cmd.palette !== undefined) useUi.getState().setPaletteOpen(cmd.palette);
+  if (cmd.filter !== undefined) useUi.getState().setText(cmd.filter);
   if (cmd.theme) {
     forceTheme(cmd.theme);
   }
