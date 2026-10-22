@@ -11,6 +11,12 @@ curl -x http://127.0.0.1:9090 http://example.com/
 
 ![Proxymate M1](docs/screenshots/m1-http-proxy.png)
 
+## Install (macOS)
+
+Download `Proxymate_<version>_universal.dmg` from [Releases](https://github.com/charlie-niekirk/proxymate/releases) (Apple silicon and Intel, macOS 13.3 or later) and drag Proxymate to Applications.
+
+Releases aren't notarised by Apple yet, so macOS blocks the first launch. Open the app once, then click **Open Anyway** in System Settings › Privacy & Security, or run `xattr -dr com.apple.quarantine /Applications/Proxymate.app`. After that, updates install from inside the app. Full steps: [`scripts/release/install-notes-macos.md`](scripts/release/install-notes-macos.md).
+
 ## Develop
 
 Requirements:

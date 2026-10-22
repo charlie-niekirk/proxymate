@@ -8,8 +8,8 @@ use pm_model::{
     DocumentInfo, FilterSpec, FlowDetail, FlowId, FlowSelection, FlowSummary, McpAuditPage, McpSettings, McpStatus,
     PresetKind, ProxySettings, ProxyStatus, RequestSpec, RowsPage, Rule, RuleId, RuleSettings, RuleTestResult,
     SaveProgress, SendOpts, SendOrigin, SidebarSnapshot, SimInstallResult, SimulatorStatus, SortSpec, SsePage,
-    SslSettings, StorageSettings, StorageStatus, StoreId, SystemProxyStatus, TrustStatus, ViewDelta, ViewId, ViewInfo,
-    WsPage, WsQuery,
+    SslSettings, StorageSettings, StorageStatus, StoreId, SystemProxyStatus, TrustStatus, UpdateSettings, ViewDelta,
+    ViewId, ViewInfo, WsPage, WsQuery,
 };
 use tauri::State;
 use tauri::ipc::{Channel, InvokeResponseBody, IpcResponse};
@@ -784,4 +784,26 @@ pub async fn set_proxy_settings(engine: EngineState<'_>, settings: ProxySettings
 #[specta::specta]
 pub fn set_sidebar_store(engine: EngineState<'_>, store: StoreId) {
     engine.set_sidebar_store(store);
+}
+
+// ---- Updates (M11) ----
+
+#[tauri::command]
+#[specta::specta]
+pub fn get_update_settings(engine: EngineState<'_>) -> UpdateSettings {
+    engine.update_settings()
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn set_update_settings(engine: EngineState<'_>, settings: UpdateSettings) -> Result<UpdateSettings, String> {
+    engine.set_update_settings(settings).map_err(|e| e.to_string())
+}
+
+/// Settings › Updates' "Check Now": the same check as the menu item, which
+/// answers with a native dialog.
+#[tauri::command]
+#[specta::specta]
+pub fn check_for_updates(app: tauri::AppHandle) {
+    crate::updater::check_now(&app);
 }

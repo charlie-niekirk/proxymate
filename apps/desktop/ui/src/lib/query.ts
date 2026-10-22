@@ -35,3 +35,5 @@ export const mcpTokenKey = ["mcp-token"] as const;
 export const mcpAuditKey = ["mcp-audit"] as const;
 export const proxySettingsKey = ["proxy-settings"] as const;
 export const storageSettingsKey = ["storage-settings"] as const;
+export const updateSettingsKey = ["update-settings"] as const;
+export const appVersionKey = ["app-version"] as const;

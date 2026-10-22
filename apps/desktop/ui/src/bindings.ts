@@ -154,6 +154,13 @@ export const commands = {
 	setProxySettings: (settings: ProxySettings_Deserialize) => typedError<ProxySettings_Serialize, string>(__TAURI_INVOKE("set_proxy_settings", { settings })),
 	/**  Makes the sidebar's Apps and Domains count the tab the UI shows. */
 	setSidebarStore: (store: number) => __TAURI_INVOKE<void>("set_sidebar_store", { store }),
+	getUpdateSettings: () => __TAURI_INVOKE<UpdateSettings>("get_update_settings"),
+	setUpdateSettings: (settings: UpdateSettings) => typedError<UpdateSettings, string>(__TAURI_INVOKE("set_update_settings", { settings })),
+	/**
+	 *  Settings › Updates' "Check Now": the same check as the menu item, which
+	 *  answers with a native dialog.
+	 */
+	checkForUpdates: () => __TAURI_INVOKE<void>("check_for_updates"),
 };
 
 /* Types */
@@ -2063,6 +2070,14 @@ export type TrustStatus_Serialize = {
 	verified: boolean,
 	/**  Why verification failed, if it did. */
 	detail: string | null,
+};
+
+export type UpdateSettings = {
+	/**
+	 *  Look for a new release quietly at launch; only an available update
+	 *  is shown. "Check for Updates…" works either way.
+	 */
+	check_at_launch: boolean,
 };
 
 export type Value = null | boolean | number | string | Value[] | { [key in string]: Value };

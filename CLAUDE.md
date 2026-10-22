@@ -52,7 +52,9 @@ Run these from the repo root unless noted.
 | Engine micro-bench | `cargo run --release -p proxymate-cli -- bench [FLOWS]` |
 | Soak (M10) | `cargo run --release -p proxymate-cli -- bench --rps 500 --duration 3600 [--max-flows N]` (own engine), or `--proxy 127.0.0.1:9090 --pid <app pid>` against the app. CSV every `--interval` seconds: rate, p50/p99, failures, RSS, flows, disk, evicted |
 | Ingest bench (criterion, target < 2 s per 100k flows) | `cargo bench -p pm-core --bench ingest` |
-| Release bundle | `npm run tauri build` |
+| Release bundle | `npm run tauri build` (host arch, ad-hoc signed) |
+| macOS release build (universal DMG, checks, staging) | `scripts/release/macos.sh` (needs `rustup target add x86_64-apple-darwin`; ad-hoc unless the signing variables in `docs/RELEASING.md` are set; output in `target/release/macos`) |
+| Updater end to end | Debug bundle (`npm run tauri -- build --debug`) launched with `PROXYMATE_UPDATE_TEST=1`: checks at launch and installs without asking. Recipe in `docs/RELEASING.md` |
 
 CI (`.github/workflows/ci.yml`):
 - Rust: `fmt --check`, `clippy -D warnings`, `test` and a bindings-drift check, on macOS and Linux.
@@ -81,7 +83,8 @@ crates/pm-mcp        MCP server over Arc<Engine> (rmcp, pinned): http.rs (axum e
 crates/pm-testkit    test upstreams (h1, TLS h1/h2 with a test CA, WS echo, slow SSE), the body-viewer zoo (fixtures/zoo),
                      proxy, HTTPS and WebSocket clients; re-export of pm_core::synth
 apps/desktop/src-tauri   thin Tauri adapters (commands.rs), the pmbody:// scheme (body_scheme.rs), window chrome (window.rs),
-                         the menu bar (menu.rs: File items reach the UI as `pm-menu` events)
+                         the menu bar (menu.rs: File items reach the UI as `pm-menu` events); updater.rs (tauri-plugin-updater,
+                         Check for Updates…, the launch check)
 apps/desktop/ui          Vite + React 19 + TS strict + Tailwind v4 + shadcn/ui
 apps/cli                 proxymate-cli (headless; `bench` today)
 ```
@@ -188,6 +191,15 @@ Targets:
 - Pinned (`FlowSummary.pinned`, `FlowRow`'s last field) and in-flight flows are never evicted. The arena may have gaps after an eviction: look flows up with `Store::get`, never by `id - first_id`.
 - Every `SegmentStore::append` names the flow it writes for; that is how a segment knows when it can be deleted.
 - Deep DSL terms (`header:`, `body:`, …) live in `store/deep.rs`. `FlowQuery::matches` passes them; anything evaluating a query over summaries must also run `FlowQuery::deep()` against the detail (views do it in the background job, MCP inline).
+
+**Release and updates (M11)**
+- `docs/RELEASING.md` covers secrets, cutting a release (tag `v*` → draft GitHub Release) and key rotation. `.github/workflows/release.yml` runs `scripts/release/macos.sh`.
+- Releases are **ad-hoc signed and not notarised** (no paid Apple Developer account); users allow the app once past Gatekeeper (`scripts/release/install-notes-macos.md`, added to each draft). Developer ID signing and notarisation stay dormant until the `APPLE_*` secrets exist.
+- Hardened runtime with no App Sandbox and an empty `Entitlements.plist`. Don't add an entitlement without its reason in RELEASING.md.
+- The guardian and the MCP bridge are modes of the one signed binary. A sidecar would need signing too.
+- Bump the version in `tauri.conf.json`, the workspace `Cargo.toml` and `apps/desktop/ui/package.json` together. The release tag must match `tauri.conf.json`.
+- The updater lives in `src-tauri/src/updater.rs` (Rust-side; no JS plugin permissions). Its public key is in `tauri.conf.json`; the private key never enters the repo.
+- The updater turns on reqwest's `rustls-no-provider` for the whole workspace. Any reqwest/rmcp client (the stdio bridge, MCP tests) must call `pm_mcp::install_crypto_provider()` before it's built, or it panics.
 
 **Replay, cURL, HAR and sessions (M8)**
 - `Engine::send(RequestSpec, SendOpts)` is the one way Proxymate sends a request itself (Replay, Compose, MCP). It goes through `proxy/exchange.rs` like proxied traffic; the flow's summary gets `sent_by`.

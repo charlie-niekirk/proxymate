@@ -1,3 +1,4 @@
+import { getVersion } from "@tauri-apps/api/app";
 import { Channel, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
@@ -44,6 +45,7 @@ import {
   type StorageSettings_Serialize,
   type StorageStatus_Deserialize,
   type StorageStatus_Serialize,
+  type UpdateSettings,
   type ViewDelta_Deserialize,
   type ViewDelta_Serialize,
   type ViewInfo_Serialize,
@@ -238,6 +240,13 @@ export interface Backend {
   setSidebarStore(store: number): Promise<void>;
   /** The native window's appearance (vibrancy, traffic lights); null follows the system. */
   setWindowTheme(theme: "light" | "dark" | null): Promise<void>;
+  // ---- Updates (M11) ----
+  /** The app's version (`tauri.conf.json`). */
+  appVersion(): Promise<string>;
+  getUpdateSettings(): Promise<UpdateSettings>;
+  setUpdateSettings(settings: UpdateSettings): Promise<UpdateSettings>;
+  /** Same as the app menu's "Check for Updates…"; the answer is a native dialog. */
+  checkForUpdates(): Promise<void>;
 }
 
 type Result<T> = { status: "ok"; data: T } | { status: "error"; error: string };
@@ -386,6 +395,10 @@ const tauriBackend: Backend = {
     const { getCurrentWindow } = await import("@tauri-apps/api/window");
     await getCurrentWindow().setTheme(theme);
   },
+  appVersion: () => getVersion(),
+  getUpdateSettings: () => commands.getUpdateSettings(),
+  setUpdateSettings: (settings) => unwrap(commands.setUpdateSettings(settings)),
+  checkForUpdates: () => commands.checkForUpdates(),
 };
 
 function progressChannel(onProgress: (p: SaveProgress_Serialize) => void) {

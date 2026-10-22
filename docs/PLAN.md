@@ -225,7 +225,7 @@ We build our own engine and use hudsucker only as a reading reference. Its handl
   - Phones are set up by hand (Wi-Fi proxy, the CA as a user certificate, a debug-only `network_security_config.xml` for the user's own apps); the wizard shows the steps and a QR code of the setup page.
   - Emulators are set up over `adb` (from the SDK's usual places, then `PATH`): `settings put global http_proxy 10.0.2.2:<port>`, cleared with `:0` on quit, and `adb push` of the DER to `/sdcard/Download/` for the user to install.
 - **Commands (M9).** `simctl` and `adb` run behind a `command::Runner` trait in `pm-platform`, so their command lines and output parsing are tested with a fake runner.
-- **Linux and Windows equivalents (M11).**
+- **Linux and Windows equivalents (M12).**
   - Linux: `pkexec update-ca-certificates`/`update-ca-trust` plus NSS `certutil`; proxy via gsettings or kwriteconfig; app detection via netlink sock_diag and `/proc`.
   - Windows: the CurrentUser ROOT store; proxy via the HKCU Internet Settings registry key and `InternetSetOption`; app detection via `GetExtendedTcpTable`; the guardian uses `WaitForSingleObject`.
 
@@ -371,6 +371,25 @@ Tokens are CSS variables set per `[data-theme]`. Pills use a tinted background w
 - **Theme:** dark first, with light mode in M10. The body viewers already use tokens for both (`--syntax-*`, `--code-*`, `--checker-*`).
   - (M10) Settings › Appearance picks System, Light or Dark (stored in the webview with the column layout); the native window follows (`setTheme`), so the sidebar vibrancy and traffic lights match. `ui/src/styles/contrast.test.ts` converts every text token and the surface it is drawn on (pill tints composited over the table) from OKLCH and checks 4.5:1 in both themes. Component colours that were hard-coded (overlays, destructive buttons, preview paper, pills on the selected row) became tokens.
 
+## Packaging, signing and updates (M11)
+The details, secrets and key rotation are in `docs/RELEASING.md`.
+- **Bundle.** The bundle is one universal (`universal-apple-darwin`) `Proxymate.app` and a DMG.
+  - Bundle id `dev.proxymate.desktop`, category Developer Tools, minimum macOS 13.3. That is the first release with WebKit 16.4, which the Tailwind v4 CSS (`color-mix()`, `@property`) needs.
+  - `bundle.macOS.signingIdentity` is `-` (ad-hoc). `APPLE_SIGNING_IDENTITY` overrides it.
+- **Hardened runtime, no App Sandbox, no entitlements.** `Entitlements.plist` is deliberately empty; RELEASING.md lists each exception and why it isn't needed.
+  - The bundle holds a single Mach-O, and the same binary runs as `--sysproxy-guardian` and `mcp-stdio`, so one signature covers every executable that gets launched. There are no sidecars.
+  - `scripts/release/macos.sh` fails if any Mach-O in the bundle is unsigned or lacks the runtime flag.
+- **Signing: ad-hoc, not notarised.** There is no paid Apple Developer account, so releases are ad-hoc signed. Users allow the app past Gatekeeper once ("Open Anyway", or `xattr -dr com.apple.quarantine`); every ad-hoc draft gets those steps from `scripts/release/install-notes-macos.md`, and the README has them. Updates then install from inside the app without the prompt.
+  - **Deferred: Developer ID signing and notarisation.** Wired up but dormant until the `APPLE_*` secrets exist (RELEASING.md › "Later"). Then `APPLE_CERTIFICATE` (base64 `.p12`) is imported into a temporary keychain, `APPLE_API_KEY`/`APPLE_API_ISSUER`/`APPLE_API_KEY_PATH` drive notarytool, Tauri notarises and staples the app and signs the DMG, and `macos.sh` notarises and staples the DMG and checks both with `spctl` and `stapler validate`.
+- **Updater.** `tauri-plugin-updater`, driven from Rust (`src-tauri/src/updater.rs`).
+  - The feed is `releases/latest/download/latest.json` on GitHub, so drafts and prereleases never reach installs. It lists `darwin-aarch64` and `darwin-x86_64`, both pointing at the universal `.app.tar.gz`, which is minisign-signed with the Tauri updater key; the public key is in `tauri.conf.json`.
+  - A quiet check runs 5 s after launch, with an opt-out: `UpdateSettings.check_at_launch`, the `updates` row in `app.sqlite`, shown in Settings › Updates.
+  - "Check for Updates…" sits in the app menu (Help on Linux/Windows). Native dialogs ask before installing. The restart goes through the normal exit path, so the system proxy is restored first.
+  - Update requests bypass the system proxy. Debug bundles with `PROXYMATE_UPDATE_TEST=1` check and install without asking, for end-to-end tests.
+- **Release workflow** (`.github/workflows/release.yml`).
+  - A `v*` tag builds on `macos-15`, then a separate job merges the `updater-<os>.json` fragments into `latest.json` and uploads everything to a **draft** release. Publishing it is the human step. M12 adds its build jobs beside the macOS one.
+  - Manual runs are dry runs, with artifacts only. Pull requests that touch packaging run an ad-hoc build with a throwaway updater key.
+
 ## Delivery workflow: one Claude session and one PR per milestone
 - **Repository.** M0 creates a new GitHub repository, private by default, called `proxymate`, with `gh repo create`. It's created under the user's account, and the name and visibility are confirmed when M0 starts.
   - `main` is protected: changes land only through PRs, with CI required.
@@ -403,7 +422,7 @@ Tokens are CSS variables set per `[data-theme]`. Pills use a tinted background w
 | M8 | `m8-replay-sessions` | Compose, Replay and Edit & Replay, cURL, HAR 1.2 import/export, `.proxymate` sessions | Golden files; Chrome HAR round trip; save and reopen 100k flows |
 | M9 | `m9-device-setup` | Onboarding server, QR codes, LAN IPs, client allow-list, Simulator one-click install, iPhone and Android wizards (emulator is a stretch goal) | Simulator Safari decrypts; physical iPhone decrypts (a manual checklist in the PR) |
 | M10 | `m10-polish` | Light-mode pass, keyboard navigation, column persistence, eviction, deep search, DSL autocomplete, error UX | 1-hour soak; stable RSS |
-| M11 | `m11-macos-release` | Developer ID signing, hardened runtime, notarisation, DMG, updater, release workflow | `spctl` and `stapler validate` pass |
+| M11 | `m11-macos-release` | Universal DMG, ad-hoc signing with the hardened runtime, updater, release workflow (Developer ID signing and notarisation deferred: no paid Apple account) | CI builds the universal DMG; it launches after the one-time Gatekeeper override; the updater installs a signed update and refuses a bad signature |
 | M12 | `m12-linux-windows` | pm-platform implementations for Linux and Windows, AppImage/deb/rpm, MSI/NSIS, CI matrix | Integration suite green on all three OSes |
 
 ## Critical files (to be created)

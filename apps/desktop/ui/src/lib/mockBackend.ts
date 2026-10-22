@@ -22,6 +22,7 @@ import type {
   StorageSettings_Serialize,
   StorageStatus_Serialize,
   TrustStatus_Serialize,
+  UpdateSettings,
   ViewDelta_Serialize,
   WsMessage_Serialize,
 } from "@/bindings";
@@ -138,6 +139,7 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
   // Opened documents show the first flows of the mock data, under the same ids.
   let documents: DocumentInfo[] = [];
   let lastDocument = 0;
+  let updateSettings: UpdateSettings = { check_at_launch: true };
   const DOCUMENT_FLOWS = 50;
   const storeFlows = (store: number) => (store === 0 ? flows : flows.slice(0, DOCUMENT_FLOWS));
 
@@ -699,6 +701,17 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
       return () => {};
     },
     ...createMockMcp(now),
+    async appVersion() {
+      return "0.1.0";
+    },
+    async getUpdateSettings() {
+      return updateSettings;
+    },
+    async setUpdateSettings(settings) {
+      updateSettings = settings;
+      return settings;
+    },
+    async checkForUpdates() {},
   };
 }
 

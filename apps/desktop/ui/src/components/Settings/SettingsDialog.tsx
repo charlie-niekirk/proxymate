@@ -1,4 +1,4 @@
-import { Bot, HardDrive, Laptop, Palette, Settings, ShieldCheck, SlidersHorizontal, Wifi, type LucideIcon } from "lucide-react";
+import { Bot, HardDrive, Laptop, Palette, RefreshCw, Settings, ShieldCheck, SlidersHorizontal, Wifi, type LucideIcon } from "lucide-react";
 
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
@@ -11,6 +11,7 @@ import { McpPage } from "./McpPage";
 import { ProxyPage } from "./ProxyPage";
 import { SslPage } from "./SslPage";
 import { StoragePage } from "./StoragePage";
+import { UpdatesPage } from "./UpdatesPage";
 
 const PAGES: { id: SettingsPage; label: string; icon: LucideIcon; page: () => React.ReactNode }[] = [
   { id: "proxy", label: "Proxy", icon: Wifi, page: () => <ProxyPage /> },
@@ -20,6 +21,7 @@ const PAGES: { id: SettingsPage; label: string; icon: LucideIcon; page: () => Re
   { id: "appearance", label: "Appearance", icon: Palette, page: () => <AppearancePage /> },
   { id: "advanced", label: "Advanced", icon: SlidersHorizontal, page: () => <AdvancedPage /> },
   { id: "mcp", label: "MCP", icon: Bot, page: () => <McpPage /> },
+  { id: "updates", label: "Updates", icon: RefreshCw, page: () => <UpdatesPage /> },
 ];
 
 /** Settings: a page list beside the chosen page. */

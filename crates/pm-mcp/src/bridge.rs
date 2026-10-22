@@ -31,6 +31,7 @@ pub struct BridgeConfig {
 pub async fn run(config: BridgeConfig) -> Result<(), String> {
     let token = wait_for_server(&config).await?;
     let url = format!("http://{}{}", config.addr, crate::http::PATH);
+    crate::install_crypto_provider();
     let mut http = StreamableHttpClientTransport::from_config(
         StreamableHttpClientTransportConfig::with_uri(url).auth_header(token),
     );

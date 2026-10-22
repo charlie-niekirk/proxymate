@@ -16,6 +16,7 @@ mod send;
 mod settings;
 mod stream;
 mod tls;
+mod update;
 mod view;
 
 pub use detail::{BodyInfo, BodyPart, FlowDetail, Header, HttpVersion, ProxyStatus, RequestHead, ResponseHead};
@@ -37,4 +38,5 @@ pub use send::{RequestSpec, SendOpts, SendOrigin, SentBy};
 pub use settings::{ProxySettings, StorageSettings, StorageStatus};
 pub use stream::{SseEvent, SsePage, WsClose, WsDirection, WsMessage, WsOpcode, WsPage, WsQuery};
 pub use tls::{CaInfo, CertSummary, SslSettings, Timing, TlsInfo, TlsStatus};
+pub use update::UpdateSettings;
 pub use view::{DeepProgress, FlowRow, RowsPage, ViewDelta, ViewId, ViewInfo};
