@@ -1253,7 +1253,10 @@ mod tests {
 
     #[test]
     fn export_matches_the_golden_file() {
-        let har = export(flows());
+        let mut har = export(flows());
+        // The creator version tracks the crate version; pin it so a release bump doesn't break the golden file.
+        assert_eq!(har.log.creator.version, env!("CARGO_PKG_VERSION"));
+        har.log.creator.version = "0.0.0-test".into();
         let json = serde_json::to_string_pretty(&har).unwrap();
         golden("export.har", &json);
     }
