@@ -26,6 +26,7 @@ use crate::mcp::McpState;
 use crate::proxy::{self, ProxyConfig, ProxyHandle};
 use crate::recorder::{FlowRecorder, is_event_stream};
 use crate::rules::Rules;
+use crate::scripts::Scripts;
 use crate::settings::Settings;
 use crate::store::{BlobBackend, DeepJob, DetailStore, SegmentStore, Store, VIEW_STORE_SHIFT, page_events, sse_event};
 use crate::tls::{CertAuthority, SslPolicy, TlsContext};
@@ -87,6 +88,7 @@ pub struct Engine {
     ssl: RwLock<Arc<SslPolicy>>,
     pub(crate) platform: Platform,
     pub(crate) rules: Rules,
+    pub(crate) scripts: Scripts,
     pub(crate) mcp: McpState,
     /// Storage limits and proxy settings.
     pub(crate) settings: Settings,
@@ -118,7 +120,8 @@ impl Engine {
     pub fn with_config(config: EngineConfig) -> Arc<Engine> {
         // Without a data directory (tests, throwaway engines) rules live
         // in memory, so engines never share them through the temp dir.
-        let rules = Rules::load(config.data_dir.as_deref());
+        let scripts = Scripts::load(config.data_dir.as_deref());
+        let rules = Rules::load(config.data_dir.as_deref(), &scripts.map());
         let mcp = McpState::load(config.data_dir.as_deref());
         let devices = DeviceRegistry::load(config.data_dir.as_deref(), devices::HOLD);
         let app_settings = Settings::load(config.data_dir.as_deref());
@@ -163,6 +166,7 @@ impl Engine {
             tls: RwLock::new(Arc::new(tls)),
             ssl: RwLock::new(Arc::new(policy)),
             rules,
+            scripts,
             mcp,
             settings: app_settings,
             docs: Documents::default(),
@@ -800,6 +804,7 @@ impl Engine {
         self.publish_storage();
         self.rules.breakpoints.publish();
         self.rules.publish();
+        self.scripts.publish();
         self.publish_mcp();
         self.device_registry().publish();
         let mut sinks = self.sinks.lock();

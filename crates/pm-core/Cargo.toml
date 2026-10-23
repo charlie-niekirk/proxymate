@@ -45,6 +45,10 @@ dashmap.workspace = true
 rusqlite.workspace = true
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 base64 = "0.23"
+# Scripts (M14). Without `parallel`, `futures`, `loader` or `bindgen`: each
+# runtime stays on its worker thread, and there is no module loader.
+rquickjs = { version = "=0.14.0", default-features = false, features = ["std"] }
+url = "2"
 
 [dev-dependencies]
 pm-testkit.workspace = true

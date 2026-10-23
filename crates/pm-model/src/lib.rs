@@ -12,6 +12,7 @@ mod flow;
 mod mcp;
 mod platform;
 mod rules;
+mod scripts;
 mod send;
 mod settings;
 mod stream;
@@ -33,6 +34,10 @@ pub use rules::{
     Action, AppliedRule, BlockMode, BreakpointBody, BreakpointId, BreakpointInfo, BreakpointResolution, FlowRules,
     GLOBAL_THROTTLE_RULE_ID, KvMatch, MapLocalSource, Matcher, MessageEdits, Pattern, PatternKind, Phase, PresetKind,
     ResponseMatcher, Rule, RuleId, RuleOrigin, RuleSettings, RuleTestResult, StatusRange,
+};
+pub use scripts::{
+    ConsoleEntry, ConsoleLevel, Script, ScriptId, ScriptIssue, ScriptKind, ScriptPhase, ScriptSettings, ScriptTestResult,
+    ScriptTestSpec, ScriptView, ScriptViewKind, ViewConfig, ViewResult,
 };
 pub use send::{RequestSpec, SendOpts, SendOrigin, SentBy};
 pub use settings::{ProxySettings, StorageSettings, StorageStatus};

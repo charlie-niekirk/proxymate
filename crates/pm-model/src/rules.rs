@@ -35,7 +35,14 @@ pub struct Rule {
 
 /// Who created a rule. Agent rules show an "AI · client" badge and can be
 /// removed together.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, JsonSchema)]
+///
+/// Serialized by hand: JSON (Tauri, MCP, `app.sqlite`) gets the tagged
+/// object the attributes below describe, while postcard (flow details in
+/// segments and sessions) gets the tag and then the fields in order, the
+/// bytes serde's internally tagged derive writes there. postcard can't
+/// read that derive back (it needs `deserialize_any`), which made every
+/// flow a rule changed unreadable from disk before M14.
+#[derive(Debug, Clone, PartialEq, Type, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RuleOrigin {
     User,
@@ -50,6 +57,115 @@ pub enum RuleOrigin {
         /// Milliseconds since the Unix epoch.
         created_at_ms: f64,
     },
+}
+
+/// [`RuleOrigin`]'s JSON form.
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum OriginJson {
+    User,
+    Preset {
+        preset: PresetKind,
+    },
+    Agent {
+        client: String,
+        session: Option<String>,
+        created_at_ms: f64,
+    },
+}
+
+impl Serialize for RuleOrigin {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeTuple;
+        if serializer.is_human_readable() {
+            let json = match self.clone() {
+                RuleOrigin::User => OriginJson::User,
+                RuleOrigin::Preset { preset } => OriginJson::Preset { preset },
+                RuleOrigin::Agent {
+                    client,
+                    session,
+                    created_at_ms,
+                } => OriginJson::Agent {
+                    client,
+                    session,
+                    created_at_ms,
+                },
+            };
+            return json.serialize(serializer);
+        }
+        match self {
+            RuleOrigin::User => {
+                let mut t = serializer.serialize_tuple(1)?;
+                t.serialize_element("user")?;
+                t.end()
+            }
+            RuleOrigin::Preset { preset } => {
+                let mut t = serializer.serialize_tuple(2)?;
+                t.serialize_element("preset")?;
+                t.serialize_element(preset)?;
+                t.end()
+            }
+            RuleOrigin::Agent {
+                client,
+                session,
+                created_at_ms,
+            } => {
+                let mut t = serializer.serialize_tuple(4)?;
+                t.serialize_element("agent")?;
+                t.serialize_element(client)?;
+                t.serialize_element(session)?;
+                t.serialize_element(created_at_ms)?;
+                t.end()
+            }
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for RuleOrigin {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        if deserializer.is_human_readable() {
+            return Ok(match OriginJson::deserialize(deserializer)? {
+                OriginJson::User => RuleOrigin::User,
+                OriginJson::Preset { preset } => RuleOrigin::Preset { preset },
+                OriginJson::Agent {
+                    client,
+                    session,
+                    created_at_ms,
+                } => RuleOrigin::Agent {
+                    client,
+                    session,
+                    created_at_ms,
+                },
+            });
+        }
+        struct Compact;
+        impl<'de> serde::de::Visitor<'de> for Compact {
+            type Value = RuleOrigin;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a rule origin")
+            }
+
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<RuleOrigin, A::Error> {
+                use serde::de::Error;
+                let missing = || A::Error::custom("a rule origin is cut short");
+                let tag: String = seq.next_element()?.ok_or_else(missing)?;
+                Ok(match tag.as_str() {
+                    "user" => RuleOrigin::User,
+                    "preset" => RuleOrigin::Preset {
+                        preset: seq.next_element()?.ok_or_else(missing)?,
+                    },
+                    "agent" => RuleOrigin::Agent {
+                        client: seq.next_element()?.ok_or_else(missing)?,
+                        session: seq.next_element()?.ok_or_else(missing)?,
+                        created_at_ms: seq.next_element()?.ok_or_else(missing)?,
+                    },
+                    other => return Err(A::Error::unknown_variant(other, &["user", "preset", "agent"])),
+                })
+            }
+        }
+        deserializer.deserialize_tuple(4, Compact)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type, JsonSchema)]
@@ -311,6 +427,13 @@ pub enum Action {
     Block {
         mode: BlockMode,
     },
+    /// Runs a script (M14): a rewrite script's `onRequest`/`onResponse` in
+    /// its phase, or a mock script's `onMock`, which answers like Map
+    /// Local (the first answer wins). A script that throws or times out is
+    /// skipped and reported on the flow. Keep this the last variant.
+    Script {
+        script_id: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, JsonSchema)]
@@ -358,8 +481,13 @@ pub struct FlowRules {
     pub rewrite_skipped: Option<String>,
     /// A breakpoint timed out and the flow continued unmodified.
     pub breakpoint_timeout: bool,
-    /// The response came from Map Local or a breakpoint, not the upstream.
+    /// The response came from Map Local, a mock script or a breakpoint,
+    /// not the upstream.
     pub mocked: bool,
+    /// Scripts that failed on this flow (M14). Keep this the last field:
+    /// a session written before it decodes with one `0` byte appended.
+    #[serde(default)]
+    pub scripts: Vec<crate::scripts::ScriptIssue>,
 }
 
 /// Rule-related settings, kept in `app.sqlite`.

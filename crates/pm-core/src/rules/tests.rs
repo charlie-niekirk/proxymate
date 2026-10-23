@@ -14,6 +14,8 @@ use serde_json::json;
 use super::RuleError;
 use super::compile::{CompiledRule, CompiledRuleSet};
 use super::eval::{self, RequestDraft, ResponseDraft};
+use crate::scripts::{ScriptMap, ScriptRun};
+use futures_util::FutureExt;
 
 fn rule(name: &str, matcher: Matcher, actions: Vec<Action>) -> Rule {
     Rule {
@@ -70,7 +72,7 @@ fn response(status: u16, content_type: &str, body: &str) -> ResponseDraft {
 }
 
 fn set(rules: Vec<Rule>) -> CompiledRuleSet {
-    CompiledRuleSet::compile(&ordered(rules)).expect("rules compile")
+    CompiledRuleSet::compile(&ordered(rules), &ScriptMap::new()).expect("rules compile")
 }
 
 /// The names of the rules in `set` that match `req`.
@@ -95,7 +97,7 @@ fn header(draft: &HeaderMap, name: &str) -> Option<String> {
 // ---- Compilation ----
 
 fn compile_error(matcher: Matcher) -> String {
-    match CompiledRule::compile(&rule("bad", matcher, Vec::new())) {
+    match CompiledRule::compile(&rule("bad", matcher, Vec::new()), &ScriptMap::new()) {
         Err(err) => err.to_string(),
         Ok(_) => panic!("expected a compile error"),
     }
@@ -124,7 +126,7 @@ fn oversized_regexes_are_rejected() {
 fn invalid_globs_and_actions_are_rejected() {
     assert!(compile_error(host(Pattern::glob("[a-"))).contains("invalid glob"));
     let bad = |action: Action| {
-        CompiledRule::compile(&rule("x", Matcher::default(), vec![action]))
+        CompiledRule::compile(&rule("x", Matcher::default(), vec![action]), &ScriptMap::new())
             .err()
             .map(|e| e.to_string())
             .unwrap_or_default()
@@ -162,7 +164,7 @@ fn disabled_rules_are_validated_but_never_match() {
     let mut broken = rule("broken", host(Pattern::regex("(")), Vec::new());
     broken.enabled = false;
     assert!(matches!(
-        CompiledRuleSet::compile(&[broken]),
+        CompiledRuleSet::compile(&[broken], &ScriptMap::new()),
         Err(RuleError::Invalid { .. })
     ));
 
@@ -295,7 +297,7 @@ fn client_app_condition() {
 
 #[test]
 fn mismatch_explains_itself() {
-    let r = CompiledRule::compile(&rule("r", host(Pattern::exact("a.test")), Vec::new())).unwrap();
+    let r = CompiledRule::compile(&rule("r", host(Pattern::exact("a.test")), Vec::new()), &ScriptMap::new()).unwrap();
     let req = request("http://b.test/");
     assert_eq!(
         r.mismatch(&req.info(None), true).as_deref(),
@@ -322,7 +324,9 @@ fn rules_match_in_order_regardless_of_the_host_prefilter() {
 fn run_request(rules: Vec<Rule>, draft: &mut RequestDraft) -> eval::RequestEffects {
     let set = set(rules);
     let matched = set.matching(&draft.info(None));
-    eval::request_phase(&matched, draft)
+    eval::request_phase(&matched, draft, ScriptRun::none())
+        .now_or_never()
+        .expect("a rule set without scripts never awaits")
 }
 
 fn any(actions: Vec<Action>) -> Rule {
@@ -690,7 +694,9 @@ fn run_response(rules: Vec<Rule>, req: &RequestDraft, draft: &mut ResponseDraft)
     let set = set(rules);
     let matched: Vec<Arc<CompiledRule>> = set.matching(&req.info(None));
     let gated = eval::response_rules(&matched, draft.status, &draft.headers);
-    eval::response_phase(&gated, draft)
+    eval::response_phase(&gated, draft, ScriptRun::none(), None)
+        .now_or_never()
+        .expect("a rule set without scripts never awaits")
 }
 
 #[test]
@@ -797,7 +803,7 @@ fn reframing_drops_the_encoding() {
 #[test]
 fn new_actions_compile_and_evaluate() {
     let bad = |action: Action| {
-        CompiledRule::compile(&any(vec![action]))
+        CompiledRule::compile(&any(vec![action]), &ScriptMap::new())
             .err()
             .map(|e| e.to_string())
             .unwrap_or_default()

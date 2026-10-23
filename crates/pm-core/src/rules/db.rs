@@ -1,5 +1,5 @@
 //! `app.sqlite`: the app database (WAL). It holds the rules, the rule
-//! settings, (M9) the LAN client allow-list and LAN access settings, and
+//! settings, (M14) the scripts, (M9) the LAN client allow-list and LAN access settings, and
 //! (M7) the MCP settings, bearer token and audit log (`mcp.rs`);
 //! the SSL lists stay in `ssl.json` until they move here. The rules engine
 //! and the device registry each open their own connection.
@@ -10,7 +10,7 @@
 use std::net::IpAddr;
 use std::path::Path;
 
-use pm_model::{Rule, RuleSettings};
+use pm_model::{Rule, RuleSettings, Script};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -52,7 +52,8 @@ impl AppDb {
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS rules (id TEXT PRIMARY KEY, json TEXT NOT NULL);
              CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, json TEXT NOT NULL);
-             CREATE TABLE IF NOT EXISTS devices (ip TEXT PRIMARY KEY, nickname TEXT, allowed INTEGER NOT NULL);",
+             CREATE TABLE IF NOT EXISTS devices (ip TEXT PRIMARY KEY, nickname TEXT, allowed INTEGER NOT NULL);
+             CREATE TABLE IF NOT EXISTS scripts (id TEXT PRIMARY KEY, json TEXT NOT NULL);",
         )?;
         Ok(AppDb { conn })
     }
@@ -88,6 +89,37 @@ impl AppDb {
                 let json =
                     serde_json::to_string(rule).map_err(|e| rusqlite::Error::ToSqlConversionFailure(e.into()))?;
                 insert.execute(params![rule.id, json])?;
+            }
+        }
+        tx.commit()
+    }
+
+    /// Every stored script. Rows that no longer parse are skipped (and
+    /// reported).
+    pub fn scripts(&self) -> rusqlite::Result<Vec<Script>> {
+        let mut stmt = self.conn.prepare("SELECT id, json FROM scripts")?;
+        let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?;
+        let mut scripts = Vec::new();
+        for row in rows {
+            let (id, json) = row?;
+            match serde_json::from_str(&json) {
+                Ok(script) => scripts.push(script),
+                Err(err) => eprintln!("proxymate: skipping unreadable script {id}: {err}"),
+            }
+        }
+        Ok(scripts)
+    }
+
+    /// Replaces the stored scripts with `scripts` in one transaction.
+    pub fn save_scripts(&mut self, scripts: &[Script]) -> rusqlite::Result<()> {
+        let tx = self.conn.transaction()?;
+        tx.execute("DELETE FROM scripts", [])?;
+        {
+            let mut insert = tx.prepare("INSERT INTO scripts (id, json) VALUES (?1, ?2)")?;
+            for script in scripts {
+                let json =
+                    serde_json::to_string(script).map_err(|e| rusqlite::Error::ToSqlConversionFailure(e.into()))?;
+                insert.execute(params![script.id, json])?;
             }
         }
         tx.commit()

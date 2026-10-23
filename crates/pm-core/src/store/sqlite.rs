@@ -30,8 +30,11 @@ use super::segments::SegmentStore;
 
 /// `meta.format` of a saved session.
 pub(crate) const FORMAT: &str = "proxymate-session";
-/// Bumped whenever the tables or the postcard layouts change.
-pub(crate) const VERSION: u32 = 1;
+/// Bumped whenever the tables or the postcard layouts change. Version 2
+/// (M14) appended `FlowRules.scripts`, the last field of a `FlowDetail`.
+pub(crate) const VERSION: u32 = 2;
+/// The oldest version this Proxymate still reads.
+const OLDEST: u32 = 1;
 
 const ZSTD_LEVEL: i32 = 3;
 const CACHE_ENTRIES: u64 = 1_024;
@@ -199,6 +202,8 @@ impl SessionWriter {
 /// Reads flows back out of a session database.
 pub(crate) struct SqliteBackend {
     conn: Mutex<Connection>,
+    /// The format version it was saved with.
+    version: u32,
     details: Cache<FlowId, Arc<FlowDetail>>,
     ws: Cache<FlowId, Option<Arc<WsLog>>>,
     sse: Cache<FlowId, Option<Arc<SseLog>>>,
@@ -226,9 +231,9 @@ impl SqliteBackend {
             return Err(bad("not a Proxymate session".into()));
         }
         let version: u32 = meta.get("version").and_then(|v| v.parse().ok()).unwrap_or(0);
-        if version != VERSION {
+        if !(OLDEST..=VERSION).contains(&version) {
             return Err(bad(format!(
-                "this session is format version {version}; this Proxymate reads version {VERSION}"
+                "this session is format version {version}; this Proxymate reads versions {OLDEST} to {VERSION}"
             )));
         }
         let summaries = conn
@@ -250,6 +255,7 @@ impl SqliteBackend {
             summaries,
             backend: SqliteBackend {
                 conn: Mutex::new(conn),
+                version,
                 details: Cache::new(CACHE_ENTRIES),
                 ws: Cache::new(64),
                 sse: Cache::new(64),
@@ -272,9 +278,13 @@ impl BlobBackend for SqliteBackend {
         if let Some(detail) = self.details.get(&id) {
             return Ok(Some(FlowDetail::clone(&detail)));
         }
-        let Some(bytes) = self.blob("SELECT detail FROM flows WHERE id = ?1", [id])? else {
+        let Some(mut bytes) = self.blob("SELECT detail FROM flows WHERE id = ?1", [id])? else {
             return Ok(None);
         };
+        if self.version == 1 {
+            // Version 1 had no `FlowRules.scripts`: an empty list is one 0.
+            bytes.push(0);
+        }
         let detail: FlowDetail = postcard::from_bytes(&bytes).map_err(io::Error::other)?;
         self.details.insert(id, Arc::new(detail.clone()));
         Ok(Some(detail))
@@ -483,6 +493,50 @@ mod tests {
         assert_eq!((page.total, page.open), (1, false));
         assert_eq!(log.payload(None, 0).unwrap().unwrap(), b"hello");
         assert!(backend.ws(1).unwrap().is_none());
+    }
+
+    /// Every origin survives postcard (it can't read serde's internally
+    /// tagged derive), and JSON keeps the tagged shape.
+    #[test]
+    fn rule_origins_round_trip_through_postcard_and_json() {
+        let origins = [
+            pm_model::RuleOrigin::User,
+            pm_model::RuleOrigin::Preset {
+                preset: pm_model::PresetKind::MapLocal,
+            },
+            pm_model::RuleOrigin::Agent {
+                client: "claude".into(),
+                session: Some("s1".into()),
+                created_at_ms: 12.5,
+            },
+        ];
+        let rules = pm_model::FlowRules {
+            applied: origins
+                .iter()
+                .map(|origin| pm_model::AppliedRule {
+                    rule_id: "r".into(),
+                    name: "n".into(),
+                    origin: origin.clone(),
+                    phase: pm_model::Phase::Response,
+                })
+                .collect(),
+            scripts: vec![pm_model::ScriptIssue {
+                script_id: "s".into(),
+                script_name: "Decode".into(),
+                rule_id: None,
+                phase: pm_model::ScriptPhase::Mock,
+                message: "boom".into(),
+            }],
+            ..Default::default()
+        };
+        let bytes = postcard::to_allocvec(&rules).unwrap();
+        assert_eq!(postcard::from_bytes::<pm_model::FlowRules>(&bytes).unwrap(), rules);
+        assert_eq!(
+            serde_json::to_value(&origins[2]).unwrap(),
+            serde_json::json!({"kind": "agent", "client": "claude", "session": "s1", "created_at_ms": 12.5})
+        );
+        let back: pm_model::RuleOrigin = serde_json::from_str(r#"{"kind":"preset","preset":"map_local"}"#).unwrap();
+        assert_eq!(back, origins[1]);
     }
 
     #[test]
