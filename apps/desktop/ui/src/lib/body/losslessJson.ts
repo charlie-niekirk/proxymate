@@ -73,11 +73,40 @@ const C_R_BRACE = 125;
 
 const ESCAPES: Record<number, string> = { 34: '"', 92: "\\", 47: "/", 98: "\b", 102: "\f", 110: "\n", 114: "\r", 116: "\t" };
 
-interface Frame {
-  array: unknown[] | null;
-  object: Record<string, unknown> | null;
-  key: string;
+/**
+ * What the tokenizer builds values with: plain JS values for
+ * {@link parseLossless}, ordered editable nodes for `lib/json/doc.ts`.
+ * `O` and `A` are an object and an array under construction.
+ */
+export interface JsonBuilder<V, O, A> {
+  object(): O;
+  member(object: O, key: string, value: V): void;
+  endObject(object: O): V;
+  array(): A;
+  item(array: A, value: V): void;
+  endArray(array: A): V;
+  string(value: string): V;
+  /** A number literal's exact text. */
+  number(raw: string): V;
+  literal(value: boolean | null): V;
 }
+
+const PLAIN: JsonBuilder<unknown, Record<string, unknown>, unknown[]> = {
+  object: () => ({}),
+  member: (object, key, value) => {
+    if (key === "__proto__") {
+      // Plain assignment would set the prototype; JSON.parse makes an own property.
+      Object.defineProperty(object, key, { value, writable: true, enumerable: true, configurable: true });
+    } else object[key] = value;
+  },
+  endObject: (object) => object,
+  array: () => [],
+  item: (array, value) => void array.push(value),
+  endArray: (array) => array,
+  string: (value) => value,
+  number: jsonNumber,
+  literal: (value) => value,
+};
 
 /**
  * Parses JSON text losslessly (see the module doc). A leading BOM is
@@ -85,6 +114,17 @@ interface Frame {
  * problem. Iterative, so deep nesting can't overflow the stack.
  */
 export function parseLossless(text: string): unknown {
+  return parseWith(text, PLAIN);
+}
+
+interface Frame<O, A> {
+  array: A | null;
+  object: O | null;
+  key: string;
+}
+
+/** The tokenizer behind {@link parseLossless}, building with `b`. */
+export function parseWith<V, O, A>(text: string, b: JsonBuilder<V, O, A>): V {
   const n = text.length;
   let i = text.charCodeAt(0) === 0xfeff ? 1 : 0;
 
@@ -163,7 +203,7 @@ export function parseLossless(text: string): unknown {
   };
 
   /** A number; `i` is on its `-` or first digit. */
-  const number = (): number | JsonNumber => {
+  const number = (): V => {
     const start = i;
     if (text.charCodeAt(i) === C_MINUS) i++;
     if (text.charCodeAt(i) === C_ZERO) {
@@ -182,13 +222,13 @@ export function parseLossless(text: string): unknown {
       if (sign === C_PLUS || sign === C_MINUS) i++;
       digits();
     }
-    return jsonNumber(text.slice(start, i));
+    return b.number(text.slice(start, i));
   };
 
-  const literal = (word: string, value: unknown) => {
+  const literal = (word: string, value: boolean | null) => {
     if (!text.startsWith(word, i)) unexpected("a value");
     i += word.length;
-    return value;
+    return b.literal(value);
   };
 
   /** `"key":` inside an object, leaving `i` after the colon. */
@@ -202,20 +242,20 @@ export function parseLossless(text: string): unknown {
     return k;
   };
 
-  const stack: Frame[] = [];
+  const stack: Frame<O, A>[] = [];
   for (;;) {
     // One value, or the opening of a non-empty container.
     skipWs();
-    let value: unknown;
+    let value: V;
     const c = text.charCodeAt(i);
     if (c === C_L_BRACE) {
       i++;
       skipWs();
       if (text.charCodeAt(i) === C_R_BRACE) {
         i++;
-        value = {};
+        value = b.endObject(b.object());
       } else {
-        stack.push({ array: null, object: {}, key: key() });
+        stack.push({ array: null, object: b.object(), key: key() });
         continue;
       }
     } else if (c === C_L_BRACKET) {
@@ -223,17 +263,17 @@ export function parseLossless(text: string): unknown {
       skipWs();
       if (text.charCodeAt(i) === C_R_BRACKET) {
         i++;
-        value = [];
+        value = b.endArray(b.array());
       } else {
-        stack.push({ array: [], object: null, key: "" });
+        stack.push({ array: b.array(), object: null, key: "" });
         continue;
       }
-    } else if (c === C_QUOTE) value = string();
+    } else if (c === C_QUOTE) value = b.string(string());
     else if (c === C_MINUS || (c >= C_ZERO && c <= C_NINE)) value = number();
     else if (c === 116 /* t */) value = literal("true", true);
     else if (c === 102 /* f */) value = literal("false", false);
     else if (c === 110 /* n */) value = literal("null", null);
-    else unexpected("a value");
+    else value = unexpected("a value");
 
     // Hand the value to its container, closing containers as they end.
     for (;;) {
@@ -243,11 +283,8 @@ export function parseLossless(text: string): unknown {
         if (i < n) fail(`Unexpected ${found()} after the JSON value`);
         return value;
       }
-      if (top.array) top.array.push(value);
-      else if (top.key === "__proto__") {
-        // Plain assignment would set the prototype; JSON.parse makes an own property.
-        Object.defineProperty(top.object, top.key, { value, writable: true, enumerable: true, configurable: true });
-      } else top.object![top.key] = value;
+      if (top.array) b.item(top.array, value);
+      else b.member(top.object!, top.key, value);
       skipWs();
       const d = text.charCodeAt(i);
       if (d === C_COMMA) {
@@ -257,7 +294,7 @@ export function parseLossless(text: string): unknown {
       }
       if (d === (top.array ? C_R_BRACKET : C_R_BRACE)) {
         i++;
-        value = top.array ?? top.object;
+        value = top.array ? b.endArray(top.array) : b.endObject(top.object!);
         stack.pop();
         continue;
       }

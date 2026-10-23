@@ -133,6 +133,11 @@ const PAIRS: [string, string[]][] = [
     "punct",
     "meta",
   ].map((t): [string, string[]] => [`--syntax-${t}`, ["--background", "--code-active-line"]]),
+  ...["add", "change", "del"].map((d): [string, string[]] => [`--diff-${d}`, ["--background", `--diff-${d}-bg`]]),
+  ...["key", "string", "number", "literal", "punct"].flatMap((t): [string, string[]][] =>
+    ["add", "change", "del"].map((d) => [`--syntax-${t}`, ["--background", `--diff-${d}-bg`]]),
+  ),
+  ["--foreground", ["--background", "--diff-change-bg"]],
   ["--code-gutter-fg", ["--code-gutter"]],
   ["--foreground", ["--background", "--code-selection"]],
   ["--foreground", ["--background", "--code-match-current"]],

@@ -1,6 +1,7 @@
 import type { BeautifyRequest, BeautifyResponse } from "./beautify.worker";
 import { jsonOp } from "./jsonOp";
 import type { JsonRequest, JsonResponse } from "./json.worker";
+import { peekNextId, reserveIds, type JNode } from "@/lib/json/doc";
 
 /** Bodies below this are parsed on the main thread: a worker round trip costs more. */
 export const WORKER_THRESHOLD = 256 * 1024;
@@ -49,6 +50,21 @@ export async function jsonInWorker(bytes: Uint8Array, op: "parse" | "pretty"): P
   if (bytes.length < WORKER_THRESHOLD) return jsonOp(new TextDecoder().decode(bytes), op);
   const copy = bytes.slice();
   return jsonRpc({ bytes: copy, op }, [copy.buffer]);
+}
+
+/**
+ * The JSON editor's document for a body (`lib/json/doc`), built in the
+ * worker for large bodies. Throws if it isn't JSON.
+ */
+export async function docInWorker(bytes: Uint8Array): Promise<JNode> {
+  const firstId = peekNextId();
+  const { root, nextId } =
+    bytes.length < WORKER_THRESHOLD
+      ? (jsonOp(new TextDecoder().decode(bytes), "doc", firstId) as { root: JNode; nextId: number })
+      : ((await jsonRpc({ bytes: bytes.slice(), op: "doc", firstId })) as { root: JNode; nextId: number });
+  // Ids made on this thread from now on stay clear of the worker's.
+  reserveIds(nextId);
+  return root;
 }
 
 const beautifyRpc = rpc<BeautifyRequest, BeautifyResponse, string>(

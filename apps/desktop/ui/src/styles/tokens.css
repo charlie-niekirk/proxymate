@@ -156,6 +156,14 @@
   --url-path: oklch(0.8 0.008 270);
   --url-query: oklch(0.7 0.07 245);
 
+  /* ---- visual rewrite: edited rows, preview diffs ---- */
+  --diff-add: oklch(0.78 0.16 150);
+  --diff-add-bg: oklch(0.78 0.16 150 / 11%);
+  --diff-change: oklch(0.82 0.15 80);
+  --diff-change-bg: oklch(0.82 0.15 80 / 11%);
+  --diff-del: oklch(0.74 0.17 25);
+  --diff-del-bg: oklch(0.72 0.18 25 / 13%);
+
   /* ---- body syntax colouring (CodeMirror, JSON tree, Raw) ---- */
   --syntax-key: oklch(0.76 0.13 245);
   --syntax-string: oklch(0.78 0.14 150);
@@ -268,6 +276,13 @@
   --url-port: oklch(0.52 0.01 270);
   --url-path: oklch(0.38 0.006 270);
   --url-query: oklch(0.5 0.1 250);
+
+  --diff-add: oklch(0.48 0.14 150);
+  --diff-add-bg: oklch(0.7 0.17 150 / 13%);
+  --diff-change: oklch(0.5 0.12 70);
+  --diff-change-bg: oklch(0.82 0.16 85 / 22%);
+  --diff-del: oklch(0.5 0.19 25);
+  --diff-del-bg: oklch(0.68 0.2 25 / 11%);
 
   --syntax-key: oklch(0.5 0.15 250);
   --syntax-string: oklch(0.5 0.14 150);

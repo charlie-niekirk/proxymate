@@ -8,11 +8,13 @@ import {
   exportHar,
   openDocument,
   openPreset,
+  openRewrite,
   replayFlow,
   saveSession,
   setThrottle,
 } from "@/lib/actions";
-import { THROTTLE_PRESETS } from "@/lib/rules";
+import { normalizeRule, THROTTLE_PRESETS } from "@/lib/rules";
+import type { PointerEdit } from "@/components/Rewrite/RewriteDialog";
 import { forceTheme } from "@/lib/theme";
 import { usePrefs } from "@/store/prefs";
 import { useUi, type DeviceTab, type RequestTab, type ResponseTab, type SettingsPage } from "@/store/ui";
@@ -32,6 +34,12 @@ import { useUi, type DeviceTab, type RequestTab, type ResponseTab, type Settings
  *   opening the flow menu for a screenshot. `{"contextMenu": null}` closes it.
  * - `{"preset": {"flow": 3, "kind": "map_local"}}` (or `breakpoint`,
  *   `rewrite`): exactly what the menu's "Map Local…" etc. do.
+ * - M13: `{"rewrite": {"flow": 3}}` opens the Rewrite dialog on the active
+ *   tab's flow 3; `{"rewrite": {"rule": "<id>"}}` reopens a saved rule on a
+ *   flow it matches. `{"rewriteEdit": {"side": "response", "tab": "Body",
+ *   "json": [{"set": "/name", "raw": "\"x\""}, {"rename": "/a", "key": "b"},
+ *   {"add": "", "key": "k", "raw": "1"}, {"remove": "/c"}], "headers": [{"name":
+ *   "X-A", "value": "1"}], "whole": false, "save": true}}` edits it like a user.
  * - `{"rulesEditor": true}` / `false`: opens or closes the Rules Editor.
  * - `{"testRule": true}`: presses "Test against selected flow".
  * - `{"saveRule": true}`: presses Save in the open Rules Editor.
@@ -68,6 +76,21 @@ interface Command {
   reload?: boolean;
   contextMenu?: number | null;
   preset?: { flow: number; kind: PresetKind };
+  /** Opens the Rewrite dialog on a flow, or reopens a saved rule (by id) visually; `null` closes it. */
+  rewrite?: { flow?: number; rule?: string } | null;
+  /** Edits in the open Rewrite dialog, then optionally saves (see `bridge.rewrite`). */
+  rewriteEdit?: {
+    side?: "request" | "response";
+    tab?: "Headers" | "Query" | "Body" | "Status";
+    json?: PointerEdit[];
+    headers?: { name: string; value: string | null }[];
+    query?: { name: string; value: string | null }[];
+    form?: { name: string; value: string | null }[];
+    status?: number;
+    whole?: boolean;
+    panel?: "preview" | "actions";
+    save?: boolean;
+  };
   rulesEditor?: boolean;
   testRule?: boolean;
   saveRule?: boolean;
@@ -123,7 +146,26 @@ async function apply(cmd: Command) {
     forceTheme(cmd.theme);
   }
   if (cmd.contextMenu !== undefined) openContextMenu(cmd.contextMenu);
-  if (cmd.preset) await openPreset(cmd.preset.flow, cmd.preset.kind);
+  if (cmd.preset) await openPreset(useUi.getState().store, cmd.preset.flow, cmd.preset.kind);
+  if (cmd.rewrite !== undefined) {
+    if (cmd.rewrite === null) ui.closeRewrite();
+    else await openRewrite(useUi.getState().store, cmd.rewrite.flow ?? null, cmd.rewrite.rule ? await savedRule(cmd.rewrite.rule) : null);
+  }
+  const rw = bridge.rewrite;
+  if (cmd.rewriteEdit && rw) {
+    const e = cmd.rewriteEdit;
+    const side = e.side ?? "response";
+    if (e.side) rw.side(e.side);
+    if (e.tab) rw.tab(side, e.tab);
+    for (const op of e.json ?? []) rw.edit(side, op);
+    for (const h of e.headers ?? []) rw.header(side, h);
+    for (const q of e.query ?? []) rw.query(q);
+    for (const f of e.form ?? []) rw.form(side, f);
+    if (e.status !== undefined) rw.status(e.status);
+    if (e.whole !== undefined) rw.whole(side, e.whole);
+    if (e.panel) rw.panel(e.panel);
+    if (e.save) await rw.save();
+  }
   if (cmd.rulesEditor === true) ui.openRulesEditor();
   if (cmd.rulesEditor === false) ui.closeRulesEditor();
   if (cmd.testRule) bridge.testRule?.();
@@ -146,6 +188,12 @@ async function apply(cmd: Command) {
   if (cmd.curl !== undefined) await post("/__pm_remote/out", await backend.getCurl(store, cmd.curl));
   if (cmd.saveSession) await saveSession({ kind: "all" }, cmd.saveSession);
   if (cmd.exportHar) await exportHar(undefined, cmd.exportHar);
+}
+
+async function savedRule(id: string) {
+  const rule = (await backend.listRules()).find((r) => r.id === id);
+  if (!rule) throw new Error(`no rule ${id}`);
+  return normalizeRule(rule);
 }
 
 async function post(url: string, body: string) {

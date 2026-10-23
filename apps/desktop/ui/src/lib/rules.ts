@@ -66,6 +66,7 @@ export function newPattern(kind: Pattern["kind"] = "glob", value = ""): Pattern 
 /** Labels for the "Add action" menu, in the order shown. */
 export const ACTION_TYPES: { type: ActionType; label: string; group: string }[] = [
   { type: "SetHeader", label: "Set header", group: "Headers" },
+  { type: "AddHeader", label: "Add header value", group: "Headers" },
   { type: "RemoveHeader", label: "Remove header", group: "Headers" },
   { type: "ReplaceHeaderValue", label: "Replace in header", group: "Headers" },
   { type: "SetQuery", label: "Set query parameter", group: "Query" },
@@ -74,6 +75,8 @@ export const ACTION_TYPES: { type: ActionType; label: string; group: string }[] 
   { type: "ReplaceBody", label: "Replace in body", group: "Body" },
   { type: "JsonSet", label: "JSON set", group: "Body" },
   { type: "JsonRemove", label: "JSON remove", group: "Body" },
+  { type: "FormSet", label: "Form field set", group: "Body" },
+  { type: "FormRemove", label: "Form field remove", group: "Body" },
   { type: "SetStatus", label: "Set status", group: "Status" },
   { type: "MapLocal", label: "Map Local", group: "Routing" },
   { type: "MapRemote", label: "Map Remote", group: "Routing" },
@@ -92,6 +95,8 @@ export function defaultAction(type: ActionType): Action {
   switch (type) {
     case "SetHeader":
       return { type, phase: "response", name: "X-Proxymate", value: "1" };
+    case "AddHeader":
+      return { type, phase: "response", name: "", value: "" };
     case "RemoveHeader":
       return { type, phase: "request", name: "" };
     case "ReplaceHeaderValue":
@@ -105,9 +110,13 @@ export function defaultAction(type: ActionType): Action {
     case "ReplaceBody":
       return { type, phase: "response", pattern: newPattern("exact"), replacement: "" };
     case "JsonSet":
-      return { type, phase: "response", pointer: "/", value: null };
+      return { type, phase: "response", pointer: "/", value: null, raw: "null" };
     case "JsonRemove":
       return { type, phase: "response", pointer: "/" };
+    case "FormSet":
+      return { type, phase: "request", name: "", value: "" };
+    case "FormRemove":
+      return { type, phase: "request", name: "" };
     case "SetStatus":
       return { type, status: 200 };
     case "MapLocal":
@@ -156,6 +165,8 @@ export function actionSummary(a: Action): string {
   switch (a.type) {
     case "SetHeader":
       return `${a.phase} ${a.name}: ${a.value}`;
+    case "AddHeader":
+      return `${a.phase} + ${a.name}: ${a.value}`;
     case "RemoveHeader":
       return `remove ${a.phase} ${a.name}`;
     case "ReplaceHeaderValue":
@@ -169,9 +180,13 @@ export function actionSummary(a: Action): string {
     case "ReplaceBody":
       return `${a.phase} body ${patternLabel(a.pattern)} → ${a.replacement}`;
     case "JsonSet":
-      return `${a.phase} ${a.pointer} = ${JSON.stringify(a.value)}`;
+      return `${a.phase} ${a.pointer} = ${jsonSetText(a)}`;
     case "JsonRemove":
       return `${a.phase} remove ${a.pointer}`;
+    case "FormSet":
+      return `${a.phase} form ${a.name}=${a.value}`;
+    case "FormRemove":
+      return `${a.phase} remove form ${a.name}`;
     case "SetStatus":
       return `status ${a.status}`;
     case "MapLocal":
@@ -187,6 +202,11 @@ export function actionSummary(a: Action): string {
     case "Block":
       return a.mode.kind === "status" ? `block ${a.mode.status}` : "block (reset)";
   }
+}
+
+/** A JsonSet's value as JSON text: its exact `raw`, else `value` serialised. */
+export function jsonSetText(a: Extract<Action, { type: "JsonSet" }>): string {
+  return a.raw ?? JSON.stringify(a.value);
 }
 
 /** The badge text for a rule's origin. */

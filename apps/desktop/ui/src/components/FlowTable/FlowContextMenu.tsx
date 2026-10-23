@@ -8,6 +8,7 @@ import {
   editAndReplay,
   exportHar,
   openPreset,
+  openRewrite,
   pinFlows,
   replayFlow,
 } from "@/lib/actions";
@@ -18,7 +19,8 @@ import { LIVE_STORE, useUi } from "@/store/ui";
 /**
  * The flow row menu. Replay sends the request again as recorded; Edit &
  * Replay opens it in Compose. The presets pre-fill a rule from the flow (in
- * Rust) and open it, unsaved, in the Rules Editor; they need a live flow.
+ * Rust) and open it, unsaved, in the Rules Editor; Rewrite… opens the
+ * Rewrite dialog. They work on saved sessions and HARs too.
  */
 export function FlowContextMenu({ row }: { row: Row | null }) {
   const store = useUi((s) => s.store);
@@ -54,22 +56,22 @@ export function FlowContextMenu({ row }: { row: Row | null }) {
       </ContextMenuItem>
       <ContextMenuSeparator />
       <ContextMenuItem
-        disabled={connect || !live}
-        onSelect={() => void openPreset(row.id, "map_local")}
+        disabled={!sendable}
+        onSelect={() => void openPreset(store, row.id, "map_local")}
         data-testid="menu-map-local"
       >
         <FileInput />
         Map Local…
       </ContextMenuItem>
       <ContextMenuItem
-        disabled={connect || !live}
-        onSelect={() => void openPreset(row.id, "breakpoint")}
+        disabled={!sendable}
+        onSelect={() => void openPreset(store, row.id, "breakpoint")}
         data-testid="menu-breakpoint"
       >
         <OctagonPause />
         Breakpoint…
       </ContextMenuItem>
-      <ContextMenuItem disabled={connect || !live} onSelect={() => void openPreset(row.id, "rewrite")} data-testid="menu-rewrite">
+      <ContextMenuItem disabled={!sendable} onSelect={() => void openRewrite(store, row.id)} data-testid="menu-rewrite">
         <PencilLine />
         Rewrite…
       </ContextMenuItem>

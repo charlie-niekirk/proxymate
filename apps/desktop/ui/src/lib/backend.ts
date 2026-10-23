@@ -135,9 +135,13 @@ export interface Backend {
   /** Rejects with the compile error if the rule is invalid. */
   validateRule(rule: Rule_Deserialize): Promise<void>;
   /** An unsaved rule pre-filled from a flow by a preset. */
-  draftRule(flow: number, preset: PresetKind): Promise<Rule_Serialize>;
+  /** A preset's unsaved rule from a flow in `store`. */
+  draftRule(store: number, flow: number, preset: PresetKind): Promise<Rule_Serialize>;
   /** Dry run of a rule against a recorded flow (computed in Rust). */
-  testRule(rule: Rule_Deserialize, flow: number): Promise<RuleTestResult_Serialize>;
+  /** Dry run on a flow in `store`; bodies cut at `bodyLimit` bytes (default 256 KB). */
+  testRule(store: number, rule: Rule_Deserialize, flow: number, bodyLimit?: number | null): Promise<RuleTestResult_Serialize>;
+  /** Flows of `store` (newest first) the rule's matcher matches. */
+  flowsMatchingRule(store: number, rule: Rule_Deserialize, limit: number): Promise<number[]>;
   getRuleSettings(): Promise<RuleSettings>;
   setRuleSettings(settings: RuleSettings): Promise<RuleSettings>;
   /** The rule list, pushed now and whenever the UI or an agent changes it. */
@@ -319,8 +323,9 @@ const tauriBackend: Backend = {
   validateRule: async (rule) => {
     await unwrap(commands.validateRule(rule));
   },
-  draftRule: (flow, preset) => unwrap(commands.draftRule(flow, preset)),
-  testRule: (rule, flow) => unwrap(commands.testRule(rule, flow)),
+  draftRule: (store, flow, preset) => unwrap(commands.draftRule(store, flow, preset)),
+  testRule: (store, rule, flow, bodyLimit = null) => unwrap(commands.testRule(store, rule, flow, bodyLimit)),
+  flowsMatchingRule: (store, rule, limit) => unwrap(commands.flowsMatchingRule(store, rule, limit)),
   getRuleSettings: () => commands.getRuleSettings(),
   setRuleSettings: (settings) => unwrap(commands.setRuleSettings(settings)),
   subscribeRules: async (onRules) => {

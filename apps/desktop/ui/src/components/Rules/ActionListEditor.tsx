@@ -9,11 +9,13 @@ import {
   ACTION_TYPES,
   actionLabel,
   defaultAction,
+  jsonSetText,
   moveItem,
-  parseJson,
   type Action,
   type ActionType,
 } from "@/lib/rules";
+
+import { parseLossless } from "@/lib/body/losslessJson";
 
 import { Checkbox, Choice, Field, NumberInput, PatternInput, PhaseChoice, TextArea } from "./fields";
 
@@ -96,6 +98,7 @@ const MONO = "h-6 font-mono text-xs";
 function ActionForm({ action, onChange }: { action: Action; onChange: (action: Action) => void }) {
   switch (action.type) {
     case "SetHeader":
+    case "AddHeader":
       return (
         <>
           <Field label="Phase">
@@ -187,7 +190,30 @@ function ActionForm({ action, onChange }: { action: Action; onChange: (action: A
             <Input className={MONO} value={action.pointer} placeholder="/data/items/0/name" onChange={(e) => onChange({ ...action, pointer: e.target.value })} />
           </Field>
           <Field label="Value (JSON)">
-            <JsonValueInput value={action.value} onChange={(value) => onChange({ ...action, value: value as typeof action.value })} />
+            <JsonValueInput value={jsonSetText(action)} onChange={(raw) => onChange({ ...action, value: null, raw })} />
+          </Field>
+        </>
+      );
+    case "FormSet":
+      return (
+        <>
+          <Field label="Phase">
+            <PhaseChoice value={action.phase} onChange={(phase) => onChange({ ...action, phase })} />
+          </Field>
+          <Field label="Field">
+            <Input className={MONO} value={action.name} placeholder="name" onChange={(e) => onChange({ ...action, name: e.target.value })} />
+            <Input className={MONO} value={action.value} placeholder="value" onChange={(e) => onChange({ ...action, value: e.target.value })} />
+          </Field>
+        </>
+      );
+    case "FormRemove":
+      return (
+        <>
+          <Field label="Phase">
+            <PhaseChoice value={action.phase} onChange={(phase) => onChange({ ...action, phase })} />
+          </Field>
+          <Field label="Field">
+            <Input className={MONO} value={action.name} placeholder="name" onChange={(e) => onChange({ ...action, name: e.target.value })} />
           </Field>
         </>
       );
@@ -340,24 +366,33 @@ function MapLocalForm({ action, onChange }: { action: Extract<Action, { type: "M
   );
 }
 
-/** JSON text, applied once it parses. */
-function JsonValueInput({ value, onChange }: { value: unknown; onChange: (value: unknown) => void }) {
-  const [text, setText] = useState(() => JSON.stringify(value));
-  const parsed = parseJson(text);
+/** Exact JSON text (big numbers and `1.50` kept as typed), applied once it parses. */
+function JsonValueInput({ value, onChange }: { value: string; onChange: (raw: string) => void }) {
+  const [text, setText] = useState(value);
+  const error = jsonError(text);
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-0.5">
       <Input
         className={MONO}
         value={text}
-        aria-invalid={!parsed.ok}
+        aria-invalid={error !== null}
         placeholder='"text", 42, true, null, {"a": 1}'
         onChange={(e) => {
           setText(e.target.value);
-          const next = parseJson(e.target.value);
-          if (next.ok) onChange(next.value);
+          if (jsonError(e.target.value) === null) onChange(e.target.value.trim());
         }}
+        data-testid="json-set-raw"
       />
-      {!parsed.ok && <span className="text-2xs text-[var(--s-failed)]">Not JSON yet: {parsed.error}</span>}
+      {error !== null && <span className="text-2xs text-[var(--s-failed)]">Not JSON yet: {error}</span>}
     </div>
   );
+}
+
+function jsonError(text: string): string | null {
+  try {
+    parseLossless(text);
+    return null;
+  } catch (e) {
+    return e instanceof Error ? e.message : String(e);
+  }
 }

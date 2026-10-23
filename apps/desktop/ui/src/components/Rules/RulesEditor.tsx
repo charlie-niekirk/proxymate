@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Bot, GripVertical, ListChecks, Plus, Save, Trash2 } from "lucide-react";
+import { Bot, GripVertical, ListChecks, PencilLine, Plus, Save, Trash2 } from "lucide-react";
 import { useEffect, useState, type DragEvent, type ReactNode } from "react";
 
 import type { RuleTestResult_Serialize } from "@/bindings";
@@ -8,9 +8,10 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { bridge } from "@/dev/bridge";
-import { deleteAgentRules, deleteRule, reorderRules, saveRule, setRuleEnabled } from "@/lib/actions";
+import { deleteAgentRules, deleteRule, openRewrite, reorderRules, saveRule, setRuleEnabled } from "@/lib/actions";
 import { backend } from "@/lib/backend";
 import { queryClient, ruleSettingsKey, rulesKey } from "@/lib/query";
+import { isVisual } from "@/lib/rewrite/diff";
 import { actionSummary, isBuiltin, matcherSummary, newRule, normalizeRule, type Rule } from "@/lib/rules";
 import { cn } from "@/lib/utils";
 import { useUi } from "@/store/ui";
@@ -195,6 +196,7 @@ function BreakpointTimeout() {
 function RuleForm({ initial }: { initial: Rule }) {
   const openEditor = useUi((s) => s.openRulesEditor);
   const selectedFlow = useUi((s) => s.selectedId);
+  const store = useUi((s) => s.store);
   const [rule, setRule] = useState(initial);
   const [invalid, setInvalid] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -237,7 +239,7 @@ function RuleForm({ initial }: { initial: Rule }) {
   const runTest = () => {
     if (selectedFlow === null) return;
     setTest((t) => ({ ...t, busy: true }));
-    backend.testRule(rule, selectedFlow).then(
+    backend.testRule(store, rule, selectedFlow).then(
       (result) => setTest({ result, error: null, busy: false }),
       (e: unknown) => setTest({ result: null, error: errorText(e), busy: false }),
     );
@@ -275,6 +277,19 @@ function RuleForm({ initial }: { initial: Rule }) {
         <Checkbox checked={rule.enabled} onChange={(enabled) => setRule({ ...rule, enabled })} label="Enabled" />
         <RuleOriginBadge origin={rule.origin} />
         {unsaved && <span className="text-muted-foreground text-xs">Unsaved</span>}
+        {(rule.actions.some(isVisual) || (rule.origin.kind === "preset" && rule.origin.preset === "rewrite")) && (
+          <Button
+            variant="outline"
+            size="xs"
+            className="ml-auto"
+            title="Edit this rule's rewrites on a flow it matches"
+            onClick={() => void openRewrite(store, null, rule)}
+            data-testid="edit-visually"
+          >
+            <PencilLine />
+            Edit visually
+          </Button>
+        )}
       </div>
       <ScrollArea className="min-h-0 flex-1">
         <div className="flex flex-col gap-4 p-3">

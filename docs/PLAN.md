@@ -155,9 +155,9 @@ We build our own engine and use hudsucker only as a reading reference. Its handl
 - **Matcher.** Matches on methods, scheme, host, port, path, query and header KV matches (each can be negated), client app, and an optional response matcher (status ranges, content-type).
   - Patterns can be Exact, Glob or Regex, each with a case-insensitive flag. Exact and globs match the whole value; regexes are unanchored. In globs `*` crosses `/`, and a host glob `*.example.com` also matches `example.com`.
 - **Actions:**
-  - Headers: `SetHeader`, `RemoveHeader`, `ReplaceHeaderValue`.
+  - Headers: `SetHeader`, `AddHeader` (M13: appends a value, for repeated headers), `RemoveHeader`, `ReplaceHeaderValue`.
   - Query: `SetQuery`, `RemoveQuery`.
-  - Body: `ReplaceBody`, `SetBody`, `JsonSet`, `JsonRemove` (by JSON pointer; `JsonSet` creates missing members, `-` appends).
+  - Body: `ReplaceBody`, `SetBody`, `JsonSet`, `JsonRemove` (by JSON pointer; `JsonSet` creates missing members, `-` appends; M13: `JsonSet.raw` is the value as exact JSON text, and both edit the bytes in place, see "M13"), `FormSet`, `FormRemove` (M13: form-urlencoded fields).
   - Status: `SetStatus`.
   - Routing: `MapLocal` (an inline body, a file, or a directory root mapped by path suffix: the whole path is tried, then with leading segments dropped; `..` never leaves the root) and `MapRemote`.
   - Flow control: `Breakpoint{request,response}`, `Delay`, `Throttle` (token bucket, kbps down/up plus latency), `Block` (a status code or a connection reset: h1 closes the connection, h2 resets the stream).
@@ -189,7 +189,7 @@ We build our own engine and use hudsucker only as a reading reference. Its handl
   - The queue is pushed to the UI on the publisher tick whenever it changes.
 - **Body policy.** By default bodies stream. If any body action or breakpoint applies, the body is buffered up to 32 MB, decoded, transformed, and re-sent identity-encoded with a fresh Content-Length (h1 chunking is dropped). Decoding is synchronous on the stored bytes (no async-compression).
   - A body over the cap is forwarded untouched (what was read, then the rest of the stream) and the flow is marked `rewrite_skipped`; so is a body that can't be decoded.
-- **Presets.** "Map Local…", "Breakpoint…" and "Rewrite…" in the flow context menu create pre-filled rules (`Engine::draft_rule`, matching the flow's method, host and path). The rules editor has a "Test against selected flow" dry run (`Engine::test_rule`), computed in Rust with the proxy's own evaluator.
+- **Presets.** "Map Local…" and "Breakpoint…" in the flow context menu create pre-filled rules (`Engine::draft_rule_in`, matching the flow's method, host and path), on live flows and (M13) saved sessions and HARs. "Rewrite…" opens the Rewrite dialog (M13); its preset drafts no actions. The rules editor has a "Test against selected flow" dry run (`Engine::test_rule_in`, any store), computed in Rust with the proxy's own evaluator.
 - **Throttle.** The toolbar's network conditions are the built-in rule `builtin-throttle`: it matches everything, sits ahead of every other rule, is disabled by default and can't be deleted.
 
 ## macOS integration (pm-platform)
@@ -424,6 +424,70 @@ The details, secrets and key rotation are in `docs/RELEASING.md`.
 | M10 | `m10-polish` | Light-mode pass, keyboard navigation, column persistence, eviction, deep search, DSL autocomplete, error UX | 1-hour soak; stable RSS |
 | M11 | `m11-macos-release` | Universal DMG, ad-hoc signing with the hardened runtime, updater, release workflow (Developer ID signing and notarisation deferred: no paid Apple account) | CI builds the universal DMG; it launches after the one-time Gatekeeper override; the updater installs a signed update and refuses a bad signature |
 | M12 | `m12-linux-windows` | pm-platform implementations for Linux and Windows, AppImage/deb/rpm, MSI/NSIS, CI matrix | Integration suite green on all three OSes |
+| M13 | `m13-visual-rewrite` | Interactive rewrite: editable JSON tree plus header/query/form/GraphQL editors, with diff → actions, an exact JSON splicer, and the Rewrite dialog (see "M13" below) | Edit a captured flow, save it, replay it: only the changed paths are patched |
+| M14 | `m14-scripting` | JavaScript scripting (QuickJS) with view, rewrite and mock scripts, a Scripts window and MCP tools (its design lands with its PR) | A base64 JSON field is auto-decoded in the inspector; rewrite and mock scripts work through the proxy |
+
+## Post-v1 milestones: M13 visual rewrite and M14 scripting
+
+### Context
+The user asked for two features beyond v1:
+1. **Scripting** (M14). The motivating case is a request that sends a JSON object base64-encoded; the user wants it decoded automatically in the inspector.
+2. **Visual rewrite** (M13). "Rewrite…" on a flow shows the captured request and response as editable tables and trees, instead of making the user type JSON pointers.
+
+**Decisions the user made:**
+- Scripts are JavaScript on embedded QuickJS, with view/decoder, traffic-modifying and mock scripts, and no network or file access.
+- Saving a rewrite patches **only what changed**; a "Replace whole body" toggle replaces the body instead.
+- Editable types: JSON, headers, query parameters, form-urlencoded bodies and GraphQL variables. XML is not included.
+
+**Order and parallel work.** M13 merges first and M14 rebases onto it. M13's `Action` variants sit right after `JsonRemove`; M14 appends `Script` as the last variant. M13 owns `eval.rs`'s `edit_body`, `rules/json_edit.rs` and the `*_in` dry runs; M14 only makes the phases async and adds a Script arm. `bindings.ts` is regenerated, never hand-merged. M12 is independent of both.
+
+**Facts that shaped the designs:**
+- **No serde_json feature changes.** `arbitrary_precision` breaks numeric fields inside internally tagged enums (`Action`, `RuleOrigin`, `BreakpointResolution`) and leaks into Tauri and rmcp; `preserve_order` reorders keys on remove. Exact JSON edits go through a byte splicer and `JsonSet.raw` instead.
+- Re-serialising a body (the pre-M13 `JsonSet`) sorts keys and rewrites numbers; a JS object reorders integer-like keys (`parseLossless` alone isn't enough for editing).
+- Saved sessions are versioned (`store/sqlite.rs`, `VERSION = 1`, strict); M13 changes no postcard layout.
+
+### M13: Visual rewrite (`m13-visual-rewrite`)
+
+**Model (`pm-model/src/rules.rs`)**
+- `JsonSet` gains `#[serde(default)] raw: Option<String>`: the value as exact JSON text, which takes precedence over `value` (validated on compile).
+- After `JsonRemove`: `FormSet{phase,name,value}`, `FormRemove{phase,name}` (urlencoded bodies, like `SetQuery` on the body) and `AddHeader{phase,name,value}` (appends, so repeated headers are a `RemoveHeader` then several `AddHeader`s).
+- `RuleTestResult` gains `request_body_truncated` / `response_body_truncated`.
+- GraphQL variables need no new action: they are `JsonSet`/`JsonRemove` under `/variables` (`/0/variables` for a batch), or a `SetQuery` of `variables` for a GET.
+
+**Engine**
+- **JSON splicer** (`rules/json_edit.rs`), used by `eval.rs` for every `JsonSet`/`JsonRemove`:
+  - The body is validated once (serde_json into `IgnoredAny`), then scanned to the value the pointer addresses and only those bytes are replaced. Key order, number text and formatting elsewhere stay byte-identical.
+  - An inserted member copies its last sibling's whitespace and `:` style (in an empty container, the document's indent unit and colon). A removed member takes its comma with it. Missing parents are created as nested objects.
+  - Same semantics as the old parse-and-reserialise code, including repeated keys (the last one is edited; a removal removes them all) and `-`/length appends. A differential test against that code (kept as the test reference) runs thousands of generated documents and edit sequences in compact, pretty and tab styles.
+  - A run of consecutive JSON actions in a rule is applied in one back-to-front pass when the edits can't interact (no overlapping or touching splices, nothing else in an array whose length one edit changes, no failures or no-ops); otherwise one by one.
+- **Store-aware dry runs:** `draft_rule_in(store, …)`, `test_rule_in(store, rule, flow, body_limit)` (the result's bodies are cut at the limit, 256 KB by default, 2 MB from the dialog; the rule runs on whole bodies) and `flows_matching_rule(store, rule, limit)` (newest first; header and response conditions checked on the detail). The live-only versions wrap them; the Tauri commands take `store`.
+- The Rewrite preset drafts an empty action list.
+
+**JSON document and editor**
+- `lib/json/doc.ts`: ordered nodes `obj{entries[{id,key,v}]}`, `arr{items[{id,v}]}`, `str`, `num{raw}`, `bool`, `null`, built by a builder mode of the `parseLossless` tokenizer (in the JSON worker above 256 KB). Ids are stable through renames and array edits; edits are immutable (path copying). `align` gives a dry run's result the original's ids (members by key, items by index).
+- `components/JsonEditor/`: virtualised rows, inline typed editors (numbers checked against the JSON grammar and kept as typed), change type, add, remove, rename, duplicate, reset to original, undo/redo (200 steps, `hooks/useUndoable.ts`), rows tinted against the original with the `--diff-*` tokens (contrast-tested), "replaced as a whole" and "−N removed" badges. Keys: ↑↓ ←→, ↩ edit, F2 rename, ⌘↩ add, ⌘D duplicate, ⌫ remove, ⌘Z/⇧⌘Z, Esc cancels. Bodies over 5 MB are edited as text.
+
+**Edits → actions (`lib/rewrite/diff.ts`, `lib/rewrite/session.ts`, table-tested)**
+- A changed scalar is `JsonSet{raw}` (numbers compared by text); a removed member `JsonRemove`; an added one a `JsonSet` of its subtree; a rename both (removals come first, so swaps work).
+- Arrays: appended items are `JsonSet …/-`; any other insert, removal or reorder sets the whole array (badged in the tree).
+- A new root type, or "Replace whole body", is `SetBody`. Above 100 actions the dialog suggests the toggle.
+- Headers (case-insensitive names): `SetHeader` / `RemoveHeader`; a repeated header is `RemoveHeader` plus an `AddHeader` per value. `Content-Length`, `Content-Encoding` and `Transfer-Encoding` are read-only.
+- Query and form fields: `SetQuery`/`RemoveQuery`, `FormSet`/`FormRemove`; a repeated name can be removed, not edited. Status: `SetStatus`. Other text bodies: "Replace whole body" (`SetBody`) or find & replace pairs (`ReplaceBody`, exact).
+
+**Rewrite dialog (`components/Rewrite/`)**
+- Opens from "Rewrite…" in the flow menu (live flows and documents), a Rewrite button in the inspector URL bar, "Edit visually" in the Rules Editor, and the palette.
+- Request side: Headers, Query, Body. Response side: Status, Headers, Body. The Body tab is the JSON tree, the GraphQL variables tree, a form table or text.
+- Matcher chips: Exact URL, Ignore query (default), Path glob (id-like segments become `*`), Any method, Advanced… (the `MatcherBuilder`).
+- Live preview: a debounced `test_rule_in` on this flow, showing the status, a header key/value diff and a line diff of the body (pretty-printed in order with exact numbers), scrolled to the first change, with a note when the body was cut. An Actions tab lists what will be saved.
+- Saving makes a rule with origin `Preset{Rewrite}` (or updates the rule being edited), editable in the Rules Editor.
+- Reopening a saved rule: on the selected flow if it matches, else the newest from `flows_matching_rule`. Its visual actions are dry-run and the edits rebuilt from the result (`align`). Their paths are pinned, so a `JsonSet` equal to the flow's value is kept, and sets that created parents stay at their paths. Other actions (Delay, Breakpoint, ReplaceHeaderValue…), and visual ones the rebuilt edits don't account for, are kept unchanged and listed read-only.
+- The Breakpoint Editor has a Text/Tree toggle for JSON bodies. `GraphQlView` shows variables through the document model (member order and numbers as sent). The Rules Editor's `JsonSet` form edits the exact `raw` text.
+
+**MCP**
+- `create_rewrite` gains `json_remove[]`, `json_set[].raw`, `set_query`/`remove_query`, `form_set`/`form_remove` and `add_request_headers`/`add_response_headers`.
+- New read-only tool `test_rule{rule_id | rule, flow_id, store?}`.
+
+**Tests:** the splicer's unit and differential tests; `FormSet`/`AddHeader`/raw compile and evaluate; an integration test where a dialog-shaped rule runs against an upstream whose other fields (and formatting, and 64-bit ids) differ, which come through byte-identical; `test_rule_in`/`flows_matching_rule` on a saved session; an rmcp test of `test_rule` and the sugar; vitest for the document, diff, matcher chips, line diff and rebuilding with pins; Playwright for the dialog on the zoo JSON flow and the Breakpoint Editor tree, in dark and light.
 
 ## Critical files (to be created)
 - `crates/pm-model/src/lib.rs`: the shared types that drive the TS bindings and the MCP schemas.

@@ -76,6 +76,11 @@ interface UiState {
    * rule (from a preset or "New"); otherwise `ruleId` names a saved one.
    */
   rulesEditor: { open: boolean; ruleId: string | null; draft: Rule | null; seq: number };
+  /**
+   * The Rewrite dialog: a flow of `store` to edit, and the rule it edits
+   * (a saved one reopened visually), or null for a new rewrite.
+   */
+  rewrite: { open: boolean; store: number; flow: number | null; rule: Rule | null; seq: number };
   breakpointsOpen: boolean;
   /** The breakpoint shown in the Breakpoint Editor. */
   selectedBreakpoint: number | null;
@@ -108,6 +113,8 @@ interface UiState {
   setCertWizardOpen(open: boolean): void;
   openRulesEditor(target?: { ruleId?: string | null; draft?: Rule | null }): void;
   closeRulesEditor(): void;
+  openRewrite(target: { store: number; flow: number; rule?: Rule | null }): void;
+  closeRewrite(): void;
   setBreakpointsOpen(open: boolean): void;
   selectBreakpoint(id: number | null): void;
   setDeviceSetupOpen(open: boolean): void;
@@ -136,6 +143,7 @@ export const useUi = create<UiState>()((set) => ({
   viewerByKind: {},
   certWizardOpen: false,
   rulesEditor: { open: false, ruleId: null, draft: null, seq: 0 },
+  rewrite: { open: false, store: LIVE_STORE, flow: null, rule: null, seq: 0 },
   breakpointsOpen: false,
   selectedBreakpoint: null,
   deviceSetupOpen: false,
@@ -185,6 +193,10 @@ export const useUi = create<UiState>()((set) => ({
       },
     })),
   closeRulesEditor: () => set((s) => ({ rulesEditor: { ...s.rulesEditor, open: false, draft: null } })),
+  // Bumping `seq` reloads the dialog, so it never shows the last flow's edits.
+  openRewrite: ({ store, flow, rule = null }) =>
+    set((s) => ({ rewrite: { open: true, store, flow, rule, seq: s.rewrite.seq + 1 } })),
+  closeRewrite: () => set((s) => ({ rewrite: { ...s.rewrite, open: false } })),
   setBreakpointsOpen: (breakpointsOpen) => set({ breakpointsOpen }),
   selectBreakpoint: (selectedBreakpoint) => set({ selectedBreakpoint }),
   setDeviceSetupOpen: (deviceSetupOpen) => set({ deviceSetupOpen }),

@@ -161,6 +161,8 @@ pub(crate) struct CompiledAction {
     pub find: Option<Regex>,
     /// The header an action names.
     pub header: Option<HeaderName>,
+    /// `JsonSet`'s value as JSON text (`raw`, or `value` serialised).
+    pub json: Option<String>,
 }
 
 /// One enabled rule, ready to run.
@@ -319,7 +321,9 @@ impl CompiledRule {
             Action::ReplaceBody { phase: p, .. }
             | Action::SetBody { phase: p, .. }
             | Action::JsonSet { phase: p, .. }
-            | Action::JsonRemove { phase: p, .. } => *p == phase,
+            | Action::JsonRemove { phase: p, .. }
+            | Action::FormSet { phase: p, .. }
+            | Action::FormRemove { phase: p, .. } => *p == phase,
             Action::Breakpoint { request, response } => match phase {
                 Phase::Request => *request,
                 Phase::Response => *response,
@@ -363,9 +367,10 @@ fn compile_action(rule: &Rule, index: usize, action: &Action) -> Result<Compiled
         action: action.clone(),
         find: None,
         header: None,
+        json: None,
     };
     match action {
-        Action::SetHeader { name, value, .. } => {
+        Action::SetHeader { name, value, .. } | Action::AddHeader { name, value, .. } => {
             compiled.header = Some(header(name)?);
             if http::HeaderValue::from_str(value).is_err() {
                 return Err(invalid(format!("{value:?} isn't a valid header value")));
@@ -379,6 +384,9 @@ fn compile_action(rule: &Rule, index: usize, action: &Action) -> Result<Compiled
         Action::SetQuery { name, .. } | Action::RemoveQuery { name } if name.is_empty() => {
             return Err(invalid("the query parameter name is empty".into()));
         }
+        Action::FormSet { name, .. } | Action::FormRemove { name, .. } if name.is_empty() => {
+            return Err(invalid("the form field name is empty".into()));
+        }
         Action::ReplaceBody { pattern, .. } => {
             compiled.find = Some(compile_pattern(pattern, Use::Find, false).map_err(invalid)?);
         }
@@ -389,7 +397,20 @@ fn compile_action(rule: &Rule, index: usize, action: &Action) -> Result<Compiled
                 return Err(invalid(format!("{ct:?} isn't a valid content type")));
             }
         }
-        Action::JsonSet { pointer: p, .. } | Action::JsonRemove { pointer: p, .. } => pointer(p)?,
+        Action::JsonSet {
+            pointer: p, value, raw, ..
+        } => {
+            pointer(p)?;
+            compiled.json = Some(match raw {
+                Some(raw) => {
+                    serde_json::from_str::<serde::de::IgnoredAny>(raw)
+                        .map_err(|e| invalid(format!("the raw value isn't JSON: {e}")))?;
+                    raw.trim().to_owned()
+                }
+                None => value.to_string(),
+            });
+        }
+        Action::JsonRemove { pointer: p, .. } => pointer(p)?,
         Action::SetStatus { status: s } => status(*s)?,
         Action::MapLocal { status: s, headers, .. } => {
             status(*s)?;

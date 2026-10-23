@@ -104,6 +104,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::get_update_settings,
             commands::set_update_settings,
             commands::check_for_updates,
+            commands::flows_matching_rule,
         ])
         // Sizes are u64 but stay far below 2^53.
         .dangerously_cast_bigints_to_number()

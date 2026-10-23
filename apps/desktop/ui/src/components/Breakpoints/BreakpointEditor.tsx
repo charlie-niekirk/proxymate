@@ -1,9 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { CirclePlay, OctagonPause, Plus, Reply, X, XCircle } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { BreakpointInfo_Serialize, Header, MessageEdits_Deserialize } from "@/bindings";
 import { CodeEditor } from "@/components/Compose/CodeEditor";
+import { keepEscapeInEditor } from "@/components/JsonEditor/escape";
+import { JsonEditor } from "@/components/JsonEditor/JsonEditor";
 import { MethodPill } from "@/components/FlowTable/cells";
 import { NumberInput } from "@/components/Rules/fields";
 import { Button } from "@/components/ui/button";
@@ -16,6 +18,8 @@ import { languageFor } from "@/lib/compose";
 import { headerValue } from "@/lib/http";
 import { cleanHeaders } from "@/lib/rules";
 import { cn } from "@/lib/utils";
+import { useUndoable } from "@/hooks/useUndoable";
+import { align, parseDoc, toJson, type JNode } from "@/lib/json/doc";
 import { useBreakpoints } from "@/store/breakpoints";
 import { useUi } from "@/store/ui";
 
@@ -40,6 +44,7 @@ export function BreakpointEditor() {
       <DialogContent
         className="flex h-[80vh] flex-col gap-0 p-0 sm:max-w-[1080px]"
         onOpenAutoFocus={(e) => e.preventDefault()}
+        onEscapeKeyDown={keepEscapeInEditor}
         data-testid="breakpoint-editor"
       >
         <DialogHeader className="border-b px-4 py-2.5">
@@ -217,6 +222,7 @@ function BreakpointForm({ bp }: { bp: BreakpointInfo_Serialize }) {
               // The editor is seeded once, so it waits for the paused body.
               loading={bodyPending}
               value={bodyText}
+              original={originalBody}
               headers={headers}
               readOnly={!bp.body.editable}
               onChange={setBody}
@@ -269,9 +275,23 @@ function BreakpointForm({ bp }: { bp: BreakpointInfo_Serialize }) {
   );
 }
 
-/** A message body in CodeMirror, highlighted for its (live) Content-Type. */
+/** A JSON document, or null if `text` isn't JSON. */
+function parsed(text: string): JNode | null {
+  try {
+    return parseDoc(text);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A message body in CodeMirror, highlighted for its (live) Content-Type.
+ * A JSON body can also be edited as a tree (`original` tints the changes);
+ * the text follows every tree edit.
+ */
 function BodyEditor({
   value,
+  original,
   headers,
   onChange,
   loading = false,
@@ -280,6 +300,7 @@ function BodyEditor({
   testId,
 }: {
   value: string;
+  original?: string;
   headers: Header[];
   onChange: (text: string) => void;
   loading?: boolean;
@@ -288,11 +309,62 @@ function BodyEditor({
   testId: string;
 }) {
   const language = languageFor(headerValue(headers, "content-type")?.trim() ?? null);
+  // The tree starts from the text as it is when it opens.
+  const [tree, setTree] = useState<JNode | null>(null);
+  const [invalid, setInvalid] = useState(false);
+  const canTree = useMemo(() => original !== undefined && !readOnly && parsed(original) !== null, [original, readOnly]);
+  const mode = tree && canTree ? "tree" : "text";
+  const setMode = (m: "text" | "tree") => {
+    if (m === "text") return setTree(null);
+    const doc = parsed(value);
+    setInvalid(doc === null);
+    setTree(doc);
+  };
   return (
-    <div className={cn("overflow-hidden rounded-md border", className)}>
-      {loading ? null : <CodeEditor value={value} language={language} onChange={onChange} readOnly={readOnly} testId={testId} />}
+    <div className="flex flex-col gap-1">
+      {canTree && (
+        <div className="flex items-center gap-1 self-end text-[11px]" data-testid={`${testId}-mode`}>
+          {(["text", "tree"] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              data-active={mode === m}
+              onClick={() => setMode(m)}
+              className="text-muted-foreground data-[active=true]:bg-accent data-[active=true]:text-foreground h-5 rounded-sm px-1.5"
+              title={m === "tree" && invalid ? "The text isn't valid JSON" : undefined}
+              data-testid={`${testId}-${m}`}
+            >
+              {m === "text" ? "Text" : "Tree"}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className={cn("overflow-hidden rounded-md border", className)}>
+        {loading ? null : mode === "tree" && tree && original !== undefined ? (
+          <TreeBody initial={tree} original={original} onChange={onChange} testId={`${testId}-json`} />
+        ) : (
+          // Remounted from the current text when coming back from the tree.
+          <CodeEditor key={mode} value={value} language={language} onChange={onChange} readOnly={readOnly} testId={testId} />
+        )}
+      </div>
     </div>
   );
+}
+
+function TreeBody({ initial, original, onChange, testId }: { initial: JNode; original: string; onChange: (text: string) => void; testId: string }) {
+  const reference = useMemo(() => parsed(original), [original]);
+  // Shares the original's ids where they line up, so only real edits are tinted.
+  const tree = useUndoable(() => (reference ? align(reference, initial) : initial));
+  const pretty = /\n/.test(original.trim());
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) {
+      first.current = false;
+      return;
+    }
+    onChange(toJson(tree.value, pretty ? 2 : 0));
+  }, [tree.value, pretty, onChange]);
+  return <JsonEditor doc={tree} original={reference} testId={testId} />;
 }
 
 function HeaderTable({ rows, onChange }: { rows: Header[]; onChange: (rows: Header[]) => void }) {

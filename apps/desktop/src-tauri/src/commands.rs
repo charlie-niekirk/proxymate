@@ -337,18 +337,42 @@ pub fn validate_rule(engine: EngineState<'_>, rule: Rule) -> Result<(), String> 
     engine.validate_rule(&rule).map_err(|e| e.to_string())
 }
 
-/// An unsaved rule pre-filled from a flow by a preset.
+/// An unsaved rule pre-filled from a flow (in any store) by a preset.
 #[tauri::command]
 #[specta::specta]
-pub fn draft_rule(engine: EngineState<'_>, flow: FlowId, preset: PresetKind) -> Result<Rule, String> {
-    engine.draft_rule(flow, preset).map_err(|e| e.to_string())
+pub fn draft_rule(engine: EngineState<'_>, store: StoreId, flow: FlowId, preset: PresetKind) -> Result<Rule, String> {
+    engine.draft_rule_in(store, flow, preset).map_err(|e| e.to_string())
 }
 
-/// Dry run of a rule against a recorded flow.
+/// Dry run of a rule against a recorded flow; the bodies shown are cut at
+/// `body_limit` bytes (default 256 KB).
 #[tauri::command]
 #[specta::specta]
-pub async fn test_rule(engine: EngineState<'_>, rule: Rule, flow: FlowId) -> Result<RuleTestResult, String> {
-    engine.test_rule(&rule, flow).await.map_err(|e| e.to_string())
+pub async fn test_rule(
+    engine: EngineState<'_>,
+    store: StoreId,
+    rule: Rule,
+    flow: FlowId,
+    body_limit: Option<u32>,
+) -> Result<RuleTestResult, String> {
+    engine
+        .test_rule_in(store, &rule, flow, body_limit.map(|n| n as usize))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Flows of a store (newest first) a rule's matcher matches.
+#[tauri::command]
+#[specta::specta]
+pub fn flows_matching_rule(
+    engine: EngineState<'_>,
+    store: StoreId,
+    rule: Rule,
+    limit: u32,
+) -> Result<Vec<FlowId>, String> {
+    engine
+        .flows_matching_rule(store, &rule, limit as usize)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
