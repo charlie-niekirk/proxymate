@@ -12,18 +12,29 @@
 //! the response as it arrived take part. Rewrites run in order, then the
 //! response breakpoint.
 //!
-//! Everything here is synchronous and works on drafts: the proxy fills a
-//! draft from the wire (buffering and decoding the body first when a body
-//! action or breakpoint needs it), evaluates, and sends what's left.
+//! **Scripts (M14).** A `Script` action runs in place, in rule and action
+//! order, so it sees the edits of the actions before it: a rewrite
+//! script's `onRequest` or `onResponse`, or a mock script's `onMock`. A
+//! mock answer is terminal like Map Local: the first answer (Map Local or
+//! mock) wins and later script actions in the request phase don't run.
+//! `Block` still runs first and the breakpoints last. A script that throws
+//! or times out is skipped and reported in the effects' `script_issues`.
+//!
+//! Everything here works on drafts: the proxy fills a draft from the wire
+//! (buffering and decoding the body first when a body action, script or
+//! breakpoint needs it), evaluates, and sends what's left. The phases are
+//! async only for scripts; a rule set without scripts never awaits.
 //! [`super::Engine::test_rule`] runs the same code on a recorded flow.
 
 use std::sync::Arc;
 
 use http::header::{self, HeaderMap, HeaderName, HeaderValue};
-use pm_model::{Action, AppliedRule, BlockMode, MapLocalSource, Phase, Scheme};
+use pm_model::{Action, AppliedRule, BlockMode, MapLocalSource, Phase, Scheme, ScriptIssue, ScriptPhase};
 
 use super::compile::{CompiledAction, CompiledRule, RequestInfo, percent_encode, query_pairs};
 use super::json_edit::{self, Edit};
+use crate::scripts::traffic::{apply_request, apply_response, mock_answer};
+use crate::scripts::{JsRequest, MockAnswer, ScriptRun};
 
 /// A request as rules see and change it.
 #[derive(Debug, Clone)]
@@ -131,6 +142,8 @@ pub(crate) struct ThrottleSpec {
 pub(crate) struct RequestEffects {
     pub block: Option<BlockMode>,
     pub map_local: Option<LocalAnswer>,
+    /// A mock script's answer.
+    pub mock: Option<MockAnswer>,
     pub map_remote: Option<Remap>,
     pub delay_ms: u64,
     pub throttle: Option<ThrottleSpec>,
@@ -142,6 +155,8 @@ pub(crate) struct RequestEffects {
     /// Body actions that couldn't run (no buffered body, not JSON…).
     pub body_skipped: Vec<String>,
     pub applied: Vec<AppliedRule>,
+    /// Scripts that threw, timed out or returned something unusable.
+    pub script_issues: Vec<ScriptIssue>,
 }
 
 #[derive(Default)]
@@ -152,6 +167,17 @@ pub(crate) struct ResponseEffects {
     pub body_changed: bool,
     pub body_skipped: Vec<String>,
     pub applied: Vec<AppliedRule>,
+    pub script_issues: Vec<ScriptIssue>,
+}
+
+/// True if a script in `rules` runs `onResponse`, so the response phase
+/// needs the request as it was sent.
+pub(crate) fn needs_request_for_response(rules: &[Arc<CompiledRule>]) -> bool {
+    rules.iter().any(|r| {
+        r.actions
+            .iter()
+            .any(|a| a.script.as_ref().is_some_and(|s| s.runs_in(Phase::Response)))
+    })
 }
 
 /// True if any rule edits or pauses the body in `phase`, so it must be
@@ -160,8 +186,32 @@ pub(crate) fn needs_body(rules: &[Arc<CompiledRule>], phase: Phase) -> bool {
     rules.iter().any(|r| r.touches_body(phase))
 }
 
+/// Like [`needs_body`], ignoring scripts: an event stream is never
+/// buffered for a script.
+pub(crate) fn needs_body_without_scripts(rules: &[Arc<CompiledRule>], phase: Phase) -> bool {
+    rules.iter().any(|r| {
+        r.actions.iter().any(|a| match &a.action {
+            Action::ReplaceBody { phase: p, .. }
+            | Action::SetBody { phase: p, .. }
+            | Action::JsonSet { phase: p, .. }
+            | Action::JsonRemove { phase: p, .. }
+            | Action::FormSet { phase: p, .. }
+            | Action::FormRemove { phase: p, .. } => *p == phase,
+            Action::Breakpoint { request, response } => match phase {
+                Phase::Request => *request,
+                Phase::Response => *response,
+            },
+            _ => false,
+        })
+    })
+}
+
 /// Runs the request phase of `rules` (the matching ones, in order).
-pub(crate) fn request_phase(rules: &[Arc<CompiledRule>], draft: &mut RequestDraft) -> RequestEffects {
+pub(crate) async fn request_phase(
+    rules: &[Arc<CompiledRule>],
+    draft: &mut RequestDraft,
+    run: ScriptRun<'_>,
+) -> RequestEffects {
     let mut fx = RequestEffects::default();
     // A block stops the flow before any rewrite.
     for rule in rules {
@@ -246,7 +296,7 @@ pub(crate) fn request_phase(rules: &[Arc<CompiledRule>], draft: &mut RequestDraf
                     headers,
                     content_type,
                 } => {
-                    if fx.map_local.is_none() {
+                    if fx.map_local.is_none() && fx.mock.is_none() {
                         fx.map_local = Some(LocalAnswer {
                             source: source.clone(),
                             status: *status,
@@ -303,6 +353,49 @@ pub(crate) fn request_phase(rules: &[Arc<CompiledRule>], draft: &mut RequestDraf
                     });
                     true
                 }
+                Action::Script { .. } => match &ca.script {
+                    // After a terminal answer nothing more is sent, so no
+                    // later script runs.
+                    Some(script) if fx.map_local.is_some() || fx.mock.is_some() || !script.enabled => false,
+                    Some(script) if script.runs_mock() => match run.mock(script, rule, draft).await {
+                        Ok(Some(out)) => match mock_answer(out) {
+                            Ok(answer) => {
+                                fx.mock = Some(answer);
+                                true
+                            }
+                            Err(message) => {
+                                fx.script_issues
+                                    .push(run.issue(script, rule, ScriptPhase::Mock, message));
+                                false
+                            }
+                        },
+                        Ok(None) => false,
+                        Err(issue) => {
+                            fx.script_issues.push(issue);
+                            false
+                        }
+                    },
+                    Some(script) if script.runs_in(Phase::Request) => match run.request(script, rule, draft).await {
+                        Ok(Some(out)) => match apply_request(draft, out) {
+                            Ok(changed) => {
+                                fx.head_changed |= changed.head;
+                                fx.body_changed |= changed.body;
+                                changed.head || changed.body
+                            }
+                            Err(message) => {
+                                fx.script_issues
+                                    .push(run.issue(script, rule, ScriptPhase::Request, message));
+                                false
+                            }
+                        },
+                        Ok(None) => false,
+                        Err(issue) => {
+                            fx.script_issues.push(issue);
+                            false
+                        }
+                    },
+                    _ => false,
+                },
                 _ => false,
             };
         }
@@ -310,7 +403,7 @@ pub(crate) fn request_phase(rules: &[Arc<CompiledRule>], draft: &mut RequestDraf
             fx.applied.push(rule.applied(Phase::Request));
         }
     }
-    if fx.map_local.is_some() {
+    if fx.map_local.is_some() || fx.mock.is_some() {
         fx.map_remote = None;
     }
     fx
@@ -327,8 +420,14 @@ pub(crate) fn response_rules(rules: &[Arc<CompiledRule>], status: u16, headers: 
 }
 
 /// Runs the response phase of `rules` (already gated by
-/// [`response_rules`]).
-pub(crate) fn response_phase(rules: &[Arc<CompiledRule>], draft: &mut ResponseDraft) -> ResponseEffects {
+/// [`response_rules`]). `request` is the request as it was sent, for
+/// `onResponse` scripts ([`needs_request_for_response`]).
+pub(crate) async fn response_phase(
+    rules: &[Arc<CompiledRule>],
+    draft: &mut ResponseDraft,
+    run: ScriptRun<'_>,
+    request: Option<&JsRequest>,
+) -> ResponseEffects {
     let mut fx = ResponseEffects::default();
     for rule in rules {
         let mut applied = false;
@@ -400,6 +499,30 @@ pub(crate) fn response_phase(rules: &[Arc<CompiledRule>], draft: &mut ResponseDr
                     fx.delay_ms += u64::from(*ms);
                     true
                 }
+                Action::Script { .. } => match (&ca.script, request) {
+                    (Some(script), Some(request)) if script.runs_in(Phase::Response) => {
+                        match run.response(script, rule, request, draft).await {
+                            Ok(Some(out)) => match apply_response(draft, out) {
+                                Ok(changed) => {
+                                    fx.head_changed |= changed.head;
+                                    fx.body_changed |= changed.body;
+                                    changed.head || changed.body
+                                }
+                                Err(message) => {
+                                    fx.script_issues
+                                        .push(run.issue(script, rule, ScriptPhase::Response, message));
+                                    false
+                                }
+                            },
+                            Ok(None) => false,
+                            Err(issue) => {
+                                fx.script_issues.push(issue);
+                                false
+                            }
+                        }
+                    }
+                    _ => false,
+                },
                 _ => false,
             };
         }

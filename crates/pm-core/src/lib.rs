@@ -15,6 +15,7 @@ pub mod proxy;
 mod recorder;
 mod replay;
 pub mod rules;
+pub mod scripts;
 mod search;
 mod settings;
 pub mod store;
@@ -32,6 +33,7 @@ pub use mcp::McpSink;
 pub use proxy::ProxyConfig;
 pub use recorder::{BodyEnd, FlowRecorder, WsRecorder};
 pub use rules::{BreakpointSink, RuleError, RulesSink};
+pub use scripts::{ConsoleSink, ScriptError, ScriptsSink};
 pub use search::{FlowPage, SearchHit, SearchMatch, SearchPage};
 pub use settings::StorageSink;
 
@@ -57,6 +59,8 @@ pub enum Error {
     Platform(#[from] pm_platform::PlatformError),
     #[error(transparent)]
     Rule(#[from] rules::RuleError),
+    #[error(transparent)]
+    Script(#[from] scripts::ScriptError),
     /// A filter DSL query or search pattern that doesn't parse.
     #[error("filter: {0}")]
     Query(String),

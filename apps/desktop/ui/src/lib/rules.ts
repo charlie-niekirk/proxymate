@@ -84,6 +84,7 @@ export const ACTION_TYPES: { type: ActionType; label: string; group: string }[] 
   { type: "Delay", label: "Delay", group: "Flow control" },
   { type: "Throttle", label: "Throttle", group: "Flow control" },
   { type: "Block", label: "Block", group: "Flow control" },
+  { type: "Script", label: "Run script", group: "Scripts" },
 ];
 
 export function actionLabel(type: ActionType): string {
@@ -131,6 +132,8 @@ export function defaultAction(type: ActionType): Action {
       return { type, download_kbps: 780, upload_kbps: 330, latency_ms: 100 };
     case "Block":
       return { type, mode: { kind: "status", status: 403 } };
+    case "Script":
+      return { type, script_id: "" };
   }
 }
 
@@ -160,8 +163,8 @@ export function matcherSummary(m: Matcher): string {
   return parts.join(" ");
 }
 
-/** A short description of an action, for the rules list. */
-export function actionSummary(a: Action): string {
+/** A short description of an action, for the rules list. `scripts` names scripts by id. */
+export function actionSummary(a: Action, scripts?: ReadonlyMap<string, string>): string {
   switch (a.type) {
     case "SetHeader":
       return `${a.phase} ${a.name}: ${a.value}`;
@@ -201,6 +204,8 @@ export function actionSummary(a: Action): string {
       return `throttle ${a.download_kbps}/${a.upload_kbps} kbps, ${a.latency_ms} ms`;
     case "Block":
       return a.mode.kind === "status" ? `block ${a.mode.status}` : "block (reset)";
+    case "Script":
+      return `script ${scripts?.get(a.script_id) ?? (a.script_id || "(none)")}`;
   }
 }
 

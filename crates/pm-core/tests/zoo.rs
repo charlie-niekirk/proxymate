@@ -99,7 +99,7 @@ async fn every_zoo_fixture_is_detected() {
     };
     assert_eq!(chip(ContentGroup::GraphQl), 1);
     assert_eq!(chip(ContentGroup::Form), 2);
-    assert_eq!(chip(ContentGroup::Json), 4);
+    assert_eq!(chip(ContentGroup::Json), 5);
     assert_eq!(chip(ContentGroup::Media), 12);
     assert_eq!(chip(ContentGroup::Document), 3);
 }

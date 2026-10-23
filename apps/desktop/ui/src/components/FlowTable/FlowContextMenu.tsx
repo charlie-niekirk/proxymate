@@ -1,12 +1,36 @@
-import { Copy, FileDown, FileInput, OctagonPause, PencilLine, Pin, PinOff, Repeat2, Send, ShieldOff, Terminal } from "lucide-react";
+import {
+  Copy,
+  Eye,
+  FileCode2,
+  FileDown,
+  FileInput,
+  OctagonPause,
+  PencilLine,
+  Pin,
+  PinOff,
+  Repeat2,
+  Send,
+  ShieldOff,
+  Terminal,
+  Theater,
+} from "lucide-react";
 
-import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuShortcut } from "@/components/ui/context-menu";
+import {
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuShortcut,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+} from "@/components/ui/context-menu";
 import {
   addSslBypass,
   copyFlowCurl,
   copyFlowUrl,
   editAndReplay,
   exportHar,
+  newScriptForFlow,
   openPreset,
   openRewrite,
   pinFlows,
@@ -75,6 +99,26 @@ export function FlowContextMenu({ row }: { row: Row | null }) {
         <PencilLine />
         Rewrite…
       </ContextMenuItem>
+      <ContextMenuSub>
+        <ContextMenuSubTrigger disabled={connect} data-testid="menu-script">
+          <FileCode2 />
+          Script
+        </ContextMenuSubTrigger>
+        <ContextMenuSubContent className="w-56">
+          <ContextMenuItem onSelect={() => void newScriptForFlow(store, row.id, "view")} data-testid="menu-script-view">
+            <Eye />
+            New view script…
+          </ContextMenuItem>
+          <ContextMenuItem onSelect={() => void newScriptForFlow(store, row.id, "rewrite")} data-testid="menu-script-rewrite">
+            <PencilLine />
+            New rewrite script…
+          </ContextMenuItem>
+          <ContextMenuItem onSelect={() => void newScriptForFlow(store, row.id, "mock")} data-testid="menu-script-mock">
+            <Theater />
+            New mock script…
+          </ContextMenuItem>
+        </ContextMenuSubContent>
+      </ContextMenuSub>
       <ContextMenuSeparator />
       <ContextMenuItem onSelect={() => void exportHar({ kind: "ids", ids: [row.id] })} data-testid="menu-export-har">
         <FileDown />

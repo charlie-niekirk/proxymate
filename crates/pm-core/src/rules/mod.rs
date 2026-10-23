@@ -32,6 +32,7 @@ pub use compile::{CompiledRuleSet, PATTERN_MAX_LEN, REGEX_SIZE_LIMIT};
 pub use db::APP_DB_FILE;
 
 use crate::notify::Notifier;
+use crate::scripts::{ScriptMap, ScriptRun};
 use crate::{Engine, Error};
 use compile::CompiledRule;
 use db::AppDb;
@@ -110,7 +111,7 @@ impl Rules {
 
     /// Loads `<dir>/app.sqlite`, or an in-memory database without a
     /// directory. A database that can't be opened falls back to memory.
-    pub fn load(dir: Option<&Path>) -> Rules {
+    pub fn load(dir: Option<&Path>, scripts: &ScriptMap) -> Rules {
         let db = dir
             .map(AppDb::open)
             .unwrap_or_else(AppDb::in_memory)
@@ -128,14 +129,14 @@ impl Rules {
         }
         // One broken rule must not take the others down: drop it from the
         // compiled set (it stays listed, disabled).
-        let compiled = CompiledRuleSet::compile(&rules).unwrap_or_else(|err| {
+        let compiled = CompiledRuleSet::compile(&rules, scripts).unwrap_or_else(|err| {
             eprintln!("proxymate: {err}; disabling rules that don't compile");
             for rule in &mut rules {
-                if CompiledRule::compile(rule).is_err() {
+                if CompiledRule::compile(rule, scripts).is_err() {
                     rule.enabled = false;
                 }
             }
-            CompiledRuleSet::compile(&rules).unwrap_or_else(|_| CompiledRuleSet::empty())
+            CompiledRuleSet::compile(&rules, scripts).unwrap_or_else(|_| CompiledRuleSet::empty())
         });
         let settings = db.rule_settings().unwrap_or_default();
         Rules {
@@ -174,6 +175,10 @@ fn global_throttle_rule() -> Rule {
     }
 }
 
+fn script_note(issue: &pm_model::ScriptIssue) -> String {
+    format!("Script {:?} failed: {}", issue.script_name, issue.message)
+}
+
 fn sorted(mut rules: Vec<Rule>) -> Vec<Rule> {
     rules.sort_by(|a, b| a.order.cmp(&b.order).then_with(|| a.id.cmp(&b.id)));
     rules
@@ -193,7 +198,7 @@ impl Engine {
 
     /// Checks that `rule` compiles, without saving it.
     pub fn validate_rule(&self, rule: &Rule) -> Result<(), Error> {
-        CompiledRule::compile(rule)?;
+        CompiledRule::compile(rule, &self.script_map())?;
         Ok(())
     }
 
@@ -298,12 +303,27 @@ impl Engine {
         let mut list = self.rules.list.write();
         let mut next = list.clone();
         let out = change(&mut next)?;
-        let compiled = CompiledRuleSet::compile(&next)?;
+        let compiled = CompiledRuleSet::compile(&next, &self.script_map())?;
         self.rules.db.lock().save_rules(&next).map_err(RuleError::from)?;
         *list = next;
         self.rules.compiled.store(Arc::new(compiled));
         self.rules.changes.changed();
         Ok(out)
+    }
+
+    /// The rule list, write-locked, for a script change (which must check
+    /// and then recompile the rules).
+    pub(crate) fn rules_write(&self) -> parking_lot::RwLockWriteGuard<'_, Vec<Rule>> {
+        self.rules.list.write()
+    }
+
+    /// Recompiles the rules against the current scripts, so they run the
+    /// new versions.
+    pub(crate) fn recompile_rules(&self, list: parking_lot::RwLockWriteGuard<'_, Vec<Rule>>) {
+        match CompiledRuleSet::compile(&list, &self.script_map()) {
+            Ok(compiled) => self.rules.compiled.store(Arc::new(compiled)),
+            Err(err) => eprintln!("proxymate: rules no longer compile after a script change: {err}"),
+        }
     }
 
     /// Sends the rule list to `sink` on the next tick and whenever it
@@ -423,7 +443,9 @@ impl Engine {
     ) -> Result<RuleTestResult, Error> {
         let summary = self.get_flow_in(store, flow).ok_or(Error::UnknownFlow(flow))?;
         let detail = self.flow_detail_in(store, flow)?.ok_or(Error::UnknownFlow(flow))?;
-        let compiled = Arc::new(CompiledRule::compile(rule)?);
+        let compiled = Arc::new(CompiledRule::compile(rule, &self.script_map())?);
+        // The console names live flows only: a document's ids are its own.
+        let run = ScriptRun::new(self.scripts_state(), (store == pm_model::LIVE_STORE).then_some(flow));
         let limit = body_limit.unwrap_or(TEST_BODY_MAX);
         let body = |part| {
             self.body_head_in(store, flow, part, true, Some(REWRITE_BODY_CAP))
@@ -451,8 +473,9 @@ impl Engine {
         let mut response_matched = None;
         if mismatch.is_none() {
             let rules = [compiled.clone()];
-            let fx = eval::request_phase(&rules, &mut request);
+            let fx = eval::request_phase(&rules, &mut request, run).await;
             notes.extend(fx.body_skipped.iter().map(|s| format!("Body action skipped: {s}")));
+            notes.extend(fx.script_issues.iter().map(script_note));
             if let Some(mode) = fx.block {
                 notes.push(match mode {
                     pm_model::BlockMode::Status { status } => format!("Blocked with status {status}."),
@@ -463,6 +486,9 @@ impl Engine {
                 if let Some(local) = &fx.map_local {
                     notes.push("Answered by Map Local; the upstream isn't contacted.".into());
                     response = Some(local::answer(local, &request.path).await);
+                } else if let Some(mock) = &fx.mock {
+                    notes.push("Answered by a mock script; the upstream isn't contacted.".into());
+                    response = Some(mock.clone());
                 } else if let Some(remap) = &fx.map_remote {
                     let path = remap.path.as_deref().unwrap_or(&request.path);
                     notes.push(format!(
@@ -489,8 +515,11 @@ impl Engine {
                 if let Some(draft) = &mut response {
                     let gated = eval::response_rules(&rules, draft.status, &draft.headers);
                     response_matched = Some(!gated.is_empty());
-                    let fx = eval::response_phase(&gated, draft);
+                    let sent =
+                        eval::needs_request_for_response(&gated).then(|| crate::scripts::traffic::js_request(&request));
+                    let fx = eval::response_phase(&gated, draft, run, sent.as_ref()).await;
                     notes.extend(fx.body_skipped.iter().map(|s| format!("Body action skipped: {s}")));
+                    notes.extend(fx.script_issues.iter().map(script_note));
                     if fx.breakpoint.is_some() {
                         notes.push("Pauses at a response breakpoint.".into());
                     }
@@ -539,18 +568,22 @@ impl Engine {
     /// Up to `limit` flows of `store` (newest first) that `rule`'s matcher
     /// matches, for reopening a saved rule on a flow it applies to.
     pub fn flows_matching_rule(&self, store: StoreId, rule: &Rule, limit: usize) -> Result<Vec<FlowId>, Error> {
-        let compiled = CompiledRule::compile(rule)?;
+        let scripts = self.script_map();
+        let compiled = CompiledRule::compile(rule, &scripts)?;
         // Header and response conditions need each flow's detail: narrow by
         // the summary first, under the lock, then check those outside it.
-        let summary_only = CompiledRule::compile(&Rule {
-            matcher: Matcher {
-                headers: Vec::new(),
-                response: None,
-                ..rule.matcher.clone()
+        let summary_only = CompiledRule::compile(
+            &Rule {
+                matcher: Matcher {
+                    headers: Vec::new(),
+                    response: None,
+                    ..rule.matcher.clone()
+                },
+                actions: Vec::new(),
+                ..rule.clone()
             },
-            actions: Vec::new(),
-            ..rule.clone()
-        })?;
+            &scripts,
+        )?;
         let needs_detail = !rule.matcher.headers.is_empty() || rule.matcher.response.is_some();
         let no_headers = http::HeaderMap::new();
         let candidates: Vec<FlowId> = self.read_store(store, |s| {

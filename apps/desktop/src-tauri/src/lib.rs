@@ -105,6 +105,23 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::set_update_settings,
             commands::check_for_updates,
             commands::flows_matching_rule,
+            commands::list_scripts,
+            commands::create_script,
+            commands::update_script,
+            commands::set_script_enabled,
+            commands::delete_script,
+            commands::delete_agent_scripts,
+            commands::test_script,
+            commands::get_flow_views,
+            commands::get_script_console,
+            commands::clear_script_console,
+            commands::subscribe_script_console,
+            commands::subscribe_scripts,
+            commands::get_script_settings,
+            commands::set_script_settings,
+            commands::get_script_type_definitions,
+            commands::export_script,
+            commands::import_script,
         ])
         // Sizes are u64 but stay far below 2^53.
         .dangerously_cast_bigints_to_number()

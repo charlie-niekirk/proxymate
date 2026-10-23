@@ -10,6 +10,7 @@ use pm_model::{Action, AppliedRule, KvMatch, Pattern, PatternKind, Phase, Rule, 
 use regex::bytes::{Regex, RegexBuilder, RegexSet, RegexSetBuilder};
 
 use super::RuleError;
+use crate::scripts::{CompiledScript, ScriptMap};
 
 /// Compiled program size allowed per pattern. Generous for real patterns,
 /// small enough that an agent can't make the proxy allocate gigabytes.
@@ -163,6 +164,9 @@ pub(crate) struct CompiledAction {
     pub header: Option<HeaderName>,
     /// `JsonSet`'s value as JSON text (`raw`, or `value` serialised).
     pub json: Option<String>,
+    /// The script an `Action::Script` runs, as it was when the rule set
+    /// was compiled.
+    pub script: Option<Arc<CompiledScript>>,
 }
 
 /// One enabled rule, ready to run.
@@ -194,7 +198,8 @@ pub(crate) struct RequestInfo<'a> {
 }
 
 impl CompiledRule {
-    pub fn compile(rule: &Rule) -> Result<CompiledRule, RuleError> {
+    /// Compiles `rule`, resolving its script actions against `scripts`.
+    pub fn compile(rule: &Rule, scripts: &ScriptMap) -> Result<CompiledRule, RuleError> {
         let m = &rule.matcher;
         let pattern = |p: &Option<Pattern>, field: &str, host: bool| {
             p.as_ref()
@@ -224,7 +229,7 @@ impl CompiledRule {
             .actions
             .iter()
             .enumerate()
-            .map(|(i, action)| compile_action(rule, i, action))
+            .map(|(i, action)| compile_action(rule, i, action, scripts))
             .collect::<Result<_, _>>()?;
         Ok(CompiledRule {
             applied: AppliedRule {
@@ -328,6 +333,7 @@ impl CompiledRule {
                 Phase::Request => *request,
                 Phase::Response => *response,
             },
+            Action::Script { .. } => a.script.as_ref().is_some_and(|s| s.runs_in(phase)),
             _ => false,
         })
     }
@@ -340,7 +346,12 @@ impl CompiledRule {
     }
 }
 
-fn compile_action(rule: &Rule, index: usize, action: &Action) -> Result<CompiledAction, RuleError> {
+fn compile_action(
+    rule: &Rule,
+    index: usize,
+    action: &Action,
+    scripts: &ScriptMap,
+) -> Result<CompiledAction, RuleError> {
     let field = format!("action {}", index + 1);
     let invalid = |message: String| RuleError::invalid(rule, &field, message);
     let header = |name: &str| {
@@ -368,6 +379,7 @@ fn compile_action(rule: &Rule, index: usize, action: &Action) -> Result<Compiled
         find: None,
         header: None,
         json: None,
+        script: None,
     };
     match action {
         Action::SetHeader { name, value, .. } | Action::AddHeader { name, value, .. } => {
@@ -435,6 +447,18 @@ fn compile_action(rule: &Rule, index: usize, action: &Action) -> Result<Compiled
         Action::Block {
             mode: pm_model::BlockMode::Status { status: s },
         } => status(*s)?,
+        Action::Script { script_id } => {
+            let script = scripts
+                .get(script_id)
+                .ok_or_else(|| invalid(format!("there is no script with id {script_id}")))?;
+            if script.kind == pm_model::ScriptKind::View {
+                return Err(invalid(format!(
+                    "{:?} is a view script; rules run rewrite and mock scripts",
+                    script.code.name
+                )));
+            }
+            compiled.script = Some(script.clone());
+        }
         _ => {}
     }
     Ok(compiled)
@@ -464,7 +488,7 @@ impl CompiledRuleSet {
 
     /// Compiles every rule (so a broken one is reported even if disabled)
     /// and keeps the enabled ones.
-    pub fn compile(rules: &[Rule]) -> Result<CompiledRuleSet, RuleError> {
+    pub(crate) fn compile(rules: &[Rule], scripts: &ScriptMap) -> Result<CompiledRuleSet, RuleError> {
         let mut sorted: Vec<&Rule> = rules.iter().collect();
         sorted.sort_by(|a, b| a.order.cmp(&b.order).then_with(|| a.id.cmp(&b.id)));
         let mut compiled = Vec::new();
@@ -472,7 +496,7 @@ impl CompiledRuleSet {
         let mut host_rules = Vec::new();
         let mut any_host = Vec::new();
         for rule in sorted {
-            let c = CompiledRule::compile(rule)?;
+            let c = CompiledRule::compile(rule, scripts)?;
             if !rule.enabled {
                 continue;
             }

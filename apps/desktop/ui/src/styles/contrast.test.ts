@@ -115,6 +115,8 @@ const PAIRS: [string, string[]][] = [
   ["--graphql", [...ALT_ROW, "--graphql-bg"]],
   ["--rule", [...TABLE, "--rule-bg"]],
   ["--rule-agent", [...TABLE, "--rule-agent-bg"]],
+  // M14: a failed script's badge in the inspector.
+  ["--s-5xx", ["--background", "--s-5xx-bg"]],
   ["--sent", [...ALT_ROW, "--sent-bg"]],
   ["--sent-agent", [...ALT_ROW, "--sent-agent-bg"]],
   ["--ws-sent", ["--background"]],

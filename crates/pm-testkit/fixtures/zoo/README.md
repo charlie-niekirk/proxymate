@@ -5,7 +5,8 @@ One fixture per `ContentKind`, listed in `zoo.json`. Both the pm-testkit upstrea
 (`apps/desktop/ui/src/dev/zoo.ts`, used by `npm run dev` with `?zoo` and by the
 Playwright viewer tests) serve them, so the real app and the snapshots see the same bytes.
 
-`json-10mb` is generated (`big-json`), not stored.
+`json-10mb` is generated (`big-json`), not stored. `json-base64` (M14) holds a
+base64-encoded JSON field, for the "Decode base64 JSON field" view script.
 
 ## Provenance
 

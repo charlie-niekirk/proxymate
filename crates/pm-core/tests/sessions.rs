@@ -354,3 +354,26 @@ fn a_failed_save_leaves_the_old_file() {
     assert_eq!(std::fs::read(&path).unwrap(), b"old");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// A session saved by M8–M13 (format version 1, before
+/// `FlowRules.scripts`) still opens, with its rules record intact.
+#[test]
+fn a_version_1_session_still_opens() {
+    let dir = temp_dir();
+    let engine = engine(&dir);
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/session-v1.proxymate");
+    let doc = engine.open_document(&fixture).expect("a v1 session opens");
+    assert_eq!(doc.flows, 2);
+    let detail = engine.flow_detail_in(doc.store, 0).unwrap().unwrap();
+    assert_eq!(detail.request.url, "https://api.example.test/v1/profile");
+    assert_eq!(detail.rules.applied.len(), 1);
+    assert_eq!(detail.rules.applied[0].name, "Tag");
+    assert_eq!(detail.rules.rewrite_skipped.as_deref(), Some("a v1 note"));
+    assert!(detail.rules.scripts.is_empty());
+    let body = engine
+        .body_head_in(doc.store, 0, BodyPart::Response, true, None)
+        .unwrap();
+    assert!(body.bytes.starts_with(br#"{"ok":true"#));
+    let health = engine.flow_detail_in(doc.store, 1).unwrap().unwrap();
+    assert_eq!(health.response.unwrap().status, 200);
+}

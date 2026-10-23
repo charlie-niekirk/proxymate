@@ -205,6 +205,15 @@ impl FlowRecorder {
         }
     }
 
+    /// A script failed on this flow; it went on unmodified by that script.
+    pub(crate) fn script_issue(&self, issue: pm_model::ScriptIssue) {
+        let mut state = self.flow.state.lock();
+        let issues = &mut state.detail.rules.scripts;
+        if !issues.contains(&issue) {
+            issues.push(issue);
+        }
+    }
+
     /// The flow is held at a breakpoint (the violet Paused pill), or goes on.
     pub fn paused(&self, paused: bool) {
         let state = if paused { FlowState::Paused } else { FlowState::Active };

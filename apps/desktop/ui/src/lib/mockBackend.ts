@@ -31,6 +31,7 @@ import { GLOBAL_THROTTLE_RULE_ID, emptyMatcher, normalizeRule, type Rule } from 
 import { newId, parseDoc, toJson, type JNode } from "@/lib/json/doc";
 import { createMockDevices } from "@/lib/mockDevices";
 import { createMockMcp } from "@/lib/mockMcp";
+import { createMockScripts } from "@/lib/mockScripts";
 
 /** A fully specified mock flow with bodies (the dev zoo, see `dev/zoo.ts`). */
 export interface MockFlow {
@@ -214,7 +215,7 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
     };
   }
 
-  return {
+  const api: Backend = {
     async createView(store, filter: FilterSpec_Deserialize) {
       await ready;
       const start = performance.now();
@@ -735,7 +736,18 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
       return settings;
     },
     async checkForUpdates() {},
+    ...createMockScripts(
+      now,
+      async (store, id) => {
+        const detail = await api.getFlowDetail(store, id);
+        if (!detail) return null;
+        const body = async (part: BodyPart) => new Uint8Array(await api.getBody(store, id, part, true).catch(() => new ArrayBuffer(0)));
+        return { detail, bodies: { request: await body("request"), response: await body("response") } };
+      },
+      (id) => rules.filter((r) => r.actions.some((a) => a.type === "Script" && a.script_id === id)).map((r) => r.name),
+    ),
   };
+  return api;
 }
 
 /** `*.example.com` matches `example.com` and its subdomains, as in Rust. */
@@ -851,7 +863,7 @@ function mockFlowRules(edited: boolean, id: number): FlowRules_Serialize {
           : []),
       ]
     : [];
-  return { applied, rewrite_skipped: null, breakpoint_timeout: false, mocked: false };
+  return { applied, rewrite_skipped: null, breakpoint_timeout: false, mocked: false, scripts: [] };
 }
 
 function mockBreakpoint(now: number): BreakpointInfo_Serialize {

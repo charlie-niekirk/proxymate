@@ -11,6 +11,7 @@ import { FlowTable } from "@/components/FlowTable/FlowTable";
 import { Footer } from "@/components/Footer";
 import { RewriteDialog } from "@/components/Rewrite/RewriteDialog";
 import { RulesEditor } from "@/components/Rules/RulesEditor";
+import { ScriptsWindow } from "@/components/Scripts/ScriptsWindow";
 import { SettingsDialog } from "@/components/Settings/SettingsDialog";
 import { Sidebar } from "@/components/Sidebar";
 import { Toolbar } from "@/components/Toolbar";
@@ -57,6 +58,7 @@ export function AppShell() {
     <CertWizard />
     <RulesEditor />
     <RewriteDialog />
+    <ScriptsWindow />
     <ComposeDialog />
     <BreakpointEditor />
     <DeviceSetupSheet />

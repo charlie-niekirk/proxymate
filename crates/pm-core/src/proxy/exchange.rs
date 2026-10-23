@@ -17,6 +17,10 @@
 //!   `rewrite_skipped`. Reading never waits on the other side, so this
 //!   can't deadlock.
 //!
+//! A body that was buffered but not changed (a script that only read it,
+//! a breakpoint continued without editing it) is forwarded as the original
+//! wire bytes, still content-encoded.
+//!
 //! A breakpoint parks only its own exchange: other h2 streams on the same
 //! connection keep flowing.
 
@@ -46,6 +50,8 @@ use crate::recorder::FlowRecorder;
 use crate::rules::compile::CompiledRule;
 use crate::rules::eval::{self, RequestDraft, ResponseDraft, ThrottleSpec, header_map, reframe};
 use crate::rules::{BREAKPOINT_EDIT_CAP, Outcome, REWRITE_BODY_CAP, local};
+use crate::scripts::traffic::js_request;
+use crate::scripts::{JsRequest, ScriptRun};
 
 /// How long a request waits for its client app when a rule matches on it.
 const CLIENT_APP_WAIT: Duration = Duration::from_millis(300);
@@ -212,14 +218,19 @@ impl Exchange<'_> {
             };
         }
 
-        let mut fx = eval::request_phase(&matched, &mut draft);
+        let run = ScriptRun::new(engine.scripts_state(), rec.as_ref().map(FlowRecorder::id));
+        let mut fx = eval::request_phase(&matched, &mut draft, run).await;
         if let Some(rec) = &rec {
             rec.rules_applied(std::mem::take(&mut fx.applied));
             for reason in &fx.body_skipped {
                 rec.rewrite_skipped(reason.clone());
             }
+            for issue in fx.script_issues.drain(..) {
+                rec.script_issue(issue);
+            }
         }
         let mut changed = fx.head_changed || fx.body_changed;
+        let mut body_changed = fx.body_changed;
 
         if let Some(mode) = fx.block {
             return self.block(mode, held);
@@ -252,7 +263,23 @@ impl Exchange<'_> {
             }
             held.drain(rec.clone(), BodyPart::Request);
             let answer = local::answer(&local, &draft.path).await;
-            return self.respond(engine, &matched, Answer::Local(answer), fx.throttle).await;
+            let request = self.request_for_response(&matched, &draft);
+            return self
+                .respond(engine, &matched, Answer::Local(answer), fx.throttle, request)
+                .await;
+        }
+        if let Some(answer) = fx.mock.take() {
+            if let Some(rec) = &rec {
+                rec.mocked();
+                if changed {
+                    rec.request_head(self.request_head(&draft, parts.version));
+                }
+            }
+            held.drain(rec.clone(), BodyPart::Request);
+            let request = self.request_for_response(&matched, &draft);
+            return self
+                .respond(engine, &matched, Answer::Local(answer), fx.throttle, request)
+                .await;
         }
 
         if let Some(rule) = fx.breakpoint.take() {
@@ -278,6 +305,7 @@ impl Exchange<'_> {
                 Outcome::TimedOut => {}
                 Outcome::Resolved(BreakpointResolution::Continue { edits }) => {
                     if let Some(edits) = edits {
+                        body_changed |= edits.body.is_some() && editable;
                         changed |= edit_request(&mut draft, edits, editable);
                     }
                 }
@@ -303,7 +331,8 @@ impl Exchange<'_> {
             }
         }
 
-        let body = match draft.body.take() {
+        let request = self.request_for_response(&matched, &draft);
+        let body = match draft.body.take().filter(|_| body_changed) {
             Some(bytes) => {
                 held.drain(None, BodyPart::Request);
                 reframe(&mut draft.headers, bytes.len());
@@ -330,8 +359,14 @@ impl Exchange<'_> {
             Ok(response) => response,
             Err(message) => return Ok(self.fail(message)),
         };
-        self.respond(engine, &matched, Answer::Upstream(upstream), fx.throttle)
+        self.respond(engine, &matched, Answer::Upstream(upstream), fx.throttle, request)
             .await
+    }
+
+    /// The request as sent, for `onResponse` scripts; `None` when no
+    /// matched rule runs one.
+    fn request_for_response(&self, matched: &[Arc<CompiledRule>], draft: &RequestDraft) -> Option<JsRequest> {
+        eval::needs_request_for_response(matched).then(|| js_request(draft))
     }
 
     /// The response phase: gate by each rule's response matcher, rewrite,
@@ -342,6 +377,7 @@ impl Exchange<'_> {
         matched: &[Arc<CompiledRule>],
         answer: Answer,
         throttle: Option<ThrottleSpec>,
+        request: Option<JsRequest>,
     ) -> Reply {
         let rec = self.recorder.clone();
         let mut upstream_head = None;
@@ -366,7 +402,18 @@ impl Exchange<'_> {
             headers: parts.headers.clone(),
             body: local_body,
         };
-        if draft.body.is_none() && eval::needs_body(&gated, Phase::Response) {
+        // An event stream is never held back for a script: its events must
+        // reach the client as they come.
+        let event_stream = draft
+            .headers
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|v| v.trim().to_ascii_lowercase().starts_with("text/event-stream"));
+        let needs_body = match event_stream {
+            true => eval::needs_body_without_scripts(&gated, Phase::Response),
+            false => eval::needs_body(&gated, Phase::Response),
+        };
+        if draft.body.is_none() && needs_body {
             let Held::Stream(body) = held else { unreachable!() };
             held = match self.hold(body, &draft.headers, BodyPart::Response).await {
                 Ok((held, decoded)) => {
@@ -379,14 +426,19 @@ impl Exchange<'_> {
                 }
             };
         }
-        let mut fx = eval::response_phase(&gated, &mut draft);
+        let run = ScriptRun::new(engine.scripts_state(), rec.as_ref().map(FlowRecorder::id));
+        let mut fx = eval::response_phase(&gated, &mut draft, run, request.as_ref()).await;
         if let Some(rec) = &rec {
             rec.rules_applied(std::mem::take(&mut fx.applied));
             for reason in &fx.body_skipped {
                 rec.rewrite_skipped(reason.clone());
             }
+            for issue in fx.script_issues.drain(..) {
+                rec.script_issue(issue);
+            }
         }
         let mut changed = mocked || fx.body_changed;
+        let mut body_changed = changed;
 
         if let Some(rule) = fx.breakpoint.take() {
             let (editable, note) = held.editability(draft.body.as_ref());
@@ -419,6 +471,7 @@ impl Exchange<'_> {
                 Outcome::TimedOut => {}
                 Outcome::Resolved(BreakpointResolution::Continue { edits }) => {
                     if let Some(edits) = edits {
+                        body_changed |= edits.body.is_some() && editable;
                         changed |= edit_response(&mut draft, edits, editable);
                     }
                 }
@@ -441,6 +494,7 @@ impl Exchange<'_> {
                     };
                     held = Held::Decoded(Bytes::new());
                     changed = true;
+                    body_changed = true;
                     parts.extensions.remove::<hyper::ext::ReasonPhrase>();
                 }
             }
@@ -451,6 +505,10 @@ impl Exchange<'_> {
         }
         if draft.status != parts.status.as_u16() {
             parts.extensions.remove::<hyper::ext::ReasonPhrase>();
+        }
+        // Read but not changed: send the bytes as they came.
+        if !body_changed && matches!(held, Held::Decoded(_)) {
+            draft.body = None;
         }
         let untouched = !changed && !fx.head_changed && matches!(held, Held::Stream(_));
         let head = upstream_head.filter(|_| untouched);

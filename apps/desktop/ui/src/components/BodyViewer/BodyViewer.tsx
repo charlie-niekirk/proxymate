@@ -1,19 +1,33 @@
-import { Download } from "lucide-react";
-import { lazy, Suspense, useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Download, FileCode2 } from "lucide-react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 
 import type { BodyInfo, BodyPart, ContentKind, Header } from "@/bindings";
 import { useBody, useBodyUrl } from "@/components/Inspector/useBody";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectSeparator,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { useViewScriptsVersion } from "@/hooks/useScripts";
 import { backend } from "@/lib/backend";
 import { essence, kindFromContentType } from "@/lib/body/content";
 import { parseGraphQlQueryString } from "@/lib/body/graphql";
 import { formatSize } from "@/lib/flow";
 import { headerValue } from "@/lib/http";
+import { flowViewsKey } from "@/lib/query";
+import { chooseViewer, isScriptValue, scriptErrors, scriptViewMime, scriptViewOptions } from "@/lib/scripts";
 import { useUi } from "@/store/ui";
 
 import { loadViewers, preloadViewer } from "./code/load";
 import { Bar, Centered, Note } from "./parts";
+import { ScriptViewBody } from "./ScriptViewBody";
 import { pickViewer, VIEWERS, viewersFor, type ViewerId } from "./registry";
 import { HIGHLIGHT_LIMIT, LOAD_LIMIT, suggestedFileName } from "./util";
 import { Viewer } from "./Viewer";
@@ -23,7 +37,9 @@ const Operations = lazy(() => loadViewers().then((m) => ({ default: m.Operations
 /**
  * The Body tab: picks the best viewer for the body's detected kind (the
  * dropdown overrides it, and the choice sticks per kind), decodes on
- * demand and keeps huge bodies cheap.
+ * demand and keeps huge bodies cheap. View scripts (M14) add a "Scripts"
+ * group to the dropdown; their first view is shown unless the user picked
+ * a built-in viewer instead.
  */
 export function BodyViewer({
   id,
@@ -58,6 +74,29 @@ export function BodyViewer({
   const mime = info.mime ?? (essence(contentType) || "application/octet-stream");
   // Fetch the viewer's code alongside the body rather than after it.
   useEffect(() => preloadViewer(viewer, def.code), [viewer, def.code]);
+  const scripts = useViewScriptsVersion();
+  const views = useQuery({
+    queryKey: flowViewsKey(store, id, part, scripts),
+    queryFn: () => backend.getFlowViews(store, id, part),
+    enabled: finished && scripts !== "",
+  });
+  const results = useMemo(() => (scripts === "" ? [] : (views.data ?? [])), [scripts, views.data]);
+  const options = useMemo(() => scriptViewOptions(results), [results]);
+  const errors = scriptErrors(results);
+  const picked = useUi((s) => s.pickedScriptView);
+  const scriptViewsOff = useUi((s) => s.scriptViewsOff);
+  const pickScriptView = useUi((s) => s.pickScriptView);
+  const openScripts = useUi((s) => s.openScripts);
+  const selected = chooseViewer(viewer, options, picked, scriptViewsOff);
+  const scriptView = options.find((o) => o.value === selected) ?? null;
+  const choose = (value: string) => {
+    if (isScriptValue(value)) {
+      pickScriptView(value);
+      return;
+    }
+    setViewer(kind, value as ViewerId);
+    if (options.length > 0) pickScriptView(null);
+  };
 
   if (info.size === 0 && kind === "graphql") {
     const op = parseGraphQlQueryString(url);
@@ -69,7 +108,7 @@ export function BodyViewer({
       );
     }
   }
-  if (info.size === 0) return <Centered>{finished ? "No body" : "Waiting for body…"}</Centered>;
+  if (info.size === 0 && options.length === 0) return <Centered>{finished ? "No body" : "Waiting for body…"}</Centered>;
   if (!finished) return <Centered>Body streaming · {formatSize(info.size)} so far</Centered>;
 
   const save = () => {
@@ -84,7 +123,7 @@ export function BodyViewer({
   return (
     <div className="flex h-full flex-col" data-testid="body-viewer" data-viewer={viewer} data-kind={kind}>
       <Bar>
-        <Select value={viewer} onValueChange={(v) => setViewer(kind, v as ViewerId)}>
+        <Select value={selected} onValueChange={choose}>
           <SelectTrigger className="h-5 min-w-24 px-1.5 text-[11px]" aria-label="Viewer" data-testid="viewer-select">
             <SelectValue />
           </SelectTrigger>
@@ -94,10 +133,24 @@ export function BodyViewer({
                 {VIEWERS[v].label}
               </SelectItem>
             ))}
+            {options.length > 0 && (
+              <>
+                <SelectSeparator />
+                <SelectGroup data-testid="script-views">
+                  <SelectLabel className="text-2xs">Scripts</SelectLabel>
+                  {options.map((o) => (
+                    <SelectItem key={o.value} value={o.value} className="text-xs" title={o.scriptName}>
+                      <FileCode2 className="size-3 text-[var(--rule)]" />
+                      {o.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </>
+            )}
           </SelectContent>
         </Select>
         <span className="text-muted-foreground truncate font-mono">
-          {mime} · {formatSize(info.size)}
+          {scriptView ? `${scriptView.scriptName} · ${scriptViewMime(scriptView.view)}` : `${mime} · ${formatSize(info.size)}`}
         </span>
         <Button variant="ghost" size="xs" className="ml-auto" onClick={save} data-testid="save-body">
           <Download /> Save…
@@ -134,8 +187,21 @@ export function BodyViewer({
         </Note>
       )}
       {saveError && <Note tone="warn">Couldn&apos;t save: {saveError}</Note>}
+      {errors.map((e) => (
+        <Note key={e.scriptId} tone="warn" testId="script-view-error">
+          <span className="min-w-0 truncate" title={e.error}>
+            View script “{e.scriptName}” failed: {e.error.split("\n")[0]}
+          </span>
+          <Button variant="outline" size="xs" className="h-5 shrink-0" onClick={() => openScripts({ scriptId: e.scriptId })}>
+            Open script
+          </Button>
+        </Note>
+      ))}
+      {scriptView?.view.truncated && <Note tone="warn">The script&apos;s view was cut at 8 MB.</Note>}
       <div className="min-h-0 flex-1">
-        {loaded.isError ? (
+        {scriptView ? (
+          <ScriptViewBody option={scriptView} bodyId={`${id}-${part}`} />
+        ) : loaded.isError ? (
           <Centered>Couldn&apos;t load body: {String(loaded.error)}</Centered>
         ) : !loaded.data ? (
           <Centered>Loading…</Centered>

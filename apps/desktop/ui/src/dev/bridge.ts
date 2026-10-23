@@ -25,4 +25,6 @@ export const bridge: {
     panel: (panel: "preview" | "actions") => void;
     save: () => Promise<void>;
   };
+  saveScript?: () => Promise<void>;
+  testScript?: (part?: "request" | "response") => void;
 } = {};

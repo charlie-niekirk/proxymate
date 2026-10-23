@@ -1,4 +1,5 @@
-//! MCP resources: the status, the rule list and the breakpoint queue
+//! MCP resources: the status, the rule and script lists, the script API's
+//! type definitions, and the breakpoint queue
 //! (subscribable: each hit sends `resources/updated`), plus templates for a
 //! flow, its bodies and its WebSocket messages.
 
@@ -12,6 +13,8 @@ use serde_json::{Value, json};
 pub(crate) const STATUS_URI: &str = "proxymate://status";
 pub(crate) const RULES_URI: &str = "proxymate://rules";
 pub(crate) const BREAKPOINTS_URI: &str = "proxymate://breakpoints";
+pub(crate) const SCRIPTS_URI: &str = "proxymate://scripts";
+pub(crate) const SCRIPTS_API_URI: &str = "proxymate://scripts/api";
 const FLOW_PREFIX: &str = "proxymate://flows/";
 /// Bodies read as resources are cut here; `get_flow_body` pages further.
 const BODY_MAX: usize = 1024 * 1024;
@@ -30,6 +33,14 @@ pub(crate) fn list() -> Vec<Resource> {
             .with_title("Rules")
             .with_description("Every rule in evaluation order. Updated when a rule changes.")
             .with_mime_type(JSON),
+        Resource::new(SCRIPTS_URI, "scripts")
+            .with_title("Scripts")
+            .with_description("Every script, with its source. Updated when a script changes.")
+            .with_mime_type(JSON),
+        Resource::new(SCRIPTS_API_URI, "scripts-api")
+            .with_title("Script API")
+            .with_description("proxymate.d.ts: the TypeScript definitions of the JavaScript API scripts use.")
+            .with_mime_type("application/typescript"),
         Resource::new(BREAKPOINTS_URI, "breakpoints")
             .with_title("Paused flows")
             .with_description(
@@ -107,6 +118,12 @@ pub(crate) fn read(engine: &Engine, uri: &str) -> Result<ReadResourceResult, Err
             ));
         }
         RULES_URI => return Ok(json_contents(uri, json!(engine.rules()))),
+        SCRIPTS_URI => return Ok(json_contents(uri, json!(engine.scripts()))),
+        SCRIPTS_API_URI => {
+            return Ok(ReadResourceResult::new(vec![
+                ResourceContents::text(engine.script_type_definitions(), uri).with_mime_type("application/typescript"),
+            ]));
+        }
         BREAKPOINTS_URI => return Ok(json_contents(uri, json!(engine.breakpoints()))),
         _ => {}
     }

@@ -65,7 +65,7 @@ pub enum FlowState {
 /// and form posts, else the response's, else the request's) so the filter
 /// chips can use it without touching bodies. Formats within a kind (PNG vs
 /// WebP, MP4 vs WebM) are in [`crate::BodyInfo::mime`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, Type, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum ContentKind {
     /// No body, or not detected yet.

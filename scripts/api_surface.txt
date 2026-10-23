@@ -1,0 +1,33 @@
+# The globals a Proxymate script sees beyond the language's own, and their
+# members. Checked against the runtime (pm-core `scripts::tests`) and
+# against proxymate.d.ts (apps/desktop/ui `src/lib/scripts.test.ts`).
+DOMException
+Proxymate
+Proxymate.base64Decode
+Proxymate.base64DecodeJson
+Proxymate.base64DecodeText
+Proxymate.base64Encode
+Proxymate.decompress
+Proxymate.parseJson
+Proxymate.stringifyJson
+TextDecoder
+TextEncoder
+URL
+URLSearchParams
+atob
+btoa
+console
+console.debug
+console.error
+console.info
+console.log
+console.trace
+console.warn
+crypto
+crypto.hmac
+crypto.randomUUID
+crypto.sha1
+crypto.sha256
+crypto.sha512
+performance
+performance.now

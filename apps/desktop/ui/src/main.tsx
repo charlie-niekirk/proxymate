@@ -47,6 +47,7 @@ if (import.meta.env.DEV) {
   if (params.has("rules")) useUi.getState().openRulesEditor();
   const rewrite = params.get("rewrite");
   if (rewrite !== null) useUi.getState().openRewrite({ store: 0, flow: Number(rewrite) });
+  if (params.has("scripts")) useUi.getState().openScripts({ scriptId: params.get("scripts") || null });
 }
 
 if (import.meta.env.DEV && import.meta.env.VITE_PM_REMOTE) {
@@ -67,6 +68,9 @@ if (import.meta.env.DEV && import.meta.env.VITE_PM_OPEN === "cert-wizard") {
 }
 if (import.meta.env.DEV && import.meta.env.VITE_PM_OPEN === "rules") {
   useUi.getState().openRulesEditor();
+}
+if (import.meta.env.DEV && import.meta.env.VITE_PM_OPEN === "scripts") {
+  useUi.getState().openScripts();
 }
 if (import.meta.env.DEV && import.meta.env.VITE_PM_OPEN === "breakpoints") {
   useUi.getState().setBreakpointsOpen(true);
