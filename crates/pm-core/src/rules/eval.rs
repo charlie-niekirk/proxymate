@@ -21,9 +21,9 @@ use std::sync::Arc;
 
 use http::header::{self, HeaderMap, HeaderName, HeaderValue};
 use pm_model::{Action, AppliedRule, BlockMode, MapLocalSource, Phase, Scheme};
-use serde_json::Value;
 
 use super::compile::{CompiledAction, CompiledRule, RequestInfo, percent_encode, query_pairs};
+use super::json_edit::{self, Edit};
 
 /// A request as rules see and change it.
 #[derive(Debug, Clone)]
@@ -176,9 +176,25 @@ pub(crate) fn request_phase(rules: &[Arc<CompiledRule>], draft: &mut RequestDraf
     }
     for rule in rules {
         let mut applied = false;
-        for ca in &rule.actions {
+        let mut actions = rule.actions.as_slice();
+        while let Some(ca) = actions.first() {
+            if let Some(n) = json_run(actions, Phase::Request) {
+                applied |= edit_json(
+                    rule,
+                    &actions[..n],
+                    &mut draft.body,
+                    &mut fx.body_changed,
+                    &mut fx.body_skipped,
+                );
+                actions = &actions[n..];
+                continue;
+            }
+            actions = &actions[1..];
             applied |= match &ca.action {
                 Action::SetHeader {
+                    phase: Phase::Request, ..
+                }
+                | Action::AddHeader {
                     phase: Phase::Request, ..
                 }
                 | Action::RemoveHeader {
@@ -209,10 +225,10 @@ pub(crate) fn request_phase(rules: &[Arc<CompiledRule>], draft: &mut RequestDraf
                 | Action::SetBody {
                     phase: Phase::Request, ..
                 }
-                | Action::JsonSet {
+                | Action::FormSet {
                     phase: Phase::Request, ..
                 }
-                | Action::JsonRemove {
+                | Action::FormRemove {
                     phase: Phase::Request, ..
                 } => match edit_body(ca, &mut draft.body, &mut draft.headers) {
                     Ok(changed) => {
@@ -316,9 +332,25 @@ pub(crate) fn response_phase(rules: &[Arc<CompiledRule>], draft: &mut ResponseDr
     let mut fx = ResponseEffects::default();
     for rule in rules {
         let mut applied = false;
-        for ca in &rule.actions {
+        let mut actions = rule.actions.as_slice();
+        while let Some(ca) = actions.first() {
+            if let Some(n) = json_run(actions, Phase::Response) {
+                applied |= edit_json(
+                    rule,
+                    &actions[..n],
+                    &mut draft.body,
+                    &mut fx.body_changed,
+                    &mut fx.body_skipped,
+                );
+                actions = &actions[n..];
+                continue;
+            }
+            actions = &actions[1..];
             applied |= match &ca.action {
                 Action::SetHeader {
+                    phase: Phase::Response, ..
+                }
+                | Action::AddHeader {
                     phase: Phase::Response, ..
                 }
                 | Action::RemoveHeader {
@@ -342,10 +374,10 @@ pub(crate) fn response_phase(rules: &[Arc<CompiledRule>], draft: &mut ResponseDr
                 | Action::SetBody {
                     phase: Phase::Response, ..
                 }
-                | Action::JsonSet {
+                | Action::FormSet {
                     phase: Phase::Response, ..
                 }
-                | Action::JsonRemove {
+                | Action::FormRemove {
                     phase: Phase::Response, ..
                 } => match edit_body(ca, &mut draft.body, &mut draft.headers) {
                     Ok(changed) => {
@@ -391,6 +423,13 @@ fn edit_headers(ca: &CompiledAction, headers: &mut HeaderMap) -> bool {
             let unchanged = headers.get_all(name).iter().eq(std::iter::once(&value));
             headers.insert(name.clone(), value);
             !unchanged
+        }
+        Action::AddHeader { value, .. } => {
+            let Ok(value) = HeaderValue::from_str(value) else {
+                return false;
+            };
+            headers.append(name.clone(), value);
+            true
         }
         Action::RemoveHeader { .. } => headers.remove(name).is_some(),
         Action::ReplaceHeaderValue { replacement, .. } => {
@@ -455,127 +494,70 @@ fn edit_body(ca: &CompiledAction, body: &mut Option<Vec<u8>>, headers: &mut Head
             *bytes = new.into_owned();
             Ok(true)
         }
-        Action::JsonSet { pointer, value, .. } => {
-            let mut doc = parse_json(bytes)?;
-            json_set(&mut doc, pointer, value.clone())?;
-            *bytes = serde_json::to_vec(&doc).map_err(|e| e.to_string())?;
-            Ok(true)
-        }
-        Action::JsonRemove { pointer, .. } => {
-            let mut doc = parse_json(bytes)?;
-            if !json_remove(&mut doc, pointer) {
-                return Ok(false);
-            }
-            *bytes = serde_json::to_vec(&doc).map_err(|e| e.to_string())?;
-            Ok(true)
-        }
+        Action::FormSet { name, value, .. } => edit_form(bytes, name, Some(value)),
+        Action::FormRemove { name, .. } => edit_form(bytes, name, None),
         _ => Ok(false),
     }
 }
 
-fn parse_json(bytes: &[u8]) -> Result<Value, String> {
-    serde_json::from_slice(bytes).map_err(|e| format!("the body isn't JSON ({e})"))
+/// Sets or removes a field of a form-urlencoded body.
+fn edit_form(bytes: &mut Vec<u8>, name: &str, value: Option<&str>) -> Result<bool, String> {
+    let text = std::str::from_utf8(bytes).map_err(|_| "the body isn't form text".to_owned())?;
+    let new = set_query(text, name, value);
+    if new == text {
+        return Ok(false);
+    }
+    *bytes = new.into_bytes();
+    Ok(true)
 }
 
-fn pointer_tokens(pointer: &str) -> Result<Vec<String>, String> {
-    if pointer.is_empty() {
-        return Ok(Vec::new());
-    }
-    let Some(rest) = pointer.strip_prefix('/') else {
-        return Err(format!("{pointer:?} isn't a JSON pointer"));
-    };
-    Ok(rest
-        .split('/')
-        .map(|t| t.replace("~1", "/").replace("~0", "~"))
-        .collect())
+/// How many actions from the start of `actions` are JSON edits of `phase`
+/// in a row (`None` for none). They are applied in one pass.
+fn json_run(actions: &[CompiledAction], phase: Phase) -> Option<usize> {
+    let n = actions
+        .iter()
+        .take_while(|ca| {
+            matches!(&ca.action, Action::JsonSet { phase: p, .. } | Action::JsonRemove { phase: p, .. } if *p == phase)
+        })
+        .count();
+    (n > 0).then_some(n)
 }
 
-/// Sets `value` at `pointer`, creating missing object members. `-` appends
-/// to an array.
-pub(crate) fn json_set(doc: &mut Value, pointer: &str, value: Value) -> Result<(), String> {
-    let tokens = pointer_tokens(pointer)?;
-    let Some((last, parents)) = tokens.split_last() else {
-        *doc = value;
-        return Ok(());
-    };
-    let mut node = doc;
-    for token in parents {
-        node = match node {
-            Value::Object(map) => map
-                .entry(token.clone())
-                .or_insert_with(|| Value::Object(Default::default())),
-            Value::Array(items) => {
-                let i = array_index(token, items.len())?;
-                &mut items[i]
-            }
-            _ => {
-                return Err(format!(
-                    "{pointer}: {token:?} is inside a value that isn't an object or array"
-                ));
-            }
-        };
-    }
-    match node {
-        Value::Object(map) => {
-            map.insert(last.clone(), value);
-        }
-        Value::Array(items) if last == "-" => items.push(value),
-        Value::Array(items) => {
-            let i = last
-                .parse::<usize>()
-                .map_err(|_| format!("{pointer}: {last:?} isn't an array index"))?;
-            match i.cmp(&items.len()) {
-                std::cmp::Ordering::Less => items[i] = value,
-                std::cmp::Ordering::Equal => items.push(value),
-                std::cmp::Ordering::Greater => return Err(format!("{pointer}: index {i} is out of range")),
-            }
-        }
-        _ => return Err(format!("{pointer}: the parent isn't an object or array")),
-    }
-    Ok(())
-}
-
-/// Removes the value at `pointer`; false if there was none.
-pub(crate) fn json_remove(doc: &mut Value, pointer: &str) -> bool {
-    let Ok(tokens) = pointer_tokens(pointer) else {
+/// Applies a run of JSON edits; returns whether any changed the body.
+fn edit_json(
+    rule: &CompiledRule,
+    run: &[CompiledAction],
+    body: &mut Option<Vec<u8>>,
+    body_changed: &mut bool,
+    skipped: &mut Vec<String>,
+) -> bool {
+    let Some(bytes) = body.as_mut() else {
+        skipped.extend(
+            run.iter()
+                .map(|_| format!("{}: the body wasn't buffered", rule.applied.name)),
+        );
         return false;
     };
-    let Some((last, parents)) = tokens.split_last() else {
-        return false;
-    };
-    let mut node = doc;
-    for token in parents {
-        node = match node {
-            Value::Object(map) => match map.get_mut(token) {
-                Some(next) => next,
-                None => return false,
+    let edits: Vec<Edit<'_>> = run
+        .iter()
+        .map(|ca| match &ca.action {
+            Action::JsonSet { pointer, .. } => Edit::Set {
+                pointer,
+                raw: ca.json.as_deref().unwrap_or("null"),
             },
-            Value::Array(items) => match token.parse::<usize>().ok().and_then(|i| items.get_mut(i)) {
-                Some(next) => next,
-                None => return false,
-            },
-            _ => return false,
-        };
+            Action::JsonRemove { pointer, .. } => Edit::Remove { pointer },
+            _ => unreachable!("json_run takes only JSON edits"),
+        })
+        .collect();
+    let mut changed = false;
+    for result in json_edit::apply(bytes, &edits) {
+        match result {
+            Ok(c) => changed |= c,
+            Err(reason) => skipped.push(format!("{}: {reason}", rule.applied.name)),
+        }
     }
-    match node {
-        Value::Object(map) => map.remove(last).is_some(),
-        Value::Array(items) => match last.parse::<usize>() {
-            Ok(i) if i < items.len() => {
-                items.remove(i);
-                true
-            }
-            _ => false,
-        },
-        _ => false,
-    }
-}
-
-fn array_index(token: &str, len: usize) -> Result<usize, String> {
-    token
-        .parse::<usize>()
-        .ok()
-        .filter(|&i| i < len)
-        .ok_or_else(|| format!("{token:?} isn't an index of an array of {len}"))
+    *body_changed |= changed;
+    changed
 }
 
 /// The query with `name` set to `value` (every occurrence replaced, or

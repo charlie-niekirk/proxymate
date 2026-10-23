@@ -15,7 +15,7 @@ use pm_model::{
     Action, BodyPart, BreakpointId, BreakpointResolution, FlowDetail, FlowId, FlowSummary, Header, MapLocalSource,
     Matcher, Pattern, Phase, PresetKind, Rule, RuleOrigin, Scheme, SearchScope, WsDirection, WsQuery,
 };
-use pm_model::{FlowSelection, LIVE_STORE, RequestSpec, SendOpts, SendOrigin};
+use pm_model::{FlowSelection, LIVE_STORE, RequestSpec, SendOpts, SendOrigin, StoreId};
 use rmcp::handler::server::common::schema_for_type;
 use rmcp::model::{JsonObject, Tool, ToolAnnotations};
 use schemars::JsonSchema;
@@ -164,7 +164,7 @@ fn defs() -> Vec<Def> {
             "create_rule",
             Write,
             CreateRule,
-            "Create a rule: a matcher plus ordered actions (SetHeader, RemoveHeader, ReplaceHeaderValue, SetQuery, RemoveQuery, ReplaceBody, SetBody, JsonSet, JsonRemove, SetStatus, MapLocal, MapRemote, Breakpoint, Delay, Throttle, Block). It is added last, enabled, and tagged as yours. Prefer create_map_local, create_rewrite or create_breakpoint for the common cases."
+            "Create a rule: a matcher plus ordered actions (SetHeader, AddHeader, RemoveHeader, ReplaceHeaderValue, SetQuery, RemoveQuery, ReplaceBody, SetBody, JsonSet, JsonRemove, FormSet, FormRemove, SetStatus, MapLocal, MapRemote, Breakpoint, Delay, Throttle, Block). It is added last, enabled, and tagged as yours. Prefer create_map_local, create_rewrite or create_breakpoint for the common cases."
         ),
         def!(
             "update_rule",
@@ -196,7 +196,13 @@ fn defs() -> Vec<Def> {
             "create_rewrite",
             Write,
             CreateRewrite,
-            "Rewrite matching traffic: set or remove headers, change the response status, find-and-replace in a body, or set JSON values by pointer. Add any other rule actions with `actions`."
+            "Rewrite matching traffic: set, add or remove headers, change the response status, set or remove query parameters, find-and-replace in a body, set or remove JSON values by pointer (only those bytes change; `raw` keeps exact number text), or set and remove form fields. Add any other rule actions with `actions`. Try a rule on a recorded flow first with test_rule."
+        ),
+        def!(
+            "test_rule",
+            Read,
+            TestRule,
+            "Dry run: what a rule (a saved one by `rule_id`, or an unsaved `rule`) would do to a recorded flow: whether it matches (and why not), the request and response after it, and notes (blocked, mapped, paused…). Nothing is sent or saved."
         ),
         def!(
             "resolve_breakpoint",
@@ -360,6 +366,7 @@ pub(crate) async fn call(ctx: &Ctx<'_>, name: &str, args: JsonObject) -> ToolRes
         "create_map_local" => create_map_local(ctx, parse(args)?),
         "create_breakpoint" => create_breakpoint(ctx, parse(args)?),
         "create_rewrite" => create_rewrite(ctx, parse(args)?),
+        "test_rule" => test_rule(ctx, parse(args)?).await,
         "resolve_breakpoint" => {
             let p: ResolveBreakpoint = parse(args)?;
             ctx.engine.resolve_breakpoint(p.id, p.resolution)?;
@@ -695,14 +702,55 @@ struct Replace {
 struct JsonEdit {
     /// RFC 6901 pointer, e.g. `/user/name`; `-` appends to an array.
     pointer: String,
+    /// The new value (default null).
+    #[serde(default)]
     value: Value,
+    /// The new value as exact JSON text instead, e.g. `12345678901234567890` or `1.50`.
+    #[serde(default)]
+    raw: Option<String>,
     /// Default response.
     #[serde(default = "response_phase")]
     phase: Phase,
 }
 
+#[derive(Deserialize, JsonSchema)]
+struct JsonRemoveEdit {
+    /// RFC 6901 pointer, e.g. `/user/token`.
+    pointer: String,
+    /// Default response.
+    #[serde(default = "response_phase")]
+    phase: Phase,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct NameValue {
+    name: String,
+    value: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct FormField {
+    name: String,
+    value: String,
+    /// Default request.
+    #[serde(default = "request_phase")]
+    phase: Phase,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct FormFieldName {
+    name: String,
+    /// Default request.
+    #[serde(default = "request_phase")]
+    phase: Phase,
+}
+
 fn response_phase() -> Phase {
     Phase::Response
+}
+
+fn request_phase() -> Phase {
+    Phase::Request
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -719,16 +767,60 @@ struct CreateRewrite {
     remove_request_headers: Vec<String>,
     #[serde(default)]
     remove_response_headers: Vec<String>,
+    /// Header values to add to the request, keeping existing ones (after
+    /// the removals: remove a header, then add each of its new values).
+    #[serde(default)]
+    add_request_headers: Vec<Header>,
+    #[serde(default)]
+    add_response_headers: Vec<Header>,
     /// Change the response status.
     #[serde(default)]
     status: Option<u16>,
+    /// Query parameters to set (every occurrence replaced, or added).
+    #[serde(default)]
+    set_query: Vec<NameValue>,
+    #[serde(default)]
+    remove_query: Vec<String>,
     #[serde(default)]
     replace_body: Vec<Replace>,
+    /// JSON values to remove (before `json_set`).
+    #[serde(default)]
+    json_remove: Vec<JsonRemoveEdit>,
     #[serde(default)]
     json_set: Vec<JsonEdit>,
+    /// Fields of a form-urlencoded body to set.
+    #[serde(default)]
+    form_set: Vec<FormField>,
+    #[serde(default)]
+    form_remove: Vec<FormFieldName>,
     /// Any further actions, run after the ones above.
     #[serde(default)]
     actions: Vec<Action>,
+}
+
+/// A rule to try without saving it.
+#[derive(Deserialize, JsonSchema)]
+struct DraftRule {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    matcher: Matcher,
+    actions: Vec<Action>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct TestRule {
+    /// A saved rule to try. Give this or `rule`.
+    #[serde(default)]
+    rule_id: Option<String>,
+    /// An unsaved rule to try.
+    #[serde(default)]
+    rule: Option<DraftRule>,
+    /// The recorded flow to try it on.
+    flow_id: FlowId,
+    /// The flow's store: 0, the live capture (default), or an opened session's.
+    #[serde(default)]
+    store: Option<StoreId>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -1512,9 +1604,24 @@ fn create_rewrite(ctx: &Ctx<'_>, p: CreateRewrite) -> ToolResult {
     ] {
         actions.extend(names.into_iter().map(|name| Action::RemoveHeader { phase, name }));
     }
+    for (phase, headers) in [
+        (Phase::Request, p.add_request_headers),
+        (Phase::Response, p.add_response_headers),
+    ] {
+        actions.extend(headers.into_iter().map(|h| Action::AddHeader {
+            phase,
+            name: h.name,
+            value: h.value,
+        }));
+    }
     if let Some(status) = p.status {
         actions.push(Action::SetStatus { status });
     }
+    actions.extend(p.set_query.into_iter().map(|q| Action::SetQuery {
+        name: q.name,
+        value: q.value,
+    }));
+    actions.extend(p.remove_query.into_iter().map(|name| Action::RemoveQuery { name }));
     actions.extend(p.replace_body.into_iter().map(|r| Action::ReplaceBody {
         phase: r.phase,
         pattern: if r.regex {
@@ -1524,13 +1631,52 @@ fn create_rewrite(ctx: &Ctx<'_>, p: CreateRewrite) -> ToolResult {
         },
         replacement: r.replace,
     }));
+    actions.extend(p.json_remove.into_iter().map(|j| Action::JsonRemove {
+        phase: j.phase,
+        pointer: j.pointer,
+    }));
     actions.extend(p.json_set.into_iter().map(|j| Action::JsonSet {
         phase: j.phase,
         pointer: j.pointer,
         value: j.value,
+        raw: j.raw,
+    }));
+    actions.extend(p.form_set.into_iter().map(|f| Action::FormSet {
+        phase: f.phase,
+        name: f.name,
+        value: f.value,
+    }));
+    actions.extend(p.form_remove.into_iter().map(|f| Action::FormRemove {
+        phase: f.phase,
+        name: f.name,
     }));
     actions.extend(p.actions);
     save(ctx, name, matcher, actions)
+}
+
+async fn test_rule(ctx: &Ctx<'_>, p: TestRule) -> ToolResult {
+    let rule = match (p.rule_id, p.rule) {
+        (Some(id), None) => ctx
+            .engine
+            .rule(&id)
+            .ok_or_else(|| ToolError(format!("no rule with id {id}")))?,
+        (None, Some(draft)) => Rule {
+            id: String::new(),
+            name: draft.name.unwrap_or_else(|| "Dry run".into()),
+            enabled: true,
+            order: 0,
+            origin: agent_origin(ctx),
+            matcher: draft.matcher,
+            actions: draft.actions,
+        },
+        _ => {
+            return Err(ToolError(
+                "give either rule_id (a saved rule) or rule (an unsaved one)".into(),
+            ));
+        }
+    };
+    let store = p.store.unwrap_or(LIVE_STORE);
+    Ok(json!(ctx.engine.test_rule_in(store, &rule, p.flow_id, None).await?))
 }
 
 #[cfg(test)]

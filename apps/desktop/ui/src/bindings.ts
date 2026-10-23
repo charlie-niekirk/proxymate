@@ -65,10 +65,13 @@ export const commands = {
 	reorderRules: (ids: string[]) => typedError<Rule_Serialize[], string>(__TAURI_INVOKE("reorder_rules", { ids })),
 	/**  Compiles a rule without saving it; the error says what's wrong. */
 	validateRule: (rule: Rule_Deserialize) => typedError<null, string>(__TAURI_INVOKE("validate_rule", { rule })),
-	/**  An unsaved rule pre-filled from a flow by a preset. */
-	draftRule: (flow: number, preset: PresetKind) => typedError<Rule_Serialize, string>(__TAURI_INVOKE("draft_rule", { flow, preset })),
-	/**  Dry run of a rule against a recorded flow. */
-	testRule: (rule: Rule_Deserialize, flow: number) => typedError<RuleTestResult_Serialize, string>(__TAURI_INVOKE("test_rule", { rule, flow })),
+	/**  An unsaved rule pre-filled from a flow (in any store) by a preset. */
+	draftRule: (store: number, flow: number, preset: PresetKind) => typedError<Rule_Serialize, string>(__TAURI_INVOKE("draft_rule", { store, flow, preset })),
+	/**
+	 *  Dry run of a rule against a recorded flow; the bodies shown are cut at
+	 *  `body_limit` bytes (default 256 KB).
+	 */
+	testRule: (store: number, rule: Rule_Deserialize, flow: number, bodyLimit: number | null) => typedError<RuleTestResult_Serialize, string>(__TAURI_INVOKE("test_rule", { store, rule, flow, bodyLimit })),
 	getRuleSettings: () => __TAURI_INVOKE<RuleSettings>("get_rule_settings"),
 	setRuleSettings: (settings: RuleSettings) => typedError<RuleSettings, string>(__TAURI_INVOKE("set_rule_settings", { settings })),
 	listBreakpoints: () => __TAURI_INVOKE<BreakpointInfo_Serialize[]>("list_breakpoints"),
@@ -161,6 +164,8 @@ export const commands = {
 	 *  answers with a native dialog.
 	 */
 	checkForUpdates: () => __TAURI_INVOKE<void>("check_for_updates"),
+	/**  Flows of a store (newest first) a rule's matcher matches. */
+	flowsMatchingRule: (store: number, rule: Rule_Deserialize, limit: number) => typedError<number[], string>(__TAURI_INVOKE("flows_matching_rule", { store, rule, limit })),
 };
 
 /* Types */
@@ -183,9 +188,31 @@ export type Action_Deserialize =
 content_type?: string | null } | 
 /**
  *  Sets the value at a JSON pointer (RFC 6901) in a JSON body. Missing
- *  object members are created; `-` appends to an array.
+ *  object members are created; `-` appends to an array. Only the bytes
+ *  of that value change: key order, number text and formatting
+ *  elsewhere are kept.
  */
-{ type: "JsonSet"; phase: Phase; pointer: string; value: Value } | { type: "JsonRemove"; phase: Phase; pointer: string } | 
+{ type: "JsonSet"; phase: Phase; pointer: string; value: Value; 
+/**
+ *  The value as exact JSON text, e.g. `12345678901234567890` or
+ *  `1.50`, which `value` can't always hold. Takes precedence.
+ */
+raw?: string | null } | 
+/**
+ *  Removes the value at a JSON pointer (every member of that name, if
+ *  an object repeats it).
+ */
+{ type: "JsonRemove"; phase: Phase; pointer: string } | 
+/**
+ *  Sets a field of a form-urlencoded body (every occurrence replaced,
+ *  or appended).
+ */
+{ type: "FormSet"; phase: Phase; name: string; value: string } | { type: "FormRemove"; phase: Phase; name: string } | 
+/**
+ *  Appends a header value, keeping the existing ones; repeated headers
+ *  are a `RemoveHeader` followed by several of these.
+ */
+{ type: "AddHeader"; phase: Phase; name: string; value: string } | 
 /**  Response only. */
 { type: "SetStatus"; status: number } | 
 /**
@@ -236,9 +263,31 @@ export type Action_Serialize =
 content_type: string | null } | 
 /**
  *  Sets the value at a JSON pointer (RFC 6901) in a JSON body. Missing
- *  object members are created; `-` appends to an array.
+ *  object members are created; `-` appends to an array. Only the bytes
+ *  of that value change: key order, number text and formatting
+ *  elsewhere are kept.
  */
-{ type: "JsonSet"; phase: Phase; pointer: string; value: Value } | { type: "JsonRemove"; phase: Phase; pointer: string } | 
+{ type: "JsonSet"; phase: Phase; pointer: string; value: Value; 
+/**
+ *  The value as exact JSON text, e.g. `12345678901234567890` or
+ *  `1.50`, which `value` can't always hold. Takes precedence.
+ */
+raw: string | null } | 
+/**
+ *  Removes the value at a JSON pointer (every member of that name, if
+ *  an object repeats it).
+ */
+{ type: "JsonRemove"; phase: Phase; pointer: string } | 
+/**
+ *  Sets a field of a form-urlencoded body (every occurrence replaced,
+ *  or appended).
+ */
+{ type: "FormSet"; phase: Phase; name: string; value: string } | { type: "FormRemove"; phase: Phase; name: string } | 
+/**
+ *  Appends a header value, keeping the existing ones; repeated headers
+ *  are a `RemoveHeader` followed by several of these.
+ */
+{ type: "AddHeader"; phase: Phase; name: string; value: string } | 
 /**  Response only. */
 { type: "SetStatus"; status: number } | 
 /**
@@ -1527,6 +1576,9 @@ export type RuleTestResult_Deserialize = {
 	response_body?: string | null,
 	/**  What else would happen: blocked, mapped, paused, delayed… */
 	notes: string[],
+	/**  `request_body` was cut at the dry run's body limit. */
+	request_body_truncated?: boolean,
+	response_body_truncated?: boolean,
 };
 
 /**  The dry run of one rule against a recorded flow. */
@@ -1545,6 +1597,9 @@ export type RuleTestResult_Serialize = {
 	response_body: string | null,
 	/**  What else would happen: blocked, mapped, paused, delayed… */
 	notes: string[],
+	/**  `request_body` was cut at the dry run's body limit. */
+	request_body_truncated: boolean,
+	response_body_truncated: boolean,
 };
 
 export type Rule_Deserialize = {

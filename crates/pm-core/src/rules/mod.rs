@@ -10,6 +10,7 @@ mod breakpoints;
 pub mod compile;
 pub(crate) mod db;
 pub(crate) mod eval;
+pub(crate) mod json_edit;
 pub(crate) mod local;
 #[cfg(test)]
 mod tests;
@@ -21,8 +22,8 @@ use arc_swap::ArcSwap;
 use parking_lot::{Mutex, RwLock};
 use pm_model::{
     Action, BodyPart, BreakpointId, BreakpointInfo, BreakpointResolution, FlowId, GLOBAL_THROTTLE_RULE_ID,
-    MapLocalSource, Matcher, Pattern, Phase, PresetKind, RequestHead, ResponseHead, Rule, RuleId, RuleOrigin,
-    RuleSettings, RuleTestResult,
+    MapLocalSource, Matcher, Pattern, PresetKind, RequestHead, ResponseHead, Rule, RuleId, RuleOrigin, RuleSettings,
+    RuleTestResult, StoreId,
 };
 
 pub use breakpoints::BreakpointSink;
@@ -42,7 +43,8 @@ use eval::{RequestDraft, ResponseDraft};
 pub const REWRITE_BODY_CAP: usize = 32 * 1024 * 1024;
 /// A paused body up to this size can be edited; above it only the head.
 pub const BREAKPOINT_EDIT_CAP: usize = 16 * 1024 * 1024;
-/// Dry-run bodies are shown up to this size.
+/// Dry-run bodies are shown up to this size unless the caller asks for
+/// more.
 const TEST_BODY_MAX: usize = 256 * 1024;
 
 #[derive(Debug, thiserror::Error)]
@@ -315,12 +317,19 @@ impl Engine {
         self.rules.compiled.load_full()
     }
 
-    /// A new, unsaved rule pre-filled from a recorded flow: it matches the
+    /// A new, unsaved rule pre-filled from a live flow: it matches the
     /// flow's method, host and path. The Rules Editor (or an agent) then
     /// edits and saves it.
     pub fn draft_rule(&self, flow: FlowId, preset: PresetKind) -> Result<Rule, Error> {
-        let summary = self.get_flow(flow).ok_or(Error::UnknownFlow(flow))?;
-        let detail = self.flow_detail(flow)?.ok_or(Error::UnknownFlow(flow))?;
+        self.draft_rule_in(pm_model::LIVE_STORE, flow, preset)
+    }
+
+    /// [`Engine::draft_rule`] from a flow in any store (a saved session or
+    /// HAR too). The Rewrite preset has no actions: the Rewrite dialog
+    /// fills them in from the user's edits.
+    pub fn draft_rule_in(&self, store: StoreId, flow: FlowId, preset: PresetKind) -> Result<Rule, Error> {
+        let summary = self.get_flow_in(store, flow).ok_or(Error::UnknownFlow(flow))?;
+        let detail = self.flow_detail_in(store, flow)?.ok_or(Error::UnknownFlow(flow))?;
         let matcher = Matcher {
             methods: vec![summary.method.to_string()],
             host: Some(Pattern::exact(summary.host.to_string())),
@@ -336,7 +345,7 @@ impl Engine {
         let (name, actions) = match preset {
             PresetKind::MapLocal => {
                 let body = self
-                    .body_head(flow, BodyPart::Response, true, Some(TEST_BODY_MAX * 4))
+                    .body_head_in(store, flow, BodyPart::Response, true, Some(TEST_BODY_MAX * 4))
                     .ok()
                     .filter(|b| !b.cut)
                     .and_then(|b| String::from_utf8(b.bytes).ok())
@@ -358,14 +367,7 @@ impl Engine {
                     response: false,
                 }],
             ),
-            PresetKind::Rewrite => (
-                format!("Rewrite · {target}"),
-                vec![Action::SetHeader {
-                    phase: Phase::Response,
-                    name: "X-Proxymate-Rewrite".into(),
-                    value: "1".into(),
-                }],
-            ),
+            PresetKind::Rewrite => (format!("Rewrite · {target}"), Vec::new()),
             PresetKind::MapRemote => (
                 format!("Map Remote · {target}"),
                 vec![Action::MapRemote {
@@ -403,14 +405,28 @@ impl Engine {
     }
 
     /// Dry run: what `rule` (saved or not, enabled or not) would do to a
-    /// recorded flow, computed with the proxy's own evaluator. Nothing is
+    /// live flow, computed with the proxy's own evaluator. Nothing is
     /// sent.
     pub async fn test_rule(&self, rule: &Rule, flow: FlowId) -> Result<RuleTestResult, Error> {
-        let summary = self.get_flow(flow).ok_or(Error::UnknownFlow(flow))?;
-        let detail = self.flow_detail(flow)?.ok_or(Error::UnknownFlow(flow))?;
+        self.test_rule_in(pm_model::LIVE_STORE, rule, flow, None).await
+    }
+
+    /// [`Engine::test_rule`] on a flow in any store. The bodies in the
+    /// result are cut at `body_limit` bytes (default 256 KB); the rule
+    /// itself runs on whole bodies, up to the proxy's buffering cap.
+    pub async fn test_rule_in(
+        &self,
+        store: StoreId,
+        rule: &Rule,
+        flow: FlowId,
+        body_limit: Option<usize>,
+    ) -> Result<RuleTestResult, Error> {
+        let summary = self.get_flow_in(store, flow).ok_or(Error::UnknownFlow(flow))?;
+        let detail = self.flow_detail_in(store, flow)?.ok_or(Error::UnknownFlow(flow))?;
         let compiled = Arc::new(CompiledRule::compile(rule)?);
+        let limit = body_limit.unwrap_or(TEST_BODY_MAX);
         let body = |part| {
-            self.body_head(flow, part, true, Some(REWRITE_BODY_CAP))
+            self.body_head_in(store, flow, part, true, Some(REWRITE_BODY_CAP))
                 .ok()
                 .filter(|b| !b.cut)
                 .map(|b| b.bytes)
@@ -486,10 +502,11 @@ impl Engine {
         }
         let text = |b: &Option<Vec<u8>>| {
             b.as_ref().map(|b| {
-                let cut = &b[..b.len().min(TEST_BODY_MAX)];
+                let cut = &b[..b.len().min(limit)];
                 String::from_utf8_lossy(cut).into_owned()
             })
         };
+        let cut = |b: Option<&Vec<u8>>| b.is_some_and(|b| b.len() > limit);
         let version = detail.request.version;
         Ok(RuleTestResult {
             matched: mismatch.is_none(),
@@ -514,7 +531,86 @@ impl Engine {
             }),
             response_body: response.as_ref().and_then(|r| text(&r.body)),
             notes,
+            request_body_truncated: cut(request.body.as_ref()),
+            response_body_truncated: cut(response.as_ref().and_then(|r| r.body.as_ref())),
         })
+    }
+
+    /// Up to `limit` flows of `store` (newest first) that `rule`'s matcher
+    /// matches, for reopening a saved rule on a flow it applies to.
+    pub fn flows_matching_rule(&self, store: StoreId, rule: &Rule, limit: usize) -> Result<Vec<FlowId>, Error> {
+        let compiled = CompiledRule::compile(rule)?;
+        // Header and response conditions need each flow's detail: narrow by
+        // the summary first, under the lock, then check those outside it.
+        let summary_only = CompiledRule::compile(&Rule {
+            matcher: Matcher {
+                headers: Vec::new(),
+                response: None,
+                ..rule.matcher.clone()
+            },
+            actions: Vec::new(),
+            ..rule.clone()
+        })?;
+        let needs_detail = !rule.matcher.headers.is_empty() || rule.matcher.response.is_some();
+        let no_headers = http::HeaderMap::new();
+        let candidates: Vec<FlowId> = self.read_store(store, |s| {
+            s.flows()
+                .iter()
+                .rev()
+                .filter(|f| {
+                    &*f.method != "CONNECT" && !matches!(f.scheme, pm_model::Scheme::Ws | pm_model::Scheme::Wss)
+                })
+                .filter(|f| {
+                    let info = compile::RequestInfo {
+                        method: &f.method,
+                        scheme: f.scheme,
+                        host: &f.host,
+                        port: f.port,
+                        path: &f.path,
+                        query: &f.query,
+                        headers: &no_headers,
+                        client_app: f.client.as_deref(),
+                    };
+                    summary_only.mismatch(&info, true).is_none()
+                })
+                .map(|f| f.id)
+                .take(if needs_detail { usize::MAX } else { limit })
+                .collect()
+        })?;
+        if !needs_detail {
+            return Ok(candidates);
+        }
+        let mut out = Vec::new();
+        for id in candidates {
+            if out.len() == limit {
+                break;
+            }
+            let (Some(f), Ok(Some(detail))) = (self.get_flow_in(store, id), self.flow_detail_in(store, id)) else {
+                continue;
+            };
+            let headers = eval::header_map(&detail.request.headers);
+            let info = compile::RequestInfo {
+                method: &f.method,
+                scheme: f.scheme,
+                host: &f.host,
+                port: f.port,
+                path: &f.path,
+                query: &f.query,
+                headers: &headers,
+                client_app: f.client.as_deref(),
+            };
+            if compiled.mismatch(&info, true).is_some() {
+                continue;
+            }
+            let response_ok = match (&compiled.response, &detail.response) {
+                (Some(m), Some(r)) => m.matches(r.status, &eval::header_map(&r.headers)),
+                _ => true,
+            };
+            if response_ok {
+                out.push(id);
+            }
+        }
+        Ok(out)
     }
 
     // ---- Breakpoints ----

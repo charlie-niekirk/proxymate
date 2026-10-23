@@ -222,15 +222,41 @@ pub enum Action {
         content_type: Option<String>,
     },
     /// Sets the value at a JSON pointer (RFC 6901) in a JSON body. Missing
-    /// object members are created; `-` appends to an array.
+    /// object members are created; `-` appends to an array. Only the bytes
+    /// of that value change: key order, number text and formatting
+    /// elsewhere are kept.
     JsonSet {
         phase: Phase,
         pointer: String,
         value: serde_json::Value,
+        /// The value as exact JSON text, e.g. `12345678901234567890` or
+        /// `1.50`, which `value` can't always hold. Takes precedence.
+        #[serde(default)]
+        raw: Option<String>,
     },
+    /// Removes the value at a JSON pointer (every member of that name, if
+    /// an object repeats it).
     JsonRemove {
         phase: Phase,
         pointer: String,
+    },
+    /// Sets a field of a form-urlencoded body (every occurrence replaced,
+    /// or appended).
+    FormSet {
+        phase: Phase,
+        name: String,
+        value: String,
+    },
+    FormRemove {
+        phase: Phase,
+        name: String,
+    },
+    /// Appends a header value, keeping the existing ones; repeated headers
+    /// are a `RemoveHeader` followed by several of these.
+    AddHeader {
+        phase: Phase,
+        name: String,
+        value: String,
     },
     /// Response only.
     SetStatus {
@@ -444,4 +470,9 @@ pub struct RuleTestResult {
     pub response_body: Option<String>,
     /// What else would happen: blocked, mapped, paused, delayed…
     pub notes: Vec<String>,
+    /// `request_body` was cut at the dry run's body limit.
+    #[serde(default)]
+    pub request_body_truncated: bool,
+    #[serde(default)]
+    pub response_body_truncated: bool,
 }

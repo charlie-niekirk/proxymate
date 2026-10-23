@@ -274,6 +274,14 @@ impl Engine {
         self.with_backend(store, |backend| body_head(backend, id, part, decode, max))
     }
 
+    /// Runs `f` on the flow summaries of `store`, read-locked.
+    pub(crate) fn read_store<R>(&self, store: StoreId, f: impl FnOnce(&Store) -> R) -> Result<R, Error> {
+        match store {
+            LIVE_STORE => Ok(f(&self.store.read())),
+            _ => Ok(f(&self.docs.get(store)?.store.read())),
+        }
+    }
+
     /// Runs `f` with the details and bodies of `store`.
     pub(crate) fn with_backend<R>(
         &self,

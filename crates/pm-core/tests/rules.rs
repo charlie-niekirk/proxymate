@@ -229,6 +229,7 @@ async fn json_set_rewrites_a_gzipped_response() {
                 phase: Phase::Response,
                 pointer: "/name".into(),
                 value: json!("patched"),
+                raw: None,
             },
             Action::JsonRemove {
                 phase: Phase::Response,
@@ -794,4 +795,165 @@ async fn agent_rules_are_tagged_and_removed_together() {
     assert_eq!(names, ["Network conditions", "test rule", "a", "b"]);
     assert_eq!(proxy.engine.delete_agent_rules().unwrap(), 2);
     assert_eq!(proxy.engine.rules().len(), 2);
+}
+
+/// A raw HTTP/1.1 JSON response, leaked so a `RawUpstream` can serve it.
+fn json_response(body: &str) -> &'static [u8] {
+    let raw = format!(
+        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    Box::leak(raw.into_bytes().into_boxed_slice())
+}
+
+#[tokio::test]
+async fn a_visual_rewrite_patches_only_its_paths() {
+    // What was captured, and what the server answers later: the same shape,
+    // other values, 64-bit ids and its own formatting.
+    let captured = r#"{"id":1,"user":{"name":"Ana","role":"user"},"items":[1]}"#;
+    let later = "{\n  \"id\": 9007199254740993123,\n  \"user\": {\n    \"name\": \"Zoe\",\n    \"role\": \"admin\",\n    \"since\": 1.50\n  },\n  \"items\": [7, 8]\n}";
+    let first = RawUpstream::start(json_response(captured)).await;
+    let second = RawUpstream::start(json_response(later)).await;
+    let proxy = Proxy::start(None).await;
+    get(proxy.addr, &format!("http://{}/me", first.addr())).await;
+    proxy.finished(0).await;
+
+    // What the Rewrite dialog saves for: name edited, role renamed to
+    // `kind`, a key added (exact JSON text, not a parsed value).
+    let mut rule = proxy.engine.draft_rule(0, PresetKind::Rewrite).unwrap();
+    assert!(rule.actions.is_empty(), "the Rewrite preset drafts no actions");
+    rule.matcher = on_path("/me");
+    rule.actions = vec![
+        Action::JsonSet {
+            phase: Phase::Response,
+            pointer: "/user/name".into(),
+            value: serde_json::Value::Null,
+            raw: Some(r#""Bea""#.into()),
+        },
+        Action::JsonRemove {
+            phase: Phase::Response,
+            pointer: "/user/role".into(),
+        },
+        Action::JsonSet {
+            phase: Phase::Response,
+            pointer: "/user/kind".into(),
+            value: serde_json::Value::Null,
+            raw: Some(r#""user""#.into()),
+        },
+        Action::JsonSet {
+            phase: Phase::Response,
+            pointer: "/big".into(),
+            value: serde_json::Value::Null,
+            raw: Some("12345678901234567890123".into()),
+        },
+    ];
+    proxy.engine.create_rule(rule).unwrap();
+
+    let reply = get(proxy.addr, &format!("http://{}/me", second.addr())).await;
+    assert_eq!(
+        std::str::from_utf8(&reply.body).unwrap(),
+        "{\n  \"id\": 9007199254740993123,\n  \"user\": {\n    \"name\": \"Bea\",\n    \"since\": 1.50,\n    \"kind\": \"user\"\n  },\n  \"items\": [7, 8],\n  \"big\": 12345678901234567890123\n}",
+        "only the edited paths change; everything else is byte-identical"
+    );
+    assert_eq!(reply.headers["content-length"], reply.body.len().to_string());
+}
+
+#[tokio::test]
+async fn form_and_repeated_header_actions() {
+    let upstream = Upstream::start().await;
+    let proxy = Proxy::start(None).await;
+    proxy.rule(
+        on_path("/echo"),
+        vec![
+            Action::FormSet {
+                phase: Phase::Request,
+                name: "q".into(),
+                value: "a b".into(),
+            },
+            Action::FormRemove {
+                phase: Phase::Request,
+                name: "drop".into(),
+            },
+            Action::RemoveHeader {
+                phase: Phase::Request,
+                name: "x-tag".into(),
+            },
+            Action::AddHeader {
+                phase: Phase::Request,
+                name: "x-tag".into(),
+                value: "one".into(),
+            },
+            Action::AddHeader {
+                phase: Phase::Request,
+                name: "x-tag".into(),
+                value: "two".into(),
+            },
+        ],
+    );
+    let req = Request::post(upstream.url("/echo"))
+        .header("content-type", "application/x-www-form-urlencoded")
+        .header("x-tag", "zero")
+        .body(Full::new(Bytes::from_static(b"q=old&drop=1&keep=x%2By")))
+        .unwrap();
+    send(proxy.addr, req).await;
+    let (_, detail) = proxy.finished(0).await;
+    let tags: Vec<&str> = detail
+        .request
+        .headers
+        .iter()
+        .filter(|h| h.name.eq_ignore_ascii_case("x-tag"))
+        .map(|h| h.value.as_str())
+        .collect();
+    assert_eq!(tags, ["one", "two"]);
+    let body = proxy.engine.body(0, pm_model::BodyPart::Request, true).unwrap().bytes;
+    assert_eq!(body, b"q=a%20b&keep=x%2By");
+}
+
+#[tokio::test]
+async fn dry_runs_work_on_a_saved_session() {
+    let upstream = Upstream::start().await;
+    let proxy = Proxy::start(None).await;
+    get(proxy.addr, &upstream.url("/json")).await;
+    proxy.finished(0).await;
+    let path = proxy.dir.join("dry.proxymate");
+    let (tx, rx) = std::sync::mpsc::channel();
+    proxy
+        .engine
+        .save_session(
+            pm_model::LIVE_STORE,
+            &pm_model::FlowSelection::All,
+            path.clone(),
+            Box::new(move |p| {
+                if p.finished {
+                    let _ = tx.send(p);
+                }
+            }),
+        )
+        .unwrap();
+    rx.recv_timeout(WAIT).expect("saved");
+    proxy.engine.clear();
+    let store = proxy.engine.open_document(&path).unwrap().store;
+
+    let mut rule = proxy.engine.draft_rule_in(store, 0, PresetKind::Rewrite).unwrap();
+    rule.actions.push(Action::JsonSet {
+        phase: Phase::Response,
+        pointer: "/name".into(),
+        value: json!("dry"),
+        raw: None,
+    });
+    assert!(
+        proxy.engine.test_rule(&rule, 0).await.is_err(),
+        "the live capture is empty"
+    );
+    let result = proxy.engine.test_rule_in(store, &rule, 0, Some(8)).await.unwrap();
+    assert!(result.matched);
+    assert!(result.response_body_truncated);
+    assert_eq!(result.response_body.as_deref().map(str::len), Some(8));
+    let full = proxy.engine.test_rule_in(store, &rule, 0, None).await.unwrap();
+    assert!(!full.response_body_truncated);
+    let doc: serde_json::Value = serde_json::from_str(full.response_body.as_deref().unwrap()).unwrap();
+    assert_eq!(doc["name"], "dry");
+    assert_eq!(proxy.engine.flows_matching_rule(store, &rule, 10).unwrap(), [0]);
+    rule.matcher.path = Some(Pattern::exact("/nope"));
+    assert!(proxy.engine.flows_matching_rule(store, &rule, 10).unwrap().is_empty());
 }

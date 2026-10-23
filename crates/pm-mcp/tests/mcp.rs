@@ -478,3 +478,74 @@ async fn tokens_hosts_and_origins_are_checked() {
 
     h.stop().await;
 }
+
+#[tokio::test]
+async fn agents_dry_run_and_create_exact_rewrites() {
+    let h = Harness::start().await;
+    let upstream = Upstream::start().await;
+    let (status, _) = client::get(h.proxy, &upstream.url("/json")).await;
+    assert_eq!(status, 200);
+    h.engine.flush();
+    let (client, _) = h.client().await;
+    let id = ok(&client, "list_flows", json!({ "filter": "path:/json" })).await["flows"][0]["id"]
+        .as_u64()
+        .unwrap();
+
+    // An unsaved rule, tried on the recorded flow.
+    let dry = ok(
+        &client,
+        "test_rule",
+        json!({ "flow_id": id, "rule": { "matcher": { "path": { "kind": "exact", "value": "/json" } },
+                "actions": [{ "type": "JsonSet", "phase": "response", "pointer": "/big", "value": null,
+                              "raw": "12345678901234567890" }] } }),
+    )
+    .await;
+    assert_eq!(dry["matched"], true);
+    assert!(
+        dry["response_body"]
+            .as_str()
+            .unwrap()
+            .contains("\"big\":12345678901234567890"),
+        "{dry}"
+    );
+    let miss = ok(
+        &client,
+        "test_rule",
+        json!({ "flow_id": id, "rule": { "matcher": { "path": { "kind": "exact", "value": "/other" } }, "actions": [] } }),
+    )
+    .await;
+    assert_eq!(miss["matched"], false);
+
+    let rule = ok(
+        &client,
+        "create_rewrite",
+        json!({ "flow_id": id, "json_set": [{ "pointer": "/id", "raw": "9007199254740993" }],
+                "json_remove": [{ "pointer": "/nested" }], "set_query": [{ "name": "page", "value": "2" }],
+                "form_set": [{ "name": "a", "value": "b" }],
+                "add_response_headers": [{ "name": "x-a", "value": "1" }, { "name": "x-a", "value": "2" }] }),
+    )
+    .await;
+    let types: Vec<&str> = rule["actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["type"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        types,
+        ["AddHeader", "AddHeader", "SetQuery", "JsonRemove", "JsonSet", "FormSet"]
+    );
+    let saved = ok(&client, "test_rule", json!({ "flow_id": id, "rule_id": rule["id"] })).await;
+    let body = saved["response_body"].as_str().unwrap();
+    assert!(
+        body.contains("9007199254740993") && !body.contains("\"nested\""),
+        "{body}"
+    );
+    assert!(
+        saved["request"]["url"].as_str().unwrap().ends_with("?page=2"),
+        "{saved}"
+    );
+
+    client.cancel().await.unwrap();
+    h.stop().await;
+}

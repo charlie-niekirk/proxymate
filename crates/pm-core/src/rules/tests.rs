@@ -444,21 +444,25 @@ fn json_set_and_remove() {
                 phase: Phase::Request,
                 pointer: "/user/name".into(),
                 value: json!("b"),
+                raw: None,
             },
             Action::JsonSet {
                 phase: Phase::Request,
                 pointer: "/user/address/city".into(),
                 value: json!("Paris"),
+                raw: None,
             },
             Action::JsonSet {
                 phase: Phase::Request,
                 pointer: "/user/tags/-".into(),
                 value: json!("y"),
+                raw: None,
             },
             Action::JsonSet {
                 phase: Phase::Request,
                 pointer: "/list/0".into(),
                 value: json!(10),
+                raw: None,
             },
             Action::JsonRemove {
                 phase: Phase::Request,
@@ -472,6 +476,7 @@ fn json_set_and_remove() {
                 phase: Phase::Request,
                 pointer: "/a~1b".into(),
                 value: json!(true),
+                raw: None,
             },
         ])],
         &mut req,
@@ -490,6 +495,7 @@ fn json_set_and_remove() {
             phase: Phase::Request,
             pointer: "/x".into(),
             value: json!(1),
+            raw: None,
         }])],
         &mut req,
     );
@@ -703,6 +709,7 @@ fn response_actions() {
                 phase: Phase::Response,
                 pointer: "/ok".into(),
                 value: json!(false),
+                raw: None,
             },
             Action::Breakpoint {
                 request: false,
@@ -785,4 +792,84 @@ fn reframing_drops_the_encoding() {
     assert_eq!(header(&headers, "content-length").as_deref(), Some("12"));
     assert_eq!(header(&headers, "content-encoding"), None);
     assert_eq!(header(&headers, "transfer-encoding"), None);
+}
+
+#[test]
+fn new_actions_compile_and_evaluate() {
+    let bad = |action: Action| {
+        CompiledRule::compile(&any(vec![action]))
+            .err()
+            .map(|e| e.to_string())
+            .unwrap_or_default()
+    };
+    assert!(
+        bad(Action::JsonSet {
+            phase: Phase::Response,
+            pointer: "/a".into(),
+            value: json!(null),
+            raw: Some("{oops".into()),
+        })
+        .contains("raw value isn't JSON")
+    );
+    assert!(
+        bad(Action::FormSet {
+            phase: Phase::Request,
+            name: String::new(),
+            value: "x".into(),
+        })
+        .contains("form field name is empty")
+    );
+    assert!(
+        bad(Action::AddHeader {
+            phase: Phase::Request,
+            name: "bad header".into(),
+            value: "x".into(),
+        })
+        .contains("isn't a valid header name")
+    );
+
+    let mut req = request("http://a.test/");
+    req.body = Some(br#"{"id": 1, "n": 1.50}"#.to_vec());
+    let fx = run_request(
+        vec![any(vec![
+            Action::JsonSet {
+                phase: Phase::Request,
+                pointer: "/id".into(),
+                value: json!(0),
+                raw: Some("12345678901234567890".into()),
+            },
+            Action::AddHeader {
+                phase: Phase::Request,
+                name: "accept".into(),
+                value: "text/plain".into(),
+            },
+        ])],
+        &mut req,
+    );
+    assert!(fx.body_changed && fx.head_changed);
+    assert_eq!(
+        req.body.as_deref(),
+        Some(&br#"{"id": 12345678901234567890, "n": 1.50}"#[..])
+    );
+    let accept: Vec<_> = req.headers.get_all("accept").iter().collect();
+    assert_eq!(accept, ["application/json", "text/plain"]);
+
+    let mut req = request("http://a.test/");
+    req.body = Some(b"a=1&b=2".to_vec());
+    let fx = run_request(
+        vec![any(vec![
+            Action::FormSet {
+                phase: Phase::Request,
+                name: "c".into(),
+                value: "x y".into(),
+            },
+            Action::FormRemove {
+                phase: Phase::Request,
+                name: "a".into(),
+            },
+        ])],
+        &mut req,
+    );
+    assert!(fx.body_changed);
+    assert_eq!(req.body.as_deref(), Some(&b"b=2&c=x%20y"[..]));
 }
