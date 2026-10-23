@@ -1,21 +1,23 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
-import type { ProxySettings_Serialize, RuleSettings } from "@/bindings";
+import type { ProxySettings_Serialize, RuleSettings, ScriptSettings_Serialize } from "@/bindings";
 import { Button } from "@/components/ui/button";
 import { errorText } from "@/lib/actions";
 import { backend } from "@/lib/backend";
-import { proxySettingsKey, queryClient, ruleSettingsKey } from "@/lib/query";
+import { proxySettingsKey, queryClient, ruleSettingsKey, scriptSettingsKey } from "@/lib/query";
 
 import { Note, NumberField, Page, Section } from "./parts";
 
-/** Settings › Advanced: how long breakpoints wait, and the upstream connection pool. */
+/** Settings › Advanced: how long breakpoints wait and scripts may run, and the upstream connection pool. */
 export function AdvancedPage() {
   const { data: rules } = useQuery({ queryKey: ruleSettingsKey, queryFn: () => backend.getRuleSettings() });
   const { data: proxy } = useQuery({ queryKey: proxySettingsKey, queryFn: () => backend.getProxySettings() });
+  const { data: scripts } = useQuery({ queryKey: scriptSettingsKey, queryFn: () => backend.getScriptSettings() });
   return (
     <Page testId="settings-advanced">
       {rules && <BreakpointForm key={JSON.stringify(rules)} settings={rules} />}
+      {scripts && <ScriptTimeoutsForm key={JSON.stringify(scripts)} settings={scripts} />}
       {proxy && <PoolForm key={JSON.stringify(proxy)} settings={proxy} />}
     </Page>
   );
@@ -50,6 +52,59 @@ function BreakpointForm({ settings }: { settings: RuleSettings }) {
         </Button>
       </form>
       <Note error={error} />
+    </Section>
+  );
+}
+
+function ScriptTimeoutsForm({ settings }: { settings: ScriptSettings_Serialize }) {
+  const [draft, setDraft] = useState(settings);
+  const [error, setError] = useState<string | null>(null);
+  const changed = JSON.stringify(draft) !== JSON.stringify(settings);
+  const save = async () => {
+    setError(null);
+    try {
+      queryClient.setQueryData(scriptSettingsKey, await backend.setScriptSettings(draft));
+    } catch (e) {
+      setError(errorText(e));
+    }
+  };
+  return (
+    <Section
+      title="Scripts"
+      description="How long a script may run before it is stopped; the flow then goes on without it. 10 ms to 60 s."
+    >
+      <form
+        className="flex flex-col gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void save();
+        }}
+      >
+        <NumberField
+          label="Rewrite and mock scripts"
+          value={draft.traffic_timeout_ms}
+          onChange={(traffic_timeout_ms) => setDraft({ ...draft, traffic_timeout_ms })}
+          min={10}
+          max={60_000}
+          unit="ms"
+          testId="settings-script-traffic-timeout"
+        />
+        <NumberField
+          label="View scripts"
+          value={draft.view_timeout_ms}
+          onChange={(view_timeout_ms) => setDraft({ ...draft, view_timeout_ms })}
+          min={10}
+          max={60_000}
+          unit="ms"
+          testId="settings-script-view-timeout"
+        />
+        <div>
+          <Button type="submit" size="sm" disabled={!changed || !Object.values(draft).every(Number.isFinite)}>
+            Save
+          </Button>
+        </div>
+        <Note error={error} />
+      </form>
     </Section>
   );
 }

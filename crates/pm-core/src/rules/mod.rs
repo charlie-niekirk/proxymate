@@ -572,15 +572,18 @@ impl Engine {
         let compiled = CompiledRule::compile(rule, &scripts)?;
         // Header and response conditions need each flow's detail: narrow by
         // the summary first, under the lock, then check those outside it.
-        let summary_only = CompiledRule::compile(&Rule {
-            matcher: Matcher {
-                headers: Vec::new(),
-                response: None,
-                ..rule.matcher.clone()
+        let summary_only = CompiledRule::compile(
+            &Rule {
+                matcher: Matcher {
+                    headers: Vec::new(),
+                    response: None,
+                    ..rule.matcher.clone()
+                },
+                actions: Vec::new(),
+                ..rule.clone()
             },
-            actions: Vec::new(),
-            ..rule.clone()
-        }, &scripts)?;
+            &scripts,
+        )?;
         let needs_detail = !rule.matcher.headers.is_empty() || rule.matcher.response.is_some();
         let no_headers = http::HeaderMap::new();
         let candidates: Vec<FlowId> = self.read_store(store, |s| {

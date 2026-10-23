@@ -8,7 +8,8 @@ import {
   type ConsoleEntry_Serialize,
   type Script_Deserialize,
   type Script_Serialize,
-  type ScriptSettings,
+  type ScriptSettings_Deserialize,
+  type ScriptSettings_Serialize,
   type ScriptTestResult_Serialize,
   type ScriptTestSpec_Deserialize,
   type ViewResult_Serialize,
@@ -281,8 +282,8 @@ export interface Backend {
   subscribeScriptConsole(onSeq: (seq: number) => void): Promise<void>;
   /** The script list, pushed now and whenever the UI or an agent changes it. */
   subscribeScripts(onScripts: (scripts: Script_Serialize[]) => void): Promise<void>;
-  getScriptSettings(): Promise<ScriptSettings>;
-  setScriptSettings(settings: ScriptSettings): Promise<ScriptSettings>;
+  getScriptSettings(): Promise<ScriptSettings_Serialize>;
+  setScriptSettings(settings: ScriptSettings_Deserialize): Promise<ScriptSettings_Serialize>;
   /** `proxymate.d.ts`. */
   getScriptTypeDefinitions(): Promise<string>;
   /** Saves a script as `.js` (asking where without `path`); null if cancelled. */

@@ -3,7 +3,7 @@ import type {
   ConsoleEntry_Serialize,
   ConsoleLevel,
   FlowDetail_Serialize,
-  ScriptSettings,
+  ScriptSettings_Serialize,
   ScriptTestResult_Serialize,
   ScriptView_Serialize,
   ViewResult_Serialize,
@@ -61,7 +61,7 @@ export function createMockScripts(now: number, flowSource: MockFlowSource, usedB
       }),
     },
   ];
-  let settings: ScriptSettings = { traffic_timeout_ms: 1000, view_timeout_ms: 3000 };
+  let settings: ScriptSettings_Serialize = { traffic_timeout_ms: 1000, view_timeout_ms: 3000 };
   let console: ConsoleEntry_Serialize[] = [];
   let seq = 0;
   let onScripts: ((s: Script[]) => void) | null = null;
@@ -239,8 +239,8 @@ export function createMockScripts(now: number, flowSource: MockFlowSource, usedB
       return settings;
     },
     async setScriptSettings(next) {
-      settings = next;
-      return next;
+      settings = { ...settings, ...next } as ScriptSettings_Serialize;
+      return settings;
     },
     async getScriptTypeDefinitions() {
       return "// proxymate.d.ts (the app serves the real file)\ndeclare function onView(context: any, flow: any): any;\n";
