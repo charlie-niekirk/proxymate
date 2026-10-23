@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { parseGraphQlBody, type GraphQlOperation } from "@/lib/body/graphql";
+import { jsonText, parseGraphQlBody, type GraphQlOperation } from "@/lib/body/graphql";
 
 import { CodeView } from "./CodeView";
 import { Bar, Note } from "./parts";
@@ -29,8 +29,9 @@ export function GraphQlView({ bytes, contentType }: { bytes: Uint8Array; content
 export function Operations({ ops }: { ops: GraphQlOperation[] }) {
   const [index, setIndex] = useState(0);
   const op = ops[Math.min(index, ops.length - 1)]!;
-  const variables = op.variables === null ? null : JSON.stringify(op.variables, null, 2);
-  const extensions = op.extensions === null ? null : JSON.stringify(op.extensions, null, 2);
+  // Member order and numbers as sent (lib/json/doc), not as JSON.parse leaves them.
+  const variables = jsonText(op.variables);
+  const extensions = jsonText(op.extensions);
   return (
     <div className="flex h-full flex-col" data-testid="graphql-view">
       <Bar>

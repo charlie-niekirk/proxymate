@@ -497,8 +497,9 @@ const Line = memo(function Line({
       data-testid="json-editor-row"
       className={cn(
         "absolute left-0 flex w-full items-center gap-1 pr-2 whitespace-nowrap",
+        // Not the table's solid selection: syntax colours stay readable.
         selected
-          ? "bg-selection text-selection-foreground"
+          ? "bg-accent shadow-[inset_2px_0_0_var(--primary)]"
           : row.status === "added"
             ? "bg-[var(--diff-add-bg)]"
             : row.status === "same"
@@ -507,6 +508,7 @@ const Line = memo(function Line({
       )}
       style={{ top, height: ROW, paddingLeft: 6 + row.depth * 14 }}
       onMouseDown={() => onSelect(row.path)}
+      onDoubleClick={() => onStartEdit(row, "value")}
     >
       {expandable ? (
         <Caret
@@ -525,7 +527,10 @@ const Line = memo(function Line({
         ) : (
           <span
             className={cn(typeof row.label === "number" ? "text-[var(--syntax-punct)]" : "text-[var(--syntax-key)]", row.status === "renamed" && "underline decoration-dotted")}
-            onDoubleClick={() => onStartEdit(row, "key")}
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              onStartEdit(row, "key");
+            }}
           >
             {typeof row.label === "number" ? row.label : JSON.stringify(row.label)}
           </span>
@@ -540,7 +545,7 @@ const Line = memo(function Line({
           testId="json-value-input"
         />
       ) : (
-        <span className="flex min-w-0 items-center gap-1" onDoubleClick={() => onStartEdit(row, "value")}>
+        <span className="flex min-w-0 items-center gap-1">
           <Value row={row} />
         </span>
       )}
