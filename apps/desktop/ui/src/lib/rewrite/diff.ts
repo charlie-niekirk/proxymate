@@ -54,6 +54,15 @@ export interface JsonDiff {
 export function diffJson(original: JNode, edited: JNode, phase: Phase, pins: Pins = NO_PINS, prefix = ""): JsonDiff {
   const out: JsonDiff = { actions: [], replaced: new Set(), wholeBody: false };
   const set = (pointer: string, node: JNode) => out.actions.push(jsonSet(phase, pointer, node));
+  const pinned = [...pins].filter((p) => p.startsWith(`json:${phase}:`)).map((p) => p.slice(`json:${phase}:`.length));
+  // A new member: one set, unless saved sets reach inside it (a reopened
+  // rule's `/a/b` that created `a`): then it is set down to those paths,
+  // so the rule still only adds them.
+  const added = (pointer: string, node: JNode) => {
+    if (node.t === "obj" && node.entries.length > 0 && !pins.has(pinKey.json(phase, pointer)) && pinned.some((p) => p.startsWith(`${pointer}/`))) {
+      for (const e of node.entries) added(`${pointer}/${escapeToken(e.key)}`, e.v);
+    } else set(pointer, node);
+  };
 
   const walk = (before: JNode, after: JNode, pointer: string, holder: number) => {
     if (pointer !== prefix && pins.has(pinKey.json(phase, pointer))) return set(pointer, after);
@@ -92,7 +101,7 @@ export function diffJson(original: JNode, edited: JNode, phase: Phase, pins: Pin
         // Removals first, so a rename onto a removed key (or a swap) lands.
         out.actions.push(...removes);
         for (const [e, next] of inner) walk(e.v, next.v, `${pointer}/${escapeToken(e.key)}`, e.id);
-        for (const [p, v] of sets) set(p, v);
+        for (const [p, v] of sets) added(p, v);
         return;
       }
       case "arr": {

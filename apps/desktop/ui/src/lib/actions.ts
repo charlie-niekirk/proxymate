@@ -100,14 +100,34 @@ export async function refreshRules() {
 }
 
 /**
- * "Map Local…", "Breakpoint…": a rule pre-filled from the flow (in Rust),
- * opened unsaved in the Rules Editor. "Rewrite…" opens the Rewrite dialog
- * instead (`openRewrite`).
+ * "Map Local…", "Breakpoint…": a rule pre-filled from a flow of `store`
+ * (in Rust), opened unsaved in the Rules Editor. "Rewrite…" opens the
+ * Rewrite dialog instead.
  */
-export async function openPreset(flow: number, preset: PresetKind) {
-  const draft = normalizeRule(await backend.draftRule(LIVE_STORE, flow, preset));
+export async function openPreset(store: number, flow: number, preset: PresetKind) {
+  if (preset === "rewrite") return openRewrite(store, flow);
+  const draft = normalizeRule(await backend.draftRule(store, flow, preset));
   useUi.getState().select(flow);
   useUi.getState().openRulesEditor({ draft });
+}
+
+/**
+ * Opens the Rewrite dialog on a flow of `store`, or reopens a saved `rule`
+ * visually on a flow it matches: the selected one if it does, else the
+ * newest.
+ */
+export async function openRewrite(store: number, flow: number | null, rule: Rule | null = null) {
+  if (flow === null && rule) {
+    const matching = await backend.flowsMatchingRule(store, rule, 500);
+    const selected = useUi.getState().selectedId;
+    flow = selected !== null && matching.includes(selected) ? selected : (matching[0] ?? null);
+    if (flow === null) {
+      reportError("No flow to edit this rule on", "no recorded flow in this tab matches it: capture one first");
+      return;
+    }
+  }
+  if (flow === null) return;
+  useUi.getState().openRewrite({ store, flow, rule });
 }
 
 /** Saves a rule (new if it has no id); resolves to the saved rule. */

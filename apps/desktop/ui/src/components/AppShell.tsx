@@ -9,6 +9,7 @@ import { DocumentTabs } from "@/components/DocumentTabs";
 import { FilterBar } from "@/components/FilterBar";
 import { FlowTable } from "@/components/FlowTable/FlowTable";
 import { Footer } from "@/components/Footer";
+import { RewriteDialog } from "@/components/Rewrite/RewriteDialog";
 import { RulesEditor } from "@/components/Rules/RulesEditor";
 import { SettingsDialog } from "@/components/Settings/SettingsDialog";
 import { Sidebar } from "@/components/Sidebar";
@@ -55,6 +56,7 @@ export function AppShell() {
     </ResizablePanelGroup>
     <CertWizard />
     <RulesEditor />
+    <RewriteDialog />
     <ComposeDialog />
     <BreakpointEditor />
     <DeviceSetupSheet />

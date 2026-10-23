@@ -45,6 +45,8 @@ if (import.meta.env.DEV) {
   const requestTab = params.get("requestTab") as RequestTab | null;
   if (requestTab) useUi.getState().setRequestTab(requestTab);
   if (params.has("rules")) useUi.getState().openRulesEditor();
+  const rewrite = params.get("rewrite");
+  if (rewrite !== null) useUi.getState().openRewrite({ store: 0, flow: Number(rewrite) });
 }
 
 if (import.meta.env.DEV && import.meta.env.VITE_PM_REMOTE) {

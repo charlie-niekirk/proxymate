@@ -103,12 +103,6 @@ function expandedTo(node: JNode, depth: number, id = ROOT_ID, out = new Set<numb
 
 const samePath = (a: Path | null, b: Path | null) => !!a && !!b && a.length === b.length && a.every((x, i) => x === b[i]);
 
-/** Radix dialogs close on Escape before an inline editor sees it; pass this as their `onEscapeKeyDown`. */
-export function keepEscapeInEditor(e: KeyboardEvent | globalThis.KeyboardEvent) {
-  const target = e.target instanceof HTMLElement ? e.target : null;
-  if (target?.closest("[data-json-editor] input")) e.preventDefault();
-}
-
 /**
  * The editable JSON tree: virtualised, with typed inline editors, a
  * change-type menu, add / remove / rename / duplicate / reset, undo and
@@ -503,8 +497,13 @@ const Line = memo(function Line({
       data-testid="json-editor-row"
       className={cn(
         "absolute left-0 flex w-full items-center gap-1 pr-2 whitespace-nowrap",
-        "hover:bg-[var(--code-row-hover)] data-[status=added]:bg-[var(--diff-add-bg)] data-[status=changed]:bg-[var(--diff-change-bg)] data-[status=renamed]:bg-[var(--diff-change-bg)]",
-        "data-[selected=true]:bg-selection data-[selected=true]:text-selection-foreground",
+        selected
+          ? "bg-selection text-selection-foreground"
+          : row.status === "added"
+            ? "bg-[var(--diff-add-bg)]"
+            : row.status === "same"
+              ? "hover:bg-[var(--code-row-hover)]"
+              : "bg-[var(--diff-change-bg)]",
       )}
       style={{ top, height: ROW, paddingLeft: 6 + row.depth * 14 }}
       onMouseDown={() => onSelect(row.path)}

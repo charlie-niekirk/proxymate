@@ -8,6 +8,7 @@ import {
   editAndReplay,
   exportHar,
   openDocument,
+  openRewrite,
   pinFlows,
   replayFlow,
   reportError,
@@ -106,6 +107,17 @@ export const COMMANDS: AppCommand[] = [
     run: async () => {
       const id = await sendableSelection();
       if (id !== null) await editAndReplay(useUi.getState().store, id);
+    },
+  },
+  {
+    id: "rewrite",
+    title: "Rewrite selected flow…",
+    group: "Flows",
+    keywords: ["edit", "modify", "rule", "json"],
+    enabled: hasSelection,
+    run: async () => {
+      const id = await sendableSelection();
+      if (id !== null) await openRewrite(useUi.getState().store, id);
     },
   },
   {
@@ -270,7 +282,9 @@ export function isEditable(target: EventTarget | null): boolean {
     target instanceof HTMLInputElement ||
     target instanceof HTMLTextAreaElement ||
     target instanceof HTMLSelectElement ||
-    target.closest(".cm-editor") !== null
+    target.closest(".cm-editor") !== null ||
+    // The JSON editor's own keys (⌫ removes a row, ⌘D duplicates).
+    target.closest("[data-json-editor]") !== null
   );
 }
 

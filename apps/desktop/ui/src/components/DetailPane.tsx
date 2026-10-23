@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { CircleAlert, ShieldAlert, ShieldOff } from "lucide-react";
+import { CircleAlert, PencilLine, ShieldAlert, ShieldOff } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import type { FlowDetail_Serialize, FlowSummary_Serialize } from "@/bindings";
@@ -17,7 +17,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/componen
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { addSslBypass, setInsecureUpstream } from "@/lib/actions";
+import { addSslBypass, openRewrite, setInsecureUpstream } from "@/lib/actions";
 import { backend } from "@/lib/backend";
 import { explainFailure, type FailureHelp } from "@/lib/errors";
 import { formatDuration, formatSize } from "@/lib/flow";
@@ -81,6 +81,18 @@ export function DetailPane() {
         <span className="text-muted-foreground font-mono text-xs tabular-nums">
           {formatDuration(flow.duration_ms)} · {formatSize(flow.resp_size)}
         </span>
+        {detail && flow.method !== "CONNECT" && stream !== "websocket" && (
+          <Button
+            variant="ghost"
+            size="xs"
+            title="Edit this flow and save the changes as a rule"
+            onClick={() => void openRewrite(store, flow.id)}
+            data-testid="inspector-rewrite"
+          >
+            <PencilLine />
+            Rewrite…
+          </Button>
+        )}
         {(flow.tls === "intercepted" || flow.tls === "likely_pinned") && <BypassButton host={flow.host} compact />}
       </div>
       {detail && <RuleBadges rules={detail.rules} />}
