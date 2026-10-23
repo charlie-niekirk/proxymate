@@ -195,6 +195,7 @@ function BreakpointTimeout() {
 function RuleForm({ initial }: { initial: Rule }) {
   const openEditor = useUi((s) => s.openRulesEditor);
   const selectedFlow = useUi((s) => s.selectedId);
+  const store = useUi((s) => s.store);
   const [rule, setRule] = useState(initial);
   const [invalid, setInvalid] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -237,7 +238,7 @@ function RuleForm({ initial }: { initial: Rule }) {
   const runTest = () => {
     if (selectedFlow === null) return;
     setTest((t) => ({ ...t, busy: true }));
-    backend.testRule(rule, selectedFlow).then(
+    backend.testRule(store, rule, selectedFlow).then(
       (result) => setTest({ result, error: null, busy: false }),
       (e: unknown) => setTest({ result: null, error: errorText(e), busy: false }),
     );

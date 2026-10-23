@@ -27,7 +27,8 @@ import type {
   WsMessage_Serialize,
 } from "@/bindings";
 import type { Backend } from "@/lib/backend";
-import { GLOBAL_THROTTLE_RULE_ID, emptyMatcher, matcherSummary, normalizeRule, type Rule } from "@/lib/rules";
+import { GLOBAL_THROTTLE_RULE_ID, emptyMatcher, normalizeRule, type Rule } from "@/lib/rules";
+import { newId, parseDoc, toJson, type JNode } from "@/lib/json/doc";
 import { createMockDevices } from "@/lib/mockDevices";
 import { createMockMcp } from "@/lib/mockMcp";
 
@@ -544,7 +545,7 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
         }
       }
     },
-    async draftRule(flow, preset) {
+    async draftRule(_store, flow, preset) {
       await ready;
       const f = flows[flow];
       if (!f) throw new Error(`unknown flow ${flow}`);
@@ -573,33 +574,55 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
         case "breakpoint":
           return { ...base, name: `Breakpoint · ${target}`, actions: [{ type: "Breakpoint", request: true, response: false }] };
         default:
-          return {
-            ...base,
-            name: `Rewrite · ${target}`,
-            actions: [{ type: "SetHeader", phase: "response", name: "X-Proxymate-Rewrite", value: "1" }],
-          };
+          return { ...base, name: `Rewrite · ${target}` };
       }
     },
-    async testRule(rule, flow) {
+    async testRule(store, rule, flow, bodyLimit) {
       await ready;
       const f = flows[flow];
       if (!f) throw new Error(`unknown flow ${flow}`);
       const r = normalizeRule(rule as Rule);
-      const host = r.matcher.host;
-      const hostOk = !host || (host.kind === "exact" ? host.value === f[4] : hostMatches(f[4], host.value));
-      const methodOk = r.matcher.methods.length === 0 || r.matcher.methods.includes(f[3]);
-      const detail = await this.getFlowDetail(0, flow);
-      const matched = hostOk && methodOk;
+      const mismatch = mockMismatch(r, f);
+      const detail = (await this.getFlowDetail(store, flow))!;
+      const text = async (part: BodyPart) => new TextDecoder().decode(await this.getBody(store, flow, part, true));
+      const limit = bodyLimit ?? 256 * 1024;
+      if (mismatch) {
+        return {
+          matched: false,
+          mismatch,
+          response_matched: null,
+          request: detail.request,
+          request_body: null,
+          response: detail.response,
+          response_body: null,
+          notes: [],
+          request_body_truncated: false,
+          response_body_truncated: false,
+        };
+      }
+      const request = mockApply(r.actions, "request", { headers: detail.request.headers, body: await text("request"), url: detail.request.url, status: 0 });
+      const response = mockApply(r.actions, "response", { headers: detail.response?.headers ?? [], body: await text("response"), url: "", status: detail.response?.status ?? 200 });
       return {
-        matched,
-        mismatch: matched ? null : !hostOk ? `host ${f[4]} doesn't match` : `method ${f[3]} doesn't match`,
-        response_matched: matched ? true : null,
-        request: detail!.request,
-        request_body: null,
-        response: detail!.response,
-        response_body: mockBody(f[9]),
-        notes: matched ? [`(mock) would apply to ${matcherSummary(r.matcher)}`] : [],
+        matched: true,
+        mismatch: null,
+        response_matched: detail.response ? true : null,
+        request: { ...detail.request, url: request.url, headers: request.headers },
+        request_body: request.body.slice(0, limit),
+        response: detail.response && { ...detail.response, status: response.status, headers: response.headers },
+        response_body: response.body.slice(0, limit),
+        notes: [...request.notes, ...response.notes],
+        request_body_truncated: request.body.length > limit,
+        response_body_truncated: response.body.length > limit,
       };
+    },
+    async flowsMatchingRule(_store, rule, limit) {
+      await ready;
+      const r = normalizeRule(rule as Rule);
+      return flows
+        .filter((f) => f[3] !== "CONNECT" && !mockMismatch(r, f))
+        .map((f) => f[0])
+        .reverse()
+        .slice(0, limit);
     },
     async getRuleSettings() {
       return ruleSettings;
@@ -871,4 +894,124 @@ function mockSave(
     setTimeout(() => onProgress({ done: Math.round(total * f), total, finished: f === 1, error: null, path }), i * 150),
   );
   return Promise.resolve(path);
+}
+
+/** The mock's matcher: method, host and path only. */
+function mockMismatch(r: Rule, f: FlowRow_Serialize): string | null {
+  const host = r.matcher.host;
+  if (host && !(host.kind === "exact" ? host.value === f[4] : hostMatches(f[4], host.value))) return `host ${f[4]} doesn't match`;
+  if (r.matcher.methods.length > 0 && !r.matcher.methods.includes(f[3])) return `method ${f[3]} isn't one of ${r.matcher.methods.join(", ")}`;
+  const path = r.matcher.path;
+  if (path && (path.kind === "exact" ? path.value !== f[6] : !globMatches(f[6], path.value))) return `path ${f[6]} doesn't match`;
+  return null;
+}
+
+function globMatches(text: string, glob: string): boolean {
+  const source = glob.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".");
+  return new RegExp(`^${source}$`, "i").test(text);
+}
+
+interface MockMessage {
+  headers: { name: string; value: string }[];
+  body: string;
+  url: string;
+  status: number;
+}
+
+/**
+ * The visual actions of `phase`, applied the way the engine does (JSON
+ * edits on an ordered document, so key order and numbers survive), for
+ * the Rewrite dialog's preview in the browser. The rest only add a note.
+ */
+function mockApply(actions: Rule["actions"], phase: "request" | "response", m: MockMessage): MockMessage & { notes: string[] } {
+  let { headers, body, url, status } = m;
+  const notes: string[] = [];
+  const query = (name: string, value: string | null) => {
+    const u = new URL(url);
+    if (value === null) u.searchParams.delete(name);
+    else u.searchParams.set(name, value);
+    url = u.toString();
+  };
+  for (const a of actions) {
+    if ("phase" in a && a.phase !== phase) continue;
+    switch (a.type) {
+      case "SetHeader":
+        headers = [...headers.filter((h) => h.name.toLowerCase() !== a.name.toLowerCase()), { name: a.name, value: a.value }];
+        break;
+      case "AddHeader":
+        headers = [...headers, { name: a.name, value: a.value }];
+        break;
+      case "RemoveHeader":
+        headers = headers.filter((h) => h.name.toLowerCase() !== a.name.toLowerCase());
+        break;
+      case "SetStatus":
+        if (phase === "response") status = a.status;
+        break;
+      case "SetQuery":
+      case "RemoveQuery":
+        if (phase === "request") query(a.name, a.type === "SetQuery" ? a.value : null);
+        break;
+      case "SetBody":
+        body = a.body;
+        break;
+      case "FormSet":
+      case "FormRemove": {
+        const form = new URLSearchParams(body);
+        if (a.type === "FormSet") form.set(a.name, a.value);
+        else form.delete(a.name);
+        body = form.toString();
+        break;
+      }
+      case "JsonSet":
+      case "JsonRemove":
+        try {
+          const doc = parseDoc(body);
+          const next = a.type === "JsonSet" ? setAtPointer(doc, a.pointer, parseDoc(a.raw ?? JSON.stringify(a.value))) : removeAtPointer(doc, a.pointer);
+          body = toJson(next, /\n/.test(body) ? 2 : 0);
+        } catch (e) {
+          notes.push(`Body action skipped: ${e instanceof Error ? e.message : String(e)}`);
+        }
+        break;
+      default:
+        if (phase === "request") notes.push(`(mock) ${a.type} isn't simulated`);
+    }
+  }
+  return { headers, body, url, status, notes };
+}
+
+function tokensOf(pointer: string): string[] {
+  return pointer === "" ? [] : pointer.slice(1).split("/").map((t) => t.replace(/~1/g, "/").replace(/~0/g, "~"));
+}
+
+function setAtPointer(root: JNode, pointer: string, value: JNode): JNode {
+  const [token, ...rest] = tokensOf(pointer);
+  if (token === undefined) return value;
+  const inner = (child: JNode | undefined) => (rest.length === 0 ? value : setAtPointer(child ?? { t: "obj", entries: [] }, `/${rest.join("/")}`, value));
+  if (root.t === "obj") {
+    const at = root.entries.map((e) => e.key).lastIndexOf(token);
+    if (at < 0) return { t: "obj", entries: [...root.entries, { id: newId(), key: token, v: inner(undefined) }] };
+    return { t: "obj", entries: root.entries.map((e, i) => (i === at ? { ...e, v: inner(e.v) } : e)) };
+  }
+  if (root.t === "arr") {
+    const i = token === "-" ? root.items.length : Number(token);
+    if (i === root.items.length) return { t: "arr", items: [...root.items, { id: newId(), v: inner(undefined) }] };
+    if (!(i >= 0 && i < root.items.length)) throw new Error(`${pointer}: index out of range`);
+    return { t: "arr", items: root.items.map((item, j) => (j === i ? { ...item, v: inner(item.v) } : item)) };
+  }
+  throw new Error(`${pointer}: the parent isn't an object or array`);
+}
+
+function removeAtPointer(root: JNode, pointer: string): JNode {
+  const [token, ...rest] = tokensOf(pointer);
+  if (token === undefined) return root;
+  if (root.t === "obj") {
+    if (rest.length === 0) return { t: "obj", entries: root.entries.filter((e) => e.key !== token) };
+    return { t: "obj", entries: root.entries.map((e) => (e.key === token ? { ...e, v: removeAtPointer(e.v, `/${rest.join("/")}`) } : e)) };
+  }
+  if (root.t === "arr") {
+    const i = Number(token);
+    if (rest.length === 0) return { t: "arr", items: root.items.filter((_, j) => j !== i) };
+    return { t: "arr", items: root.items.map((item, j) => (j === i ? { ...item, v: removeAtPointer(item.v, `/${rest.join("/")}`) } : item)) };
+  }
+  return root;
 }

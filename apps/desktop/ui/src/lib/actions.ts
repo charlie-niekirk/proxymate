@@ -100,11 +100,12 @@ export async function refreshRules() {
 }
 
 /**
- * "Map Local…", "Breakpoint…", "Rewrite…": a rule pre-filled from the flow
- * (in Rust), opened unsaved in the Rules Editor.
+ * "Map Local…", "Breakpoint…": a rule pre-filled from the flow (in Rust),
+ * opened unsaved in the Rules Editor. "Rewrite…" opens the Rewrite dialog
+ * instead (`openRewrite`).
  */
 export async function openPreset(flow: number, preset: PresetKind) {
-  const draft = normalizeRule(await backend.draftRule(flow, preset));
+  const draft = normalizeRule(await backend.draftRule(LIVE_STORE, flow, preset));
   useUi.getState().select(flow);
   useUi.getState().openRulesEditor({ draft });
 }
