@@ -44,6 +44,11 @@ export function newId(): number {
   return nextId++;
 }
 
+/** The id the next member or item gets (a worker starts from it). */
+export function peekNextId(): number {
+  return nextId;
+}
+
 /** Makes sure new ids stay above those of a document parsed elsewhere (in a worker). */
 export function reserveIds(next: number) {
   if (next > nextId) nextId = next;

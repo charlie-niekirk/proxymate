@@ -84,6 +84,8 @@ export function bodySource(
   kind: ContentKind,
   phase: Phase,
   query: KvRow[],
+  /** The body as a document, if it was parsed already (in a worker). */
+  doc?: JNode | null,
 ): BodySource {
   const ct = (contentType ?? "").toLowerCase();
   if (bytes.length === 0) {
@@ -122,7 +124,7 @@ export function bodySource(
   const t = text.trimStart();
   if (kind === "json" || kind === "graphql" || ct.includes("json") || t.startsWith("{") || t.startsWith("[")) {
     try {
-      return { kind: "json", text, doc: parseDoc(text), pretty: /\n/.test(text.trim()) };
+      return { kind: "json", text, doc: doc ?? parseDoc(text), pretty: /\n/.test(text.trim()) };
     } catch {
       // Not valid JSON after all.
     }

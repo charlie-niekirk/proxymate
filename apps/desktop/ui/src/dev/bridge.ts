@@ -15,7 +15,7 @@ export const bridge: {
   /** The open Rewrite dialog. `null` values remove a header, parameter or field. */
   rewrite?: {
     side: (side: Phase) => void;
-    tab: (tab: "Headers" | "Query" | "Body" | "Status") => void;
+    tab: (side: Phase, tab: "Headers" | "Query" | "Body" | "Status") => void;
     edit: (side: Phase, op: PointerEdit) => void;
     whole: (side: Phase, on: boolean) => void;
     header: (side: Phase, header: { name: string; value: string | null }) => void;

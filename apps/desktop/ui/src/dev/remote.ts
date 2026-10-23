@@ -154,9 +154,9 @@ async function apply(cmd: Command) {
   const rw = bridge.rewrite;
   if (cmd.rewriteEdit && rw) {
     const e = cmd.rewriteEdit;
-    if (e.side) rw.side(e.side);
-    if (e.tab) rw.tab(e.tab);
     const side = e.side ?? "response";
+    if (e.side) rw.side(e.side);
+    if (e.tab) rw.tab(side, e.tab);
     for (const op of e.json ?? []) rw.edit(side, op);
     for (const h of e.headers ?? []) rw.header(side, h);
     for (const q of e.query ?? []) rw.query(q);

@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import type { Phase, RuleTestResult_Serialize } from "@/bindings";
 import { languageFor } from "@/lib/compose";
 import { Centered } from "@/components/BodyViewer/parts";
+import { docInWorker, WORKER_THRESHOLD } from "@/components/BodyViewer/workers/client";
 import { CodeEditor } from "@/components/Compose/CodeEditor";
 import { MethodPill } from "@/components/FlowTable/cells";
 import { keepEscapeInEditor } from "@/components/JsonEditor/escape";
@@ -30,6 +31,7 @@ import {
   initialEdits,
   MANY_ACTIONS,
   PREVIEW_LIMIT,
+  TREE_MAX,
   rawQuery,
   rebuild,
   type BodyEdit,
@@ -46,6 +48,12 @@ import { MatcherChips, type MatchChoice } from "./MatcherChips";
 import { Preview } from "./Preview";
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/** The first byte that isn't JSON whitespace. */
+function firstByte(bytes: Uint8Array): number {
+  for (const b of bytes) if (b !== 0x20 && b !== 0x0a && b !== 0x0d && b !== 0x09) return b;
+  return 0;
+}
 
 interface Loaded {
   source: Source;
@@ -69,6 +77,12 @@ async function load(store: number, flow: number, rule: Rule | null): Promise<Loa
   const [reqBytes, resBytes] = await Promise.all(
     (["request", "response"] as const).map(async (part) => new Uint8Array(await backend.getBody(store, flow, part, true))),
   );
+  // Large JSON bodies become documents off the main thread.
+  const preparse = async (bytes: Uint8Array) => {
+    if (bytes.length < WORKER_THRESHOLD || bytes.length > TREE_MAX || ![0x7b, 0x5b].includes(firstByte(bytes))) return null;
+    return docInWorker(bytes).catch(() => null);
+  };
+  const [reqDoc, resDoc] = [await preparse(reqBytes!), await preparse(resBytes!)];
   const query = parsePairs(rawQuery(detail.request.url), newId);
   const contentType = (headers: { name: string; value: string }[]) => headers.find((h) => h.name.toLowerCase() === "content-type")?.value ?? null;
   const target: FlowTarget = {
@@ -89,13 +103,13 @@ async function load(store: number, flow: number, rule: Rule | null): Promise<Loa
     request: {
       headers: headerRows(detail.request.headers),
       query,
-      body: bodySource(reqBytes!, reqType, detail.request_body.kind, "request", query),
+      body: bodySource(reqBytes!, reqType, detail.request_body.kind, "request", query, reqDoc),
       contentType: reqType,
     },
     response: detail.response && {
       status: detail.response.status,
       headers: headerRows(detail.response.headers),
-      body: bodySource(resBytes!, resType, detail.response_body.kind, "response", []),
+      body: bodySource(resBytes!, resType, detail.response_body.kind, "response", [], resDoc),
       contentType: resType,
     },
   };
@@ -272,7 +286,7 @@ function RewriteEditor({ loaded, onDone }: { loaded: Loaded; onDone: () => void 
   useEffect(() => {
     bridge.rewrite = {
       side: (s) => setSide(s),
-      tab: (t) => setTabs((prev) => ({ ...prev, [side]: t })),
+      tab: (s, t) => setTabs((prev) => ({ ...prev, [s]: t })),
       edit: (s, op) => editByPointer(s === "request" ? reqBody.tree : resBody.tree, op),
       whole: (s, on) => (s === "request" ? reqBody : resBody).setWhole(on),
       header: (s, header) => {
