@@ -239,6 +239,13 @@ export const COMMANDS: AppCommand[] = [
     run: () => useUi.getState().setStore(LIVE_STORE),
   },
   { id: "rules", title: "Rules…", group: "Windows", keywords: ["map local", "rewrite"], run: () => useUi.getState().openRulesEditor() },
+  {
+    id: "scripts",
+    title: "Scripts…",
+    group: "Windows",
+    keywords: ["javascript", "decode", "base64", "mock", "view"],
+    run: () => useUi.getState().openScripts(),
+  },
   { id: "breakpoints", title: "Breakpoints…", group: "Windows", run: () => useUi.getState().setBreakpointsOpen(true) },
   {
     id: "devices",

@@ -1,6 +1,6 @@
 import { toast } from "sonner";
 
-import type { FlowSelection, PresetKind, RequestSpec_Deserialize, SaveProgress_Serialize } from "@/bindings";
+import type { FlowSelection, PresetKind, RequestSpec_Deserialize, SaveProgress_Serialize, ScriptKind } from "@/bindings";
 import { backend } from "@/lib/backend";
 import {
   androidKey,
@@ -10,11 +10,13 @@ import {
   proxyStatusKey,
   queryClient,
   rulesKey,
+  scriptsKey,
   sslSettingsKey,
   systemProxyKey,
   trustStatusKey,
 } from "@/lib/query";
 import { GLOBAL_THROTTLE_RULE_ID, normalizeRule, withThrottle, type Rule, type ThrottlePreset } from "@/lib/rules";
+import { KIND_LABELS, newScript, normalizeScript, type Script } from "@/lib/scripts";
 import { LIVE_STORE, useUi } from "@/store/ui";
 
 /** Clears every live flow. The view's structural delta then empties the table. */
@@ -291,4 +293,90 @@ export async function setLanInterface(name: string) {
 /** Points an emulator's proxy at us, or clears it. */
 export async function setAndroidProxy(serial: string, on: boolean) {
   queryClient.setQueryData(androidKey, await backend.setAndroidProxy(serial, on));
+}
+
+// ---- Scripts (M14) ----
+
+/** Refetches the scripts list after a change (the engine also pushes it). */
+export async function refreshScripts() {
+  await queryClient.invalidateQueries({ queryKey: scriptsKey });
+}
+
+/** Saves a script (new if it has no id); resolves to the saved script. */
+export async function saveScript(script: Script): Promise<Script> {
+  const saved = script.id ? await backend.updateScript(script) : await backend.createScript(script);
+  await refreshScripts();
+  return normalizeScript(saved);
+}
+
+export async function deleteScript(id: string) {
+  await backend.deleteScript(id);
+  await refreshScripts();
+}
+
+export async function setScriptEnabled(id: string, enabled: boolean) {
+  await backend.setScriptEnabled(id, enabled);
+  await refreshScripts();
+}
+
+export async function deleteAgentScripts(): Promise<number> {
+  const n = await backend.deleteAgentScripts();
+  await refreshScripts();
+  return n;
+}
+
+/**
+ * The flow menu's "Script ›": a new script of `kind` from its template,
+ * named after the flow; a view script also matches the flow's host and path.
+ */
+export async function newScriptForFlow(store: number, flow: number, kind: ScriptKind) {
+  const summary = await backend.getFlow(store, flow);
+  const script = newScript(kind);
+  if (summary) {
+    script.name = `${KIND_LABELS[kind]} · ${summary.host}${summary.path}`;
+    if (script.view) {
+      script.view.matcher = {
+        ...script.view.matcher,
+        host: { kind: "exact", value: summary.host, case_insensitive: false },
+        path: { kind: "exact", value: summary.path, case_insensitive: false },
+      };
+    }
+  }
+  useUi.getState().openScripts({ draft: script });
+}
+
+/**
+ * A rule that runs `script` on requests like the selected flow (its
+ * method, host and path), opened unsaved in the Rules Editor.
+ */
+export async function ruleForScript(store: number, flow: number, script: Script) {
+  const draft = normalizeRule(await backend.draftRule(store, flow, script.kind === "mock" ? "map_local" : "rewrite"));
+  const target = draft.name.replace(/^[^·]*·\s*/, "");
+  useUi.getState().openRulesEditor({
+    draft: {
+      ...draft,
+      name: `${script.name} · ${target}`,
+      origin: { kind: "user" },
+      actions: [{ type: "Script", script_id: script.id }],
+    },
+  });
+}
+
+/** Saves a script as a `.js` file (the app asks where). */
+export async function exportScript(id: string) {
+  const path = await backend.exportScript(id, null);
+  if (path) toast.success("Script exported", { description: path });
+}
+
+/** Imports a `.js` file as a new script; resolves to it (null if cancelled). */
+export async function importScript(): Promise<Script | null> {
+  const script = await backend.importScript(null);
+  await refreshScripts();
+  return script ? normalizeScript(script) : null;
+}
+
+/** Copies `proxymate.d.ts`, for an editor or an agent. */
+export async function copyScriptTypes() {
+  await navigator.clipboard.writeText(await backend.getScriptTypeDefinitions());
+  toast.success("Copied proxymate.d.ts");
 }

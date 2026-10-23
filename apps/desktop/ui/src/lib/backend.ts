@@ -5,6 +5,13 @@ import { listen } from "@tauri-apps/api/event";
 import {
   commands,
   type AndroidStatus_Serialize,
+  type ConsoleEntry_Serialize,
+  type Script_Deserialize,
+  type Script_Serialize,
+  type ScriptSettings,
+  type ScriptTestResult_Serialize,
+  type ScriptTestSpec_Deserialize,
+  type ViewResult_Serialize,
   type BodyPart,
   type BreakpointInfo_Deserialize,
   type BreakpointInfo_Serialize,
@@ -251,6 +258,37 @@ export interface Backend {
   setUpdateSettings(settings: UpdateSettings): Promise<UpdateSettings>;
   /** Same as the app menu's "Check for Updates…"; the answer is a native dialog. */
   checkForUpdates(): Promise<void>;
+
+  // ---- Scripts (M14) ----
+  /** Every script: view scripts, then rewrite, then mock; by name within each. */
+  listScripts(): Promise<Script_Serialize[]>;
+  /** Saves a new script (a fresh id is assigned); rejects with what's wrong with it. */
+  createScript(script: Script_Deserialize): Promise<Script_Serialize>;
+  updateScript(script: Script_Deserialize): Promise<Script_Serialize>;
+  setScriptEnabled(id: string, enabled: boolean): Promise<Script_Serialize>;
+  /** Rejects while a rule runs the script, naming those rules. */
+  deleteScript(id: string): Promise<void>;
+  /** Deletes the agent-created scripts no rule runs; resolves to how many. */
+  deleteAgentScripts(): Promise<number>;
+  /** Dry run of a script (saved, or unsaved source) against a recorded flow. */
+  testScript(store: number, flow: number, spec: ScriptTestSpec_Deserialize): Promise<ScriptTestResult_Serialize>;
+  /** What the enabled view scripts make of one body; empty when none applies. */
+  getFlowViews(store: number, flow: number, part: BodyPart): Promise<ViewResult_Serialize[]>;
+  /** Console entries newer than `since`, oldest first, at most `limit`. */
+  getScriptConsole(since: number | null, limit: number): Promise<ConsoleEntry_Serialize[]>;
+  clearScriptConsole(): Promise<void>;
+  /** The newest console sequence number, pushed whenever entries are added. */
+  subscribeScriptConsole(onSeq: (seq: number) => void): Promise<void>;
+  /** The script list, pushed now and whenever the UI or an agent changes it. */
+  subscribeScripts(onScripts: (scripts: Script_Serialize[]) => void): Promise<void>;
+  getScriptSettings(): Promise<ScriptSettings>;
+  setScriptSettings(settings: ScriptSettings): Promise<ScriptSettings>;
+  /** `proxymate.d.ts`. */
+  getScriptTypeDefinitions(): Promise<string>;
+  /** Saves a script as `.js` (asking where without `path`); null if cancelled. */
+  exportScript(id: string, path: string | null): Promise<string | null>;
+  /** Imports a `.js` file (asking which without `path`); null if cancelled. */
+  importScript(path: string | null): Promise<Script_Serialize | null>;
 }
 
 type Result<T> = { status: "ok"; data: T } | { status: "error"; error: string };
@@ -404,6 +442,34 @@ const tauriBackend: Backend = {
   getUpdateSettings: () => commands.getUpdateSettings(),
   setUpdateSettings: (settings) => unwrap(commands.setUpdateSettings(settings)),
   checkForUpdates: () => commands.checkForUpdates(),
+  listScripts: () => commands.listScripts(),
+  createScript: (script) => unwrap(commands.createScript(script)),
+  updateScript: (script) => unwrap(commands.updateScript(script)),
+  setScriptEnabled: (id, enabled) => unwrap(commands.setScriptEnabled(id, enabled)),
+  deleteScript: async (id) => {
+    await unwrap(commands.deleteScript(id));
+  },
+  deleteAgentScripts: () => unwrap(commands.deleteAgentScripts()),
+  testScript: (store, flow, spec) => unwrap(commands.testScript(store, flow, spec)),
+  getFlowViews: (store, flow, part) => unwrap(commands.getFlowViews(store, flow, part)),
+  getScriptConsole: (since, limit) => commands.getScriptConsole(since, limit),
+  clearScriptConsole: () => commands.clearScriptConsole(),
+  subscribeScriptConsole: async (onSeq) => {
+    const channel = new Channel<number>();
+    channel.onmessage = onSeq;
+    await commands.subscribeScriptConsole(channel);
+  },
+  subscribeScripts: async (onScripts) => {
+    // The channel carries what Rust serializes; the binding names the other shape.
+    const channel = new Channel<Script_Serialize[]>();
+    channel.onmessage = onScripts;
+    await commands.subscribeScripts(channel as unknown as Channel<Script_Deserialize[]>);
+  },
+  getScriptSettings: () => commands.getScriptSettings(),
+  setScriptSettings: (settings) => unwrap(commands.setScriptSettings(settings)),
+  getScriptTypeDefinitions: () => commands.getScriptTypeDefinitions(),
+  exportScript: (id, path) => unwrap(commands.exportScript(id, path)),
+  importScript: (path) => unwrap(commands.importScript(path)),
 };
 
 function progressChannel(onProgress: (p: SaveProgress_Serialize) => void) {

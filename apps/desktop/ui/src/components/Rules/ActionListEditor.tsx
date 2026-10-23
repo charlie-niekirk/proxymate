@@ -16,6 +16,8 @@ import {
 } from "@/lib/rules";
 
 import { parseLossless } from "@/lib/body/losslessJson";
+import { useScripts } from "@/hooks/useScripts";
+import { useUi } from "@/store/ui";
 
 import { Checkbox, Choice, Field, NumberInput, PatternInput, PhaseChoice, TextArea } from "./fields";
 
@@ -314,8 +316,42 @@ function ActionForm({ action, onChange }: { action: Action; onChange: (action: A
           )}
         </Field>
       );
+    case "Script":
+      return <ScriptActionForm action={action} onChange={onChange} />;
   }
 }
+
+/** Picks the rewrite or mock script a rule runs; view scripts run on their own. */
+function ScriptActionForm({ action, onChange }: { action: Extract<Action, { type: "Script" }>; onChange: (a: Action) => void }) {
+  const scripts = useScripts().filter((s) => s.kind !== "view");
+  const openScripts = useUi((s) => s.openScripts);
+  const current = scripts.find((s) => s.id === action.script_id);
+  const options = [
+    ...(current ? [] : [{ value: NO_SCRIPT, label: action.script_id ? "(missing script)" : "Choose a script…" }]),
+    ...scripts.map((s) => ({ value: s.id, label: `${s.name} · ${s.kind}${s.enabled ? "" : " (off)"}` })),
+  ];
+  return (
+    <Field label="Script">
+      <Choice
+        value={current ? action.script_id : NO_SCRIPT}
+        options={options}
+        onChange={(id) => id !== NO_SCRIPT && onChange({ ...action, script_id: id })}
+        className="w-64"
+        testId="script-picker"
+      />
+      <Button
+        variant="ghost"
+        size="xs"
+        onClick={() => openScripts(current ? { scriptId: current.id } : {})}
+        title={current ? "Open the script" : "Open the Scripts window"}
+      >
+        {current ? "Edit…" : "Scripts…"}
+      </Button>
+    </Field>
+  );
+}
+
+const NO_SCRIPT = "__none__";
 
 function MapLocalForm({ action, onChange }: { action: Extract<Action, { type: "MapLocal" }>; onChange: (a: Action) => void }) {
   const setSource = (source: MapLocalSource) => onChange({ ...action, source });

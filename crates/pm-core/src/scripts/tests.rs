@@ -542,3 +542,82 @@ async fn the_api_surface_matches_api_surface_txt() {
         assert_eq!(eval(&check).await, "true", "{line}");
     }
 }
+
+/// The Scripts window's templates (`apps/desktop/ui/src/lib/script-templates`)
+/// do what they say.
+#[tokio::test]
+async fn templates_run() {
+    macro_rules! template {
+        ($name:literal) => {
+            include_str!(concat!("../../../../apps/desktop/ui/src/lib/script-templates/", $name, ".js"))
+        };
+    }
+    let host = ScriptHost::new();
+    let view = |source: &'static str, req: JsRequest, resp: JsResponse, part: pm_model::BodyPart| {
+        let host = &host;
+        async move {
+            let info = CallInfo {
+                flow_id: Some(1),
+                rule: None,
+                part: Some(part),
+            };
+            match host
+                .run(code("view", source), Call::View(req, Some(resp)), info, Duration::from_secs(3), true)
+                .await
+                .output
+            {
+                Ok(Output::Views(views)) => views,
+                other => panic!("{other:?}"),
+            }
+        }
+    };
+
+    // {"user":"ada","id":12345678901234567890}, URL-safe and unpadded.
+    let payload = "eyJ1c2VyIjoiYWRhIiwiaWQiOjEyMzQ1Njc4OTAxMjM0NTY3ODkwfQ";
+    let body = format!(r#"{{"ok":true,"name":"plain text","data":{{"payload":"{payload}"}}}}"#);
+    let views = view(
+        template!("decode-base64-json"),
+        request("text/plain", b""),
+        response("application/json", body.as_bytes()),
+        pm_model::BodyPart::Response,
+    )
+    .await;
+    assert_eq!(views.len(), 1, "{views:?}");
+    assert_eq!(views[0].title, "data.payload");
+    assert_eq!(
+        views[0].text.as_deref(),
+        Some("{\n  \"user\": \"ada\",\n  \"id\": 12345678901234567890\n}")
+    );
+    // Form bodies too.
+    let views = view(
+        template!("decode-base64-json"),
+        request("application/x-www-form-urlencoded", format!("state={payload}").as_bytes()),
+        response("text/plain", b""),
+        pm_model::BodyPart::Request,
+    )
+    .await;
+    assert_eq!(views[0].title, "state");
+
+    // eyJhbGciOiJIUzI1NiJ9 . {"sub":"42","exp":1760000000} . signature
+    let jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiI0MiIsImV4cCI6MTc2MDAwMDAwMH0.c2lnbmF0dXJl";
+    let mut req = request("text/plain", b"");
+    req.headers.push(("authorization".into(), format!("Bearer {jwt}")));
+    let views = view(template!("decode-jwt"), req, response("text/plain", b""), pm_model::BodyPart::Request).await;
+    assert_eq!(views[0].title, "JWT · Authorization");
+    let text = views[0].text.as_deref().unwrap();
+    assert!(text.contains("\"sub\": \"42\""), "{text}");
+    assert!(text.contains("2025-10-09T08:53:20.000Z"), "{text}");
+
+    let out = on_request(template!("add-header"), request("text/plain", b"")).await;
+    assert!(out.headers.unwrap().contains(&("x-proxymate".into(), "1".into())));
+
+    let out = on_response(template!("modify-json"), response("application/json", br#"{"a":1}"#)).await;
+    assert_eq!(out.body.unwrap(), br#"{"a":1,"debug":true}"#);
+
+    let out = on_mock(template!("mock-json")).await.unwrap();
+    assert_eq!(out.status, 200);
+    let mocked: serde_json::Value = serde_json::from_slice(&out.body).unwrap();
+    assert_eq!(mocked["path"], "/v1/items");
+    assert_eq!(mocked["query"]["a"], serde_json::json!(["1", "3"]));
+    assert_eq!(mocked["call"], 1);
+}

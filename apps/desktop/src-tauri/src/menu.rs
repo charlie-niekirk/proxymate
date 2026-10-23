@@ -23,6 +23,7 @@ const FILE_ITEMS: &[&[(&str, &str, &str)]] = &[
         ("save-session", "Save Session…", "CmdOrCtrl+S"),
         ("export-har", "Export HAR…", "CmdOrCtrl+Shift+E"),
     ],
+    &[("scripts", "Scripts…", "CmdOrCtrl+Shift+J")],
 ];
 
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {

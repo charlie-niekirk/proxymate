@@ -28,6 +28,11 @@ export const trustStatusKey = ["trust-status"] as const;
 export const systemProxyKey = ["system-proxy"] as const;
 export const rulesKey = ["rules"] as const;
 export const ruleSettingsKey = ["rule-settings"] as const;
+export const scriptsKey = ["scripts"] as const;
+export const scriptSettingsKey = ["script-settings"] as const;
+/** A body's view-script results; `version` changes whenever a script does. */
+export const flowViewsKey = (store: number, id: number, part: string, version: string) =>
+  ["flow-views", store, id, part, version] as const;
 export const deviceAccessKey = ["device-access"] as const;
 export const simulatorKey = ["simulator"] as const;
 export const androidKey = ["android"] as const;

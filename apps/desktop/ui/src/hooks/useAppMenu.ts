@@ -32,6 +32,9 @@ export function useAppMenu() {
           case "export-har":
             void exportHar();
             break;
+          case "scripts":
+            useUi.getState().openScripts();
+            break;
         }
       })
       .then((unlisten) => {

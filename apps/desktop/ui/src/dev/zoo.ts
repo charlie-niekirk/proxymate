@@ -99,7 +99,7 @@ export async function loadZoo(): Promise<MockFlow[]> {
           error: null,
           tls: null,
           timing: { dns_ms: 1.2, connect_ms: 3.4, tls_ms: 8.9, ttfb_ms: 20, transfer_ms: 4, reused_connection: false },
-          rules: { applied: [], rewrite_skipped: null, breakpoint_timeout: false, mocked: false },
+          rules: { applied: [], rewrite_skipped: null, breakpoint_timeout: false, mocked: false, scripts: [] },
         },
         bodies: {
           request: { raw: request, decoded: request },

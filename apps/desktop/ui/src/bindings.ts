@@ -166,6 +166,44 @@ export const commands = {
 	checkForUpdates: () => __TAURI_INVOKE<void>("check_for_updates"),
 	/**  Flows of a store (newest first) a rule's matcher matches. */
 	flowsMatchingRule: (store: number, rule: Rule_Deserialize, limit: number) => typedError<number[], string>(__TAURI_INVOKE("flows_matching_rule", { store, rule, limit })),
+	/**  Every script, grouped by kind (view, rewrite, mock), then by name. */
+	listScripts: () => __TAURI_INVOKE<Script_Serialize[]>("list_scripts"),
+	/**
+	 *  Saves a new script (a fresh id is assigned). The error says what's wrong
+	 *  with it (a syntax error, a missing entry point).
+	 */
+	createScript: (script: Script_Deserialize) => typedError<Script_Serialize, string>(__TAURI_INVOKE("create_script", { script })),
+	updateScript: (script: Script_Deserialize) => typedError<Script_Serialize, string>(__TAURI_INVOKE("update_script", { script })),
+	setScriptEnabled: (id: string, enabled: boolean) => typedError<Script_Serialize, string>(__TAURI_INVOKE("set_script_enabled", { id, enabled })),
+	/**  Refused while a rule runs the script; the error names those rules. */
+	deleteScript: (id: string) => typedError<null, string>(__TAURI_INVOKE("delete_script", { id })),
+	/**  Deletes every agent-created script no rule runs; returns how many. */
+	deleteAgentScripts: () => typedError<number, string>(__TAURI_INVOKE("delete_agent_scripts")),
+	/**  Dry run of a script (saved, or unsaved source) against a recorded flow. */
+	testScript: (store: number, flow: number, spec: ScriptTestSpec_Deserialize) => typedError<ScriptTestResult_Serialize, string>(__TAURI_INVOKE("test_script", { store, flow, spec })),
+	/**  The view scripts' views of one body; empty when none applies. */
+	getFlowViews: (store: number, flow: number, part: BodyPart) => typedError<ViewResult_Serialize[], string>(__TAURI_INVOKE("get_flow_views", { store, flow, part })),
+	/**  Console entries newer than `since`, oldest first. */
+	getScriptConsole: (since: number | null, limit: number) => __TAURI_INVOKE<ConsoleEntry_Serialize[]>("get_script_console", { since, limit }),
+	clearScriptConsole: () => __TAURI_INVOKE<void>("clear_script_console"),
+	/**  Pushes the newest console sequence number whenever entries are added. */
+	subscribeScriptConsole: (onEntries: Channel<number>) => __TAURI_INVOKE<void>("subscribe_script_console", { onEntries }),
+	/**  Streams the script list whenever anyone (the UI or an agent) changes it. */
+	subscribeScripts: (onScripts: Channel<Script_Deserialize[]>) => __TAURI_INVOKE<void>("subscribe_scripts", { onScripts }),
+	getScriptSettings: () => __TAURI_INVOKE<ScriptSettings_Serialize>("get_script_settings"),
+	setScriptSettings: (settings: ScriptSettings_Deserialize) => typedError<ScriptSettings_Serialize, string>(__TAURI_INVOKE("set_script_settings", { settings })),
+	/**  `proxymate.d.ts`, for "Copy type definitions". */
+	getScriptTypeDefinitions: () => __TAURI_INVOKE<string>("get_script_type_definitions"),
+	/**
+	 *  Saves a script as a `.js` file with a metadata header; without `path`,
+	 *  asks where. `None` if the user cancelled.
+	 */
+	exportScript: (id: string, path: string | null) => typedError<string | null, string>(__TAURI_INVOKE("export_script", { id, path })),
+	/**
+	 *  Imports a `.js` file as a new script; without `path`, asks for one.
+	 *  `None` if the user cancelled.
+	 */
+	importScript: (path: string | null) => typedError<Script_Serialize | null, string>(__TAURI_INVOKE("import_script", { path })),
 };
 
 /* Types */

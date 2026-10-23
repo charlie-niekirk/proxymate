@@ -14,6 +14,7 @@ import { queryClient, ruleSettingsKey, rulesKey } from "@/lib/query";
 import { isVisual } from "@/lib/rewrite/diff";
 import { actionSummary, isBuiltin, matcherSummary, newRule, normalizeRule, type Rule } from "@/lib/rules";
 import { cn } from "@/lib/utils";
+import { useScriptNames } from "@/hooks/useScripts";
 import { useUi } from "@/store/ui";
 
 import { ActionListEditor } from "./ActionListEditor";
@@ -75,6 +76,7 @@ function RuleList({ rules, selected, hasDraft }: { rules: Rule[]; selected: stri
   const [dragged, setDragged] = useState<string | null>(null);
   const [over, setOver] = useState<string | null>(null);
   const agentRules = rules.filter((r) => r.origin.kind === "agent").length;
+  const scriptNames = useScriptNames();
 
   const onDrop = (target: string) => {
     if (!dragged || dragged === target) return;
@@ -161,7 +163,7 @@ function RuleList({ rules, selected, hasDraft }: { rules: Rule[]; selected: stri
                 </div>
                 <div className="truncate font-mono text-2xs opacity-70">{matcherSummary(rule.matcher)}</div>
                 <div className="truncate text-2xs opacity-70">
-                  {rule.actions.map(actionSummary).join(" · ") || "no actions"}
+                  {rule.actions.map((a) => actionSummary(a, scriptNames)).join(" · ") || "no actions"}
                 </div>
               </div>
             </div>

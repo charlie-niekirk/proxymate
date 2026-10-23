@@ -13,6 +13,7 @@ import type {
 } from "@/bindings";
 import type { ViewerId } from "@/components/BodyViewer/registry";
 import type { Rule } from "@/lib/rules";
+import type { Script } from "@/lib/scripts";
 import { usePrefs } from "@/store/prefs";
 
 export interface ViewStats {
@@ -81,6 +82,12 @@ interface UiState {
    * (a saved one reopened visually), or null for a new rewrite.
    */
   rewrite: { open: boolean; store: number; flow: number | null; rule: Rule | null; seq: number };
+  /** The Scripts window, like the Rules Editor: a saved script or an unsaved draft. */
+  scripts: { open: boolean; scriptId: string | null; draft: Script | null; seq: number };
+  /** The script view last picked in a body viewer (`script:<id>:<n>`); sticks across flows. */
+  pickedScriptView: string | null;
+  /** The user chose a built-in viewer over script views: stop auto-selecting them. */
+  scriptViewsOff: boolean;
   breakpointsOpen: boolean;
   /** The breakpoint shown in the Breakpoint Editor. */
   selectedBreakpoint: number | null;
@@ -115,6 +122,10 @@ interface UiState {
   closeRulesEditor(): void;
   openRewrite(target: { store: number; flow: number; rule?: Rule | null }): void;
   closeRewrite(): void;
+  openScripts(target?: { scriptId?: string | null; draft?: Script | null }): void;
+  closeScripts(): void;
+  /** A script view (or, with null, a built-in viewer) was picked in a body viewer. */
+  pickScriptView(value: string | null): void;
   setBreakpointsOpen(open: boolean): void;
   selectBreakpoint(id: number | null): void;
   setDeviceSetupOpen(open: boolean): void;
@@ -144,6 +155,9 @@ export const useUi = create<UiState>()((set) => ({
   certWizardOpen: false,
   rulesEditor: { open: false, ruleId: null, draft: null, seq: 0 },
   rewrite: { open: false, store: LIVE_STORE, flow: null, rule: null, seq: 0 },
+  scripts: { open: false, scriptId: null, draft: null, seq: 0 },
+  pickedScriptView: null,
+  scriptViewsOff: false,
   breakpointsOpen: false,
   selectedBreakpoint: null,
   deviceSetupOpen: false,
@@ -197,6 +211,17 @@ export const useUi = create<UiState>()((set) => ({
   openRewrite: ({ store, flow, rule = null }) =>
     set((s) => ({ rewrite: { open: true, store, flow, rule, seq: s.rewrite.seq + 1 } })),
   closeRewrite: () => set((s) => ({ rewrite: { ...s.rewrite, open: false } })),
+  openScripts: (target = {}) =>
+    set((s) => ({
+      scripts: {
+        open: true,
+        draft: target.draft ?? null,
+        scriptId: target.draft ? null : target.scriptId !== undefined ? target.scriptId : s.scripts.scriptId,
+        seq: s.scripts.seq + 1,
+      },
+    })),
+  closeScripts: () => set((s) => ({ scripts: { ...s.scripts, open: false, draft: null } })),
+  pickScriptView: (value) => set({ pickedScriptView: value, scriptViewsOff: value === null }),
   setBreakpointsOpen: (breakpointsOpen) => set({ breakpointsOpen }),
   selectBreakpoint: (selectedBreakpoint) => set({ selectedBreakpoint }),
   setDeviceSetupOpen: (deviceSetupOpen) => set({ deviceSetupOpen }),

@@ -15,6 +15,7 @@ import {
 } from "@/lib/actions";
 import { normalizeRule, THROTTLE_PRESETS } from "@/lib/rules";
 import type { PointerEdit } from "@/components/Rewrite/RewriteDialog";
+import { TEMPLATES, newScript } from "@/lib/scripts";
 import { forceTheme } from "@/lib/theme";
 import { usePrefs } from "@/store/prefs";
 import { useUi, type DeviceTab, type RequestTab, type ResponseTab, type SettingsPage } from "@/store/ui";
@@ -60,6 +61,12 @@ import { useUi, type DeviceTab, type RequestTab, type ResponseTab, type Settings
  * - `{"openDocument": "/path/x.har"}`, `{"closeDocument": 1}`.
  * - `{"saveSession": "/path/x.proxymate"}` saves the active tab;
  *   `{"exportHar": "/path/x.har"}` exports what the table shows.
+ * - M14: `{"scripts": true}` / `false` opens or closes the Scripts window;
+ *   `{"scripts": "<id>"}` opens it on that script;
+ *   `{"scriptTemplate": "decode-base64-json"}` opens a new script from a
+ *   template; `{"scriptSource": "…"}` replaces the open draft's source (and
+ *   remounts the editor); `{"saveScript": true}` presses Save;
+ *   `{"testScript": "response"}` presses Test (view scripts: that body).
  */
 interface Command {
   select?: number;
@@ -92,6 +99,11 @@ interface Command {
     save?: boolean;
   };
   rulesEditor?: boolean;
+  scripts?: boolean | string;
+  scriptTemplate?: string;
+  scriptSource?: string;
+  saveScript?: boolean;
+  testScript?: "request" | "response";
   testRule?: boolean;
   saveRule?: boolean;
   throttle?: string;
@@ -168,6 +180,19 @@ async function apply(cmd: Command) {
   }
   if (cmd.rulesEditor === true) ui.openRulesEditor();
   if (cmd.rulesEditor === false) ui.closeRulesEditor();
+  if (cmd.scripts === true) ui.openScripts();
+  if (cmd.scripts === false) ui.closeScripts();
+  if (typeof cmd.scripts === "string") ui.openScripts({ scriptId: cmd.scripts });
+  if (cmd.scriptTemplate) {
+    const template = TEMPLATES.find((t) => t.id === cmd.scriptTemplate);
+    if (template) ui.openScripts({ draft: newScript(template.kind, template) });
+  }
+  if (cmd.scriptSource !== undefined) {
+    const draft = useUi.getState().scripts.draft;
+    if (draft) ui.openScripts({ draft: { ...draft, source: cmd.scriptSource } });
+  }
+  if (cmd.saveScript) await bridge.saveScript?.();
+  if (cmd.testScript) bridge.testScript?.(cmd.testScript);
   if (cmd.testRule) bridge.testRule?.();
   if (cmd.saveRule) await bridge.saveRule?.();
   if (cmd.throttle !== undefined) await setThrottle(THROTTLE_PRESETS.find((p) => p.name === cmd.throttle) ?? null);

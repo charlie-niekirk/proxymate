@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Circle, ListChecks, Plus, Settings, ShieldAlert, Smartphone, Trash2 } from "lucide-react";
+import { Circle, FileCode2, ListChecks, Plus, Settings, ShieldAlert, Smartphone, Trash2 } from "lucide-react";
 
 import type { ProxyStatus_Serialize } from "@/bindings";
 import { BreakpointBadge } from "@/components/Breakpoints/BreakpointBadge";
@@ -71,6 +71,7 @@ export function Toolbar() {
       </div>
 
       <RulesButton />
+      <ScriptsButton />
       <ThrottleMenu />
       <BreakpointBadge />
       <Separator orientation="vertical" className="mx-1 !h-5" />
@@ -107,6 +108,20 @@ function RulesButton() {
         </Button>
       </TooltipTrigger>
       <TooltipContent>Rules: Map Local, rewrites, breakpoints, Map Remote, block</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function ScriptsButton() {
+  const open = useUi((s) => s.openScripts);
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button variant="ghost" size="icon" aria-label="Scripts" onClick={() => open()} data-testid="scripts-button">
+          <FileCode2 />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>Scripts: decode bodies, rewrite and mock with JavaScript</TooltipContent>
     </Tooltip>
   );
 }

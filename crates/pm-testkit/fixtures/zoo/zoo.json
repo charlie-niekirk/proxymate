@@ -4,6 +4,7 @@
     { "name": "json", "file": "nested.json", "type": "application/json; charset=utf-8", "kind": "json" },
     { "name": "json-gzip", "file": "nested.json", "type": "application/json", "encoding": "gzip", "kind": "json" },
     { "name": "json-headerless", "file": "nested.json", "kind": "json" },
+    { "name": "json-base64", "file": "base64-field.json", "type": "application/json", "kind": "json" },
     { "name": "json-10mb", "generate": "big-json", "type": "application/json", "kind": "json" },
     { "name": "xml", "file": "feed.xml", "type": "application/atom+xml", "kind": "xml" },
     { "name": "html", "file": "page.html", "type": "text/html; charset=utf-8", "kind": "html" },
