@@ -103,7 +103,7 @@ export function newScript(kind: ScriptKind, template?: Template): Script {
     source: t.source,
     origin: { kind: "user" },
     view: t.kind === "view" ? emptyViewConfig() : null,
-    updated_at_ms: null,
+    updated_at_ms: 0,
   };
 }
 
@@ -111,6 +111,8 @@ export function newScript(kind: ScriptKind, template?: Template): Script {
 export function normalizeScript(script: Script): Script {
   return {
     ...script,
+    // Rust takes a number; specta types an f64 as possibly null.
+    updated_at_ms: script.updated_at_ms ?? 0,
     view:
       script.kind === "view"
         ? { ...emptyViewConfig(), ...script.view, matcher: { ...emptyMatcher(), ...script.view?.matcher } }

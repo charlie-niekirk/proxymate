@@ -15,7 +15,7 @@ We're building a fast, modern desktop tool for debugging web traffic, in the sam
 - Mobile device setup wizards.
 - HAR import/export, saved sessions, copy as cURL, replay and compose.
 
-**What's out of v1:** JS scripting, HTTP/3, ws-over-h2 (RFC 8441), and a privileged helper.
+**What's out of v1:** HTTP/3, ws-over-h2 (RFC 8441), and a privileged helper. (JS scripting, first out of v1, is M14: see "Scripting (M14)".)
 
 **MCP access:** agents get full access by default. A setting switches the server to read-only, and rules created by agents are tagged.
 
@@ -66,6 +66,7 @@ apps/cli                 proxymate-cli serve|mcp-stdio|gen-flows|bench (headless
   - (M10) A WebSocket log keeps its newest messages up to the limit; older ones are dropped but keep their indexes (`WsPage.dropped`).
   - (M10) A failed segment write (a full disk) is reported in `StorageStatus.error` and the footer until a write succeeds; forwarding never stops.
 - **Sessions.** A saved session (`.proxymate`) is a single SQLite file. A `BlobBackend` trait lets the same store and view code read live segments, saved sessions and imported HARs.
+  - (M14) The format is version 2: `FlowRules` (the last field of the postcard `FlowDetail`) gained `scripts`, its last field. Version 1 files still open: a v1 detail blob plus one `0x00` byte decodes as v2 (`tests/fixtures/session-v1.proxymate`). M14 also fixed postcard reading `RuleOrigin` (an internally tagged enum, which postcard can't deserialize): it now serializes by hand, the same bytes for postcard and the same tagged JSON, so flows a rule changed load from sessions and evicted live details again.
   - (M8) Tables: `meta` (format, version, saved time, app version), `flows` (the summary fields as columns, enums as their serde names; the `FlowDetail` as a postcard blob; the WebSocket message list and parsed SSE events as zstd'd postcard blobs), `bodies` (zstd, still content-encoded) and `messages` (WebSocket payloads, zstd). Flow ids are renumbered `0..n` in the order saved.
   - (M8) Saves run on a background thread with progress, into a temporary file in the target directory that replaces the target only once complete. HAR exports stream one entry per line the same way.
   - (M8) Every opened document is its own store (`StoreId`; the live capture is `LIVE_STORE` = 0): a `Store` for summaries and views, and a `SqliteBackend` for details, bodies and message logs (`SegmentBackend` is the live one). A document's view ids are `store << 24 | n`, so view calls need no store; flow calls take one (`Engine::*_in(store, …)`, and the Tauri commands' `store` argument). An imported HAR is converted into the same tables in an in-memory SQLite database.
@@ -99,6 +100,7 @@ apps/cli                 proxymate-cli serve|mcp-stdio|gen-flows|bench (headless
 | Rule matching | regex (with `size_limit`) and globset |
 | App database | rusqlite (bundled SQLite, WAL) |
 | Concurrency | arc-swap, parking_lot, rayon |
+| Scripts (M14) | rquickjs `=0.14.0` (QuickJS-NG), without `parallel`, `futures`, `loader` or `bindgen`; `url` for WHATWG URLs |
 | QR codes | qrcode |
 | Network interfaces | if-addrs |
 
@@ -161,6 +163,7 @@ We build our own engine and use hudsucker only as a reading reference. Its handl
   - Status: `SetStatus`.
   - Routing: `MapLocal` (an inline body, a file, or a directory root mapped by path suffix: the whole path is tried, then with leading segments dropped; `..` never leaves the root) and `MapRemote`.
   - Flow control: `Breakpoint{request,response}`, `Delay`, `Throttle` (token bucket, kbps down/up plus latency), `Block` (a status code or a connection reset: h1 closes the connection, h2 resets the stream).
+  - (M14) Scripts: `Script{script_id}`, the last variant. It names a rewrite or mock script (see "Scripting (M14)").
   - Header, body and delay actions carry a `phase` (request or response).
 - **Compilation.** Rules compile to a `CompiledRuleSet`, which is swapped in atomically with ArcSwap.
   - Every pattern becomes a byte regex (globs via globset) built with `RegexBuilder::size_limit` (256 KB compiled, 4096 characters of source). Errors name the rule, the field and the reason ("rule "x", host: invalid regex: unclosed group").
@@ -175,8 +178,9 @@ We build our own engine and use hudsucker only as a reading reference. Its handl
      - If several `MapRemote` rules match, the last one wins. It is applied before the breakpoint, so the breakpoint shows the final URL. Another HTTPS origin is reached over a new HTTP/1.1 TLS connection (there is no pooled HTTPS client).
      - Request delays add up; the last `Throttle` wins.
      - `MapLocal` is terminal: the first one wins, it skips the upstream (and the request breakpoint, since nothing is sent), but response-phase actions still run on its answer.
+     - (M14) A `Script` action runs in place, in rule and action order, so it sees the edits before it: a rewrite script's `onRequest`, or a mock script's `onMock`. A mock answer is terminal like `MapLocal`: the first answer (Map Local or mock) wins, and later script actions in the request phase don't run. A script that throws, times out or returns something unusable is skipped and recorded in `FlowRules.scripts`; the flow goes on without it.
      - The request breakpoint fires **last**, so the user edits exactly what will be sent.
-  2. **Response phase.** Gated by the response matcher (against the response as it arrived): rewrites run, then the response breakpoint, then response delays and the throttle's latency.
+  2. **Response phase.** Gated by the response matcher (against the response as it arrived): rewrites run (including `onResponse` scripts, given the request as it was sent), then the response breakpoint, then response delays and the throttle's latency.
   3. **Recording.** Each flow records which rules applied (`FlowDetail.rules`: applied rules with their phase, `rewrite_skipped`, `breakpoint_timeout`, `mocked`) and sets `edited`. That drives the Edited column and the inspector badges. The recorded request and response are what was sent after rules, not the originals (keeping both is a follow-up).
   - Rules don't apply to WebSocket handshakes yet.
 - **Breakpoints.**
@@ -187,10 +191,35 @@ We build our own engine and use hudsucker only as a reading reference. Its handl
   - The UI and MCP can both resolve a breakpoint. The first to resolve wins; later ones get "already resolved".
   - Bodies up to 16 MB can be edited; above that only the head. A paused flow shows the violet Paused pill; other h2 streams on the connection keep flowing. If the client goes away while paused, the flow fails.
   - The queue is pushed to the UI on the publisher tick whenever it changes.
-- **Body policy.** By default bodies stream. If any body action or breakpoint applies, the body is buffered up to 32 MB, decoded, transformed, and re-sent identity-encoded with a fresh Content-Length (h1 chunking is dropped). Decoding is synchronous on the stored bytes (no async-compression).
+- **Body policy.** By default bodies stream. If any body action, script or breakpoint applies, the body is buffered up to 32 MB, decoded, transformed, and re-sent identity-encoded with a fresh Content-Length (h1 chunking is dropped). Decoding is synchronous on the stored bytes (no async-compression).
+  - (M14) A buffered body that nothing changed (a script that only read it, a breakpoint continued without editing it, a body action that matched nothing) is forwarded as the original wire bytes, still content-encoded. An event stream is never buffered for a script.
   - A body over the cap is forwarded untouched (what was read, then the rest of the stream) and the flow is marked `rewrite_skipped`; so is a body that can't be decoded.
 - **Presets.** "Map Local…" and "Breakpoint…" in the flow context menu create pre-filled rules (`Engine::draft_rule_in`, matching the flow's method, host and path), on live flows and (M13) saved sessions and HARs. "Rewrite…" opens the Rewrite dialog (M13); its preset drafts no actions. The rules editor has a "Test against selected flow" dry run (`Engine::test_rule_in`, any store), computed in Rust with the proxy's own evaluator.
 - **Throttle.** The toolbar's network conditions are the built-in rule `builtin-throttle`: it matches everything, sits ahead of every other rule, is disabled by default and can't be deleted.
+
+## Scripting (M14)
+JavaScript on an embedded QuickJS (rquickjs 0.14, QuickJS-NG). Scripts get no network, file access, `require`, `import` of other modules or timers. `crates/pm-core/src/scripts/proxymate.d.ts` is the API's source of truth; `prelude.js` (the JS half) and `native.rs` (the Rust built-ins) implement it.
+
+- **Kinds.** A `Script` (`pm-model/src/scripts.rs`) is `{id, name, kind: rewrite|mock|view, enabled, source, origin: RuleOrigin, view: Option<ViewConfig{matcher, parts, kinds}>, updated_at_ms}`.
+  - Rewrite scripts export `onRequest(context, url, request)` and/or `onResponse(context, url, request, response)`; mock scripts `onMock(context, url, request)`, returning `{status, headers, body}` (or a string, bytes, any object as JSON, or `null` to pass). Both run only from a rule's `Action::Script{script_id}`, so one script serves many rules.
+  - View scripts export `onView(context, flow)`, returning `[{title, kind: json|text|xml|html|hex|image, body}]`, and run when the inspector shows a body their `ViewConfig` matches.
+- **Runtime (`pm-core/src/scripts/`).**
+  - `ScriptHost` runs N = clamp(cores/2, 1, 4) worker threads (8 MB stacks), plus one for dry runs, started on first use. Each owns a `Runtime` and `Context` (a `Runtime` isn't `Send` without `parallel`). Jobs are sharded by script id with a bounded queue of 256 each (a full queue is a script error); answers come back over a tokio oneshot.
+  - Each job carries an absolute deadline set when it is queued: a job still waiting when it passes fails without running, and a running one is stopped by the interrupt handler. 1000 ms for traffic and mock scripts, 3000 ms for views (`ScriptSettings`, the `scripts` settings row).
+  - 256 MB of QuickJS heap and 1 MB of stack per worker. The context (and its runtime) is rebuilt after an interrupt, an out-of-memory error or a stack overflow, and after 64 modules (QuickJS never unloads one). Async entry points are supported by running the job queue until the promise settles or the deadline passes.
+  - Each script is evaluated once per worker as an ES module and its namespace cached by source hash. There is no bytecode cache (loading bytecode is `unsafe` and unsound for untrusted input). `context.shared` is kept per script and source: saving a script, or a context rebuild, starts it over. Dry runs use their own worker and a fresh module each time, so they never touch traffic scripts' `shared`.
+  - Saving a script evaluates it once (with the traffic timeout) to check it parses and exports its kind's entry point; a broken script is never stored.
+- **Messages.** `method, url, scheme, host, port, path, query, headers, body, text, rawBody, bodyTooLarge` (and `status`). Header and query keys are lower-case (query keys as sent), a repeated name is a `string[]`. `body` is parsed lazily: JSON (with `JSON.parse` source access, integers beyond 2^53 as BigInt; written back with `JSON.rawJSON`), a form object, text, or `null` for binary. Dirty detection keeps an untouched message byte-identical: headers and query are compared with what came in, a read `body` with its canonical form when first read, `rawBody` byte for byte. Bodies over 16 MB, and event streams, reach scripts as `null` with `bodyTooLarge`.
+- **Built-ins.** `atob`/`btoa` (QuickJS-NG's own), `TextEncoder`/`TextDecoder` (UTF-8, Rust-backed), `URL` (the `url` crate) and `URLSearchParams` (JS), `crypto.sha1/sha256/sha512/hmac/randomUUID` (`ring`, `uuid`), `Proxymate.base64Decode/base64DecodeText/base64DecodeJson/base64Encode` (standard and URL-safe, padded or not), `Proxymate.decompress` (the inspector's decoder), `Proxymate.parseJson/stringifyJson` (BigInt-safe) and `console.*` (the script console). `scripts/api_surface.txt` lists them; a Rust test checks it against the runtime's globals and a vitest checks it against the `.d.ts` and the editor's completions.
+- **Rules.** `CompiledRuleSet::compile(rules, scripts)` resolves each `Action::Script` to the `CompiledScript` (source, exports) as it is then; each flow keeps the snapshot it started with, so editing a script never changes a flow halfway. A missing script or a view script in a rule is a compile error; deleting a script some rule runs is refused, naming the rules; a disabled script does nothing. `touches_body` is true for a script in each phase it exports. Script problems are `ScriptIssue`s in `FlowRules.scripts` (session format 2) and show as badges in the inspector.
+- **View scripts.** `Engine::run_view_scripts(store, flow, part)` matches each enabled view script on the summary and detail first (its matcher through the rules compiler, plus parts and content kinds) and only then reads the bodies. It works on the live capture, saved sessions and HARs. Results for finished flows are cached in moka (64 MB, weighed by bytes) by (store, flow, part, script id, source hash); flow and store ids are never reused, so no epoch is needed. Each view is capped at 8 MB.
+- **Dry runs and console.** `Engine::test_script(store, flow, {script_id | source, kind, part})` runs a saved or unsaved script against a recorded flow in any store: before and after for rewrites, the mock's answer, or the views, plus what it logged. The script console keeps the newest 2,000 entries; subscribers are told the newest sequence number on the publisher tick and fetch entries with `script_console(since, limit)`.
+- **Files.** Scripts are rows of a `scripts(id, json)` table in `app.sqlite`. Export and import are `.js` files with a `/* proxymate: {"name", "kind", "enabled", "view"} */` header; a file without one imports with its kind from its exports and its name from the file name.
+- **UI.**
+  - The Scripts window (`ui/src/components/Scripts/`; toolbar, ⌘K, File › Scripts… ⌘⇧J): scripts grouped by kind with enable switches and agent badges; a CodeMirror JavaScript editor with completions from a hand-kept map (`lib/scripts.ts`, checked against the `.d.ts`); "Where it runs" (view scripts: a `MatcherBuilder` plus part and kind toggles) or "Used by rules" with "Create rule for selected flow"; Test (before/after, the mock answer, or the views) and Console tabs; Copy type definitions, Export, Import. Templates (`ui/src/lib/script-templates/*.js`, run by a Rust test too): decode a base64 JSON field, decode a JWT, add a header, modify a JSON field, mock JSON.
+  - `BodyViewer` gets a "Scripts" group in its viewer dropdown and shows the first script view unless the user picked a built-in viewer (`pickedScriptView`/`scriptViewsOff` in `store/ui.ts`). Views render through the existing viewers; a script's error shows as a note. Script views also show for bodiless messages (a JWT in a header).
+  - The flow menu has "Script ›" (new view, rewrite or mock script for that flow); `ActionListEditor` has a "Run script" action with a script picker.
+- **Risks.** C build of QuickJS on every target (prebuilt bindings exist for macOS x86_64/aarch64, Linux and Windows MSVC; whichever of M12 and M14 lands second shows it building on Windows CI); CPU-heavy scripts slowing flows (timeouts, queue bounds, and a flow never waits longer than the timeout); agent-written code running in-process (no I/O, read-only mode hides every tool that saves or runs agent code, agent tagging).
 
 ## macOS integration (pm-platform)
 - **CA trust.**
@@ -250,6 +279,7 @@ We build our own engine and use hudsucker only as a reading reference. Its handl
   - `get_websocket_messages`, `wait_for_flow{filter, timeout_ms, after_id, include_active}`.
   - `list_rules`, `get_rule`, `list_breakpoints`, `get_breakpoint`.
   - `export_curl{id}`, `export_har{ids? | filter, limit}` (inline JSON, up to 4 MB; bigger exports go to a file from the app).
+- **Script tools (M14):** `list_scripts`, `get_script`, `get_flow_views` and `get_script_console` read; `create_script` (Agent origin), `update_script`, `set_script_enabled`, `delete_script`, `delete_agent_scripts` and `test_script` (it runs agent code, so read-only mode hides it too) write. Resources `proxymate://scripts` (updated on change) and `proxymate://scripts/api` (`proxymate.d.ts`).
 - **Write tools:**
   - `create_rule`, `update_rule`, `set_rule_enabled`, `delete_rule`, `delete_agent_rules`. Rules agents create get `origin: Agent{client, session, created_at_ms}`.
   - Sugar tools: `create_map_local`, `create_breakpoint`, `create_rewrite`, targeting a URL pattern (`https://api.example.com/v1/*`) or a recorded flow (`flow_id`).
@@ -425,7 +455,7 @@ The details, secrets and key rotation are in `docs/RELEASING.md`.
 | M11 | `m11-macos-release` | Universal DMG, ad-hoc signing with the hardened runtime, updater, release workflow (Developer ID signing and notarisation deferred: no paid Apple account) | CI builds the universal DMG; it launches after the one-time Gatekeeper override; the updater installs a signed update and refuses a bad signature |
 | M12 | `m12-linux-windows` | pm-platform implementations for Linux and Windows, AppImage/deb/rpm, MSI/NSIS, CI matrix | Integration suite green on all three OSes |
 | M13 | `m13-visual-rewrite` | Interactive rewrite: editable JSON tree plus header/query/form/GraphQL editors, with diff → actions, an exact JSON splicer, and the Rewrite dialog (see "M13" below) | Edit a captured flow, save it, replay it: only the changed paths are patched |
-| M14 | `m14-scripting` | JavaScript scripting (QuickJS) with view, rewrite and mock scripts, a Scripts window and MCP tools (its design lands with its PR) | A base64 JSON field is auto-decoded in the inspector; rewrite and mock scripts work through the proxy |
+| M14 | `m14-scripting` | JavaScript scripts on QuickJS: view, rewrite and mock scripts, the Scripts window, script views in the inspector, MCP script tools, session format 2 | A base64 JSON field shows decoded in the inspector on live and saved flows; script errors show while flows pass; timeouts and memory limits hold |
 
 ## Post-v1 milestones: M13 visual rewrite and M14 scripting
 
@@ -488,6 +518,9 @@ The user asked for two features beyond v1:
 - New read-only tool `test_rule{rule_id | rule, flow_id, store?}`.
 
 **Tests:** the splicer's unit and differential tests; `FormSet`/`AddHeader`/raw compile and evaluate; an integration test where a dialog-shaped rule runs against an upstream whose other fields (and formatting, and 64-bit ids) differ, which come through byte-identical; `test_rule_in`/`flows_matching_rule` on a saved session; an rmcp test of `test_rule` and the sugar; vitest for the document, diff, matcher chips, line diff and rebuilding with pins; Playwright for the dialog on the zoo JSON flow and the Breakpoint Editor tree, in dark and light.
+
+### M14: Scripting (`m14-scripting`)
+The design as built is "Scripting (M14)" above (with the rules evaluation order, session format 2 and the MCP script tools in their sections).
 
 ## Critical files (to be created)
 - `crates/pm-model/src/lib.rs`: the shared types that drive the TS bindings and the MCP schemas.

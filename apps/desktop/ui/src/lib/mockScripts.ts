@@ -263,7 +263,7 @@ function decodeScript(source: string): Script {
     source,
     origin: { kind: "user" },
     view: null,
-    updated_at_ms: null,
+    updated_at_ms: 0,
   };
 }
 

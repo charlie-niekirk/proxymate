@@ -549,7 +549,11 @@ async fn the_api_surface_matches_api_surface_txt() {
 async fn templates_run() {
     macro_rules! template {
         ($name:literal) => {
-            include_str!(concat!("../../../../apps/desktop/ui/src/lib/script-templates/", $name, ".js"))
+            include_str!(concat!(
+                "../../../../apps/desktop/ui/src/lib/script-templates/",
+                $name,
+                ".js"
+            ))
         };
     }
     let host = ScriptHost::new();
@@ -562,7 +566,13 @@ async fn templates_run() {
                 part: Some(part),
             };
             match host
-                .run(code("view", source), Call::View(req, Some(resp)), info, Duration::from_secs(3), true)
+                .run(
+                    code("view", source),
+                    Call::View(req, Some(resp)),
+                    info,
+                    Duration::from_secs(3),
+                    true,
+                )
                 .await
                 .output
             {
@@ -591,7 +601,10 @@ async fn templates_run() {
     // Form bodies too.
     let views = view(
         template!("decode-base64-json"),
-        request("application/x-www-form-urlencoded", format!("state={payload}").as_bytes()),
+        request(
+            "application/x-www-form-urlencoded",
+            format!("state={payload}").as_bytes(),
+        ),
         response("text/plain", b""),
         pm_model::BodyPart::Request,
     )
@@ -602,7 +615,13 @@ async fn templates_run() {
     let jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiI0MiIsImV4cCI6MTc2MDAwMDAwMH0.c2lnbmF0dXJl";
     let mut req = request("text/plain", b"");
     req.headers.push(("authorization".into(), format!("Bearer {jwt}")));
-    let views = view(template!("decode-jwt"), req, response("text/plain", b""), pm_model::BodyPart::Request).await;
+    let views = view(
+        template!("decode-jwt"),
+        req,
+        response("text/plain", b""),
+        pm_model::BodyPart::Request,
+    )
+    .await;
     assert_eq!(views[0].title, "JWT · Authorization");
     let text = views[0].text.as_deref().unwrap();
     assert!(text.contains("\"sub\": \"42\""), "{text}");

@@ -38,7 +38,7 @@ Run these from the repo root unless noted.
 | TLS test upstream (h2 + h1) | `cargo run -p pm-testkit --bin upstream -- --tls` prints its port and CA file. Start the app with `PROXYMATE_EXTRA_UPSTREAM_CA=<that file>`, then `curl -x http://127.0.0.1:9090 --cacert ~/Library/Application\ Support/Proxymate/ca/proxymate-ca.pem https://localhost:<port>/json --http2 -v` |
 | Rewrite dialog in the browser UI | `npm run dev`, then `http://localhost:1420/?zoo&select=0&rewrite=0`. In the app with `VITE_PM_REMOTE=1`: `{"rewrite":{"flow":3}}`, then `{"rewriteEdit":{"side":"response","json":[{"set":"/a","raw":"1"}],"save":true}}` (see `src/dev/remote.ts`) |
 | Open the app on a response tab | `VITE_PM_RESPONSE_TAB=TLS` (or `Timing`, …), for screenshots from a shell |
-| Drive the app from a shell | Start with `VITE_PM_REMOTE=1`, then `curl -d '{"select":3,"requestTab":"Body"}' localhost:1420/__pm_remote` (also `responseTab`, `viewer: {kind, viewer}`, `theme`; M8: `replay`, `editReplay`, `compose`, `composeSend`, `store`, `openDocument`, `saveSession`, `exportHar`, and `curl`, whose answer is at `/__pm_remote/out`). See `src/dev/remote.ts` |
+| Drive the app from a shell | Start with `VITE_PM_REMOTE=1`, then `curl -d '{"select":3,"requestTab":"Body"}' localhost:1420/__pm_remote` (also `responseTab`, `viewer: {kind, viewer}`, `theme`; M8: `replay`, `editReplay`, `compose`, `composeSend`, `store`, `openDocument`, `saveSession`, `exportHar`, and `curl`, whose answer is at `/__pm_remote/out`; M14: `scripts`, `scriptTemplate`, `scriptSource`, `saveScript`, `testScript`). See `src/dev/remote.ts` |
 | Body-viewer zoo through the proxy | `cargo run -p pm-testkit --bin upstream -- --zoo [127.0.0.1:9090]` sends one flow per fixture in `crates/pm-testkit/fixtures/zoo/` |
 | Zoo in the browser UI | `npm run dev`, then open `http://localhost:1420/?zoo` (mock backend serving the zoo; `&select=<id>&theme=light&requestTab=Body`) |
 | Viewer snapshots + preview safety (Playwright) | `npm run e2e` (first time: `npx -w @proxymate/ui playwright install webkit chromium`). `-- --update-snapshots` after an intended visual change; `PM_E2E_PORT` picks the dev server port (default 1425) |
@@ -73,7 +73,7 @@ crates/pm-core       headless Engine: proxy/ (h1 forward proxy, mitm.rs: CONNECT
                      BlobBackend, segments, sqlite.rs: session tables + SqliteBackend, bodies, details, messages: WS/SSE
                      logs), io/ (content kind, decoding, sse parser, curl, har, session), documents (opened sessions and
                      HARs), replay, client (loopback peer → app), trust (handshake check), integration (the OS-facing
-                     Engine methods), rules/, synth
+                     Engine methods), rules/, scripts/ (M14: QuickJS workers, prelude.js, native.rs, proxymate.d.ts), synth
 crates/pm-platform   OS integration traits; macos/ impls, stub.rs elsewhere: fs (private files), sysproxy (backup +
                      restore over a ProxyBackend; networksetup), trust (keychain), procinfo (libproc port scan, app
                      bundles, icons), process (kqueue exit wait), netif (if-addrs), simctl and adb (over a
@@ -202,11 +202,21 @@ Targets:
 - The updater lives in `src-tauri/src/updater.rs` (Rust-side; no JS plugin permissions). Its public key is in `tauri.conf.json`; the private key never enters the repo.
 - The updater turns on reqwest's `rustls-no-provider` for the whole workspace. Any reqwest/rmcp client (the stdio bridge, MCP tests) must call `pm_mcp::install_crypto_provider()` before it's built, or it panics.
 
+**Scripts (M14)**
+- `crates/pm-core/src/scripts/proxymate.d.ts` is the script API's source of truth. A new global or member goes in `prelude.js` (or `native.rs`), the `.d.ts`, `scripts/api_surface.txt` and the editor's `GLOBAL_COMPLETIONS` (`ui/src/lib/scripts.ts`); a Rust test and a vitest check they agree.
+- Scripts get no I/O: no network, files, module loader or timers. Never enable rquickjs's `loader`, `futures` or `parallel`, and never load bytecode.
+- `unsafe_code` has one scoped exception, `scripts/native.rs::bytes_of`: rquickjs 0.14 only exposes a typed array's bytes through `unsafe`; they are copied out before any JavaScript runs.
+- `Action::Script` is the last `Action` variant; `FlowRules.scripts` is the last field of `FlowRules` (and so of the postcard `FlowDetail`). Add fields after them only with a session `VERSION` bump.
+- Rule evaluation is async only for scripts: a rule set without scripts never awaits (`rules/tests.rs` drives it with `now_or_never`).
+- Templates are `.js` files in `ui/src/lib/script-templates/`, imported raw by the UI and run by `scripts::tests::templates_run`.
+- Saving a script evaluates it (top-level code runs, with the traffic timeout), so Tauri commands and MCP tools that save scripts run off the async threads.
+
 **Replay, cURL, HAR and sessions (M8)**
 - `Engine::send(RequestSpec, SendOpts)` is the one way Proxymate sends a request itself (Replay, Compose, MCP). It goes through `proxy/exchange.rs` like proxied traffic; the flow's summary gets `sent_by`.
 - Flow ids are per store. The live capture is `LIVE_STORE` (0); every opened session or HAR is a document store. Flow-level Engine methods have `*_in(store, …)` forms (the live-only ones stay for existing callers); view ids already encode their store. UI code reads the active store from `useUi().store` and puts it in query keys (`flowKey(store, id)`).
 - Golden files are in `crates/pm-core/tests/golden/` (cURL and HAR); rewrite them with `UPDATE_GOLDEN=1 cargo test -p pm-core --lib io::`. The Chrome HAR fixture is `crates/pm-core/tests/fixtures/chrome-devtools.har`.
-- A session's postcard layouts are part of its format: bump `store/sqlite.rs` `VERSION` when `FlowDetail` or the message types change shape.
+- A session's postcard layouts are part of its format: bump `store/sqlite.rs` `VERSION` when `FlowDetail` or the message types change shape. Version 2 (M14) still reads version 1 (`tests/fixtures/session-v1.proxymate`).
+- postcard can't deserialize internally tagged enums (`#[serde(tag = …)]`). Anything inside `FlowDetail` must not be one, or must serialize by hand like `RuleOrigin`.
 
 **Visual rewrite (M13)**
 - `JsonSet`/`JsonRemove` edit bodies in place through `rules/json_edit.rs` (the byte splicer): never parse and re-serialise a body to change it. `JsonSet.raw` (exact JSON text) wins over `value`. Don't turn on serde_json's `arbitrary_precision` or `preserve_order` (`docs/PLAN.md`, "M13").

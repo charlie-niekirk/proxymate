@@ -113,6 +113,7 @@ pub fn file_bytes(name: &str) -> &'static [u8] {
     files!(
         "animated.gif",
         "app.min.js",
+        "base64-field.json",
         "clip.mp4",
         "document.pdf",
         "favicon.ico",
