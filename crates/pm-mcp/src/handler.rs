@@ -26,7 +26,7 @@ use rmcp::{ErrorData, Peer, RoleServer, ServerHandler};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::resources::{BREAKPOINTS_URI, RULES_URI};
+use crate::resources::{BREAKPOINTS_URI, RULES_URI, SCRIPTS_URI};
 use crate::{prompts, resources, tools};
 
 const INSTRUCTIONS: &str = "Proxymate is an HTTP(S) debugging proxy. These tools read the traffic it \
@@ -84,6 +84,9 @@ impl Shared {
         let breakpoints = tx.clone();
         self.engine
             .subscribe_breakpoints(Box::new(move |_| breakpoints.send(BREAKPOINTS_URI).is_ok()));
+        let scripts = tx.clone();
+        self.engine
+            .subscribe_scripts(Box::new(move |_| scripts.send(SCRIPTS_URI).is_ok()));
         self.engine
             .subscribe_rules(Box::new(move |_| tx.send(RULES_URI).is_ok()));
         let shared = self.clone();

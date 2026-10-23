@@ -162,7 +162,12 @@ impl Engine {
     /// Runs the enabled view scripts that apply to `part` of a flow, in any
     /// store, and returns what each made of it (views, or an error). Empty
     /// when none applies.
-    pub async fn run_view_scripts(&self, store: StoreId, flow: FlowId, part: BodyPart) -> Result<Vec<ViewResult>, Error> {
+    pub async fn run_view_scripts(
+        &self,
+        store: StoreId,
+        flow: FlowId,
+        part: BodyPart,
+    ) -> Result<Vec<ViewResult>, Error> {
         let view_scripts = self.scripts.view_scripts();
         if view_scripts.is_empty() {
             return Ok(Vec::new());

@@ -105,7 +105,9 @@ impl CompiledScript {
     /// phase, `onResponse` in the response phase.
     pub fn runs_in(&self, phase: Phase) -> bool {
         match phase {
-            Phase::Request => self.runs_mock() || (self.enabled && self.kind == ScriptKind::Rewrite && self.exports.on_request),
+            Phase::Request => {
+                self.runs_mock() || (self.enabled && self.kind == ScriptKind::Rewrite && self.exports.on_request)
+            }
             Phase::Response => self.enabled && self.kind == ScriptKind::Rewrite && self.exports.on_response,
         }
     }
@@ -228,11 +230,7 @@ impl Scripts {
 
     /// Records what a run logged, and its error, in the console.
     pub fn log_run(&self, code: &Code, result: &RunResult, flow_id: Option<FlowId>) {
-        let error = result
-            .output
-            .as_ref()
-            .err()
-            .map(|e| (ConsoleLevel::Error, e.clone()));
+        let error = result.output.as_ref().err().map(|e| (ConsoleLevel::Error, e.clone()));
         self.console
             .push(code, result.console.iter().cloned().chain(error), flow_id);
     }
@@ -247,11 +245,17 @@ impl Scripts {
         if script.source.len() > SOURCE_MAX {
             return Err(invalid(
                 script,
-                format!("the source is {} KB; the limit is {} KB", script.source.len() / 1024, SOURCE_MAX / 1024),
+                format!(
+                    "the source is {} KB; the limit is {} KB",
+                    script.source.len() / 1024,
+                    SOURCE_MAX / 1024
+                ),
             ));
         }
         let code = Code::new(script.id.clone(), script.name.clone(), script.source.as_str().into());
-        let result = self.host.run_blocking(code.clone(), Call::Inspect, self.traffic_timeout());
+        let result = self
+            .host
+            .run_blocking(code.clone(), Call::Inspect, self.traffic_timeout());
         let exports = match result.output {
             Ok(Output::Exports(exports)) => exports,
             Ok(_) => Exports::default(),
@@ -404,7 +408,7 @@ impl Engine {
     /// top-level code (with the traffic timeout).
     pub fn create_script(&self, mut script: Script) -> Result<Script, Error> {
         script.id = uuid::Uuid::new_v4().to_string();
-        script.updated_at_ms = now_ms();
+        script.updated_at_ms = now_ms().round();
         if script.name.trim().is_empty() {
             script.name = "Untitled script".into();
         }
@@ -417,7 +421,7 @@ impl Engine {
     /// Replaces the script with the same id. Its `context.shared` starts
     /// over if the source changed.
     pub fn update_script(&self, mut script: Script) -> Result<Script, Error> {
-        script.updated_at_ms = now_ms();
+        script.updated_at_ms = now_ms().round();
         self.change_scripts(|scripts, rules| {
             let slot = scripts
                 .iter_mut()
@@ -445,7 +449,7 @@ impl Engine {
                 .find(|s| s.id == id)
                 .ok_or_else(|| ScriptError::Unknown(id.to_owned()))?;
             script.enabled = enabled;
-            script.updated_at_ms = now_ms();
+            script.updated_at_ms = now_ms().round();
             Ok(script.clone())
         })
     }
@@ -560,10 +564,7 @@ impl Engine {
     /// oldest first, at most `limit`, the newest ones when there are more.
     pub fn script_console(&self, since: Option<u64>, limit: u32) -> Vec<ConsoleEntry> {
         let entries = self.scripts.console.entries.lock();
-        let fresh: Vec<&ConsoleEntry> = entries
-            .iter()
-            .filter(|e| since.is_none_or(|s| e.seq > s))
-            .collect();
+        let fresh: Vec<&ConsoleEntry> = entries.iter().filter(|e| since.is_none_or(|s| e.seq > s)).collect();
         let skip = fresh.len().saturating_sub(limit as usize);
         fresh.into_iter().skip(skip).cloned().collect()
     }

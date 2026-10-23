@@ -56,7 +56,10 @@ async fn on_request(source: &str, req: JsRequest) -> RequestOut {
 }
 
 async fn on_response(source: &str, resp: JsResponse) -> ResponseOut {
-    match run(source, Call::Response(request("text/plain", b""), resp)).await.output {
+    match run(source, Call::Response(request("text/plain", b""), resp))
+        .await
+        .output
+    {
         Ok(Output::Response(out)) => out,
         other => panic!("{other:?}"),
     }
@@ -70,7 +73,10 @@ async fn on_mock(source: &str) -> Option<MockOut> {
 }
 
 async fn on_view(source: &str, resp: JsResponse) -> Vec<ViewOut> {
-    match run(source, Call::View(request("text/plain", b""), Some(resp))).await.output {
+    match run(source, Call::View(request("text/plain", b""), Some(resp)))
+        .await
+        .output
+    {
         Ok(Output::Views(views)) => views,
         other => panic!("{other:?}"),
     }
@@ -78,7 +84,8 @@ async fn on_view(source: &str, resp: JsResponse) -> Vec<ViewOut> {
 
 /// Evaluates `expr` in a view and returns it as text.
 async fn eval(expr: &str) -> String {
-    let source = format!("export async function onView() {{ return [{{ title: 't', body: String(await ({expr})) }}]; }}");
+    let source =
+        format!("export async function onView() {{ return [{{ title: 't', body: String(await ({expr})) }}]; }}");
     let views = on_view(&source, response("text/plain", b"")).await;
     views[0].text.clone().unwrap()
 }
@@ -97,7 +104,10 @@ async fn an_untouched_message_is_byte_identical() {
         assert_eq!(out.headers, None, "{source}");
         assert_eq!(out.body, None, "{source}");
         assert_eq!(out.query, "b=2&a=1&a=3", "{source}");
-        assert_eq!((out.method.as_str(), out.host.as_str(), out.port), ("POST", "api.test", 8443));
+        assert_eq!(
+            (out.method.as_str(), out.host.as_str(), out.port),
+            ("POST", "api.test", 8443)
+        );
     }
 }
 
@@ -178,7 +188,13 @@ async fn the_url_and_query_can_change() {
     )
     .await;
     assert_eq!(
-        (out.scheme.as_str(), out.host.as_str(), out.port, out.path.as_str(), out.query.as_str()),
+        (
+            out.scheme.as_str(),
+            out.host.as_str(),
+            out.port,
+            out.path.as_str(),
+            out.query.as_str()
+        ),
         ("http", "other.test", 80, "/x", "y=1")
     );
 }
@@ -200,7 +216,10 @@ async fn responses_change_status_headers_and_body() {
     )
     .await;
     let message = result.output.unwrap_err();
-    assert!(message.contains("read-only"), "the request is read-only here: {message}");
+    assert!(
+        message.contains("read-only"),
+        "the request is read-only here: {message}"
+    );
 }
 
 #[tokio::test]
@@ -210,7 +229,10 @@ async fn mocks_take_objects_strings_bytes_or_null() {
         .unwrap();
     assert_eq!(out.status, 418);
     assert_eq!(out.body, br#"{"tea":true}"#);
-    assert!(out.headers.contains(&("content-type".into(), "application/json".into())));
+    assert!(
+        out.headers
+            .contains(&("content-type".into(), "application/json".into()))
+    );
 
     let out = on_mock("export function onMock() { return 'hello'; }").await.unwrap();
     assert_eq!((out.status, out.body.as_slice()), (200, &b"hello"[..]));
@@ -226,7 +248,11 @@ async fn mocks_take_objects_strings_bytes_or_null() {
         .unwrap();
     assert!(out.headers.contains(&("x-a".into(), "2".into())));
 
-    assert!(on_mock("export function onMock(c, url, r) { return null; }").await.is_none());
+    assert!(
+        on_mock("export function onMock(c, url, r) { return null; }")
+            .await
+            .is_none()
+    );
     assert!(on_mock("export function onMock(c, url, r) {}").await.is_none());
 }
 
@@ -237,7 +263,10 @@ async fn views_render_json_text_and_bytes() {
            { title: 'Decoded', body: Proxymate.base64DecodeJson(flow.response.body.data) }, \
            { title: 'Raw', kind: 'hex', body: flow.response.rawBody }, \
            { title: 'Part', body: flow.part ?? 'none' } ]; }",
-        response("application/json", br#"{"data":"eyJ1c2VyIjoiYWRhIiwiaWQiOjEyMzQ1Njc4OTAxMjM0NTY3ODkwfQ"}"#),
+        response(
+            "application/json",
+            br#"{"data":"eyJ1c2VyIjoiYWRhIiwiaWQiOjEyMzQ1Njc4OTAxMjM0NTY3ODkwfQ"}"#,
+        ),
     )
     .await;
     assert_eq!(views.len(), 3);
@@ -261,10 +290,18 @@ async fn a_throw_is_reported_with_its_message() {
     let message = result.output.unwrap_err();
     assert!(message.starts_with("TypeError: bad token"), "{message}");
 
-    let result = run("export function onRequest() { throw 'plain'; }", Call::Request(request("text/plain", b""))).await;
+    let result = run(
+        "export function onRequest() { throw 'plain'; }",
+        Call::Request(request("text/plain", b"")),
+    )
+    .await;
     assert!(result.output.unwrap_err().contains("plain"));
 
-    let result = run("export function onRequest( {", Call::Request(request("text/plain", b""))).await;
+    let result = run(
+        "export function onRequest( {",
+        Call::Request(request("text/plain", b"")),
+    )
+    .await;
     assert!(result.output.unwrap_err().contains("SyntaxError"));
 }
 
@@ -286,7 +323,10 @@ async fn an_infinite_loop_stops_at_the_timeout_and_the_worker_recovers() {
 
     let result = run_with(
         &host,
-        code("loop", "export async function onRequest() { await new Promise(() => {}); }"),
+        code(
+            "loop",
+            "export async function onRequest() { await new Promise(() => {}); }",
+        ),
         Call::Request(request("text/plain", b"")),
         timeout,
     )
@@ -345,9 +385,14 @@ async fn shared_persists_between_calls_and_resets_on_edit() {
     let count = |source: &'static str| {
         let host = &host;
         async move {
-            match run_with(host, code("counter", source), Call::Mock(request("text/plain", b"")), Duration::from_secs(1))
-                .await
-                .output
+            match run_with(
+                host,
+                code("counter", source),
+                Call::Mock(request("text/plain", b"")),
+                Duration::from_secs(1),
+            )
+            .await
+            .output
             {
                 Ok(Output::Mock(Some(out))) => String::from_utf8(out.body).unwrap(),
                 other => panic!("{other:?}"),
@@ -386,15 +431,15 @@ async fn the_built_ins_match_known_vectors() {
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
         ),
         ("crypto.sha1('abc')", "a9993e364706816aba3e25717850c26c9cd0d89d"),
-        (
-            "crypto.sha512('abc').slice(0, 16)",
-            "ddaf35a193617aba",
-        ),
+        ("crypto.sha512('abc').slice(0, 16)", "ddaf35a193617aba"),
         (
             "crypto.hmac('sha256', 'Jefe', 'what do ya want for nothing?')",
             "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843",
         ),
-        ("crypto.sha256('abc', 'base64')", "ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0="),
+        (
+            "crypto.sha256('abc', 'base64')",
+            "ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0=",
+        ),
         ("/^[0-9a-f-]{36}$/.test(crypto.randomUUID())", "true"),
         ("btoa('hello')", "aGVsbG8="),
         ("atob('aGVsbG8=')", "hello"),
@@ -402,11 +447,23 @@ async fn the_built_ins_match_known_vectors() {
         ("Proxymate.base64DecodeText('aGk-')", "hi>"),
         ("Proxymate.base64Encode('hi???', { urlSafe: true })", "aGk_Pz8"),
         ("Proxymate.base64DecodeJson('eyJhIjoxfQ').a", "1"),
-        ("new TextDecoder().decode(new TextEncoder().encode('héllo €'))", "héllo €"),
+        (
+            "new TextDecoder().decode(new TextEncoder().encode('héllo €'))",
+            "héllo €",
+        ),
         ("new TextEncoder().encode('é').length", "2"),
-        ("Proxymate.parseJson('{\"n\":9007199254740993}').n === 9007199254740993n", "true"),
-        ("Proxymate.stringifyJson({ n: 9007199254740993n })", "{\"n\":9007199254740993}"),
-        ("new URL('/b?x=1#h', 'https://a.test:8443/a').href", "https://a.test:8443/b?x=1#h"),
+        (
+            "Proxymate.parseJson('{\"n\":9007199254740993}').n === 9007199254740993n",
+            "true",
+        ),
+        (
+            "Proxymate.stringifyJson({ n: 9007199254740993n })",
+            "{\"n\":9007199254740993}",
+        ),
+        (
+            "new URL('/b?x=1#h', 'https://a.test:8443/a').href",
+            "https://a.test:8443/b?x=1#h",
+        ),
         ("new URL('https://a.test/p?q=1').searchParams.get('q')", "1"),
         (
             "(() => { const u = new URL('https://a.test/p?q=1'); u.searchParams.set('r', 'a b'); return u.href; })()",
@@ -476,7 +533,11 @@ async fn the_api_surface_matches_api_surface_txt() {
         .collect();
     assert_eq!(builtins.lines().collect::<Vec<_>>(), documented);
     // Every documented member exists.
-    for line in API_SURFACE.lines().map(str::trim).filter(|l| l.contains('.') && !l.starts_with('#')) {
+    for line in API_SURFACE
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.contains('.') && !l.starts_with('#'))
+    {
         let check = format!("typeof {line} !== 'undefined'");
         assert_eq!(eval(&check).await, "true", "{line}");
     }

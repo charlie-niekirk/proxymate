@@ -120,7 +120,12 @@ impl Engine {
     /// Dry run: what a script would do to a recorded flow. A rewrite
     /// script runs `onRequest` then `onResponse`; a mock script `onMock`;
     /// a view script `onView` on `spec.part` (the response by default).
-    pub async fn test_script(&self, store: StoreId, flow: FlowId, spec: ScriptTestSpec) -> Result<ScriptTestResult, Error> {
+    pub async fn test_script(
+        &self,
+        store: StoreId,
+        flow: FlowId,
+        spec: ScriptTestSpec,
+    ) -> Result<ScriptTestResult, Error> {
         let (code, kind) = match (spec.source, &spec.script_id) {
             (Some(source), id) => {
                 let saved = id.as_deref().and_then(|id| self.script(id));
@@ -129,7 +134,10 @@ impl Engine {
                     .or(saved.as_ref().map(|s| s.kind))
                     .ok_or_else(|| Error::Invalid("say which kind of script the source is".into()))?;
                 let name = saved.map_or_else(|| "Unsaved script".to_owned(), |s| s.name);
-                (Code::new(id.clone().unwrap_or_else(|| "test".into()), name, source.into()), kind)
+                (
+                    Code::new(id.clone().unwrap_or_else(|| "test".into()), name, source.into()),
+                    kind,
+                )
             }
             (None, Some(id)) => {
                 let script = self.script(id).ok_or_else(|| ScriptError::Unknown(id.clone()))?;
@@ -224,7 +232,9 @@ impl Engine {
                     result.response = Some(response_head(&resp, version));
                     result.response_body = text(resp.body.as_ref());
                 } else {
-                    result.notes.push("The flow has no response, so onResponse didn't run.".into());
+                    result
+                        .notes
+                        .push("The flow has no response, so onResponse didn't run.".into());
                 }
             }
             ScriptKind::Mock => {
@@ -234,7 +244,9 @@ impl Engine {
                 match runner.run(self, Call::Mock(request)).await {
                     Ok(Output::Mock(Some(out))) => match mock_answer(out) {
                         Ok(answer) => {
-                            result.notes.push("Answered by the mock; the upstream isn't contacted.".into());
+                            result
+                                .notes
+                                .push("Answered by the mock; the upstream isn't contacted.".into());
                             result.response = Some(response_head(&answer, version));
                             result.response_body = text(answer.body.as_ref());
                         }

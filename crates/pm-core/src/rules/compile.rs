@@ -346,7 +346,12 @@ impl CompiledRule {
     }
 }
 
-fn compile_action(rule: &Rule, index: usize, action: &Action, scripts: &ScriptMap) -> Result<CompiledAction, RuleError> {
+fn compile_action(
+    rule: &Rule,
+    index: usize,
+    action: &Action,
+    scripts: &ScriptMap,
+) -> Result<CompiledAction, RuleError> {
     let field = format!("action {}", index + 1);
     let invalid = |message: String| RuleError::invalid(rule, &field, message);
     let header = |name: &str| {

@@ -38,9 +38,7 @@ pub(crate) fn to_file(script: &Script) -> String {
         view: script.view.clone(),
     };
     // `*/` can only occur inside a JSON string, where `\/` means `/`.
-    let json = serde_json::to_string(&meta)
-        .unwrap_or_default()
-        .replace("*/", "*\\/");
+    let json = serde_json::to_string(&meta).unwrap_or_default().replace("*/", "*\\/");
     format!("{HEADER}{json} */\n{}", script.source)
 }
 
@@ -140,7 +138,10 @@ mod tests {
         assert_eq!(text.lines().count(), 2);
         let (meta, source) = from_file(&text).unwrap();
         let meta = meta.unwrap();
-        assert_eq!((meta.name.as_str(), meta.kind, meta.enabled), ("odd */ name", ScriptKind::View, false));
+        assert_eq!(
+            (meta.name.as_str(), meta.kind, meta.enabled),
+            ("odd */ name", ScriptKind::View, false)
+        );
         assert_eq!(source, script.source);
     }
 

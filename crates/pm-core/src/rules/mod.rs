@@ -515,8 +515,8 @@ impl Engine {
                 if let Some(draft) = &mut response {
                     let gated = eval::response_rules(&rules, draft.status, &draft.headers);
                     response_matched = Some(!gated.is_empty());
-                    let sent = eval::needs_request_for_response(&gated)
-                        .then(|| crate::scripts::traffic::js_request(&request));
+                    let sent =
+                        eval::needs_request_for_response(&gated).then(|| crate::scripts::traffic::js_request(&request));
                     let fx = eval::response_phase(&gated, draft, run, sent.as_ref()).await;
                     notes.extend(fx.body_skipped.iter().map(|s| format!("Body action skipped: {s}")));
                     notes.extend(fx.script_issues.iter().map(script_note));

@@ -297,7 +297,11 @@ fn client_app_condition() {
 
 #[test]
 fn mismatch_explains_itself() {
-    let r = CompiledRule::compile(&rule("r", host(Pattern::exact("a.test")), Vec::new()), &ScriptMap::new()).unwrap();
+    let r = CompiledRule::compile(
+        &rule("r", host(Pattern::exact("a.test")), Vec::new()),
+        &ScriptMap::new(),
+    )
+    .unwrap();
     let req = request("http://b.test/");
     assert_eq!(
         r.mismatch(&req.info(None), true).as_deref(),

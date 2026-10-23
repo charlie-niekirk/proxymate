@@ -173,9 +173,11 @@ pub(crate) struct ResponseEffects {
 /// True if a script in `rules` runs `onResponse`, so the response phase
 /// needs the request as it was sent.
 pub(crate) fn needs_request_for_response(rules: &[Arc<CompiledRule>]) -> bool {
-    rules
-        .iter()
-        .any(|r| r.actions.iter().any(|a| a.script.as_ref().is_some_and(|s| s.runs_in(Phase::Response))))
+    rules.iter().any(|r| {
+        r.actions
+            .iter()
+            .any(|a| a.script.as_ref().is_some_and(|s| s.runs_in(Phase::Response)))
+    })
 }
 
 /// True if any rule edits or pauses the body in `phase`, so it must be

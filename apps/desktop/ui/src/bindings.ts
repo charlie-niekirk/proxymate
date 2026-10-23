@@ -245,7 +245,14 @@ preserve_host?: boolean } |
  */
 { type: "Throttle"; download_kbps: number; upload_kbps: number; latency_ms: number } | 
 /**  Stops the flow. */
-{ type: "Block"; mode: BlockMode };
+{ type: "Block"; mode: BlockMode } | 
+/**
+ *  Runs a script (M14): a rewrite script's `onRequest`/`onResponse` in
+ *  its phase, or a mock script's `onMock`, which answers like Map
+ *  Local (the first answer wins). A script that throws or times out is
+ *  skipped and reported on the flow. Keep this the last variant.
+ */
+{ type: "Script"; script_id: string };
 
 /**  One step of a rule. Actions of all matching rules run in rule order. */
 export type Action_Serialize = 
@@ -320,7 +327,14 @@ preserve_host: boolean } |
  */
 { type: "Throttle"; download_kbps: number; upload_kbps: number; latency_ms: number } | 
 /**  Stops the flow. */
-{ type: "Block"; mode: BlockMode };
+{ type: "Block"; mode: BlockMode } | 
+/**
+ *  Runs a script (M14): a rewrite script's `onRequest`/`onResponse` in
+ *  its phase, or a mock script's `onMock`, which answers like Map
+ *  Local (the first answer wins). A script that throws or times out is
+ *  skipped and reported on the flow. Keep this the last variant.
+ */
+{ type: "Script"; script_id: string };
 
 /**  A device or emulator `adb` sees. */
 export type AndroidDevice = AndroidDevice_Serialize | AndroidDevice_Deserialize;
@@ -599,6 +613,48 @@ export type CertSummary = {
 	/**  SHA-256 of the DER, hex. */
 	sha256: string,
 };
+
+/**
+ *  One line of the script console: a script's `console.*` call, or an
+ *  error the engine reports for it.
+ */
+export type ConsoleEntry = ConsoleEntry_Serialize | ConsoleEntry_Deserialize;
+
+/**
+ *  One line of the script console: a script's `console.*` call, or an
+ *  error the engine reports for it.
+ */
+export type ConsoleEntry_Deserialize = {
+	/**  Increases by one per entry, so readers can ask for what's new. */
+	seq: number,
+	/**  Milliseconds since the Unix epoch. */
+	time_ms: number | null,
+	script_id: string,
+	script_name: string,
+	level: ConsoleLevel,
+	message: string,
+	/**  The flow the script ran for, if it was recorded. */
+	flow_id?: number | null,
+};
+
+/**
+ *  One line of the script console: a script's `console.*` call, or an
+ *  error the engine reports for it.
+ */
+export type ConsoleEntry_Serialize = {
+	/**  Increases by one per entry, so readers can ask for what's new. */
+	seq: number,
+	/**  Milliseconds since the Unix epoch. */
+	time_ms: number | null,
+	script_id: string,
+	script_name: string,
+	level: ConsoleLevel,
+	message: string,
+	/**  The flow the script ran for, if it was recorded. */
+	flow_id: number | null,
+};
+
+export type ConsoleLevel = "debug" | "log" | "info" | "warn" | "error";
 
 /**  Content chip in the filter row. Each group covers one or more [`ContentKind`]s. */
 export type ContentGroup = "json" | "form" | "xml" | "js" | "css" | "graphql" | "document" | "media" | "other";
@@ -923,8 +979,16 @@ export type FlowRules_Deserialize = {
 	rewrite_skipped?: string | null,
 	/**  A breakpoint timed out and the flow continued unmodified. */
 	breakpoint_timeout: boolean,
-	/**  The response came from Map Local or a breakpoint, not the upstream. */
+	/**
+	 *  The response came from Map Local, a mock script or a breakpoint,
+	 *  not the upstream.
+	 */
 	mocked: boolean,
+	/**
+	 *  Scripts that failed on this flow (M14). Keep this the last field:
+	 *  a session written before it decodes with one `0` byte appended.
+	 */
+	scripts?: ScriptIssue_Deserialize[],
 };
 
 /**
@@ -940,8 +1004,16 @@ export type FlowRules_Serialize = {
 	rewrite_skipped: string | null,
 	/**  A breakpoint timed out and the flow continued unmodified. */
 	breakpoint_timeout: boolean,
-	/**  The response came from Map Local or a breakpoint, not the upstream. */
+	/**
+	 *  The response came from Map Local, a mock script or a breakpoint,
+	 *  not the upstream.
+	 */
 	mocked: boolean,
+	/**
+	 *  Scripts that failed on this flow (M14). Keep this the last field:
+	 *  a session written before it decodes with one `0` byte appended.
+	 */
+	scripts: ScriptIssue_Serialize[],
 };
 
 /**  Which flows of a store to save or export. */
@@ -1521,12 +1593,26 @@ export type Rule = Rule_Serialize | Rule_Deserialize;
 /**
  *  Who created a rule. Agent rules show an "AI · client" badge and can be
  *  removed together.
+ * 
+ *  Serialized by hand: JSON (Tauri, MCP, `app.sqlite`) gets the tagged
+ *  object the attributes below describe, while postcard (flow details in
+ *  segments and sessions) gets the tag and then the fields in order, the
+ *  bytes serde's internally tagged derive writes there. postcard can't
+ *  read that derive back (it needs `deserialize_any`), which made every
+ *  flow a rule changed unreadable from disk before M14.
  */
 export type RuleOrigin = RuleOrigin_Serialize | RuleOrigin_Deserialize;
 
 /**
  *  Who created a rule. Agent rules show an "AI · client" badge and can be
  *  removed together.
+ * 
+ *  Serialized by hand: JSON (Tauri, MCP, `app.sqlite`) gets the tagged
+ *  object the attributes below describe, while postcard (flow details in
+ *  segments and sessions) gets the tag and then the fields in order, the
+ *  bytes serde's internally tagged derive writes there. postcard can't
+ *  read that derive back (it needs `deserialize_any`), which made every
+ *  flow a rule changed unreadable from disk before M14.
  */
 export type RuleOrigin_Deserialize = { kind: "user" } | 
 /**  Pre-filled from a flow by a preset (or built in, like the throttle). */
@@ -1539,6 +1625,13 @@ created_at_ms: number | null };
 /**
  *  Who created a rule. Agent rules show an "AI · client" badge and can be
  *  removed together.
+ * 
+ *  Serialized by hand: JSON (Tauri, MCP, `app.sqlite`) gets the tagged
+ *  object the attributes below describe, while postcard (flow details in
+ *  segments and sessions) gets the tag and then the fields in order, the
+ *  bytes serde's internally tagged derive writes there. postcard can't
+ *  read that derive back (it needs `deserialize_any`), which made every
+ *  flow a rule changed unreadable from disk before M14.
  */
 export type RuleOrigin_Serialize = { kind: "user" } | 
 /**  Pre-filled from a flow by a preset (or built in, like the throttle). */
@@ -1658,6 +1751,219 @@ export type SaveProgress_Serialize = {
 
 /**  URL scheme of a flow as seen by the client. */
 export type Scheme = "http" | "https" | "ws" | "wss";
+
+export type Script = Script_Serialize | Script_Deserialize;
+
+/**
+ *  A script that failed on a flow (threw, timed out, returned something
+ *  unusable). The flow went on unmodified by that script.
+ */
+export type ScriptIssue = ScriptIssue_Serialize | ScriptIssue_Deserialize;
+
+/**
+ *  A script that failed on a flow (threw, timed out, returned something
+ *  unusable). The flow went on unmodified by that script.
+ */
+export type ScriptIssue_Deserialize = {
+	script_id: string,
+	script_name: string,
+	/**  The rule whose action ran the script. */
+	rule_id?: string | null,
+	phase: ScriptPhase,
+	message: string,
+};
+
+/**
+ *  A script that failed on a flow (threw, timed out, returned something
+ *  unusable). The flow went on unmodified by that script.
+ */
+export type ScriptIssue_Serialize = {
+	script_id: string,
+	script_name: string,
+	/**  The rule whose action ran the script. */
+	rule_id: string | null,
+	phase: ScriptPhase,
+	message: string,
+};
+
+export type ScriptKind = 
+/**  Exports `onRequest` and/or `onResponse`. */
+"rewrite" | 
+/**  Exports `onMock`. */
+"mock" | 
+/**  Exports `onView`. */
+"view";
+
+/**  Which entry point a script problem came from. */
+export type ScriptPhase = "request" | "response" | "mock" | "view";
+
+/**  Script limits, kept in `app.sqlite` (Settings › Advanced). */
+export type ScriptSettings = ScriptSettings_Serialize | ScriptSettings_Deserialize;
+
+/**  Script limits, kept in `app.sqlite` (Settings › Advanced). */
+export type ScriptSettings_Deserialize = {
+	/**  How long `onRequest`, `onResponse` and `onMock` may run. */
+	traffic_timeout_ms?: number,
+	/**  How long `onView` may run. */
+	view_timeout_ms?: number,
+};
+
+/**  Script limits, kept in `app.sqlite` (Settings › Advanced). */
+export type ScriptSettings_Serialize = {
+	/**  How long `onRequest`, `onResponse` and `onMock` may run. */
+	traffic_timeout_ms: number,
+	/**  How long `onView` may run. */
+	view_timeout_ms: number,
+};
+
+/**  The dry run of a script against a recorded flow. Nothing is sent. */
+export type ScriptTestResult = ScriptTestResult_Serialize | ScriptTestResult_Deserialize;
+
+/**  The dry run of a script against a recorded flow. Nothing is sent. */
+export type ScriptTestResult_Deserialize = {
+	kind: ScriptKind,
+	/**  The first error, if the script threw or timed out. */
+	error?: string | null,
+	/**  Rewrite scripts: the request before and after `onRequest`. */
+	request_before?: RequestHead | null,
+	request_body_before?: string | null,
+	request?: RequestHead | null,
+	request_body?: string | null,
+	/**
+	 *  Rewrite scripts: the response before and after `onResponse`.
+	 *  Mock scripts: the mocked response (`None` when `onMock` passed).
+	 */
+	response_before?: ResponseHead | null,
+	response_body_before?: string | null,
+	response?: ResponseHead | null,
+	response_body?: string | null,
+	/**  View scripts: the views produced. */
+	views: ScriptView_Deserialize[],
+	/**  What the script logged during the run. */
+	console: ConsoleEntry_Deserialize[],
+	duration_ms: number | null,
+	notes: string[],
+};
+
+/**  The dry run of a script against a recorded flow. Nothing is sent. */
+export type ScriptTestResult_Serialize = {
+	kind: ScriptKind,
+	/**  The first error, if the script threw or timed out. */
+	error: string | null,
+	/**  Rewrite scripts: the request before and after `onRequest`. */
+	request_before: RequestHead | null,
+	request_body_before: string | null,
+	request: RequestHead | null,
+	request_body: string | null,
+	/**
+	 *  Rewrite scripts: the response before and after `onResponse`.
+	 *  Mock scripts: the mocked response (`None` when `onMock` passed).
+	 */
+	response_before: ResponseHead | null,
+	response_body_before: string | null,
+	response: ResponseHead | null,
+	response_body: string | null,
+	/**  View scripts: the views produced. */
+	views: ScriptView_Serialize[],
+	/**  What the script logged during the run. */
+	console: ConsoleEntry_Serialize[],
+	duration_ms: number | null,
+	notes: string[],
+};
+
+/**  What to dry-run: a saved script, or source that isn't saved yet. */
+export type ScriptTestSpec = ScriptTestSpec_Serialize | ScriptTestSpec_Deserialize;
+
+/**  What to dry-run: a saved script, or source that isn't saved yet. */
+export type ScriptTestSpec_Deserialize = {
+	/**  A saved script. Ignored when `source` is given. */
+	script_id?: string | null,
+	/**  Unsaved source; `kind` says which entry points to run. */
+	source?: string | null,
+	kind?: ScriptKind | null,
+	/**  For view scripts: which body to view (the response by default). */
+	part?: BodyPart | null,
+};
+
+/**  What to dry-run: a saved script, or source that isn't saved yet. */
+export type ScriptTestSpec_Serialize = {
+	/**  A saved script. Ignored when `source` is given. */
+	script_id: string | null,
+	/**  Unsaved source; `kind` says which entry points to run. */
+	source: string | null,
+	kind: ScriptKind | null,
+	/**  For view scripts: which body to view (the response by default). */
+	part: BodyPart | null,
+};
+
+/**
+ *  One view a view script produced. Text kinds carry `text`; `hex` and
+ *  `image` carry `base64`. Each is capped at 8 MB.
+ */
+export type ScriptView = ScriptView_Serialize | ScriptView_Deserialize;
+
+/**  How the inspector renders a script view. */
+export type ScriptViewKind = "json" | "text" | "xml" | "html" | "hex" | "image";
+
+/**
+ *  One view a view script produced. Text kinds carry `text`; `hex` and
+ *  `image` carry `base64`. Each is capped at 8 MB.
+ */
+export type ScriptView_Deserialize = {
+	title: string,
+	kind: ScriptViewKind,
+	text?: string | null,
+	base64?: string | null,
+	/**  The image type, e.g. `image/png` (images only). */
+	mime?: string | null,
+	/**  The view was longer than the cap and was cut. */
+	truncated?: boolean,
+};
+
+/**
+ *  One view a view script produced. Text kinds carry `text`; `hex` and
+ *  `image` carry `base64`. Each is capped at 8 MB.
+ */
+export type ScriptView_Serialize = {
+	title: string,
+	kind: ScriptViewKind,
+	text: string | null,
+	base64: string | null,
+	/**  The image type, e.g. `image/png` (images only). */
+	mime: string | null,
+	/**  The view was longer than the cap and was cut. */
+	truncated: boolean,
+};
+
+export type Script_Deserialize = {
+	id: string,
+	name: string,
+	kind: ScriptKind,
+	/**  A disabled script does nothing, even when a rule names it. */
+	enabled: boolean,
+	/**  An ES module exporting the kind's entry points. */
+	source: string,
+	origin: RuleOrigin_Deserialize,
+	/**  Which bodies a view script runs on (view scripts only). */
+	view?: ViewConfig_Deserialize | null,
+	/**  Milliseconds since the Unix epoch. */
+	updated_at_ms?: number | null,
+};
+
+export type Script_Serialize = {
+	id: string,
+	name: string,
+	kind: ScriptKind,
+	/**  A disabled script does nothing, even when a rule names it. */
+	enabled: boolean,
+	/**  An ES module exporting the kind's entry points. */
+	source: string,
+	origin: RuleOrigin_Serialize,
+	/**  Which bodies a view script runs on (view scripts only). */
+	view: ViewConfig_Serialize | null,
+	/**  Milliseconds since the Unix epoch. */
+	updated_at_ms: number | null,
+};
 
 /**
  *  The flow-table marker of a flow Proxymate sent itself (the summary's
@@ -2137,6 +2443,29 @@ export type UpdateSettings = {
 
 export type Value = null | boolean | number | string | Value[] | { [key in string]: Value };
 
+/**  Where a view script applies. Every set condition must match. */
+export type ViewConfig = ViewConfig_Serialize | ViewConfig_Deserialize;
+
+/**  Where a view script applies. Every set condition must match. */
+export type ViewConfig_Deserialize = {
+	/**  The flow's request (and, if set, response) must match. */
+	matcher?: Matcher_Deserialize,
+	/**  Which bodies get the view; empty means both. */
+	parts?: BodyPart[],
+	/**  Only bodies of these kinds; empty means any. */
+	kinds?: ContentKind[],
+};
+
+/**  Where a view script applies. Every set condition must match. */
+export type ViewConfig_Serialize = {
+	/**  The flow's request (and, if set, response) must match. */
+	matcher: Matcher_Serialize,
+	/**  Which bodies get the view; empty means both. */
+	parts: BodyPart[],
+	/**  Only bodies of these kinds; empty means any. */
+	kinds: ContentKind[],
+};
+
 /**
  *  Per-tick change notification for one view, published at 20 Hz.
  * 
@@ -2222,6 +2551,29 @@ export type ViewInfo_Serialize = {
 	elapsed_us: number,
 	/**  Set when the filter has header or body terms: a deep search started. */
 	deep: DeepProgress | null,
+};
+
+/**  What one view script made of one body. */
+export type ViewResult = ViewResult_Serialize | ViewResult_Deserialize;
+
+/**  What one view script made of one body. */
+export type ViewResult_Deserialize = {
+	script_id: string,
+	script_name: string,
+	views: ScriptView_Deserialize[],
+	/**  The script threw or timed out. */
+	error?: string | null,
+	duration_ms: number | null,
+};
+
+/**  What one view script made of one body. */
+export type ViewResult_Serialize = {
+	script_id: string,
+	script_name: string,
+	views: ScriptView_Serialize[],
+	/**  The script threw or timed out. */
+	error: string | null,
+	duration_ms: number | null,
 };
 
 /**  How a WebSocket connection ended. */

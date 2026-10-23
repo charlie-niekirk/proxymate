@@ -370,7 +370,9 @@ fn a_version_1_session_still_opens() {
     assert_eq!(detail.rules.applied[0].name, "Tag");
     assert_eq!(detail.rules.rewrite_skipped.as_deref(), Some("a v1 note"));
     assert!(detail.rules.scripts.is_empty());
-    let body = engine.body_head_in(doc.store, 0, BodyPart::Response, true, None).unwrap();
+    let body = engine
+        .body_head_in(doc.store, 0, BodyPart::Response, true, None)
+        .unwrap();
     assert!(body.bytes.starts_with(br#"{"ok":true"#));
     let health = engine.flow_detail_in(doc.store, 1).unwrap().unwrap();
     assert_eq!(health.response.unwrap().status, 200);

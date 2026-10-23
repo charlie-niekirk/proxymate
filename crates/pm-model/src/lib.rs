@@ -36,8 +36,8 @@ pub use rules::{
     ResponseMatcher, Rule, RuleId, RuleOrigin, RuleSettings, RuleTestResult, StatusRange,
 };
 pub use scripts::{
-    ConsoleEntry, ConsoleLevel, Script, ScriptId, ScriptIssue, ScriptKind, ScriptPhase, ScriptSettings, ScriptTestResult,
-    ScriptTestSpec, ScriptView, ScriptViewKind, ViewConfig, ViewResult,
+    ConsoleEntry, ConsoleLevel, Script, ScriptId, ScriptIssue, ScriptKind, ScriptPhase, ScriptSettings,
+    ScriptTestResult, ScriptTestSpec, ScriptView, ScriptViewKind, ViewConfig, ViewResult,
 };
 pub use send::{RequestSpec, SendOpts, SendOrigin, SentBy};
 pub use settings::{ProxySettings, StorageSettings, StorageStatus};

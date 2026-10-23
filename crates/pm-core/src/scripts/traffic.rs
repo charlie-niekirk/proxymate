@@ -33,6 +33,7 @@ impl<'a> ScriptRun<'a> {
         }
     }
 
+    #[cfg(test)]
     pub fn none() -> ScriptRun<'static> {
         ScriptRun {
             scripts: None,
@@ -109,7 +110,13 @@ impl<'a> ScriptRun<'a> {
     }
 
     /// The issue for a script result that couldn't be applied.
-    pub fn issue(&self, script: &CompiledScript, rule: &CompiledRule, phase: ScriptPhase, message: String) -> ScriptIssue {
+    pub fn issue(
+        &self,
+        script: &CompiledScript,
+        rule: &CompiledRule,
+        phase: ScriptPhase,
+        message: String,
+    ) -> ScriptIssue {
         if let Some(scripts) = self.scripts {
             scripts.log_error(&script.code, &message, self.flow_id);
         }
@@ -126,7 +133,12 @@ impl<'a> ScriptRun<'a> {
 pub(crate) fn header_pairs(headers: &HeaderMap) -> Vec<(String, String)> {
     headers
         .iter()
-        .map(|(n, v)| (n.as_str().to_owned(), String::from_utf8_lossy(v.as_bytes()).into_owned()))
+        .map(|(n, v)| {
+            (
+                n.as_str().to_owned(),
+                String::from_utf8_lossy(v.as_bytes()).into_owned(),
+            )
+        })
         .collect()
 }
 
@@ -164,7 +176,8 @@ fn header_map(pairs: &[(String, String)]) -> Result<HeaderMap, String> {
     for (name, value) in pairs {
         let name = HeaderName::from_bytes(name.trim().as_bytes())
             .map_err(|_| format!("{name:?} isn't a valid header name"))?;
-        let value = HeaderValue::from_str(value).map_err(|_| format!("{name}: {value:?} isn't a valid header value"))?;
+        let value =
+            HeaderValue::from_str(value).map_err(|_| format!("{name}: {value:?} isn't a valid header value"))?;
         map.append(name, value);
     }
     Ok(map)
@@ -215,7 +228,13 @@ pub(crate) fn apply_request(draft: &mut RequestDraft, out: RequestOut) -> Result
         changed.head = true;
     }
     if (scheme, out.host.as_str(), out.port, path.as_str(), out.query.as_str())
-        != (draft.scheme, draft.host.as_str(), draft.port, draft.path.as_str(), draft.query.as_str())
+        != (
+            draft.scheme,
+            draft.host.as_str(),
+            draft.port,
+            draft.path.as_str(),
+            draft.query.as_str(),
+        )
     {
         draft.scheme = scheme;
         draft.host = out.host;

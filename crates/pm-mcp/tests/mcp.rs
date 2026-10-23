@@ -277,6 +277,136 @@ async fn agents_mock_endpoints_with_tagged_rules() {
 }
 
 #[tokio::test]
+async fn agents_write_test_and_run_scripts() {
+    let h = Harness::start().await;
+    let upstream = Upstream::start().await;
+    let (client, mut events) = h.client().await;
+    #[allow(deprecated)] // resources/subscribe is how 2025-11-25 sessions subscribe.
+    let subscribe = client
+        .subscribe(SubscribeRequestParams::new("proxymate://scripts"))
+        .await;
+    assert!(subscribe.is_ok());
+
+    // A mock script, run by a rule, serves a body with a base64 JSON field.
+    let mock = ok(
+        &client,
+        "create_script",
+        json!({
+            "name": "Profile",
+            "kind": "mock",
+            "source": "export function onMock() { return { body: { payload: btoa(JSON.stringify({ user: 'ada' })) } }; }",
+        }),
+    )
+    .await;
+    assert_eq!(mock["origin"]["kind"], "agent");
+    next_event(&mut events, |e| {
+        *e == Event::ResourceUpdated("proxymate://scripts".into())
+    })
+    .await;
+    let rule = ok(
+        &client,
+        "create_rule",
+        json!({
+            "name": "mock profile",
+            "matcher": { "path": { "kind": "exact", "value": "/profile" } },
+            "actions": [{ "type": "Script", "script_id": mock["id"] }],
+        }),
+    )
+    .await;
+    // A view script decodes it.
+    let view = ok(
+        &client,
+        "create_script",
+        json!({
+            "name": "Decode payload",
+            "kind": "view",
+            "source": "export function onView(c, flow) { console.log('viewing', flow.id); \
+                       return { title: 'Payload', body: Proxymate.base64DecodeJson(flow.response.body.payload) }; }",
+            "view": { "parts": ["response"], "kinds": ["json"] },
+        }),
+    )
+    .await;
+    let (status, body) = client::get(h.proxy, &upstream.url("/profile")).await;
+    assert_eq!(status, 200);
+    assert!(String::from_utf8_lossy(&body).contains("payload"));
+    let flow = eventually(WAIT, || {
+        h.engine.flush();
+        h.engine.get_flow(0).filter(|f| f.status.is_some())
+    })
+    .await;
+
+    let views = ok(&client, "get_flow_views", json!({ "id": flow.id })).await;
+    let result = &views["results"][0];
+    assert_eq!(result["script_id"], view["id"]);
+    assert_eq!(result["views"][0]["text"], "{\n  \"user\": \"ada\"\n}");
+    let console = ok(&client, "get_script_console", json!({})).await;
+    assert_eq!(
+        console["entries"].as_array().unwrap().last().unwrap()["message"],
+        "viewing 0"
+    );
+
+    let test = ok(
+        &client,
+        "test_script",
+        json!({ "flow_id": flow.id, "kind": "rewrite", "source": "export function onResponse(c, u, q, r) { r.status = 418; }" }),
+    )
+    .await;
+    assert_eq!(test["response"]["status"], 418);
+    assert_eq!(test["response_before"]["status"], 200);
+
+    let listed = ok(&client, "list_scripts", json!({ "kind": "view" })).await;
+    assert_eq!(listed["total"], 1);
+    let api = client
+        .read_resource(rmcp::model::ReadResourceRequestParams::new("proxymate://scripts/api"))
+        .await
+        .unwrap();
+    let rmcp::model::ResourceContents::TextResourceContents { text, .. } = &api.contents[0] else {
+        panic!("text")
+    };
+    assert!(text.contains("declare function onView"));
+
+    // The mock script is in use, so only the view script goes.
+    let deleted = ok(&client, "delete_agent_scripts", json!({})).await;
+    assert_eq!(deleted["deleted"], 1);
+    let refused = call(&client, "delete_script", json!({ "id": mock["id"] })).await;
+    assert_eq!(refused.is_error, Some(true));
+    ok(&client, "delete_rule", json!({ "id": rule["id"] })).await;
+    ok(&client, "delete_script", json!({ "id": mock["id"] })).await;
+    assert!(h.engine.scripts().is_empty());
+
+    // Read-only mode hides every tool that saves or runs agent code.
+    h.engine
+        .set_mcp_settings(McpSettings {
+            enabled: true,
+            read_only: true,
+        })
+        .unwrap();
+    next_event(&mut events, |e| *e == Event::ToolListChanged).await;
+    let names: Vec<String> = client
+        .list_all_tools()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|t| t.name.to_string())
+        .collect();
+    for hidden in [
+        "create_script",
+        "update_script",
+        "delete_script",
+        "test_script",
+        "set_script_enabled",
+    ] {
+        assert!(!names.iter().any(|n| n == hidden), "{hidden}");
+    }
+    for shown in ["list_scripts", "get_script", "get_flow_views", "get_script_console"] {
+        assert!(names.iter().any(|n| n == shown), "{shown}");
+    }
+
+    client.cancel().await.unwrap();
+    h.stop().await;
+}
+
+#[tokio::test]
 async fn agents_replay_send_and_export() {
     let h = Harness::start().await;
     let upstream = Upstream::start().await;

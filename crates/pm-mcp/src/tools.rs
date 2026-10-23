@@ -16,6 +16,7 @@ use pm_model::{
     Matcher, Pattern, Phase, PresetKind, Rule, RuleOrigin, Scheme, SearchScope, WsDirection, WsQuery,
 };
 use pm_model::{FlowSelection, LIVE_STORE, RequestSpec, SendOpts, SendOrigin, StoreId};
+use pm_model::{Script, ScriptKind, ScriptTestSpec, ViewConfig};
 use rmcp::handler::server::common::schema_for_type;
 use rmcp::model::{JsonObject, Tool, ToolAnnotations};
 use schemars::JsonSchema;
@@ -164,7 +165,7 @@ fn defs() -> Vec<Def> {
             "create_rule",
             Write,
             CreateRule,
-            "Create a rule: a matcher plus ordered actions (SetHeader, AddHeader, RemoveHeader, ReplaceHeaderValue, SetQuery, RemoveQuery, ReplaceBody, SetBody, JsonSet, JsonRemove, FormSet, FormRemove, SetStatus, MapLocal, MapRemote, Breakpoint, Delay, Throttle, Block). It is added last, enabled, and tagged as yours. Prefer create_map_local, create_rewrite or create_breakpoint for the common cases."
+            "Create a rule: a matcher plus ordered actions (SetHeader, AddHeader, RemoveHeader, ReplaceHeaderValue, SetQuery, RemoveQuery, ReplaceBody, SetBody, JsonSet, JsonRemove, FormSet, FormRemove, SetStatus, MapLocal, MapRemote, Breakpoint, Delay, Throttle, Block, Script). It is added last, enabled, and tagged as yours. Prefer create_map_local, create_rewrite or create_breakpoint for the common cases."
         ),
         def!(
             "update_rule",
@@ -239,6 +240,61 @@ fn defs() -> Vec<Def> {
             Write,
             ReplayFlow,
             "Send a recorded request again, optionally modified (method, URL, headers, body). The new flow is recorded and marked as sent by you; with `wait` (default) the result has its response status."
+        ),
+        def!(
+            "list_scripts",
+            Read,
+            ListScripts,
+            "List scripts (JavaScript run by Proxymate, with no network or file access): view scripts add decoded views of bodies to the inspector; rewrite scripts (onRequest/onResponse) and mock scripts (onMock) run from a rule's Script action. The API's type definitions are the resource proxymate://scripts/api."
+        ),
+        def!("get_script", Read, ScriptIdParam, "One script by id, with its source."),
+        def!(
+            "create_script",
+            Write,
+            CreateScript,
+            "Create a script: an ES module exporting onView (kind view), onRequest and/or onResponse (kind rewrite) or onMock (kind mock); see proxymate://scripts/api for the API. It is evaluated once to check it. Rewrite and mock scripts run only from a rule: create_rule with a {type: \"Script\", script_id} action. View scripts run on bodies their `view` config matches. Tagged as yours. Try it first with test_script."
+        ),
+        def!(
+            "update_script",
+            Destructive,
+            UpdateScript,
+            "Change a script's name, source, enabled flag or view config (fields left out stay as they are). Its context.shared starts over."
+        ),
+        def!(
+            "set_script_enabled",
+            Write,
+            SetScriptEnabled,
+            "Turn a script on or off."
+        ),
+        def!(
+            "delete_script",
+            Destructive,
+            ScriptIdParam,
+            "Delete a script. Refused while a rule runs it; the error names those rules."
+        ),
+        def!(
+            "delete_agent_scripts",
+            Destructive,
+            NoParams,
+            "Delete every script created by an agent that no rule runs. Returns how many."
+        ),
+        def!(
+            "test_script",
+            Write,
+            TestScript,
+            "Dry-run a script (saved, by script_id, or unsaved source with its kind) against a recorded flow: the request and response before and after, a mock's answer, or the views, plus what it logged. Nothing is sent and nothing is saved."
+        ),
+        def!(
+            "get_flow_views",
+            Read,
+            GetFlowViews,
+            "What the enabled view scripts make of a flow's request or response body (e.g. a base64 field decoded): each script's views (text, or base64 for hex and image views) or its error."
+        ),
+        def!(
+            "get_script_console",
+            Read,
+            GetScriptConsole,
+            "The script console: what scripts logged with console.* and the errors they hit, oldest first. Pass the last seq you saw as `since` to get only newer entries."
         ),
         def!(
             "send_request",
@@ -388,6 +444,39 @@ pub(crate) async fn call(ctx: &Ctx<'_>, name: &str, args: JsonObject) -> ToolRes
         }
         "export_har" => export_har(ctx, parse(args)?),
         "replay_flow" => replay_flow(ctx, parse(args)?).await,
+        "list_scripts" => list_scripts(ctx, parse(args)?),
+        "get_script" => {
+            let p: ScriptIdParam = parse(args)?;
+            ctx.engine
+                .script(&p.id)
+                .map(|s| json!(s))
+                .ok_or_else(|| ToolError(format!("no script with id {}", p.id)))
+        }
+        "create_script" => create_script(ctx, parse(args)?).await,
+        "update_script" => update_script(ctx, parse(args)?).await,
+        "set_script_enabled" => {
+            let p: SetScriptEnabled = parse(args)?;
+            Ok(json!(
+                blocking(ctx, move |e| e.set_script_enabled(&p.id, p.enabled)).await?
+            ))
+        }
+        "delete_script" => {
+            let p: ScriptIdParam = parse(args)?;
+            blocking(ctx, move |e| e.delete_script(&p.id)).await?;
+            Ok(json!({ "deleted": true }))
+        }
+        "delete_agent_scripts" => Ok(json!({ "deleted": blocking(ctx, |e| e.delete_agent_scripts()).await? })),
+        "test_script" => test_script(ctx, parse(args)?).await,
+        "get_flow_views" => {
+            let p: GetFlowViews = parse(args)?;
+            let part = p.part.unwrap_or(BodyPart::Response);
+            Ok(json!({ "results": ctx.engine.run_view_scripts(LIVE_STORE, p.id, part).await? }))
+        }
+        "get_script_console" => {
+            let p: GetScriptConsole = parse(args)?;
+            let entries = ctx.engine.script_console(p.since, limit(p.limit, 200, 2000) as u32);
+            Ok(json!({ "entries": entries }))
+        }
         "send_request" => {
             let p: SendRequest = parse(args)?;
             send(ctx, p.request, p.apply_rules, p.wait).await
@@ -582,6 +671,86 @@ struct ListRules {
     limit: Option<u32>,
     #[serde(default)]
     cursor: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct ListScripts {
+    #[serde(default)]
+    kind: Option<ScriptKind>,
+    #[serde(default)]
+    origin: Option<OriginFilter>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct ScriptIdParam {
+    id: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct CreateScript {
+    name: String,
+    kind: ScriptKind,
+    /// An ES module exporting the kind's entry points.
+    source: String,
+    #[serde(default = "yes")]
+    enabled: bool,
+    /// View scripts: which bodies get the view (default: every response and request body).
+    #[serde(default)]
+    view: Option<ViewConfig>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct UpdateScript {
+    id: String,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    source: Option<String>,
+    #[serde(default)]
+    enabled: Option<bool>,
+    #[serde(default)]
+    view: Option<ViewConfig>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct SetScriptEnabled {
+    id: String,
+    enabled: bool,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct TestScript {
+    /// The recorded flow to run it against.
+    flow_id: FlowId,
+    /// A saved script to test.
+    #[serde(default)]
+    script_id: Option<String>,
+    /// Unsaved source (with `kind`), tested instead of the saved script.
+    #[serde(default)]
+    source: Option<String>,
+    #[serde(default)]
+    kind: Option<ScriptKind>,
+    /// View scripts: which body to view (default response).
+    #[serde(default)]
+    part: Option<BodyPart>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct GetFlowViews {
+    id: FlowId,
+    /// Default response.
+    #[serde(default)]
+    part: Option<BodyPart>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct GetScriptConsole {
+    /// Only entries with a larger seq.
+    #[serde(default)]
+    since: Option<u64>,
+    /// 1–2000, default 200 (the newest ones).
+    #[serde(default)]
+    limit: Option<u32>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -1382,6 +1551,79 @@ fn agent_origin(ctx: &Ctx<'_>) -> RuleOrigin {
             .map(|d| d.as_secs_f64() * 1000.0)
             .unwrap_or(0.0),
     }
+}
+
+/// Runs an engine call that may block (saving a script evaluates it) off
+/// the async runtime's threads.
+async fn blocking<T: Send + 'static>(
+    ctx: &Ctx<'_>,
+    f: impl FnOnce(&Engine) -> Result<T, pm_core::Error> + Send + 'static,
+) -> Result<T, ToolError> {
+    let engine = ctx.engine.clone();
+    Ok(tokio::task::spawn_blocking(move || f(&engine)).await??)
+}
+
+fn list_scripts(ctx: &Ctx<'_>, p: ListScripts) -> ToolResult {
+    let scripts: Vec<Script> = ctx
+        .engine
+        .scripts()
+        .into_iter()
+        .filter(|s| p.kind.is_none_or(|k| k == s.kind))
+        .filter(|s| match p.origin {
+            None => true,
+            Some(OriginFilter::User) => matches!(s.origin, RuleOrigin::User),
+            Some(OriginFilter::Preset) => matches!(s.origin, RuleOrigin::Preset { .. }),
+            Some(OriginFilter::Agent) => matches!(s.origin, RuleOrigin::Agent { .. }),
+        })
+        .collect();
+    Ok(json!({ "scripts": scripts, "total": scripts.len() }))
+}
+
+async fn create_script(ctx: &Ctx<'_>, p: CreateScript) -> ToolResult {
+    let script = Script {
+        id: String::new(),
+        name: p.name,
+        kind: p.kind,
+        enabled: p.enabled,
+        source: p.source,
+        origin: agent_origin(ctx),
+        view: match p.kind {
+            ScriptKind::View => Some(p.view.unwrap_or_default()),
+            _ => None,
+        },
+        updated_at_ms: 0.0,
+    };
+    Ok(json!(blocking(ctx, move |e| e.create_script(script)).await?))
+}
+
+async fn update_script(ctx: &Ctx<'_>, p: UpdateScript) -> ToolResult {
+    let mut script = ctx
+        .engine
+        .script(&p.id)
+        .ok_or_else(|| ToolError(format!("no script with id {}", p.id)))?;
+    if let Some(name) = p.name {
+        script.name = name;
+    }
+    if let Some(source) = p.source {
+        script.source = source;
+    }
+    if let Some(enabled) = p.enabled {
+        script.enabled = enabled;
+    }
+    if p.view.is_some() {
+        script.view = p.view;
+    }
+    Ok(json!(blocking(ctx, move |e| e.update_script(script)).await?))
+}
+
+async fn test_script(ctx: &Ctx<'_>, p: TestScript) -> ToolResult {
+    let spec = ScriptTestSpec {
+        script_id: p.script_id,
+        source: p.source,
+        kind: p.kind,
+        part: p.part,
+    };
+    Ok(json!(ctx.engine.test_script(LIVE_STORE, p.flow_id, spec).await?))
 }
 
 /// Saves a new rule as the agent's.

@@ -346,7 +346,12 @@ fn execute<'js>(
     Ok(output)
 }
 
-fn context_info<'js>(ctx: &Ctx<'js>, code: &Code, phase: ScriptPhase, info: &CallInfo) -> rquickjs::Result<Object<'js>> {
+fn context_info<'js>(
+    ctx: &Ctx<'js>,
+    code: &Code,
+    phase: ScriptPhase,
+    info: &CallInfo,
+) -> rquickjs::Result<Object<'js>> {
     let obj = Object::new(ctx.clone())?;
     obj.set("scriptId", code.id.as_str())?;
     obj.set("scriptName", code.name.as_str())?;
@@ -455,9 +460,7 @@ fn optional_bytes(obj: &Object<'_>, key: &str) -> Result<Option<Vec<u8>>, String
     if value.is_null() || value.is_undefined() {
         return Ok(None);
     }
-    bytes_of(&value)
-        .map(Some)
-        .ok_or_else(|| format!("{key} must be bytes"))
+    bytes_of(&value).map(Some).ok_or_else(|| format!("{key} must be bytes"))
 }
 
 fn request_out(result: &Value<'_>) -> Result<RequestOut, String> {
