@@ -102,6 +102,8 @@ const PAIRS: [string, string[]][] = [
   ["--url-port", ALT_ROW],
   ["--url-path", ALT_ROW],
   ["--url-query", ALT_ROW],
+  ["--url-bar-host", ["--background"]],
+  ["--url-bar-path", ["--background"]],
   ["--s-failed", ALT_ROW],
   ["--ssl-pinned", ALT_ROW],
   ["--ssl-passthrough", ALT_ROW],

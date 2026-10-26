@@ -24,7 +24,7 @@ We're building a fast, modern desktop tool for debugging web traffic, in the sam
 Design cues from Proxyman's dashboard:
 - Three panes: a sidebar grouped by Apps and Domains with counts, a dense monospace flow table, and a split Request | Response inspector.
 - A row of filter chips: All/HTTP/HTTPS/WebSocket | JSON/Form/XML/JS/CSS/GraphQL/Document/Media/Other.
-- Method and status pills, and an orange highlight on the selected row.
+- Method and status pills, and a highlight on the selected row (Proxyman's is orange; ours is macOS blue).
 - A toolbar status reading "Listening on IP:port", and a footer with Clear / Filter / Auto Select, the row count and throughput.
 
 ## Architecture
@@ -400,8 +400,8 @@ Tokens are CSS variables set per `[data-theme]`. Pills use a tinted background w
 - **Status:**
   - 1xx slate, 2xx green, 3xx cyan, 4xx amber, 5xx red.
   - Active: amber with a pulse. Paused: violet. Failed: red outline. Blocked and Tunnel: grey.
-- **URL parts:** scheme dim, host bright, path normal, query dim-accent.
-- **Selection:** orange (a deeper orange since M10, so white text on it reaches 4.5:1).
+- **URL parts:** scheme dim, host bright, path normal, query dim-accent. The inspector's URL bar colours the host blue (`--url-bar-host`, as Proxyman does) and the path green (`--url-bar-path`); the table keeps them grey.
+- **Accent and selection:** macOS system blue (`--primary`, `--ring`, chips, code selection) and the deeper selected-content blue for the selected row, both dark enough for white text at 4.5:1. They were orange until the post-M15 colour pass.
 - **Theme:** dark first, with light mode in M10. The body viewers already use tokens for both (`--syntax-*`, `--code-*`, `--checker-*`).
   - (M10) Settings › Appearance picks System, Light or Dark (stored in the webview with the column layout); the native window follows (`setTheme`), so the sidebar vibrancy and traffic lights match. `ui/src/styles/contrast.test.ts` converts every text token and the surface it is drawn on (pill tints composited over the table) from OKLCH and checks 4.5:1 in both themes. Component colours that were hard-coded (overlays, destructive buttons, preview paper, pills on the selected row) became tokens.
 

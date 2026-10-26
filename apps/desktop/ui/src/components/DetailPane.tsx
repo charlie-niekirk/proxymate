@@ -73,7 +73,13 @@ export function DetailPane() {
       <UrlBarMenu flow={flow} detail={detail}>
         <div className="flex h-8 shrink-0 items-center gap-2 border-b px-2" data-selectable data-testid="url-bar">
           <MethodPill method={flow.method} />
-          <UrlText row={flow} operation={flow.graphql_op} sentBy={flow.sent_by} className="min-w-0 flex-1 text-xs" />
+          <UrlText
+            row={flow}
+            operation={flow.graphql_op}
+            sentBy={flow.sent_by}
+            tone="bar"
+            className="min-w-0 flex-1 text-xs"
+          />
           <StatusPill status={flow.status} state={flow.state} />
           <span
             className="text-muted-foreground rounded-sm border px-1 font-mono text-2xs leading-4"
