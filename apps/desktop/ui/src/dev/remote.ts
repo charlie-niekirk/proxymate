@@ -33,6 +33,9 @@ import { useUi, type DeviceTab, type RequestTab, type ResponseTab, type Settings
  *   `{"palette": true}`, `{"filter": "body:token"}`, `{"reload": true}`
  * - `{"contextMenu": 3}`: right-clicks flow 3's row (it must be on screen),
  *   opening the flow menu for a screenshot. `{"contextMenu": null}` closes it.
+ *   M15: `{"contextMenu": {"testid": "header-table", "index": 2}}` right-clicks
+ *   the `index`th (default 0) `[data-testid]` element, at its `[data-menu-key]`
+ *   row `row` if given (`{"testid": "header-table", "row": 3}`).
  * - `{"preset": {"flow": 3, "kind": "map_local"}}` (or `breakpoint`,
  *   `rewrite`): exactly what the menu's "Map Local…" etc. do.
  * - M13: `{"rewrite": {"flow": 3}}` opens the Rewrite dialog on the active
@@ -81,7 +84,7 @@ interface Command {
   filter?: string;
   /** Reloads the page (with `VITE_PM_PERF_PROBE`, the probe runs again). */
   reload?: boolean;
-  contextMenu?: number | null;
+  contextMenu?: number | null | { testid: string; index?: number; row?: number };
   preset?: { flow: number; kind: PresetKind };
   /** Opens the Rewrite dialog on a flow, or reopens a saved rule (by id) visually; `null` closes it. */
   rewrite?: { flow?: number; rule?: string } | null;
@@ -226,12 +229,18 @@ async function post(url: string, body: string) {
 }
 
 /** Right-clicks a row the way a user would (Radix opens on `contextmenu`). */
-function openContextMenu(flow: number | null) {
-  if (flow === null) {
+function openContextMenu(target: NonNullable<Command["contextMenu"]> | null) {
+  if (target === null) {
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     return;
   }
-  const row = document.querySelector<HTMLElement>(`[data-flow-id="${flow}"]`);
+  let row: HTMLElement | null | undefined;
+  if (typeof target === "number") {
+    row = document.querySelector<HTMLElement>(`[data-flow-id="${target}"]`);
+  } else {
+    const el = document.querySelectorAll<HTMLElement>(`[data-testid="${CSS.escape(target.testid)}"]`)[target.index ?? 0];
+    row = target.row === undefined ? el : el?.querySelector<HTMLElement>(`[data-menu-key="${target.row}"]`);
+  }
   if (!row) return;
   const box = row.getBoundingClientRect();
   const at = { clientX: box.left + Math.min(320, box.width / 3), clientY: box.top + box.height / 2 };

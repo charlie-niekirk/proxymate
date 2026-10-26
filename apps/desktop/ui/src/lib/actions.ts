@@ -2,6 +2,7 @@ import { toast } from "sonner";
 
 import type { FlowSelection, PresetKind, RequestSpec_Deserialize, SaveProgress_Serialize, ScriptKind } from "@/bindings";
 import { backend } from "@/lib/backend";
+import { copyLater } from "@/lib/clipboard";
 import {
   androidKey,
   caInfoKey,
@@ -89,9 +90,12 @@ export async function setAppSslExcluded(app: string, excluded: boolean) {
   queryClient.setQueryData(sslSettingsKey, await backend.setAppSslExcluded(app, excluded));
 }
 
-/** Copies `export HTTPS_PROXY=… NODE_EXTRA_CA_CERTS=…` for a terminal. */
-export async function copyTerminalEnv() {
-  await navigator.clipboard.writeText(await backend.getTerminalEnv());
+/**
+ * Copies `export HTTPS_PROXY=… NODE_EXTRA_CA_CERTS=…` for a terminal;
+ * resolves true once copied. `silent` for buttons that show their own tick.
+ */
+export function copyTerminalEnv(silent = false) {
+  return copyLater(() => backend.getTerminalEnv(), "terminal environment", { silent });
 }
 
 // ---- Rules ----
@@ -171,15 +175,16 @@ export async function setThrottle(preset: ThrottlePreset | null) {
 // ---- Flow menu ----
 
 export async function copyFlowUrl(store: number, flow: number) {
-  const detail = await backend.getFlowDetail(store, flow);
-  const summary = detail ? null : await backend.getFlow(store, flow);
-  const url = detail?.request.url ?? (summary ? `${summary.scheme}://${summary.host}${summary.path}${summary.query ? `?${summary.query}` : ""}` : "");
-  if (url) await navigator.clipboard.writeText(url);
+  await copyLater(async () => {
+    const detail = await backend.getFlowDetail(store, flow);
+    const summary = detail ? null : await backend.getFlow(store, flow);
+    return detail?.request.url ?? (summary ? `${summary.scheme}://${summary.host}${summary.path}${summary.query ? `?${summary.query}` : ""}` : null);
+  }, "URL");
 }
 
 /** A shell command (built in Rust, bodies included) that sends the request again. */
 export async function copyFlowCurl(store: number, flow: number) {
-  await navigator.clipboard.writeText(await backend.getCurl(store, flow));
+  await copyLater(() => backend.getCurl(store, flow), "cURL command");
 }
 
 // ---- Replay and compose ----
@@ -376,7 +381,6 @@ export async function importScript(): Promise<Script | null> {
 }
 
 /** Copies `proxymate.d.ts`, for an editor or an agent. */
-export async function copyScriptTypes() {
-  await navigator.clipboard.writeText(await backend.getScriptTypeDefinitions());
-  toast.success("Copied proxymate.d.ts");
+export function copyScriptTypes() {
+  return copyLater(() => backend.getScriptTypeDefinitions(), "proxymate.d.ts");
 }

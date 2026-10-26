@@ -3,6 +3,7 @@ import { useState, type ReactNode } from "react";
 
 import type { DeviceAccess_Serialize } from "@/bindings";
 import { Button } from "@/components/ui/button";
+import { copy } from "@/lib/clipboard";
 import { svgDataUrl, type Progress } from "@/lib/devices";
 import { cn } from "@/lib/utils";
 
@@ -67,8 +68,9 @@ export function CopyField({
   testId?: string;
 }) {
   const [copied, setCopied] = useState(false);
-  const copy = () =>
-    void navigator.clipboard?.writeText(value).then(() => {
+  const onCopy = () =>
+    void copy(value, undefined, { silent: true }).then((ok) => {
+      if (!ok) return;
       setCopied(true);
       setTimeout(() => setCopied(false), 1200);
     });
@@ -79,7 +81,7 @@ export function CopyField({
       ) : (
         <code className="min-w-0 flex-1 truncate py-0.5 font-mono text-[11px]">{display ?? value}</code>
       )}
-      <Button variant="ghost" size="icon-xs" aria-label={label ?? "Copy"} onClick={copy} className="-mr-1" data-testid={testId}>
+      <Button variant="ghost" size="icon-xs" aria-label={label ?? "Copy"} onClick={onCopy} className="-mr-1" data-testid={testId}>
         {copied ? <CircleCheck className="text-[var(--s-2xx)]" /> : <Copy />}
       </Button>
     </div>

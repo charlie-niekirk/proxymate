@@ -8,6 +8,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Switch } from "@/components/ui/switch";
 import { regenerateCa } from "@/lib/actions";
 import { backend } from "@/lib/backend";
+import { copy } from "@/lib/clipboard";
 import { caInfoKey, proxyStatusKey } from "@/lib/query";
 import { useUi } from "@/store/ui";
 
@@ -153,7 +154,7 @@ function CopyRow({ text }: { text: string }) {
         variant="ghost"
         size="icon-xs"
         aria-label="Copy"
-        onClick={() => void navigator.clipboard?.writeText(text)}
+        onClick={() => void copy(text)}
       >
         <Copy />
       </Button>

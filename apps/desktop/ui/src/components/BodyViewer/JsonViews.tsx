@@ -13,11 +13,11 @@ import {
 } from "@/components/ui/context-menu";
 import { evaluatePath, toJsonPath, toPointer, type PathSegment } from "@/lib/body/jsonPath";
 import { isJsonNumber, numberText, stringifyLossless } from "@/lib/body/losslessJson";
+import { copy } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 
 import { CodeView } from "./CodeView";
 import { Centered, Note } from "./parts";
-import { copyText } from "./util";
 import { jsonInWorker, objectId } from "./workers/client";
 
 /** Pretty-printed JSON in CodeMirror; large bodies are formatted in a worker. */
@@ -177,12 +177,12 @@ function Tree({ root }: { root: unknown }) {
         <ContextMenuContent className="min-w-44 text-xs">
           {menuRow && (
             <>
-              <ContextMenuItem onSelect={() => void copyText(valueText(menuRow.value))}>Copy value</ContextMenuItem>
+              <ContextMenuItem onSelect={() => void copy(valueText(menuRow.value), "value")}>Copy value</ContextMenuItem>
               {menuRow.label !== null && !menuRow.match && (
-                <ContextMenuItem onSelect={() => void copyText(String(menuRow.label))}>Copy key</ContextMenuItem>
+                <ContextMenuItem onSelect={() => void copy(String(menuRow.label), "key")}>Copy key</ContextMenuItem>
               )}
-              <ContextMenuItem onSelect={() => void copyText(toJsonPath(menuRow.path))}>Copy path</ContextMenuItem>
-              <ContextMenuItem onSelect={() => void copyText(toPointer(menuRow.path) || "/")}>Copy JSON pointer</ContextMenuItem>
+              <ContextMenuItem onSelect={() => void copy(toJsonPath(menuRow.path), "path")}>Copy path</ContextMenuItem>
+              <ContextMenuItem onSelect={() => void copy(toPointer(menuRow.path) || "/", "JSON pointer")}>Copy JSON pointer</ContextMenuItem>
               {menuRow.container && (
                 <>
                   <ContextMenuSeparator />

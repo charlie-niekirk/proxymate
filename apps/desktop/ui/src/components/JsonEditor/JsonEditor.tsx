@@ -2,7 +2,6 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Redo2, Undo2 } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
-import { copyText } from "@/components/BodyViewer/util";
 import { Button } from "@/components/ui/button";
 import {
   ContextMenu,
@@ -16,6 +15,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import type { Undoable } from "@/hooks/useUndoable";
+import { copy } from "@/lib/clipboard";
 import {
   blank,
   children,
@@ -434,8 +434,8 @@ export function JsonEditor({
                 </ContextMenuItem>
               )}
               <ContextMenuSeparator />
-              <ContextMenuItem onSelect={() => void copyText(menuRow.node.t === "str" ? menuRow.node.v : toJson(menuRow.node, 2))}>Copy value</ContextMenuItem>
-              <ContextMenuItem onSelect={() => void copyText(pointer(menuRow) || "/")}>Copy JSON pointer</ContextMenuItem>
+              <ContextMenuItem onSelect={() => void copy(menuRow.node.t === "str" ? menuRow.node.v : toJson(menuRow.node, 2), "value")}>Copy value</ContextMenuItem>
+              <ContextMenuItem onSelect={() => void copy(pointer(menuRow) || "/", "JSON pointer")}>Copy JSON pointer</ContextMenuItem>
             </>
           )}
         </ContextMenuContent>

@@ -2,10 +2,13 @@ import { useQuery } from "@tanstack/react-query";
 import { Copy, Download, Maximize2, Minus, Plus, Scan } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
+import { CopyItem } from "@/components/menus/items";
 import { Button } from "@/components/ui/button";
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { isAnimated, jpegOrientation, orientationLabel } from "@/lib/body/exif";
+import { copyImage } from "@/lib/clipboard";
 import { formatSize } from "@/lib/flow";
 import { cn } from "@/lib/utils";
 
@@ -53,7 +56,6 @@ export function ImageView({ url, mime, size, onSave }: { url: string; mime: stri
   const [zoom, setZoom] = useState<Zoom>("fit");
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
   const [failed, setFailed] = useState(false);
-  const [copied, setCopied] = useState<string | null>(null);
   const img = useRef<HTMLImageElement>(null);
   const meta = useQuery({
     queryKey: ["image-meta", url],
@@ -70,19 +72,14 @@ export function ImageView({ url, mime, size, onSave }: { url: string; mime: stri
     const next = dir > 0 ? levels.find((l) => l > current + 1e-6) : [...levels].reverse().find((l) => l < current - 1e-6);
     setZoom(next ?? current);
   };
-  const copy = async () => {
-    try {
-      const el = img.current!;
-      const canvas = document.createElement("canvas");
-      canvas.width = el.naturalWidth;
-      canvas.height = el.naturalHeight;
-      canvas.getContext("2d")!.drawImage(el, 0, 0);
-      const png = new Promise<Blob>((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("encode failed"))), "image/png"));
-      await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
-      setCopied("Copied");
-    } catch (err) {
-      setCopied(`Couldn't copy: ${err instanceof Error ? err.message : String(err)}`);
-    }
+  const copyPng = () => {
+    const el = img.current!;
+    const canvas = document.createElement("canvas");
+    canvas.width = el.naturalWidth;
+    canvas.height = el.naturalHeight;
+    canvas.getContext("2d")!.drawImage(el, 0, 0);
+    const png = new Promise<Blob>((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("encode failed"))), "image/png"));
+    void copyImage(png);
   };
   // A load that finished before React committed the element (the viewers
   // render lazily, concurrently) has no onLoad; read the size here instead.
@@ -90,11 +87,6 @@ export function ImageView({ url, mime, size, onSave }: { url: string; mime: stri
     const el = img.current;
     if (el?.complete && el.naturalWidth > 0) setDims({ w: el.naturalWidth, h: el.naturalHeight });
   }, [url]);
-  useEffect(() => {
-    if (!copied) return;
-    const t = setTimeout(() => setCopied(null), 1500);
-    return () => clearTimeout(t);
-  }, [copied]);
 
   const label = formatLabel(mime);
   return (
@@ -121,37 +113,52 @@ export function ImageView({ url, mime, size, onSave }: { url: string; mime: stri
             meta.data?.orientation && meta.data.orientation !== 1 ? `EXIF: ${orientationLabel(meta.data.orientation)}` : null,
           ]}
         />
-        <span className="ml-auto text-[11px] text-muted-foreground">{copied}</span>
+        <span className="ml-auto" />
         {onSave && (
           <IconButton label="Save image…" onClick={onSave}>
             <Download />
           </IconButton>
         )}
-        <IconButton label="Copy image" onClick={() => void copy()} disabled={!dims}>
+        <IconButton label="Copy image" onClick={copyPng} disabled={!dims}>
           <Copy />
         </IconButton>
       </Bar>
       {mime === "image/svg+xml" && <Note>Rendered as an image: its scripts and external resources never load.</Note>}
-      <div className={cn("min-h-0 flex-1 overflow-auto", scale === null && "flex items-center justify-center p-3")}>
-        {failed ? (
-          <Centered>The webview can&apos;t decode this {label} image.</Centered>
-        ) : (
-          <div className={cn(scale !== null && "inline-block p-3")}>
-            <img
-              ref={img}
-              src={url}
-              alt=""
-              crossOrigin="anonymous"
-              draggable={false}
-              onLoad={(e) => setDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
-              onError={() => setFailed(true)}
-              className={cn("block", scale === null && "max-h-full max-w-full object-contain", (scale ?? 1) >= 2 && "[image-rendering:pixelated]")}
-              style={{ ...CHECKER, ...(scale !== null && dims ? { width: dims.w * scale, height: dims.h * scale, maxWidth: "none" } : {}) }}
-              data-testid="image"
-            />
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <div className={cn("min-h-0 flex-1 overflow-auto", scale === null && "flex items-center justify-center p-3")}>
+            {failed ? (
+              <Centered>The webview can&apos;t decode this {label} image.</Centered>
+            ) : (
+              <div className={cn(scale !== null && "inline-block p-3")}>
+                <img
+                  ref={img}
+                  src={url}
+                  alt=""
+                  crossOrigin="anonymous"
+                  draggable={false}
+                  onLoad={(e) => setDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
+                  onError={() => setFailed(true)}
+                  className={cn("block", scale === null && "max-h-full max-w-full object-contain", (scale ?? 1) >= 2 && "[image-rendering:pixelated]")}
+                  style={{ ...CHECKER, ...(scale !== null && dims ? { width: dims.w * scale, height: dims.h * scale, maxWidth: "none" } : {}) }}
+                  data-testid="image"
+                />
+              </div>
+            )}
           </div>
-        )}
-      </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent className="min-w-44" data-testid="image-menu">
+          <ContextMenuItem disabled={!dims} onSelect={copyPng}>
+            Copy image
+          </ContextMenuItem>
+          {dims && (
+            <CopyItem text={`${dims.w} × ${dims.h}`} what="dimensions">
+              Copy dimensions
+            </CopyItem>
+          )}
+          {onSave && <ContextMenuItem onSelect={onSave}>Save image…</ContextMenuItem>}
+        </ContextMenuContent>
+      </ContextMenu>
     </div>
   );
 }

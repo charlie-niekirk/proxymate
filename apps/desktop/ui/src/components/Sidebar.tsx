@@ -30,6 +30,7 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { addSslBypass, closeDocument, openDocument, setAppSslExcluded } from "@/lib/actions";
 import { backend } from "@/lib/backend";
+import { copy } from "@/lib/clipboard";
 import { formatCount } from "@/lib/flow";
 import { sslSettingsKey } from "@/lib/query";
 import { cn } from "@/lib/utils";
@@ -341,7 +342,7 @@ function HostMenu({ host, children }: { host: string; children: ReactNode }) {
     <ContextMenu>
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
       <ContextMenuContent className="w-56">
-        <ContextMenuItem onSelect={() => void navigator.clipboard?.writeText(host)}>Copy {host}</ContextMenuItem>
+        <ContextMenuItem onSelect={() => void copy(host, "host")}>Copy {host}</ContextMenuItem>
         <ContextMenuItem onSelect={() => void addSslBypass(host)}>Add {host} to SSL bypass</ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>

@@ -16,16 +16,6 @@ export function formatLabel(mime: string | null | undefined): string {
   return special[sub] ?? sub.replace(/^x-/, "").toUpperCase();
 }
 
-/** Writes text to the clipboard; resolves false if the webview refused. */
-export async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /** Above this, only the head of a body is loaded until the user asks for all of it. */
 export const LOAD_LIMIT = 20 * 1024 * 1024;
 /** Above this, code viewers show plain text until the user asks for highlighting. */
