@@ -38,7 +38,7 @@ Run these from the repo root unless noted.
 | TLS test upstream (h2 + h1) | `cargo run -p pm-testkit --bin upstream -- --tls` prints its port and CA file. Start the app with `PROXYMATE_EXTRA_UPSTREAM_CA=<that file>`, then `curl -x http://127.0.0.1:9090 --cacert ~/Library/Application\ Support/Proxymate/ca/proxymate-ca.pem https://localhost:<port>/json --http2 -v` |
 | Rewrite dialog in the browser UI | `npm run dev`, then `http://localhost:1420/?zoo&select=0&rewrite=0`. In the app with `VITE_PM_REMOTE=1`: `{"rewrite":{"flow":3}}`, then `{"rewriteEdit":{"side":"response","json":[{"set":"/a","raw":"1"}],"save":true}}` (see `src/dev/remote.ts`) |
 | Open the app on a response tab | `VITE_PM_RESPONSE_TAB=TLS` (or `Timing`, …), for screenshots from a shell |
-| Drive the app from a shell | Start with `VITE_PM_REMOTE=1`, then `curl -d '{"select":3,"requestTab":"Body"}' localhost:1420/__pm_remote` (also `responseTab`, `viewer: {kind, viewer}`, `theme`; M8: `replay`, `editReplay`, `compose`, `composeSend`, `store`, `openDocument`, `saveSession`, `exportHar`, and `curl`, whose answer is at `/__pm_remote/out`; M14: `scripts`, `scriptTemplate`, `scriptSource`, `saveScript`, `testScript`). See `src/dev/remote.ts` |
+| Drive the app from a shell | Start with `VITE_PM_REMOTE=1`, then `curl -d '{"select":3,"requestTab":"Body"}' localhost:1420/__pm_remote` (also `responseTab`, `viewer: {kind, viewer}`, `theme`; M8: `replay`, `editReplay`, `compose`, `composeSend`, `store`, `openDocument`, `saveSession`, `exportHar`, and `curl`, whose answer is at `/__pm_remote/out`; M14: `scripts`, `scriptTemplate`, `scriptSource`, `saveScript`, `testScript`; M15: `{"contextMenu":{"testid":"request-headers","row":1}}` right-clicks any element). See `src/dev/remote.ts` |
 | Body-viewer zoo through the proxy | `cargo run -p pm-testkit --bin upstream -- --zoo [127.0.0.1:9090]` sends one flow per fixture in `crates/pm-testkit/fixtures/zoo/` |
 | Zoo in the browser UI | `npm run dev`, then open `http://localhost:1420/?zoo` (mock backend serving the zoo; `&select=<id>&theme=light&requestTab=Body`) |
 | Viewer snapshots + preview safety (Playwright) | `npm run e2e` (first time: `npx -w @proxymate/ui playwright install webkit chromium`). `-- --update-snapshots` after an intended visual change; `PM_E2E_PORT` picks the dev server port (default 1425) |
@@ -145,6 +145,11 @@ Targets:
 - It is a custom div grid virtualised with TanStack Virtual, at a fixed 22 px row height. Do not swap in shadcn's DataTable.
 - Keep row components memoised, with stable callbacks.
 - Columns are defined in `FlowTable/columns.ts`; a new one also needs a `RowCell` case and a place in `DEFAULT_LAYOUT` (saved layouts pick it up at its default position).
+
+**Context menus and copying (M15)**
+- Copy through `lib/clipboard.ts` (`copy`, `copyLater` for text that is fetched first, `copyImage`); never call `navigator.clipboard` directly. Text formats (header lines, cookies, hex, Base64, filter terms) live in `lib/copyFormats.ts` with their tests.
+- Menus are built from `components/menus/`: `CopyMenu` for one element, `useMenuTarget` plus `data-menu-key` for a list (one menu per list, not per row), `SelectionItem` first wherever text is selectable, `BodyItems` at the end of a body viewer's menu (`BodyCopyContext` says which body).
+- Copy the whole value, not what's displayed when it's truncated. The native menu policy (`hooks/useNativeMenuPolicy.ts`) only acts in release builds.
 
 **Keyboard and commands (M10)**
 - `lib/commands.ts` is the single list: the ⌘K palette shows every command, and a command's `key` binds ⌘/Ctrl+key in `hooks/useShortcuts.ts`. Add commands there, not ad-hoc `keydown` listeners. ⌘⌫ never fires in text fields; ⌘F inside CodeMirror is left to its search.
