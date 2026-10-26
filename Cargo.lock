@@ -3122,7 +3122,7 @@ dependencies = [
 
 [[package]]
 name = "pm-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "arc-swap",
  "base64 0.23.1",
@@ -3171,7 +3171,7 @@ dependencies = [
 
 [[package]]
 name = "pm-mcp"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "axum",
  "base64 0.23.1",
@@ -3196,7 +3196,7 @@ dependencies = [
 
 [[package]]
 name = "pm-model"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "schemars 1.2.3",
  "serde",
@@ -3206,7 +3206,7 @@ dependencies = [
 
 [[package]]
 name = "pm-platform"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "core-foundation 0.10.1",
  "if-addrs",
@@ -3225,7 +3225,7 @@ dependencies = [
 
 [[package]]
 name = "pm-testkit"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "brotli 8.0.4",
  "bytes",
@@ -3373,7 +3373,7 @@ dependencies = [
 
 [[package]]
 name = "proxymate-cli"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "bytes",
  "http",
@@ -3391,7 +3391,7 @@ dependencies = [
 
 [[package]]
 name = "proxymate-desktop"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "parking_lot 0.13.0",
  "pm-core",
