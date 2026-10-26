@@ -2,8 +2,10 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 
 import type { SseEvent_Serialize } from "@/bindings";
+import { CopyItem } from "@/components/menus/items";
 import { usePagedList } from "@/hooks/usePagedList";
 import { backend } from "@/lib/backend";
+import { sseWire } from "@/lib/copyFormats";
 import { formatTime } from "@/lib/flow";
 import { streamKey } from "@/lib/query";
 import { useUi } from "@/store/ui";
@@ -58,6 +60,11 @@ export function SsePanel({ id }: { id: number }) {
         <MessageList
           count={len}
           onRange={setRange}
+          menuTestId="sse-menu"
+          menu={(index) => {
+            const e = event(index);
+            return e ? <EventItems event={e} /> : null;
+          }}
           emptyText={total === 0 ? (head?.open ? "Waiting for events…" : "No events") : "No events match"}
           header={
             <div className={`${listHeaderClass} ${GRID}`}>
@@ -92,6 +99,27 @@ export function SsePanel({ id }: { id: number }) {
   );
 }
 
+function EventItems({ event: e }: { event: SseEvent_Serialize }) {
+  return (
+    <>
+      <CopyItem text={e.data} what="event data" testId="sse-copy-data">
+        Copy data
+      </CopyItem>
+      <CopyItem text={sseWire(e)} what="event" testId="sse-copy-event">
+        Copy as event-stream text
+      </CopyItem>
+      <CopyItem text={e.event ?? "message"} what="event name">
+        Copy event name
+      </CopyItem>
+      {e.id !== null && (
+        <CopyItem text={e.id} what="event id">
+          Copy id
+        </CopyItem>
+      )}
+    </>
+  );
+}
+
 function EventDetail({ event }: { event: SseEvent_Serialize }) {
   const data = useMemo(() => new TextEncoder().encode(event.data), [event.data]);
   const fields: Kv = [["event", event.event ?? "message (default)"]];
@@ -100,11 +128,11 @@ function EventDetail({ event }: { event: SseEvent_Serialize }) {
   if (event.time_ms !== null) fields.push(["time", formatTime(event.time_ms)]);
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="sse-event-detail">
-      <KvTable rows={fields} />
+      <KvTable rows={fields} testId="sse-fields" />
       {event.truncated && (
         <div className="text-muted-foreground border-b px-2 py-1 text-[11px]">Data cut at 1 MB</div>
       )}
-      <PayloadView key={event.index} id={`sse-${event.index}`} bytes={data} binary={false} />
+      <PayloadView key={event.index} id={`sse-${event.index}`} bytes={data} binary={false} what="data" />
     </div>
   );
 }

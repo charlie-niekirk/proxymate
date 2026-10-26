@@ -1,8 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { memo, useCallback, useMemo, useRef, useState, type MouseEvent } from "react";
+import { memo, useCallback, useMemo, useRef, useState } from "react";
 
+import { BodyItems } from "@/components/menus/body";
+import { SelectionItem } from "@/components/menus/items";
+import { useMenuTarget } from "@/components/menus/useMenuTarget";
 import { Input } from "@/components/ui/input";
 import {
   ContextMenu,
@@ -112,7 +115,6 @@ export function JsonTree({ bytes }: { bytes: Uint8Array }) {
 function Tree({ root }: { root: unknown }) {
   const [filter, setFilter] = useState("");
   const [expanded, setExpanded] = useState(() => expandedTo(root, 1));
-  const [menuRow, setMenuRow] = useState<TreeRow | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
 
   const result = useMemo(() => evaluatePath(root, filter), [root, filter]);
@@ -143,10 +145,9 @@ function Tree({ root }: { root: unknown }) {
     });
   }, []);
 
-  const onContextMenu = (e: MouseEvent) => {
-    const el = (e.target as HTMLElement).closest<HTMLElement>("[data-row]");
-    setMenuRow(el ? (rows[Number(el.dataset.row)] ?? null) : null);
-  };
+  // Blank space still has the selection and the body items.
+  const menu = useMenuTarget((key) => rows[Number(key)], { always: true });
+  const menuRow = menu.target;
 
   const matchCount = "matches" in result && roots[0]?.match ? result.matches.length : null;
   return (
@@ -166,7 +167,7 @@ function Tree({ root }: { root: unknown }) {
       </div>
       <ContextMenu>
         <ContextMenuTrigger asChild>
-          <div ref={scroller} className="min-h-0 flex-1 overflow-auto font-mono text-[11.5px]" onContextMenu={onContextMenu} data-selectable>
+          <div ref={scroller} className="min-h-0 flex-1 overflow-auto font-mono text-[11.5px]" onContextMenu={menu.onContextMenu} data-selectable>
             <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
               {virtualizer.getVirtualItems().map((item) => (
                 <TreeLine key={item.key} index={item.index} row={rows[item.index]!} top={item.start} onToggle={toggle} />
@@ -174,7 +175,8 @@ function Tree({ root }: { root: unknown }) {
             </div>
           </div>
         </ContextMenuTrigger>
-        <ContextMenuContent className="min-w-44 text-xs">
+        <ContextMenuContent className="min-w-44 text-xs" data-testid="json-tree-menu">
+          <SelectionItem text={menu.selection} />
           {menuRow && (
             <>
               <ContextMenuItem onSelect={() => void copy(valueText(menuRow.value), "value")}>Copy value</ContextMenuItem>
@@ -192,6 +194,7 @@ function Tree({ root }: { root: unknown }) {
               )}
             </>
           )}
+          <BodyItems separator={menuRow !== null} />
         </ContextMenuContent>
       </ContextMenu>
     </div>
@@ -218,6 +221,7 @@ const TreeLine = memo(function TreeLine({
   return (
     <div
       data-row={index}
+      data-menu-key={index}
       className="absolute left-0 flex w-full items-center gap-1 pr-2 whitespace-nowrap hover:bg-[var(--code-row-hover)]"
       style={{ top, height: ROW, paddingLeft: 6 + row.depth * 14 }}
       onClick={expandable ? (e) => onToggle(row.ptr, e.altKey, row.value) : undefined}

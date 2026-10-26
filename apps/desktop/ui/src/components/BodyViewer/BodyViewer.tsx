@@ -1,9 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
-import { Download, FileCode2 } from "lucide-react";
+import { Copy, Download, FileCode2 } from "lucide-react";
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 
 import type { BodyInfo, BodyPart, ContentKind, Header } from "@/bindings";
 import { useBody, useBodyUrl } from "@/components/Inspector/useBody";
+import { BodyFallbackMenu } from "@/components/menus/body";
+import { BodyCopyContext } from "@/components/menus/bodyContext";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -19,6 +21,7 @@ import { useViewScriptsVersion } from "@/hooks/useScripts";
 import { backend } from "@/lib/backend";
 import { essence, kindFromContentType } from "@/lib/body/content";
 import { parseGraphQlQueryString } from "@/lib/body/graphql";
+import { copyBodyText } from "@/lib/clipboard";
 import { formatSize } from "@/lib/flow";
 import { headerValue } from "@/lib/http";
 import { flowViewsKey } from "@/lib/query";
@@ -152,7 +155,18 @@ export function BodyViewer({
         <span className="text-muted-foreground truncate font-mono">
           {scriptView ? `${scriptView.scriptName} · ${scriptViewMime(scriptView.view)}` : `${mime} · ${formatSize(info.size)}`}
         </span>
-        <Button variant="ghost" size="xs" className="ml-auto" onClick={save} data-testid="save-body">
+        <Button
+          variant="ghost"
+          size="xs"
+          className="ml-auto"
+          disabled={!bytes || bytes.length === 0}
+          title={bytes ? "Copy the body as text (Base64 from the right-click menu)" : "The viewer loads the body itself: save it instead"}
+          onClick={() => bytes && void copyBodyText(bytes, "body")}
+          data-testid="copy-body"
+        >
+          <Copy /> Copy
+        </Button>
+        <Button variant="ghost" size="xs" onClick={save} data-testid="save-body">
           <Download /> Save…
         </Button>
       </Bar>
@@ -198,27 +212,31 @@ export function BodyViewer({
         </Note>
       ))}
       {scriptView?.view.truncated && <Note tone="warn">The script&apos;s view was cut at 8 MB.</Note>}
-      <div className="min-h-0 flex-1">
-        {scriptView ? (
-          <ScriptViewBody option={scriptView} bodyId={`${id}-${part}`} />
-        ) : loaded.isError ? (
-          <Centered>Couldn&apos;t load body: {String(loaded.error)}</Centered>
-        ) : !loaded.data ? (
-          <Centered>Loading…</Centered>
-        ) : (
-          <Viewer
-            viewer={viewer}
-            bytes={bytes}
-            url={bodyUrl.data ?? null}
-            mime={mime}
-            size={info.size}
-            contentType={contentType}
-            highlight={highlight}
-            bodyId={`${id}-${part}`}
-            onSave={save}
-          />
-        )}
-      </div>
+      <BodyCopyContext.Provider value={{ bytes, what: "body", onSave: save }}>
+        <BodyFallbackMenu>
+          <div className="min-h-0 flex-1">
+            {scriptView ? (
+              <ScriptViewBody option={scriptView} bodyId={`${id}-${part}`} />
+            ) : loaded.isError ? (
+              <Centered>Couldn&apos;t load body: {String(loaded.error)}</Centered>
+            ) : !loaded.data ? (
+              <Centered>Loading…</Centered>
+            ) : (
+              <Viewer
+                viewer={viewer}
+                bytes={bytes}
+                url={bodyUrl.data ?? null}
+                mime={mime}
+                size={info.size}
+                contentType={contentType}
+                highlight={highlight}
+                bodyId={`${id}-${part}`}
+                onSave={save}
+              />
+            )}
+          </div>
+        </BodyFallbackMenu>
+      </BodyCopyContext.Provider>
     </div>
   );
 }

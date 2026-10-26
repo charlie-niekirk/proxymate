@@ -23,14 +23,15 @@ export interface MenuTarget<T> {
  * it would be empty.
  */
 export function useMenuTarget<T>(
-  resolve: (key: string, el: HTMLElement) => T | null | undefined,
+  /** `el` is the row; `target` what was clicked inside it (a cell). */
+  resolve: (key: string, el: HTMLElement, target: Element) => T | null | undefined,
   { always = false }: { always?: boolean } = {},
 ): MenuTarget<T> {
   const [state, setState] = useState<{ target: T | null; selection: string }>({ target: null, selection: "" });
   const onContextMenu = (e: MouseEvent) => {
     const el = (e.target as Element).closest<HTMLElement>("[data-menu-key]");
     const key = el && e.currentTarget.contains(el) ? el.dataset.menuKey : undefined;
-    const target = el && key !== undefined ? (resolve(key, el) ?? null) : null;
+    const target = el && key !== undefined ? (resolve(key, el, e.target as Element) ?? null) : null;
     const selection = selectionIn(e.currentTarget);
     if (target === null && !selection && !always) {
       // Radix opens only if the event isn't prevented; this also keeps the native menu away.

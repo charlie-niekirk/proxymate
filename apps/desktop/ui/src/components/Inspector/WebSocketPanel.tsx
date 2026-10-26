@@ -3,6 +3,7 @@ import { ArrowDown, ArrowUp } from "lucide-react";
 import { useState } from "react";
 
 import type { WsDirection, WsMessage_Serialize, WsQuery_Deserialize } from "@/bindings";
+import { CopyItem } from "@/components/menus/items";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { usePagedList } from "@/hooks/usePagedList";
 import { backend } from "@/lib/backend";
@@ -10,6 +11,8 @@ import { formatSize, formatTime } from "@/lib/flow";
 import { streamKey } from "@/lib/query";
 import { useUi } from "@/store/ui";
 import { OPCODE_LABEL, closeCodeLabel, describeClose } from "@/lib/stream";
+import { base64, hexBytes } from "@/lib/copyFormats";
+import { bodyText } from "@/lib/http";
 
 import { Placeholder } from "./KvTable";
 import { PayloadView } from "./PayloadView";
@@ -89,6 +92,11 @@ export function WebSocketPanel({ id }: { id: number }) {
         <MessageList
           count={len}
           onRange={setRange}
+          menuTestId="ws-menu"
+          menu={(index) => {
+            const m = message(index);
+            return m ? <MessageItems id={id} message={m} /> : null;
+          }}
           emptyText={total === 0 ? "No messages yet" : "No messages match"}
           header={
             <div className={`${listHeaderClass} ${GRID}`}>
@@ -122,6 +130,37 @@ export function WebSocketPanel({ id }: { id: number }) {
       }
       detail={shown ? <MessageDetail id={id} message={shown} /> : <Placeholder text="Select a message" />}
     />
+  );
+}
+
+/** A message row's copies; payloads are fetched whole (the row only has a preview). */
+function MessageItems({ id, message: m }: { id: number; message: WsMessage_Serialize }) {
+  const store = useUi((st) => st.store);
+  const payload = async () => new Uint8Array(await backend.getWebsocketPayload(store, id, m.index));
+  const text = async () => {
+    const bytes = await payload();
+    const t = bodyText(bytes);
+    if (t === null) throw new Error("The payload isn't UTF-8 text: copy it as Base64 or hex instead");
+    return t;
+  };
+  return (
+    <>
+      {m.opcode === "close" ? (
+        <CopyItem text={[m.close_code === null ? "" : closeCodeLabel(m.close_code), m.preview].filter(Boolean).join(" · ")} what="close reason">
+          Copy close code and reason
+        </CopyItem>
+      ) : (
+        <CopyItem text={text} what="payload" disabled={m.opcode === "binary" || m.len === 0} testId="ws-copy-payload">
+          Copy payload
+        </CopyItem>
+      )}
+      <CopyItem text={async () => base64(await payload())} what="payload as Base64" disabled={m.len === 0} testId="ws-copy-base64">
+        Copy payload as Base64
+      </CopyItem>
+      <CopyItem text={async () => hexBytes(await payload())} what="payload as hex" disabled={m.len === 0}>
+        Copy payload as hex
+      </CopyItem>
+    </>
   );
 }
 

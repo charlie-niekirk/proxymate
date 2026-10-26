@@ -1,5 +1,11 @@
 import { useEffect, useMemo } from "react";
 
+import { KvMenu, type Kv } from "@/components/Inspector/KvTable";
+import { BodyFallbackMenu, BodyItems } from "@/components/menus/body";
+import { BodyCopyContext } from "@/components/menus/bodyContext";
+import { CopyMenu } from "@/components/menus/items";
+import { useMenuTarget } from "@/components/menus/useMenuTarget";
+import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { sniff } from "@/lib/body/content";
 import { boundaryOf, parseMultipart, type MultipartPart } from "@/lib/body/multipart";
 import { formatSize } from "@/lib/flow";
@@ -43,35 +49,59 @@ function PartCard({ part, bodyId }: { part: MultipartPart; bodyId: string }) {
   const sniffed = useMemo(() => sniff(part.body, part.contentType), [part]);
   const viewer = viewersFor(sniffed.kind)[0]!;
   const short = sniffed.kind === "text" && part.body.length <= 200 && !part.body.includes(10);
+  const headers = useMemo<Kv>(() => part.headers.map(([k, v]) => [displayHeaderName(k), v]), [part.headers]);
+  const menu = useMenuTarget((key) => (headers[Number(key)] ? Number(key) : null));
   return (
-    <div className="bg-card overflow-hidden rounded-md border" data-testid="multipart-part">
-      <div className="flex items-center gap-2 border-b bg-[var(--pane-header)] px-2 py-1 text-[11px]">
-        <span className="font-mono font-semibold text-[var(--syntax-key)]">{part.name ?? "(unnamed)"}</span>
-        {part.filename && <span className="font-mono">{part.filename}</span>}
-        <span className="text-muted-foreground ml-auto">
-          {part.contentType ?? sniffed.mime} · {formatSize(part.body.length) === "—" ? "0 B" : formatSize(part.body.length)}
-        </span>
-      </div>
-      <table className="w-full font-mono text-[10.5px]" data-selectable>
-        <tbody>
-          {part.headers.map(([k, v], i) => (
-            <tr key={i}>
-              <td className="text-muted-foreground w-40 px-2 align-top">{displayHeaderName(k)}</td>
-              <td className="px-2 break-all">{v}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {part.body.length === 0 ? null : short ? (
-        <div className="border-t px-2 py-1 font-mono text-xs whitespace-pre-wrap" data-selectable>
-          {new TextDecoder().decode(part.body)}
+    // The part's own body, for its viewer's copy items; the card's blank space falls back to them.
+    <BodyCopyContext.Provider value={{ bytes: part.body, what: "part body" }}>
+      <BodyFallbackMenu>
+        <div className="bg-card overflow-hidden rounded-md border" data-testid="multipart-part">
+          <CopyMenu
+            testId="multipart-part-menu"
+            items={[
+              part.name !== null && { label: "Copy name", text: part.name, what: "part name" },
+              part.filename !== null && { label: "Copy file name", text: part.filename, what: "file name" },
+              { label: "Copy content type", text: part.contentType ?? sniffed.mime, what: "content type" },
+            ]}
+            extra={<BodyItems separator={false} />}
+          >
+            <div className="flex items-center gap-2 border-b bg-[var(--pane-header)] px-2 py-1 text-[11px]">
+              <span className="font-mono font-semibold text-[var(--syntax-key)]">{part.name ?? "(unnamed)"}</span>
+              {part.filename && <span className="font-mono">{part.filename}</span>}
+              <span className="text-muted-foreground ml-auto">
+                {part.contentType ?? sniffed.mime} · {formatSize(part.body.length) === "—" ? "0 B" : formatSize(part.body.length)}
+              </span>
+            </div>
+          </CopyMenu>
+          <ContextMenu>
+            <ContextMenuTrigger asChild>
+              <table className="w-full font-mono text-[10.5px]" data-selectable onContextMenu={menu.onContextMenu}>
+                <tbody>
+                  {headers.map(([k, v], i) => (
+                    <tr key={i} data-menu-key={i}>
+                      <td className="text-muted-foreground w-40 px-2 align-top">{k}</td>
+                      <td className="px-2 break-all">{v}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </ContextMenuTrigger>
+            <KvMenu rows={headers} kind="header" index={menu.target} selection={menu.selection}>
+              <BodyItems />
+            </KvMenu>
+          </ContextMenu>
+          {part.body.length === 0 ? null : short ? (
+            <div className="border-t px-2 py-1 font-mono text-xs whitespace-pre-wrap" data-selectable>
+              {new TextDecoder().decode(part.body)}
+            </div>
+          ) : (
+            <div className="h-56 border-t">
+              <PartBody part={part} viewer={viewer} mime={sniffed.mime} bodyId={bodyId} />
+            </div>
+          )}
         </div>
-      ) : (
-        <div className="h-56 border-t">
-          <PartBody part={part} viewer={viewer} mime={sniffed.mime} bodyId={bodyId} />
-        </div>
-      )}
-    </div>
+      </BodyFallbackMenu>
+    </BodyCopyContext.Provider>
   );
 }
 

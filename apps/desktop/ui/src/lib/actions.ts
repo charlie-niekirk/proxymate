@@ -3,6 +3,8 @@ import { toast } from "sonner";
 import type { FlowSelection, PresetKind, RequestSpec_Deserialize, SaveProgress_Serialize, ScriptKind } from "@/bindings";
 import { backend } from "@/lib/backend";
 import { copyLater } from "@/lib/clipboard";
+import { withTerm } from "@/lib/copyFormats";
+import { flowUrl } from "@/lib/flow";
 import {
   androidKey,
   caInfoKey,
@@ -34,6 +36,12 @@ export const errorText = (e: unknown) => (e instanceof Error ? e.message : Strin
 /** A failed action, as a toast: what was being done, then why. */
 export function reportError(what: string, err: unknown) {
   toast.error(what, { description: errorText(err) });
+}
+
+/** Narrows the search box to flows matching a DSL `term`, keeping what's typed. */
+export function addFilterTerm(term: string) {
+  const ui = useUi.getState();
+  ui.setText(withTerm(ui.filter.text, term));
 }
 
 /** Pins or unpins live flows: pinned flows are kept when old flows are evicted. */
@@ -178,7 +186,7 @@ export async function copyFlowUrl(store: number, flow: number) {
   await copyLater(async () => {
     const detail = await backend.getFlowDetail(store, flow);
     const summary = detail ? null : await backend.getFlow(store, flow);
-    return detail?.request.url ?? (summary ? `${summary.scheme}://${summary.host}${summary.path}${summary.query ? `?${summary.query}` : ""}` : null);
+    return detail?.request.url ?? (summary ? flowUrl(summary) : null);
   }, "URL");
 }
 

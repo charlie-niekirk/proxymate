@@ -2,6 +2,8 @@ import { Search, X } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useEffect, useRef, type ReactNode } from "react";
 
+import { useMenuTarget } from "@/components/menus/useMenuTarget";
+import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { Input } from "@/components/ui/input";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { cn } from "@/lib/utils";
@@ -88,7 +90,8 @@ const ROW_HEIGHT = 22;
  * The virtualised message list: fixed 22 px rows, `row(index)` renders
  * one. It follows the end as rows arrive, like a terminal, until the user
  * scrolls up; scrolling back to the bottom follows again. The visible
- * range goes to `onRange`, for fetching just those rows.
+ * range goes to `onRange`, for fetching just those rows. `menu(index)`
+ * gives a row's context menu items, or null while the row isn't loaded.
  */
 export function MessageList({
   count,
@@ -96,12 +99,16 @@ export function MessageList({
   row,
   emptyText,
   onRange,
+  menu,
+  menuTestId,
 }: {
   count: number;
   header: ReactNode;
   row: (index: number) => ReactNode;
   emptyText: string;
   onRange: (range: [number, number]) => void;
+  menu: (index: number) => ReactNode | null;
+  menuTestId?: string;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const following = useRef(true);
@@ -113,6 +120,7 @@ export function MessageList({
     overscan: 16,
   });
   const items = virtualizer.getVirtualItems();
+  const target = useMenuTarget((key) => (menu(Number(key)) === null ? null : Number(key)));
   const first = items[0]?.index ?? 0;
   const last = items.at(-1)?.index ?? -1;
 
@@ -128,16 +136,28 @@ export function MessageList({
   return (
     <div className="bg-pane-table flex h-full flex-col">
       {header}
-      <div ref={scrollRef} onScroll={onScroll} className="relative min-h-0 flex-1 overflow-auto">
-        <div className="relative" style={{ height: virtualizer.getTotalSize() }}>
-          {items.map((item) => (
-            <div key={item.key} className="absolute inset-x-0" style={{ top: item.start, height: ROW_HEIGHT }}>
-              {row(item.index)}
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <div ref={scrollRef} onScroll={onScroll} onContextMenu={target.onContextMenu} className="relative min-h-0 flex-1 overflow-auto">
+            <div className="relative" style={{ height: virtualizer.getTotalSize() }}>
+              {items.map((item) => (
+                <div
+                  key={item.key}
+                  className="absolute inset-x-0"
+                  style={{ top: item.start, height: ROW_HEIGHT }}
+                  data-menu-key={item.index}
+                >
+                  {row(item.index)}
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-        {count === 0 && <div className="text-muted-foreground p-4 text-center text-xs">{emptyText}</div>}
-      </div>
+            {count === 0 && <div className="text-muted-foreground p-4 text-center text-xs">{emptyText}</div>}
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent className="min-w-48" data-testid={menuTestId}>
+          {target.target !== null && menu(target.target)}
+        </ContextMenuContent>
+      </ContextMenu>
     </div>
   );
 }

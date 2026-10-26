@@ -1,5 +1,6 @@
 import type { CertSummary, FlowDetail_Serialize, FlowSummary_Serialize } from "@/bindings";
 import { KvTable, Placeholder, type Kv } from "@/components/Inspector/KvTable";
+import { CopyMenu } from "@/components/menus/items";
 import { certExpiredAt } from "@/lib/tls";
 
 /** The TLS tab: how both legs were negotiated, and the upstream's chain. */
@@ -27,7 +28,7 @@ export function TlsView({ flow, detail }: { flow: FlowSummary_Serialize; detail:
   return (
     <div className="flex flex-col" data-testid="tls-view">
       <SectionTitle>Connection</SectionTitle>
-      <KvTable rows={rows} />
+      <KvTable rows={rows} testId="tls-connection" />
       <SectionTitle>Upstream certificate chain</SectionTitle>
       {tls.chain.length === 0 ? (
         <Placeholder text="The upstream presented no certificate" />
@@ -58,12 +59,23 @@ function CertCard({ cert, index, capturedAt }: { cert: CertSummary; index: numbe
   rows.push(["Serial", cert.serial], ["SHA-256", cert.sha256]);
   return (
     <div className="border-b">
-      <div className="flex items-baseline gap-2 px-2 pt-1.5 text-xs" data-selectable>
-        <span className="text-muted-foreground font-mono tabular-nums">{index}</span>
-        <span className="font-medium break-all">{cert.subject}</span>
-        {index === 0 && <span className="text-muted-foreground">leaf</span>}
-      </div>
-      <KvTable rows={rows} />
+      <CopyMenu
+        testId="cert-menu"
+        items={[
+          { label: "Copy subject", text: cert.subject, what: "subject" },
+          { label: "Copy SHA-256", text: cert.sha256, what: "fingerprint" },
+          { label: "Copy SHA-256 without colons", text: cert.sha256.replaceAll(":", ""), what: "fingerprint" },
+          { label: "Copy serial", text: cert.serial, what: "serial" },
+          cert.san.length > 0 && { label: "Copy names", text: cert.san.join("\n"), what: "names" },
+        ]}
+      >
+        <div className="flex items-baseline gap-2 px-2 pt-1.5 text-xs" data-selectable>
+          <span className="text-muted-foreground font-mono tabular-nums">{index}</span>
+          <span className="font-medium break-all">{cert.subject}</span>
+          {index === 0 && <span className="text-muted-foreground">leaf</span>}
+        </div>
+      </CopyMenu>
+      <KvTable rows={rows} testId={`cert-${index}`} />
     </div>
   );
 }
