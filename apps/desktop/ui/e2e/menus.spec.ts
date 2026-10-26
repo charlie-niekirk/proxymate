@@ -5,7 +5,8 @@ import { chooseViewer, openFixture } from "./zoo";
 /**
  * M15's context menus against the mock backend: what each copies, where
  * the right-click lands. Clipboard writes are captured in the page
- * (WebKit's clipboard needs a permission Playwright can't grant); the
+ * (WebKit only writes the clipboard during a trusted click, and
+ * Playwright's are synthetic); the
  * formats themselves are unit-tested in lib/copyFormats.test.ts.
  */
 
@@ -17,7 +18,11 @@ test.beforeEach(async ({ page }) => {
       configurable: true,
       value: {
         writeText: async (text: string) => void w.__copied.push(text),
-        write: async () => {},
+        // copyLater writes a ClipboardItem whose text is still being fetched.
+        write: async (items: ClipboardItem[]) => {
+          const item = items[0]!;
+          if (item.types.includes("text/plain")) w.__copied.push(await (await item.getType("text/plain")).text());
+        },
       },
     });
   });

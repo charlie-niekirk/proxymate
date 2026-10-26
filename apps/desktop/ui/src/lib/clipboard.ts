@@ -39,11 +39,39 @@ export async function copy(text: string, what?: string, opts: CopyOpts = {}): Pr
   return true;
 }
 
+/** Rejects the pending clipboard item when `load` has nothing to copy: no toast for it. */
+class NothingToCopy extends Error {}
+
 /**
  * Copies text that has to be fetched first (a body, a cURL command). A
  * failure to fetch toasts like a failure to copy; null copies nothing.
+ *
+ * WebKit only lets a page write the clipboard while the click that asked
+ * for it is being handled, and awaiting the fetch first loses that. So the
+ * write starts now, with a `ClipboardItem` the text fills in when it comes.
  */
 export async function copyLater(load: () => Promise<string | null>, what?: string, opts: CopyOpts = {}): Promise<boolean> {
+  if (typeof ClipboardItem !== "undefined" && typeof navigator.clipboard.write === "function") {
+    const blob = load().then((text) => {
+      if (text === null) throw new NothingToCopy();
+      return new Blob([text], { type: "text/plain" });
+    });
+    // Handled below, after the write; this keeps it from counting as unhandled meanwhile.
+    blob.catch(() => {});
+    try {
+      await navigator.clipboard.write([new ClipboardItem({ "text/plain": blob })]);
+    } catch (err) {
+      // The fetch's own error says more than the clipboard's "not allowed".
+      const cause = await blob.then(
+        () => err,
+        (e: unknown) => e,
+      );
+      if (!(cause instanceof NothingToCopy)) failed(cause);
+      return false;
+    }
+    done(what, opts);
+    return true;
+  }
   let text: string | null;
   try {
     text = await load();

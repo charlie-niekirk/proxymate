@@ -46,6 +46,38 @@ describe("clipboard", () => {
     expect(writeText).not.toHaveBeenCalled();
   });
 
+  it("starts the write before fetched text arrives, where ClipboardItem exists (WebKit)", async () => {
+    class Item {
+      items: Record<string, Promise<Blob>>;
+      constructor(items: Record<string, Promise<Blob>>) {
+        this.items = items;
+      }
+    }
+    const write = vi.fn(async ([item]: Item[]) => {
+      written.push(await (await item!.items["text/plain"]!).text());
+    });
+    const written: string[] = [];
+    vi.stubGlobal("ClipboardItem", Item);
+    vi.stubGlobal("navigator", { clipboard: { writeText, write } });
+
+    let resolve!: (text: string) => void;
+    const done = copyLater(() => new Promise((r) => (resolve = r)), "cURL command");
+    // Called within the click, before the text is there.
+    expect(write).toHaveBeenCalledTimes(1);
+    resolve("curl …");
+    expect(await done).toBe(true);
+    expect(written).toEqual(["curl …"]);
+    expect(toast.success).toHaveBeenCalledWith("Copied cURL command", expect.anything());
+
+    // A failed fetch reports its own error; nothing to copy reports nothing.
+    expect(await copyLater(() => Promise.reject(new Error("no detail")))).toBe(false);
+    expect(toast.error).toHaveBeenCalledWith("Couldn't copy", expect.objectContaining({ description: "no detail" }));
+    toast.error.mockClear();
+    expect(await copyLater(async () => null)).toBe(false);
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
   it("copies text bodies, and says why not for binary ones", async () => {
     expect(await copyBodyText(new TextEncoder().encode('{"a":1}'), "body")).toBe(true);
     expect(writeText).toHaveBeenCalledWith('{"a":1}');
