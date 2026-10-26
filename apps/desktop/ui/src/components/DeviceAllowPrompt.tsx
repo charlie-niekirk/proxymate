@@ -1,6 +1,7 @@
 import { Smartphone } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { CopyMenu } from "@/components/menus/items";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -62,10 +63,12 @@ export function DeviceAllowPrompt() {
     <Dialog open={!!pending} onOpenChange={(open) => !open && dismiss()}>
       <DialogContent className="sm:max-w-[400px]" data-testid="device-allow-prompt">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Smartphone className="size-4" />
-            Allow {pending?.ip}?
-          </DialogTitle>
+          <CopyMenu items={[pending && { label: "Copy IP address", text: pending.ip, what: "IP address" }]}>
+            <DialogTitle className="flex items-center gap-2">
+              <Smartphone className="size-4" />
+              Allow {pending?.ip}?
+            </DialogTitle>
+          </CopyMenu>
           <DialogDescription>
             A device on your network wants to use Proxymate as its proxy. Only allow devices you are setting up: an
             allowed device&apos;s traffic is recorded here.

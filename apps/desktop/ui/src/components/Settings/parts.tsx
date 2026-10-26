@@ -1,7 +1,10 @@
 import { Plus, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
+import { CopyItem } from "@/components/menus/items";
+import { useMenuTarget } from "@/components/menus/useMenuTarget";
 import { Button } from "@/components/ui/button";
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { Input } from "@/components/ui/input";
 
 /** A titled block of a settings page, with an optional control on the right. */
@@ -121,27 +124,44 @@ export function ListEditor({
     onChange([...items, value]);
     setDraft("");
   };
+  const menu = useMenuTarget((key) => (items.includes(key) ? key : null));
   return (
     <div className="flex flex-col gap-1.5" data-testid={testId}>
-      <ul className="bg-muted/30 max-h-40 overflow-y-auto rounded-md border">
-        {items.length === 0 && <li className="text-muted-foreground px-2 py-1.5 italic">{empty}</li>}
-        {items.map((item) => (
-          <li key={item} className="group flex items-center gap-2 border-b px-2 py-1 last:border-b-0">
-            <span className={mono ? "min-w-0 flex-1 truncate font-mono text-[11px]" : "min-w-0 flex-1 truncate"} title={item}>
-              {item}
-            </span>
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              aria-label={`Remove ${item}`}
-              className="opacity-60 group-hover:opacity-100 focus-visible:opacity-100"
-              onClick={() => onChange(items.filter((i) => i !== item))}
-            >
-              <X />
-            </Button>
-          </li>
-        ))}
-      </ul>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <ul className="bg-muted/30 max-h-40 overflow-y-auto rounded-md border" onContextMenu={menu.onContextMenu}>
+            {items.length === 0 && <li className="text-muted-foreground px-2 py-1.5 italic">{empty}</li>}
+            {items.map((item) => (
+              <li key={item} className="group flex items-center gap-2 border-b px-2 py-1 last:border-b-0" data-menu-key={item}>
+                <span className={mono ? "min-w-0 flex-1 truncate font-mono text-[11px]" : "min-w-0 flex-1 truncate"} title={item}>
+                  {item}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={`Remove ${item}`}
+                  className="opacity-60 group-hover:opacity-100 focus-visible:opacity-100"
+                  onClick={() => onChange(items.filter((i) => i !== item))}
+                >
+                  <X />
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </ContextMenuTrigger>
+        <ContextMenuContent className="max-w-80 min-w-44" data-testid="list-menu">
+          {menu.target !== null && (
+            <>
+              <CopyItem text={menu.target} what="entry">
+                <span className="truncate">Copy {menu.target}</span>
+              </CopyItem>
+              <ContextMenuItem variant="destructive" onSelect={() => onChange(items.filter((i) => i !== menu.target))}>
+                Remove
+              </ContextMenuItem>
+            </>
+          )}
+        </ContextMenuContent>
+      </ContextMenu>
       <form
         className="flex gap-1.5"
         onSubmit={(e) => {

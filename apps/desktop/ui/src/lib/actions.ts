@@ -291,6 +291,16 @@ async function runSave(label: string, start: (onProgress: (p: SaveProgress_Seria
 
 // ---- Device setup ----
 
+/** Allows or denies a LAN device (an allowed one is recorded under `nickname`). */
+export async function decideDevice(ip: string, allow: boolean, nickname: string | null) {
+  await backend.decideDevice(ip, allow, nickname);
+}
+
+/** Forgets a LAN device: it's asked about again next time. */
+export async function forgetDevice(ip: string) {
+  await backend.forgetDevice(ip);
+}
+
 /** Listens on every interface (or loopback only); the toolbar address follows. */
 export async function setLanAccess(on: boolean) {
   queryClient.setQueryData(deviceAccessKey, await backend.setLanAccess(on));

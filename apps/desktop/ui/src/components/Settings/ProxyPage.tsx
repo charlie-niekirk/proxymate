@@ -3,6 +3,7 @@ import { useState } from "react";
 
 import type { ProxySettings_Serialize } from "@/bindings";
 import { CopyField } from "@/components/DeviceSetup/parts";
+import { CopyMenu } from "@/components/menus/items";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
@@ -19,6 +20,7 @@ export function ProxyPage() {
   const { data: access } = useQuery({ queryKey: deviceAccessKey, queryFn: () => backend.getDeviceAccess() });
   const { data: sysproxy } = useQuery({ queryKey: systemProxyKey, queryFn: () => backend.getSystemProxyStatus() });
   const { data: env } = useQuery({ queryKey: ["terminal-env"], queryFn: () => backend.getTerminalEnv() });
+  const lanIp = access?.interfaces.find((i) => i.name === access.interface)?.ip ?? null;
   const [error, setError] = useState<string | null>(null);
   const [lanError, setLanError] = useState<string | null>(null);
 
@@ -28,15 +30,22 @@ export function ProxyPage() {
         title="Listening"
         description="Proxymate tries this port first, then the nine after it. Changing it restarts the listener; open connections finish on the old one."
       >
-        <div className="flex items-center gap-2 rounded-md border px-2 py-1.5" data-testid="proxy-listening">
-          <span
-            className="size-1.5 shrink-0 rounded-full"
-            style={{ backgroundColor: status?.listening ? "var(--s-2xx)" : "var(--s-5xx)" }}
-          />
-          <span className="min-w-0 flex-1 truncate font-mono text-[11px]">
-            {status?.listening ? `Listening on ${status.listening}` : `Not running: ${status?.error ?? "stopped"}`}
-          </span>
-        </div>
+        <CopyMenu
+          items={[
+            status?.listening && { label: "Copy address", text: status.listening, what: "proxy address" },
+            status?.error && { label: "Copy error", text: status.error, what: "error" },
+          ]}
+        >
+          <div className="flex items-center gap-2 rounded-md border px-2 py-1.5" data-testid="proxy-listening">
+            <span
+              className="size-1.5 shrink-0 rounded-full"
+              style={{ backgroundColor: status?.listening ? "var(--s-2xx)" : "var(--s-5xx)" }}
+            />
+            <span className="min-w-0 flex-1 truncate font-mono text-[11px]">
+              {status?.listening ? `Listening on ${status.listening}` : `Not running: ${status?.error ?? "stopped"}`}
+            </span>
+          </div>
+        </CopyMenu>
         {settings && <PortForm key={settings.port} settings={settings} onError={setError} />}
         <Note error={error} />
       </Section>
@@ -60,9 +69,16 @@ export function ProxyPage() {
           <label className="grid grid-cols-[180px_1fr] items-center gap-3">
             <span>Address shown to devices</span>
             <Select value={access.interface ?? undefined} onValueChange={(name) => void setLanInterface(name)}>
-              <SelectTrigger size="sm" className="w-64">
-                <SelectValue placeholder="Pick an interface" />
-              </SelectTrigger>
+              <CopyMenu
+                items={[
+                  lanIp && { label: "Copy IP address", text: lanIp, what: "IP address" },
+                  access.proxy && { label: "Copy address and port", text: access.proxy, what: "proxy address" },
+                ]}
+              >
+                <SelectTrigger size="sm" className="w-64">
+                  <SelectValue placeholder="Pick an interface" />
+                </SelectTrigger>
+              </CopyMenu>
               <SelectContent>
                 {access.interfaces.map((i) => (
                   <SelectItem key={i.name} value={i.name}>

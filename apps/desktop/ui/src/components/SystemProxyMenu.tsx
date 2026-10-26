@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Copy, Globe, LoaderCircle } from "lucide-react";
 import { useState } from "react";
 
+import { CopyMenu } from "@/components/menus/items";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { copyTerminalEnv, setSystemProxy } from "@/lib/actions";
@@ -56,10 +57,12 @@ export function SystemProxyMenu() {
         </div>
         <div className="flex flex-col gap-2 px-3 py-2">
           {status?.services.length ? (
-            <div>
-              <span className="text-muted-foreground">Services: </span>
-              {status.services.join(", ")}
-            </div>
+            <CopyMenu items={[{ label: "Copy services", text: status.services.join("\n"), what: "services" }]}>
+              <div data-selectable>
+                <span className="text-muted-foreground">Services: </span>
+                {status.services.join(", ")}
+              </div>
+            </CopyMenu>
           ) : null}
           {status && !status.supported && (
             <div className="text-muted-foreground">Not available on this platform yet.</div>

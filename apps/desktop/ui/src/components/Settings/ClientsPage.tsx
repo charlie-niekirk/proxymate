@@ -3,9 +3,10 @@ import { Smartphone } from "lucide-react";
 import { useState } from "react";
 
 import type { DeviceClient_Deserialize } from "@/bindings";
+import { DeviceMenu } from "@/components/DeviceSetup/parts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { errorText } from "@/lib/actions";
+import { decideDevice, errorText, forgetDevice } from "@/lib/actions";
 import { backend } from "@/lib/backend";
 import { deviceAccessKey } from "@/lib/query";
 import { cn } from "@/lib/utils";
@@ -61,8 +62,8 @@ export function ClientsPage() {
               <ClientRow
                 key={d.ip}
                 device={d}
-                onDecide={(allow, nickname) => run(backend.decideDevice(d.ip, allow, nickname))}
-                onForget={() => run(backend.forgetDevice(d.ip))}
+                onDecide={(allow, nickname) => run(decideDevice(d.ip, allow, nickname))}
+                onForget={() => run(forgetDevice(d.ip))}
               />
             ))}
           </ul>
@@ -84,51 +85,53 @@ function ClientRow({
   const [nickname, setNickname] = useState(device.nickname ?? "");
   const changed = (nickname.trim() || null) !== (device.nickname ?? null);
   return (
-    <li className="flex items-center gap-2 px-2 py-1.5" data-testid="client-row">
-      <Smartphone className="text-muted-foreground size-3.5 shrink-0" />
-      <div className="min-w-0 flex-1">
-        <div className="flex items-baseline gap-2">
-          <span className="font-mono text-[11px]">{device.ip}</span>
-          <span
-            className={cn(
-              "text-2xs",
-              device.decision === "allowed" && "text-[var(--s-2xx)]",
-              device.decision === "denied" && "text-[var(--s-failed)]",
-              device.decision === "pending" && "text-[var(--s-4xx)]",
-            )}
-          >
-            {LABEL[device.decision]}
-          </span>
+    <DeviceMenu device={device} onDecide={(allow) => onDecide(allow, allow ? nickname.trim() || null : null)} onForget={onForget}>
+      <li className="flex items-center gap-2 px-2 py-1.5" data-testid="client-row">
+        <Smartphone className="text-muted-foreground size-3.5 shrink-0" />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline gap-2">
+            <span className="font-mono text-[11px]">{device.ip}</span>
+            <span
+              className={cn(
+                "text-2xs",
+                device.decision === "allowed" && "text-[var(--s-2xx)]",
+                device.decision === "denied" && "text-[var(--s-failed)]",
+                device.decision === "pending" && "text-[var(--s-4xx)]",
+              )}
+            >
+              {LABEL[device.decision]}
+            </span>
+          </div>
+          <div className="text-muted-foreground text-2xs">
+            {device.flows} flows · {device.https_decrypted} decrypted
+            {device.https_refused > 0 && ` · ${device.https_refused} refused (CA not trusted yet?)`}
+          </div>
         </div>
-        <div className="text-muted-foreground text-2xs">
-          {device.flows} flows · {device.https_decrypted} decrypted
-          {device.https_refused > 0 && ` · ${device.https_refused} refused (CA not trusted yet?)`}
-        </div>
-      </div>
-      <Input
-        value={nickname}
-        onChange={(e) => setNickname(e.target.value)}
-        placeholder="Nickname"
-        aria-label={`Nickname for ${device.ip}`}
-        className="w-40"
-      />
-      {device.decision !== "allowed" || changed ? (
-        <Button size="xs" onClick={() => onDecide(true, nickname.trim() || null)}>
-          {device.decision === "allowed" ? "Save" : "Allow"}
+        <Input
+          value={nickname}
+          onChange={(e) => setNickname(e.target.value)}
+          placeholder="Nickname"
+          aria-label={`Nickname for ${device.ip}`}
+          className="w-40"
+        />
+        {device.decision !== "allowed" || changed ? (
+          <Button size="xs" onClick={() => onDecide(true, nickname.trim() || null)}>
+            {device.decision === "allowed" ? "Save" : "Allow"}
+          </Button>
+        ) : (
+          <Button size="xs" variant="outline" onClick={() => onDecide(false, null)}>
+            Deny
+          </Button>
+        )}
+        {device.decision === "pending" && (
+          <Button size="xs" variant="outline" onClick={() => onDecide(false, null)}>
+            Deny
+          </Button>
+        )}
+        <Button size="xs" variant="ghost" onClick={onForget}>
+          Forget
         </Button>
-      ) : (
-        <Button size="xs" variant="outline" onClick={() => onDecide(false, null)}>
-          Deny
-        </Button>
-      )}
-      {device.decision === "pending" && (
-        <Button size="xs" variant="outline" onClick={() => onDecide(false, null)}>
-          Deny
-        </Button>
-      )}
-      <Button size="xs" variant="ghost" onClick={onForget}>
-        Forget
-      </Button>
-    </li>
+      </li>
+    </DeviceMenu>
   );
 }

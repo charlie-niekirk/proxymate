@@ -70,7 +70,7 @@ export function CopyMenu({
   testId,
   children,
 }: {
-  items: (CopyEntry | null | false | undefined)[];
+  items: (CopyEntry | null | false | undefined | "")[];
   extra?: ReactNode;
   testId?: string;
   children: ReactElement;

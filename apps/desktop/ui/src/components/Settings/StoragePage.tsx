@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
 import type { StorageSettings_Serialize } from "@/bindings";
+import { CopyMenu } from "@/components/menus/items";
 import { Button } from "@/components/ui/button";
 import { clearFlows, errorText } from "@/lib/actions";
 import { backend } from "@/lib/backend";
@@ -24,21 +25,23 @@ export function StoragePage() {
     <Page testId="settings-storage">
       <Section title="Live capture" description="Bodies and details are kept in files that are deleted on Clear and on quit.">
         {status && (
-          <dl className="grid grid-cols-[180px_1fr] gap-x-3 gap-y-1" data-selectable data-testid="storage-status">
-            <dt className="text-muted-foreground">Flows</dt>
-            <dd className="tabular-nums">
-              {nf.format(status.flows)}
-              {status.pinned > 0 && ` (${nf.format(status.pinned)} pinned)`}
-            </dd>
-            <dt className="text-muted-foreground">On disk</dt>
-            <dd className="tabular-nums">{status.disk_bytes > 0 ? formatSize(status.disk_bytes) : "Nothing yet"}</dd>
-            <dt className="text-muted-foreground">Evicted since launch</dt>
-            <dd className="tabular-nums">{nf.format(status.evicted)} flows</dd>
-            <dt className="text-muted-foreground">Location</dt>
-            <dd className="truncate font-mono text-[11px]" title={status.dir}>
-              {status.dir}
-            </dd>
-          </dl>
+          <CopyMenu items={[{ label: "Copy location", text: status.dir, what: "path" }]}>
+            <dl className="grid grid-cols-[180px_1fr] gap-x-3 gap-y-1" data-selectable data-testid="storage-status">
+              <dt className="text-muted-foreground">Flows</dt>
+              <dd className="tabular-nums">
+                {nf.format(status.flows)}
+                {status.pinned > 0 && ` (${nf.format(status.pinned)} pinned)`}
+              </dd>
+              <dt className="text-muted-foreground">On disk</dt>
+              <dd className="tabular-nums">{status.disk_bytes > 0 ? formatSize(status.disk_bytes) : "Nothing yet"}</dd>
+              <dt className="text-muted-foreground">Evicted since launch</dt>
+              <dd className="tabular-nums">{nf.format(status.evicted)} flows</dd>
+              <dt className="text-muted-foreground">Location</dt>
+              <dd className="truncate font-mono text-[11px]" title={status.dir}>
+                {status.dir}
+              </dd>
+            </dl>
+          </CopyMenu>
         )}
         {status?.error && <Note error={`Bodies aren't being recorded: ${status.error}.`} />}
         <div>
