@@ -82,6 +82,7 @@ export function UrlText({
   row,
   operation,
   sentBy,
+  tone = "table",
   className,
 }: {
   row: Pick<Row, "scheme" | "host" | "port" | "path" | "query">;
@@ -89,6 +90,8 @@ export function UrlText({
   operation?: string | null;
   /** Who sent a flow Proxymate made itself, shown as a badge first. */
   sentBy?: SentBy | null;
+  /** `bar` colours the host blue and the path green (the inspector's URL bar); the table keeps them grey. */
+  tone?: "table" | "bar";
   className?: string;
 }) {
   const u = urlParts(row);
@@ -109,7 +112,10 @@ export function UrlText({
       <span className={part} style={{ color: "var(--url-scheme)" }}>
         {u.scheme}
       </span>
-      <span className={cn(part, "font-medium")} style={{ color: "var(--url-host)" }}>
+      <span
+        className={cn(part, "font-medium")}
+        style={{ color: tone === "bar" ? "var(--url-bar-host)" : "var(--url-host)" }}
+      >
         {u.host}
       </span>
       {u.port && (
@@ -117,7 +123,7 @@ export function UrlText({
           {u.port}
         </span>
       )}
-      <span className={part} style={{ color: "var(--url-path)" }}>
+      <span className={part} style={{ color: tone === "bar" ? "var(--url-bar-path)" : "var(--url-path)" }}>
         {u.path}
       </span>
       {u.query && (
