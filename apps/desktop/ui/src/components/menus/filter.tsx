@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 import {
   ContextMenuItem,
   ContextMenuSub,
@@ -16,7 +18,7 @@ export interface FilterFacts {
 }
 
 /** "Filter by ▸ Host, Method, Status, App": narrows the search box (the flow menu and the URL bar). */
-export function FilterBySub({ facts }: { facts: FilterFacts }) {
+export function FilterBySub({ facts, icon }: { facts: FilterFacts; /** For menus whose items all have one. */ icon?: ReactNode }) {
   const items: [string, string, string][] = [];
   if (facts.host) items.push(["Host", facts.host, dslTerm("host", facts.host)]);
   if (facts.method) items.push(["Method", facts.method, dslTerm("method", facts.method)]);
@@ -25,7 +27,10 @@ export function FilterBySub({ facts }: { facts: FilterFacts }) {
   if (items.length === 0) return null;
   return (
     <ContextMenuSub>
-      <ContextMenuSubTrigger data-testid="menu-filter-by">Filter by</ContextMenuSubTrigger>
+      <ContextMenuSubTrigger data-testid="menu-filter-by">
+        {icon}
+        Filter by
+      </ContextMenuSubTrigger>
       <ContextMenuSubContent className="max-w-80 min-w-44">
         {items.map(([label, value, term]) => (
           <ContextMenuItem key={label} onSelect={() => addFilterTerm(term)} data-testid={`menu-filter-${label.toLowerCase()}`}>
