@@ -1,6 +1,6 @@
 import { defaultKeymap } from "@codemirror/commands";
 import { bracketMatching, codeFolding, foldGutter, foldKeymap, syntaxHighlighting } from "@codemirror/language";
-import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
+import { highlightSelectionMatches, openSearchPanel, search, searchKeymap } from "@codemirror/search";
 import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import { EditorView, drawSelection, keymap, lineNumbers } from "@codemirror/view";
 import { useEffect, useRef } from "react";
@@ -16,7 +16,7 @@ import { codeHighlight, codeTheme } from "./theme";
  * The fold gutter is there from the start and the grammar is swapped in
  * when it has loaded, so the layout doesn't move when highlighting arrives.
  */
-export function CodeMirrorView({ text, language, highlight = true, wrap = false, className }: CodeViewProps) {
+export function CodeMirrorView({ text, language, highlight = true, wrap = false, className, onHandle }: CodeViewProps) {
   const host = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -39,10 +39,23 @@ export function CodeMirrorView({ text, language, highlight = true, wrap = false,
     if (wrap) extensions.push(EditorView.lineWrapping);
     const view = new EditorView({ parent, state: EditorState.create({ doc: text, extensions }) });
     const cancel = highlighted ? applyLanguage(view, lang, language) : () => {};
+    onHandle?.({
+      selection: () => view.state.selection.ranges.map((r) => view.state.sliceDoc(r.from, r.to)).filter(Boolean).join("\n"),
+      selectAll: () => {
+        view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } });
+        view.focus();
+      },
+      find: () => {
+        openSearchPanel(view);
+      },
+    });
     return () => {
+      onHandle?.(null);
       cancel();
       view.destroy();
     };
+    // onHandle is a fresh closure each render; the handle only changes with the view.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [text, language, highlight, wrap]);
 
   return <div ref={host} className={cn("h-full min-h-0", className)} data-selectable data-testid="code-view" data-language={language} />;

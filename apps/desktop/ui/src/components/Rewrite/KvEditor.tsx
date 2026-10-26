@@ -1,6 +1,8 @@
 import { Plus, RotateCcw, X } from "lucide-react";
 
+import { CopyMenu } from "@/components/menus/items";
 import { Button } from "@/components/ui/button";
+import { ContextMenuItem } from "@/components/ui/context-menu";
 import { Input } from "@/components/ui/input";
 import { newId } from "@/lib/json/doc";
 import type { KvRow } from "@/lib/rewrite/diff";
@@ -90,26 +92,31 @@ export function KvEditor({
           </div>
         );
       })}
-      {removed.map((r) => (
-        <div key={r.id} className="flex items-center gap-1 rounded-sm bg-[var(--diff-del-bg)] px-0.5" data-testid="kv-removed">
-          <span className="w-56 shrink-0 truncate px-2 font-mono text-[var(--diff-del)] line-through">{r.name}</span>
-          <span className="min-w-0 flex-1 truncate px-2 font-mono text-[var(--diff-del)] line-through">{r.value}</span>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            aria-label="Put back"
-            title="Put back"
-            onClick={() => {
-              // Back in its original place, among the rows that are still there.
-              const order = original.map((o) => o.id);
-              const next = [...rows, r].sort((a, b) => rank(order, a.id) - rank(order, b.id));
-              onChange(next);
-            }}
+      {removed.map((r) => {
+        // Back in its original place, among the rows that are still there.
+        const putBack = () => {
+          const order = original.map((o) => o.id);
+          onChange([...rows, r].sort((a, b) => rank(order, a.id) - rank(order, b.id)));
+        };
+        return (
+          <CopyMenu
+            key={r.id}
+            items={[
+              { label: "Copy name", text: r.name, what: "name" },
+              { label: "Copy value", text: r.value, what: "value" },
+            ]}
+            extra={<ContextMenuItem onSelect={putBack}>Put back</ContextMenuItem>}
           >
-            <RotateCcw />
-          </Button>
-        </div>
-      ))}
+            <div className="flex items-center gap-1 rounded-sm bg-[var(--diff-del-bg)] px-0.5" data-testid="kv-removed">
+              <span className="w-56 shrink-0 truncate px-2 font-mono text-[var(--diff-del)] line-through">{r.name}</span>
+              <span className="min-w-0 flex-1 truncate px-2 font-mono text-[var(--diff-del)] line-through">{r.value}</span>
+              <Button variant="ghost" size="icon-xs" aria-label="Put back" title="Put back" onClick={putBack}>
+                <RotateCcw />
+              </Button>
+            </div>
+          </CopyMenu>
+        );
+      })}
       <Button
         variant="ghost"
         size="xs"

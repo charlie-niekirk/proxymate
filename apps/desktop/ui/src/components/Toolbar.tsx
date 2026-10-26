@@ -7,7 +7,9 @@ import { CertificateMenu } from "@/components/CertificateMenu";
 import { ThrottleMenu } from "@/components/Rules/ThrottleMenu";
 import { McpIndicator } from "@/components/Settings/McpIndicator";
 import { SystemProxyMenu } from "@/components/SystemProxyMenu";
+import { CopyMenu } from "@/components/menus/items";
 import { Button } from "@/components/ui/button";
+import { ContextMenuItem } from "@/components/ui/context-menu";
 import { useTrustStatus } from "@/hooks/useTrustStatus";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -176,6 +178,8 @@ function WaitingDevices() {
   );
 }
 
+const copyTerminalEnvText = () => backend.getTerminalEnv();
+
 function ListeningStatus({ status }: { status: ProxyStatus_Serialize | undefined }) {
   const openDeviceSetup = useUi((s) => s.setDeviceSetupOpen);
   const openSettings = useUi((s) => s.openSettings);
@@ -185,18 +189,35 @@ function ListeningStatus({ status }: { status: ProxyStatus_Serialize | undefined
     : status.listening
       ? [status.recording ? "var(--s-2xx)" : "var(--s-paused)", `Listening on ${status.listening}${status.recording ? "" : " · paused"}`]
       : ["var(--s-5xx)", `Proxy not running: ${status.error ?? "stopped"}`];
+  const addr = status?.listening ?? null;
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          className="text-muted-foreground hover:bg-accent flex h-7 max-w-[520px] items-center gap-2 rounded-md border px-3 text-xs"
-          data-testid="listening-status"
-          onClick={() => (failed ? openSettings("proxy") : openDeviceSetup(true))}
-        >
-          <span className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: dot }} />
-          <span className="truncate">{text}</span>
-        </button>
-      </TooltipTrigger>
+      <CopyMenu
+        testId="listening-menu"
+        items={[
+          addr && { label: "Copy address", text: addr, what: "proxy address", testId: "copy-proxy-address" },
+          addr && { label: "Copy curl example", text: `curl -x http://${addr} http://example.com/`, what: "command" },
+          addr && { label: "Copy terminal environment", text: copyTerminalEnvText, what: "terminal environment" },
+          status?.error && { label: "Copy error", text: status.error, what: "error" },
+        ]}
+        extra={
+          <>
+            <ContextMenuItem onSelect={() => openDeviceSetup(true)}>Device setup…</ContextMenuItem>
+            <ContextMenuItem onSelect={() => openSettings("proxy")}>Proxy settings…</ContextMenuItem>
+          </>
+        }
+      >
+        <TooltipTrigger asChild>
+          <button
+            className="text-muted-foreground hover:bg-accent flex h-7 max-w-[520px] items-center gap-2 rounded-md border px-3 text-xs"
+            data-testid="listening-status"
+            onClick={() => (failed ? openSettings("proxy") : openDeviceSetup(true))}
+          >
+            <span className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: dot }} />
+            <span className="truncate">{text}</span>
+          </button>
+        </TooltipTrigger>
+      </CopyMenu>
       <TooltipContent className="max-w-96">
         {failed ? `${status?.error ?? "The proxy isn't running."} Click to change the port.` : "Device setup · connect a phone, simulator or emulator"}
       </TooltipContent>

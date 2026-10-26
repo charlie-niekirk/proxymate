@@ -3,7 +3,9 @@ import { Download, LoaderCircle, RefreshCw } from "lucide-react";
 import { useState } from "react";
 
 import { Check, CopyField, Path, ProgressCheck, Section, Steps } from "@/components/DeviceSetup/parts";
+import { CopyMenu } from "@/components/menus/items";
 import { Button } from "@/components/ui/button";
+import { ContextMenuItem } from "@/components/ui/context-menu";
 import { Switch } from "@/components/ui/switch";
 import { setAndroidProxy } from "@/lib/actions";
 import { backend } from "@/lib/backend";
@@ -55,39 +57,60 @@ export function EmulatorTab() {
         </Check>
         {emulators.map((d) => {
           const ours = d.proxy === status?.emulator_proxy;
+          const ready = busy === null && d.state === "device";
+          const push = () =>
+            run(`push:${d.serial}`, async () => {
+              const path = await backend.pushAndroidCert(d.serial);
+              setNote(`Copied to ${path} on ${d.serial}.`);
+            });
+          const proxy = (on: boolean) => run(`proxy:${d.serial}`, () => setAndroidProxy(d.serial, on));
           return (
-            <div key={d.serial} className="ml-6 flex items-center gap-2" data-testid="emulator-row">
-              <div className="min-w-0 flex-1">
-                <div className="truncate">{d.model ?? d.serial}</div>
-                <div className="text-muted-foreground truncate">
-                  {d.serial} · {d.state !== "device" ? d.state : d.proxy ? `proxy ${d.proxy}` : "no proxy"}
+            <CopyMenu
+              key={d.serial}
+              items={[
+                { label: "Copy serial", text: d.serial, what: "serial" },
+                d.model && { label: "Copy model", text: d.model, what: "model" },
+                d.proxy && { label: "Copy proxy", text: d.proxy, what: "proxy" },
+              ]}
+              extra={
+                <>
+                  <ContextMenuItem disabled={!ready} onSelect={push}>
+                    Push certificate
+                  </ContextMenuItem>
+                  <ContextMenuItem disabled={!ready} onSelect={() => proxy(!ours)}>
+                    {ours ? "Stop using Proxymate as its proxy" : "Use Proxymate as its proxy"}
+                  </ContextMenuItem>
+                </>
+              }
+            >
+              <div className="ml-6 flex items-center gap-2" data-testid="emulator-row">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate">{d.model ?? d.serial}</div>
+                  <div className="text-muted-foreground truncate">
+                    {d.serial} · {d.state !== "device" ? d.state : d.proxy ? `proxy ${d.proxy}` : "no proxy"}
+                  </div>
                 </div>
+                <Button
+                  variant="outline"
+                  size="xs"
+                  disabled={!ready}
+                  onClick={push}
+                >
+                  {busy === `push:${d.serial}` ? <LoaderCircle className="animate-spin" /> : <Download />}
+                  Push certificate
+                </Button>
+                <label className="flex items-center gap-1.5">
+                  <Switch
+                    size="sm"
+                    checked={ours}
+                    disabled={!ready}
+                    onCheckedChange={proxy}
+                    aria-label={`Use Proxymate as ${d.serial}'s proxy`}
+                  />
+                  Proxy
+                </label>
               </div>
-              <Button
-                variant="outline"
-                size="xs"
-                disabled={busy !== null || d.state !== "device"}
-                onClick={() =>
-                  run(`push:${d.serial}`, async () => {
-                    const path = await backend.pushAndroidCert(d.serial);
-                    setNote(`Copied to ${path} on ${d.serial}.`);
-                  })
-                }
-              >
-                {busy === `push:${d.serial}` ? <LoaderCircle className="animate-spin" /> : <Download />}
-                Push certificate
-              </Button>
-              <label className="flex items-center gap-1.5">
-                <Switch
-                  size="sm"
-                  checked={ours}
-                  disabled={busy !== null || d.state !== "device"}
-                  onCheckedChange={(on) => run(`proxy:${d.serial}`, () => setAndroidProxy(d.serial, on))}
-                  aria-label={`Use Proxymate as ${d.serial}'s proxy`}
-                />
-                Proxy
-              </label>
-            </div>
+            </CopyMenu>
           );
         })}
         <ProgressCheck progress={progress(activity)} who="the emulator" flows={activity.flows} />

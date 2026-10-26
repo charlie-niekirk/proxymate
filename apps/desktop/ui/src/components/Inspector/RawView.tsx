@@ -4,8 +4,10 @@ import type { BodyInfo, BodyPart, Header } from "@/bindings";
 import { CodeView } from "@/components/BodyViewer/CodeView";
 import { Note } from "@/components/BodyViewer/parts";
 import { HIGHLIGHT_LIMIT } from "@/components/BodyViewer/util";
+import { CopyItem } from "@/components/menus/items";
+import { headersBlock } from "@/lib/copyFormats";
 import { formatSize } from "@/lib/flow";
-import { bodyText, rawMessage } from "@/lib/http";
+import { bodyText, displayHeaderName, rawMessage } from "@/lib/http";
 
 import { useBody } from "./useBody";
 
@@ -45,7 +47,22 @@ export function RawView({
     <div className="flex h-full flex-col">
       <Note>Rebuilt from the parsed message, not the exact bytes on the wire</Note>
       <div className="min-h-0 flex-1" data-testid="raw-view">
-        <CodeView text={text} language="http" highlight={text.length <= HIGHLIGHT_LIMIT} wrap />
+        <CodeView
+          text={text}
+          language="http"
+          highlight={text.length <= HIGHLIGHT_LIMIT}
+          wrap
+          menuItems={
+            <>
+              <CopyItem text={startLine} what={part === "request" ? "request line" : "status line"}>
+                Copy {part === "request" ? "request line" : "status line"}
+              </CopyItem>
+              <CopyItem text={headersBlock(headers.map((h) => [displayHeaderName(h.name), h.value]))} what="headers">
+                Copy headers
+              </CopyItem>
+            </>
+          }
+        />
       </div>
     </div>
   );

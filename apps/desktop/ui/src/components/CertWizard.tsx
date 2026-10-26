@@ -100,7 +100,8 @@ export function CertWizard() {
               variant="outline"
               size="xs"
               onClick={() =>
-                void copyTerminalEnv().then(() => {
+                void copyTerminalEnv(true).then((ok) => {
+                  if (!ok) return;
                   setCopied(true);
                   setTimeout(() => setCopied(false), 1500);
                 })

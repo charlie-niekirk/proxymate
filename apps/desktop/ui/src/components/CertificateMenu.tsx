@@ -2,12 +2,14 @@ import { useQuery } from "@tanstack/react-query";
 import { CircleAlert, CircleCheck, Copy, RefreshCw, ShieldAlert, ShieldCheck } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
+import { CopyMenu } from "@/components/menus/items";
 import { Button } from "@/components/ui/button";
 import { useTrustStatus } from "@/hooks/useTrustStatus";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
 import { regenerateCa } from "@/lib/actions";
 import { backend } from "@/lib/backend";
+import { copy } from "@/lib/clipboard";
 import { caInfoKey, proxyStatusKey } from "@/lib/query";
 import { useUi } from "@/store/ui";
 
@@ -90,19 +92,31 @@ export function CertificateMenu() {
           </Button>
         </div>
         {ca && (
-          <div className="flex flex-col gap-2 px-3 py-2" data-selectable>
-            <Field label="Root CA">{ca.common_name}</Field>
-            <Field label="Valid until">{ca.not_after.slice(0, 10)}</Field>
-            <Field label="SHA-256">
-              <span className="font-mono break-all">{ca.sha256.match(/.{1,2}/g)?.join(":")}</span>
-            </Field>
-            <Field label="PEM file">
-              <CopyRow text={ca.cert_path} />
-            </Field>
-            <Field label="Try it">
-              <CopyRow text={curl} />
-            </Field>
-          </div>
+          <CopyMenu
+            testId="ca-menu"
+            items={[
+              { label: "Copy common name", text: ca.common_name, what: "common name" },
+              { label: "Copy expiry date", text: ca.not_after, what: "expiry date" },
+              { label: "Copy SHA-256", text: colonHex(ca.sha256), what: "fingerprint", testId: "copy-ca-sha256" },
+              { label: "Copy SHA-256 without colons", text: ca.sha256, what: "fingerprint" },
+              { label: "Copy PEM file path", text: ca.cert_path, what: "path" },
+              { label: "Copy curl example", text: curl, what: "command" },
+            ]}
+          >
+            <div className="flex flex-col gap-2 px-3 py-2" data-selectable>
+              <Field label="Root CA">{ca.common_name}</Field>
+              <Field label="Valid until">{ca.not_after.slice(0, 10)}</Field>
+              <Field label="SHA-256">
+                <span className="font-mono break-all">{colonHex(ca.sha256)}</span>
+              </Field>
+              <Field label="PEM file">
+                <CopyRow text={ca.cert_path} />
+              </Field>
+              <Field label="Try it">
+                <CopyRow text={curl} />
+              </Field>
+            </div>
+          </CopyMenu>
         )}
         <div className="flex flex-col gap-2 border-t px-3 py-2">
           <div className="flex items-center justify-between gap-2">
@@ -145,6 +159,9 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
+/** `ab:cd:…`, as Keychain Access shows a fingerprint. */
+const colonHex = (hex: string) => hex.match(/.{1,2}/g)?.join(":") ?? hex;
+
 function CopyRow({ text }: { text: string }) {
   return (
     <div className="flex items-start gap-1">
@@ -153,7 +170,7 @@ function CopyRow({ text }: { text: string }) {
         variant="ghost"
         size="icon-xs"
         aria-label="Copy"
-        onClick={() => void navigator.clipboard?.writeText(text)}
+        onClick={() => void copy(text)}
       >
         <Copy />
       </Button>

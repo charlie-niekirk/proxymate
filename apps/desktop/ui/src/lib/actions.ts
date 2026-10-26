@@ -1,7 +1,17 @@
 import { toast } from "sonner";
 
-import type { FlowSelection, PresetKind, RequestSpec_Deserialize, SaveProgress_Serialize, ScriptKind } from "@/bindings";
+import type {
+  BreakpointResolution_Deserialize,
+  FlowSelection,
+  PresetKind,
+  RequestSpec_Deserialize,
+  SaveProgress_Serialize,
+  ScriptKind,
+} from "@/bindings";
 import { backend } from "@/lib/backend";
+import { copyLater } from "@/lib/clipboard";
+import { withTerm } from "@/lib/copyFormats";
+import { flowUrl } from "@/lib/flow";
 import {
   androidKey,
   caInfoKey,
@@ -33,6 +43,12 @@ export const errorText = (e: unknown) => (e instanceof Error ? e.message : Strin
 /** A failed action, as a toast: what was being done, then why. */
 export function reportError(what: string, err: unknown) {
   toast.error(what, { description: errorText(err) });
+}
+
+/** Narrows the search box to flows matching a DSL `term`, keeping what's typed. */
+export function addFilterTerm(term: string) {
+  const ui = useUi.getState();
+  ui.setText(withTerm(ui.filter.text, term));
 }
 
 /** Pins or unpins live flows: pinned flows are kept when old flows are evicted. */
@@ -89,9 +105,12 @@ export async function setAppSslExcluded(app: string, excluded: boolean) {
   queryClient.setQueryData(sslSettingsKey, await backend.setAppSslExcluded(app, excluded));
 }
 
-/** Copies `export HTTPS_PROXY=… NODE_EXTRA_CA_CERTS=…` for a terminal. */
-export async function copyTerminalEnv() {
-  await navigator.clipboard.writeText(await backend.getTerminalEnv());
+/**
+ * Copies `export HTTPS_PROXY=… NODE_EXTRA_CA_CERTS=…` for a terminal;
+ * resolves true once copied. `silent` for buttons that show their own tick.
+ */
+export function copyTerminalEnv(silent = false) {
+  return copyLater(() => backend.getTerminalEnv(), "terminal environment", { silent });
 }
 
 // ---- Rules ----
@@ -139,6 +158,11 @@ export async function saveRule(rule: Rule): Promise<Rule> {
   return normalizeRule(saved);
 }
 
+/** Saves a copy of `rule` as a new user rule ("<name> copy"); resolves to it. */
+export async function duplicateRule(rule: Rule): Promise<Rule> {
+  return saveRule({ ...normalizeRule(rule), id: "", name: `${rule.name || "Untitled"} copy`, origin: { kind: "user" } });
+}
+
 export async function deleteRule(id: string) {
   await backend.deleteRule(id);
   await refreshRules();
@@ -171,15 +195,16 @@ export async function setThrottle(preset: ThrottlePreset | null) {
 // ---- Flow menu ----
 
 export async function copyFlowUrl(store: number, flow: number) {
-  const detail = await backend.getFlowDetail(store, flow);
-  const summary = detail ? null : await backend.getFlow(store, flow);
-  const url = detail?.request.url ?? (summary ? `${summary.scheme}://${summary.host}${summary.path}${summary.query ? `?${summary.query}` : ""}` : "");
-  if (url) await navigator.clipboard.writeText(url);
+  await copyLater(async () => {
+    const detail = await backend.getFlowDetail(store, flow);
+    const summary = detail ? null : await backend.getFlow(store, flow);
+    return detail?.request.url ?? (summary ? flowUrl(summary) : null);
+  }, "URL");
 }
 
 /** A shell command (built in Rust, bodies included) that sends the request again. */
 export async function copyFlowCurl(store: number, flow: number) {
-  await navigator.clipboard.writeText(await backend.getCurl(store, flow));
+  await copyLater(() => backend.getCurl(store, flow), "cURL command");
 }
 
 // ---- Replay and compose ----
@@ -276,7 +301,24 @@ async function runSave(label: string, start: (onProgress: (p: SaveProgress_Seria
   }
 }
 
+// ---- Breakpoints ----
+
+/** Lets a paused flow go on (with edits), aborts it, or answers it. */
+export async function resolveBreakpoint(id: number, resolution: BreakpointResolution_Deserialize) {
+  await backend.resolveBreakpoint(id, resolution);
+}
+
 // ---- Device setup ----
+
+/** Allows or denies a LAN device (an allowed one is recorded under `nickname`). */
+export async function decideDevice(ip: string, allow: boolean, nickname: string | null) {
+  await backend.decideDevice(ip, allow, nickname);
+}
+
+/** Forgets a LAN device: it's asked about again next time. */
+export async function forgetDevice(ip: string) {
+  await backend.forgetDevice(ip);
+}
 
 /** Listens on every interface (or loopback only); the toolbar address follows. */
 export async function setLanAccess(on: boolean) {
@@ -307,6 +349,11 @@ export async function saveScript(script: Script): Promise<Script> {
   const saved = script.id ? await backend.updateScript(script) : await backend.createScript(script);
   await refreshScripts();
   return normalizeScript(saved);
+}
+
+/** Saves a copy of `script` as a new user script ("<name> copy"); resolves to it. */
+export async function duplicateScript(script: Script): Promise<Script> {
+  return saveScript({ ...normalizeScript(script), id: "", name: `${script.name || "Untitled"} copy`, origin: { kind: "user" } });
 }
 
 export async function deleteScript(id: string) {
@@ -376,7 +423,6 @@ export async function importScript(): Promise<Script | null> {
 }
 
 /** Copies `proxymate.d.ts`, for an editor or an agent. */
-export async function copyScriptTypes() {
-  await navigator.clipboard.writeText(await backend.getScriptTypeDefinitions());
-  toast.success("Copied proxymate.d.ts");
+export function copyScriptTypes() {
+  return copyLater(() => backend.getScriptTypeDefinitions(), "proxymate.d.ts");
 }

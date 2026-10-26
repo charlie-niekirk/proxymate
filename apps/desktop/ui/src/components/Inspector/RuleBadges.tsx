@@ -1,6 +1,9 @@
 import { Bot, FileCode2, PencilLine, TriangleAlert } from "lucide-react";
 
 import type { FlowRules_Serialize } from "@/bindings";
+import { CopyMenu } from "@/components/menus/items";
+import { ContextMenuItem } from "@/components/ui/context-menu";
+import { reportError, setRuleEnabled } from "@/lib/actions";
 import { useUi } from "@/store/ui";
 
 /**
@@ -25,42 +28,67 @@ export function RuleBadges({ rules }: { rules: FlowRules_Serialize }) {
       {rules.applied.map((r) => {
         const client = r.origin.kind === "agent" ? r.origin.client : null;
         return (
-          <button
+          <CopyMenu
             key={`${r.rule_id}-${r.phase}`}
-            type="button"
-            onClick={() => open({ ruleId: r.rule_id })}
-            title={`${r.name} changed the ${r.phase}${client !== null ? ` · created by ${client}` : ""}`}
-            className="inline-flex h-5 items-center gap-1 rounded-sm px-1.5 hover:brightness-110"
-            style={
-              client !== null
-                ? { color: "var(--rule-agent)", backgroundColor: "var(--rule-agent-bg)" }
-                : { color: "var(--rule)", backgroundColor: "var(--rule-bg)" }
+            testId="rule-badge-menu"
+            items={[
+              { label: "Copy rule name", text: r.name, what: "rule name" },
+              { label: "Copy rule id", text: r.rule_id, what: "rule id" },
+            ]}
+            extra={
+              <>
+                <ContextMenuItem onSelect={() => open({ ruleId: r.rule_id })}>Open rule</ContextMenuItem>
+                <ContextMenuItem onSelect={() => void setRuleEnabled(r.rule_id, false).catch((e: unknown) => reportError("Couldn't disable the rule", e))}>
+                  Disable rule
+                </ContextMenuItem>
+              </>
             }
-            data-testid="rule-badge"
           >
-            {client !== null && <Bot className="size-3" />}
-            {client !== null && <span className="font-semibold">AI · {client}</span>}
-            <span>{r.name}</span>
-            <span className="opacity-60">{r.phase === "request" ? "req" : "resp"}</span>
-          </button>
+            <button
+              type="button"
+              onClick={() => open({ ruleId: r.rule_id })}
+              title={`${r.name} changed the ${r.phase}${client !== null ? ` · created by ${client}` : ""}`}
+              className="inline-flex h-5 items-center gap-1 rounded-sm px-1.5 hover:brightness-110"
+              style={
+                client !== null
+                  ? { color: "var(--rule-agent)", backgroundColor: "var(--rule-agent-bg)" }
+                  : { color: "var(--rule)", backgroundColor: "var(--rule-bg)" }
+              }
+              data-testid="rule-badge"
+            >
+              {client !== null && <Bot className="size-3" />}
+              {client !== null && <span className="font-semibold">AI · {client}</span>}
+              <span>{r.name}</span>
+              <span className="opacity-60">{r.phase === "request" ? "req" : "resp"}</span>
+            </button>
+          </CopyMenu>
         );
       })}
       {failed.map((issue) => (
-        <button
+        <CopyMenu
           key={`${issue.script_id}-${issue.phase}`}
-          type="button"
-          onClick={() => openScripts({ scriptId: issue.script_id })}
-          title={issue.message}
-          className="inline-flex h-5 max-w-full items-center gap-1 rounded-sm px-1.5 hover:brightness-110"
-          style={{ color: "var(--s-5xx)", backgroundColor: "var(--s-5xx-bg)" }}
-          data-testid="script-issue"
+          testId="script-issue-menu"
+          items={[
+            { label: "Copy error", text: issue.message, what: "error" },
+            { label: "Copy script name", text: issue.script_name, what: "script name" },
+          ]}
+          extra={<ContextMenuItem onSelect={() => openScripts({ scriptId: issue.script_id })}>Open script</ContextMenuItem>}
         >
-          <FileCode2 className="size-3 shrink-0" />
-          <span className="shrink-0 font-medium">Script “{issue.script_name}” failed</span>
-          <span className="truncate opacity-80">
-            {issue.phase} · {issue.message.split("\n")[0]}
-          </span>
-        </button>
+          <button
+            type="button"
+            onClick={() => openScripts({ scriptId: issue.script_id })}
+            title={issue.message}
+            className="inline-flex h-5 max-w-full items-center gap-1 rounded-sm px-1.5 hover:brightness-110"
+            style={{ color: "var(--s-5xx)", backgroundColor: "var(--s-5xx-bg)" }}
+            data-testid="script-issue"
+          >
+            <FileCode2 className="size-3 shrink-0" />
+            <span className="shrink-0 font-medium">Script “{issue.script_name}” failed</span>
+            <span className="truncate opacity-80">
+              {issue.phase} · {issue.message.split("\n")[0]}
+            </span>
+          </button>
+        </CopyMenu>
       ))}
       {notes.map((n) => (
         <span key={n} className="text-muted-foreground inline-flex items-center gap-1" data-testid="rule-note">

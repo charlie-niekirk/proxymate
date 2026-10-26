@@ -28,8 +28,9 @@ import {
 } from "@/components/ui/context-menu";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { addSslBypass, closeDocument, openDocument, setAppSslExcluded } from "@/lib/actions";
+import { addSslBypass, closeDocument, openDocument, setAppSslExcluded, setInsecureUpstream } from "@/lib/actions";
 import { backend } from "@/lib/backend";
+import { copy } from "@/lib/clipboard";
 import { formatCount } from "@/lib/flow";
 import { sslSettingsKey } from "@/lib/query";
 import { cn } from "@/lib/utils";
@@ -149,8 +150,13 @@ function SavedDocuments() {
               />
             </div>
           </ContextMenuTrigger>
-          <ContextMenuContent>
-            <ContextMenuItem onSelect={() => void closeDocument(doc.store)}>Close {doc.name}</ContextMenuItem>
+          <ContextMenuContent className="max-w-72">
+            <ContextMenuItem onSelect={() => void copy(doc.name, "name")}>Copy name</ContextMenuItem>
+            <ContextMenuItem onSelect={() => void copy(doc.path, "path")}>Copy path</ContextMenuItem>
+            <ContextMenuSeparator />
+            <ContextMenuItem onSelect={() => void closeDocument(doc.store)}>
+              <span className="truncate">Close {doc.name}</span>
+            </ContextMenuItem>
           </ContextMenuContent>
         </ContextMenu>
       ))}
@@ -275,6 +281,9 @@ const AppItem = memo(function AppItem({
       <ContextMenuContent className="w-60">
         <ContextMenuItem onSelect={onSelect}>{active ? "Show all traffic" : `Show only ${app.name}`}</ContextMenuItem>
         <ContextMenuSeparator />
+        <ContextMenuItem onSelect={() => void copy(app.name, "app name")}>Copy name</ContextMenuItem>
+        {app.bundle_id && <ContextMenuItem onSelect={() => void copy(app.bundle_id!, "bundle id")}>Copy bundle id</ContextMenuItem>}
+        <ContextMenuSeparator />
         <ContextMenuCheckboxItem checked={excluded} onCheckedChange={(on) => void setAppSslExcluded(key, on === true)}>
           Don&apos;t decrypt HTTPS from {app.name}
         </ContextMenuCheckboxItem>
@@ -301,7 +310,7 @@ const DomainItem = memo(function DomainItem({
   const scope = expandable ? `*.${node.domain}` : node.domain;
   return (
     <>
-      <HostMenu host={node.domain}>
+      <HostMenu host={node.domain} scope={scope} shown={selected === scope} onShow={() => onSelect(scope)}>
         <div className={itemClass(selected === scope)}>
           <button
             aria-label={expanded ? "Collapse" : "Expand"}
@@ -319,7 +328,7 @@ const DomainItem = memo(function DomainItem({
       </HostMenu>
       {expanded &&
         node.hosts.map((h) => (
-          <HostMenu key={h.host} host={h.host}>
+          <HostMenu key={h.host} host={h.host} scope={h.host} shown={selected === h.host} onShow={() => onSelect(h.host)}>
             <div>
               <Item
                 icon={null}
@@ -336,13 +345,49 @@ const DomainItem = memo(function DomainItem({
   );
 });
 
-function HostMenu({ host, children }: { host: string; children: ReactNode }) {
+/**
+ * A domain or host row's menu. `scope` is what the row filters by
+ * (`*.example.com` for a domain with hosts under it); `onShow` toggles it,
+ * like a click.
+ */
+function HostMenu({
+  host,
+  scope,
+  shown,
+  onShow,
+  children,
+}: {
+  host: string;
+  scope: string;
+  shown: boolean;
+  onShow: () => void;
+  children: ReactNode;
+}) {
+  const { data: ssl } = useQuery({ queryKey: sslSettingsKey, queryFn: () => backend.getSslSettings() });
+  const insecure = (ssl?.insecure_upstream ?? []).includes(host.toLowerCase());
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
-      <ContextMenuContent className="w-56">
-        <ContextMenuItem onSelect={() => void navigator.clipboard?.writeText(host)}>Copy {host}</ContextMenuItem>
-        <ContextMenuItem onSelect={() => void addSslBypass(host)}>Add {host} to SSL bypass</ContextMenuItem>
+      <ContextMenuContent className="w-64" data-testid="host-menu">
+        <ContextMenuItem onSelect={onShow}>
+          <span className="truncate">{shown ? "Show all traffic" : `Show only ${scope}`}</span>
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem onSelect={() => void copy(host, "host")}>
+          <span className="truncate">Copy {host}</span>
+        </ContextMenuItem>
+        {scope !== host && (
+          <ContextMenuItem onSelect={() => void copy(scope, "domain pattern")}>
+            <span className="truncate">Copy {scope}</span>
+          </ContextMenuItem>
+        )}
+        <ContextMenuSeparator />
+        <ContextMenuItem onSelect={() => void addSslBypass(host)}>
+          <span className="truncate">Add {host} to SSL bypass</span>
+        </ContextMenuItem>
+        <ContextMenuCheckboxItem checked={insecure} onCheckedChange={(on) => void setInsecureUpstream(host, on === true)}>
+          <span className="truncate">Accept {host}&apos;s certificate unverified</span>
+        </ContextMenuCheckboxItem>
       </ContextMenuContent>
     </ContextMenu>
   );

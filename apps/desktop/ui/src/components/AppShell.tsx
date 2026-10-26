@@ -18,6 +18,7 @@ import { Toolbar } from "@/components/Toolbar";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { Toaster } from "@/components/ui/sonner";
 import { useAppMenu } from "@/hooks/useAppMenu";
+import { useNativeMenuPolicy } from "@/hooks/useNativeMenuPolicy";
 import { useShortcuts } from "@/hooks/useShortcuts";
 import { startStorage } from "@/store/storage";
 import { useEffect } from "react";
@@ -29,6 +30,7 @@ import { useEffect } from "react";
 export function AppShell() {
   useAppMenu();
   useShortcuts();
+  useNativeMenuPolicy();
   useEffect(startStorage, []);
   return (
     <>

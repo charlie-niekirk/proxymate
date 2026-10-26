@@ -1,8 +1,11 @@
 import { CircleAlert, CircleCheck, Copy, LoaderCircle, Wifi } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useState, type ReactElement, type ReactNode } from "react";
 
-import type { DeviceAccess_Serialize } from "@/bindings";
+import type { DeviceAccess_Serialize, DeviceClient_Deserialize } from "@/bindings";
+import { CopyMenu, type CopyEntry } from "@/components/menus/items";
 import { Button } from "@/components/ui/button";
+import { ContextMenuItem } from "@/components/ui/context-menu";
+import { copy } from "@/lib/clipboard";
 import { svgDataUrl, type Progress } from "@/lib/devices";
 import { cn } from "@/lib/utils";
 
@@ -52,37 +55,83 @@ export function ProgressCheck({ progress, who, flows }: { progress: Progress; wh
   }
 }
 
-/** Monospace text with a copy button. `display` shows something else (e.g. a masked secret) but copies `value`. */
+/**
+ * Monospace text with a copy button. `display` shows something else (e.g. a
+ * masked secret) but copies `value`. Right-click copies too, plus `more`
+ * (an MCP command's URL and token on their own).
+ */
 export function CopyField({
   value,
   display,
   label,
   multiline,
   testId,
+  more = [],
 }: {
   value: string;
   display?: string;
   label?: string;
   multiline?: boolean;
   testId?: string;
+  more?: CopyEntry[];
 }) {
   const [copied, setCopied] = useState(false);
-  const copy = () =>
-    void navigator.clipboard?.writeText(value).then(() => {
+  const onCopy = () =>
+    void copy(value, undefined, { silent: true }).then((ok) => {
+      if (!ok) return;
       setCopied(true);
       setTimeout(() => setCopied(false), 1200);
     });
   return (
-    <div className="bg-muted/50 flex items-start gap-1 rounded-md border px-2 py-1">
-      {multiline ? (
-        <pre className="min-w-0 flex-1 overflow-x-auto py-0.5 font-mono text-[11px] leading-4">{display ?? value}</pre>
-      ) : (
-        <code className="min-w-0 flex-1 truncate py-0.5 font-mono text-[11px]">{display ?? value}</code>
-      )}
-      <Button variant="ghost" size="icon-xs" aria-label={label ?? "Copy"} onClick={copy} className="-mr-1" data-testid={testId}>
-        {copied ? <CircleCheck className="text-[var(--s-2xx)]" /> : <Copy />}
-      </Button>
-    </div>
+    <CopyMenu items={[{ label: label ?? "Copy", text: value, testId: testId && `${testId}-menu` }, ...more]}>
+      <div className="bg-muted/50 flex items-start gap-1 rounded-md border px-2 py-1">
+        {multiline ? (
+          <pre className="min-w-0 flex-1 overflow-x-auto py-0.5 font-mono text-[11px] leading-4">{display ?? value}</pre>
+        ) : (
+          <code className="min-w-0 flex-1 truncate py-0.5 font-mono text-[11px]">{display ?? value}</code>
+        )}
+        <Button variant="ghost" size="icon-xs" aria-label={label ?? "Copy"} onClick={onCopy} className="-mr-1" data-testid={testId}>
+          {copied ? <CircleCheck className="text-[var(--s-2xx)]" /> : <Copy />}
+        </Button>
+      </div>
+    </CopyMenu>
+  );
+}
+
+/**
+ * A LAN device row's menu (Device setup and Settings › Clients): copy its
+ * address or nickname, allow, deny or forget it.
+ */
+export function DeviceMenu({
+  device,
+  onDecide,
+  onForget,
+  children,
+}: {
+  device: DeviceClient_Deserialize;
+  onDecide: (allow: boolean) => void;
+  onForget: () => void;
+  children: ReactElement;
+}) {
+  return (
+    <CopyMenu
+      testId="device-menu"
+      items={[
+        { label: "Copy IP address", text: device.ip, what: "IP address" },
+        device.nickname && { label: "Copy nickname", text: device.nickname, what: "nickname" },
+      ]}
+      extra={
+        <>
+          {device.decision !== "allowed" && <ContextMenuItem onSelect={() => onDecide(true)}>Allow</ContextMenuItem>}
+          {device.decision !== "denied" && <ContextMenuItem onSelect={() => onDecide(false)}>Deny</ContextMenuItem>}
+          <ContextMenuItem variant="destructive" onSelect={onForget}>
+            Forget
+          </ContextMenuItem>
+        </>
+      }
+    >
+      {children}
+    </CopyMenu>
   );
 }
 

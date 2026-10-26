@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { CircleAlert, PencilLine, ShieldAlert, ShieldOff } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useState, type ReactElement, type ReactNode } from "react";
 
 import type { FlowDetail_Serialize, FlowSummary_Serialize } from "@/bindings";
 import { MethodPill, StatusPill, UrlText } from "@/components/FlowTable/cells";
@@ -12,6 +12,8 @@ import { SsePanel } from "@/components/Inspector/SsePanel";
 import { TimingView } from "@/components/Inspector/TimingView";
 import { TlsView } from "@/components/Inspector/TlsView";
 import { WebSocketPanel } from "@/components/Inspector/WebSocketPanel";
+import { FilterBySub } from "@/components/menus/filter";
+import { CopyMenu } from "@/components/menus/items";
 import { Button } from "@/components/ui/button";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -20,7 +22,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { addSslBypass, openRewrite, setInsecureUpstream } from "@/lib/actions";
 import { backend } from "@/lib/backend";
 import { explainFailure, type FailureHelp } from "@/lib/errors";
-import { formatDuration, formatSize } from "@/lib/flow";
+import { flowUrl, formatDuration, formatSize } from "@/lib/flow";
 import { displayHeaderName, queryPairs } from "@/lib/http";
 import { flowKey, sslSettingsKey } from "@/lib/query";
 import { streamKind } from "@/lib/stream";
@@ -68,33 +70,35 @@ export function DetailPane() {
   );
   return (
     <div className="bg-background flex h-full flex-col" data-testid="inspector">
-      <div className="flex h-8 shrink-0 items-center gap-2 border-b px-2" data-selectable>
-        <MethodPill method={flow.method} />
-        <UrlText row={flow} operation={flow.graphql_op} sentBy={flow.sent_by} className="min-w-0 flex-1 text-xs" />
-        <StatusPill status={flow.status} state={flow.state} />
-        <span
-          className="text-muted-foreground rounded-sm border px-1 font-mono text-2xs leading-4"
-          data-testid="http-version"
-        >
-          {flow.http_version}
-        </span>
-        <span className="text-muted-foreground font-mono text-xs tabular-nums">
-          {formatDuration(flow.duration_ms)} · {formatSize(flow.resp_size)}
-        </span>
-        {detail && flow.method !== "CONNECT" && stream !== "websocket" && (
-          <Button
-            variant="ghost"
-            size="xs"
-            title="Edit this flow and save the changes as a rule"
-            onClick={() => void openRewrite(store, flow.id)}
-            data-testid="inspector-rewrite"
+      <UrlBarMenu flow={flow} detail={detail}>
+        <div className="flex h-8 shrink-0 items-center gap-2 border-b px-2" data-selectable data-testid="url-bar">
+          <MethodPill method={flow.method} />
+          <UrlText row={flow} operation={flow.graphql_op} sentBy={flow.sent_by} className="min-w-0 flex-1 text-xs" />
+          <StatusPill status={flow.status} state={flow.state} />
+          <span
+            className="text-muted-foreground rounded-sm border px-1 font-mono text-2xs leading-4"
+            data-testid="http-version"
           >
-            <PencilLine />
-            Rewrite…
-          </Button>
-        )}
-        {(flow.tls === "intercepted" || flow.tls === "likely_pinned") && <BypassButton host={flow.host} compact />}
-      </div>
+            {flow.http_version}
+          </span>
+          <span className="text-muted-foreground font-mono text-xs tabular-nums">
+            {formatDuration(flow.duration_ms)} · {formatSize(flow.resp_size)}
+          </span>
+          {detail && flow.method !== "CONNECT" && stream !== "websocket" && (
+            <Button
+              variant="ghost"
+              size="xs"
+              title="Edit this flow and save the changes as a rule"
+              onClick={() => void openRewrite(store, flow.id)}
+              data-testid="inspector-rewrite"
+            >
+              <PencilLine />
+              Rewrite…
+            </Button>
+          )}
+          {(flow.tls === "intercepted" || flow.tls === "likely_pinned") && <BypassButton host={flow.host} compact />}
+        </div>
+      </UrlBarMenu>
       {detail && <RuleBadges rules={detail.rules} />}
       {flow.tls === "likely_pinned" && (
         <div
@@ -138,10 +142,10 @@ function RequestPane({ flow, detail }: Inspected & { detail: FlowDetail_Serializ
   return (
     <MessageTabs title="Request" tabs={["Header", "Query", "Body", "Raw"]} value={tab} onChange={setTab}>
       <ScrollTab value="Header">
-        <KvTable rows={headers} />
+        <KvTable rows={headers} kind="header" side="request" testId="request-headers" />
       </ScrollTab>
       <ScrollTab value="Query">
-        {query.length ? <KvTable rows={query} /> : <Placeholder text="No query parameters" />}
+        {query.length ? <KvTable rows={query} kind="query" testId="query-params" /> : <Placeholder text="No query parameters" />}
       </ScrollTab>
       <FillTab value="Body">
         <BodyViewer
@@ -187,7 +191,16 @@ function ResponsePane({ flow, detail }: Inspected & { detail: FlowDetail_Seriali
         </div>
       )}
       <ScrollTab value="Header">
-        {response ? <KvTable rows={response.headers.map((h) => [displayHeaderName(h.name), h.value])} /> : noResponse}
+        {response ? (
+          <KvTable
+            rows={response.headers.map((h) => [displayHeaderName(h.name), h.value])}
+            kind="header"
+            side="response"
+            testId="response-headers"
+          />
+        ) : (
+          noResponse
+        )}
       </ScrollTab>
       <FillTab value="Body">
         {response ? (
@@ -228,6 +241,33 @@ function ResponsePane({ flow, detail }: Inspected & { detail: FlowDetail_Seriali
   );
 }
 
+/**
+ * The URL bar's menu: the URL and its parts, method, status, cURL, and
+ * filters for this flow's host, method, status and app.
+ */
+function UrlBarMenu({ flow, detail, children }: Inspected & { children: ReactElement }) {
+  const store = useUi((s) => s.store);
+  const status = detail?.response ? `${detail.response.status} ${detail.response.reason}`.trim() : flow.status !== null ? String(flow.status) : null;
+  const pathQuery = `${flow.path}${flow.query ? `?${flow.query}` : ""}`;
+  return (
+    <CopyMenu
+      testId="url-bar-menu"
+      items={[
+        { label: "Copy URL", text: detail?.request.url ?? flowUrl(flow), what: "URL", testId: "url-copy-url" },
+        { label: "Copy host", text: flow.host, what: "host", testId: "url-copy-host" },
+        { label: "Copy path", text: flow.path, what: "path" },
+        flow.query !== "" && { label: "Copy path and query", text: pathQuery, what: "path and query" },
+        { label: "Copy method", text: flow.method, what: "method" },
+        status !== null && { label: "Copy status", text: status, what: "status", testId: "url-copy-status" },
+        flow.method !== "CONNECT" && { label: "Copy as cURL", text: () => backend.getCurl(store, flow.id), what: "cURL command" },
+      ]}
+      extra={<FilterBySub facts={{ host: flow.host, method: flow.method, status: flow.status, client: flow.client }} />}
+    >
+      {children}
+    </CopyMenu>
+  );
+}
+
 /** "Add to SSL bypass": stop decrypting the host from its next connection. */
 function BypassButton({ host, compact = false }: { host: string; compact?: boolean }) {
   const { data: settings } = useQuery({ queryKey: sslSettingsKey, queryFn: () => backend.getSslSettings() });
@@ -261,10 +301,17 @@ function FailureBanner({ help, host }: { help: FailureHelp; host: string }) {
   return (
     <div className="flex items-start gap-2 border-b bg-[var(--s-5xx-bg)] px-2 py-1.5 text-xs" role="alert" data-testid="failure-banner">
       <CircleAlert className="mt-px size-3.5 shrink-0 text-[var(--s-failed)]" />
-      <div className="min-w-0 flex-1" data-selectable>
-        <div className="font-medium text-[var(--s-failed)]">{help.title}</div>
-        <div className="text-muted-foreground leading-4">{help.detail}</div>
-      </div>
+      <CopyMenu
+        items={[
+          { label: "Copy error", text: help.detail, what: "error" },
+          { label: "Copy title and error", text: `${help.title}\n${help.detail}`, what: "error" },
+        ]}
+      >
+        <div className="min-w-0 flex-1" data-selectable>
+          <div className="font-medium text-[var(--s-failed)]">{help.title}</div>
+          <div className="text-muted-foreground leading-4">{help.detail}</div>
+        </div>
+      </CopyMenu>
       <div className="flex shrink-0 flex-wrap justify-end gap-1">
         {help.actions.map((action) => {
           switch (action) {

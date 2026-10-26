@@ -4,6 +4,8 @@ import { Bar, Centered } from "@/components/BodyViewer/parts";
 import { VIEWERS, viewersFor, type ViewerId } from "@/components/BodyViewer/registry";
 import { HIGHLIGHT_LIMIT } from "@/components/BodyViewer/util";
 import { Viewer } from "@/components/BodyViewer/Viewer";
+import { BodyFallbackMenu } from "@/components/menus/body";
+import { BodyCopyContext } from "@/components/menus/bodyContext";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { sniff } from "@/lib/body/content";
 import { formatSize } from "@/lib/flow";
@@ -14,7 +16,18 @@ import { formatSize } from "@/lib/flow";
  * Binary frames start as hex unless they hold JSON. Only viewers that take
  * bytes apply: a message has no URL to load media from.
  */
-export function PayloadView({ bytes, binary, id }: { bytes: Uint8Array; binary: boolean; id: string }) {
+export function PayloadView({
+  bytes,
+  binary,
+  id,
+  what = "payload",
+}: {
+  bytes: Uint8Array;
+  binary: boolean;
+  id: string;
+  /** Names it in the copy items: "payload" (WebSocket), "data" (SSE). */
+  what?: string;
+}) {
   const { kind, mime, options } = useMemo(() => {
     const sniffed = sniff(bytes);
     let options = viewersFor(sniffed.kind).filter((v) => VIEWERS[v].source === "bytes");
@@ -45,18 +58,22 @@ export function PayloadView({ bytes, binary, id }: { bytes: Uint8Array; binary: 
           {mime} · {formatSize(bytes.length)}
         </span>
       </Bar>
-      <div className="min-h-0 flex-1">
-        <Viewer
-          viewer={viewer}
-          bytes={bytes}
-          url={null}
-          mime={mime}
-          size={bytes.length}
-          contentType={null}
-          highlight={bytes.length <= HIGHLIGHT_LIMIT}
-          bodyId={id}
-        />
-      </div>
+      <BodyCopyContext.Provider value={{ bytes, what }}>
+        <BodyFallbackMenu>
+          <div className="min-h-0 flex-1">
+            <Viewer
+              viewer={viewer}
+              bytes={bytes}
+              url={null}
+              mime={mime}
+              size={bytes.length}
+              contentType={null}
+              highlight={bytes.length <= HIGHLIGHT_LIMIT}
+              bodyId={id}
+            />
+          </div>
+        </BodyFallbackMenu>
+      </BodyCopyContext.Provider>
     </div>
   );
 }

@@ -4,7 +4,9 @@ import { useState } from "react";
 
 import type { SimInstallResult_Serialize } from "@/bindings";
 import { Check, ProgressCheck, Section } from "@/components/DeviceSetup/parts";
+import { CopyMenu } from "@/components/menus/items";
 import { Button } from "@/components/ui/button";
+import { ContextMenuItem } from "@/components/ui/context-menu";
 import { setSystemProxy } from "@/lib/actions";
 import { backend } from "@/lib/backend";
 import { progress } from "@/lib/devices";
@@ -32,11 +34,12 @@ export function SimulatorTab() {
 
   const booted = sim?.booted ?? [];
   const allInstalled = booted.length > 0 && booted.every((d) => d.cert_installed);
-  const install = () => {
+  /** Installs on `udids`, or every booted simulator. */
+  const install = (udids: string[] = []) => {
     setBusy("install");
     setError(null);
     backend
-      .installSimulatorCert([])
+      .installSimulatorCert(udids)
       .then(setResults)
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => {
@@ -75,19 +78,33 @@ export function SimulatorTab() {
               {booted.map((d) => {
                 const result = results?.find((r) => r.udid === d.udid);
                 return (
-                  <li key={d.udid} className="flex items-center gap-2">
-                    <span className="truncate">{d.name}</span>
-                    <span className="text-muted-foreground">{d.runtime}</span>
-                    <span
-                      className={cn(
-                        "ml-auto shrink-0",
-                        d.cert_installed ? "text-[var(--s-2xx)]" : "text-muted-foreground",
-                        result?.error && "text-[var(--s-failed)]",
-                      )}
-                    >
-                      {result?.error ? "Failed" : d.cert_installed ? "Certificate installed" : "Not installed"}
-                    </span>
-                  </li>
+                  <CopyMenu
+                    key={d.udid}
+                    items={[
+                      { label: "Copy name", text: d.name, what: "name" },
+                      { label: "Copy UDID", text: d.udid, what: "UDID" },
+                      { label: "Copy runtime", text: d.runtime, what: "runtime" },
+                    ]}
+                    extra={
+                      <ContextMenuItem disabled={busy !== null} onSelect={() => install([d.udid])}>
+                        Install certificate on this simulator
+                      </ContextMenuItem>
+                    }
+                  >
+                    <li className="flex items-center gap-2">
+                      <span className="truncate">{d.name}</span>
+                      <span className="text-muted-foreground">{d.runtime}</span>
+                      <span
+                        className={cn(
+                          "ml-auto shrink-0",
+                          d.cert_installed ? "text-[var(--s-2xx)]" : "text-muted-foreground",
+                          result?.error && "text-[var(--s-failed)]",
+                        )}
+                      >
+                        {result?.error ? "Failed" : d.cert_installed ? "Certificate installed" : "Not installed"}
+                      </span>
+                    </li>
+                  </CopyMenu>
                 );
               })}
             </ul>
@@ -121,7 +138,7 @@ export function SimulatorTab() {
         <Button
           size="sm"
           disabled={busy !== null || !booted.length}
-          onClick={install}
+          onClick={() => install()}
           data-testid="simulator-install"
         >
           {busy === "install" ? <LoaderCircle className="animate-spin" /> : <ShieldPlus />}

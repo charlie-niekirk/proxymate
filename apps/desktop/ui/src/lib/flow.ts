@@ -75,6 +75,12 @@ export function urlParts(r: Pick<Row, "scheme" | "host" | "port" | "path" | "que
   };
 }
 
+/** The absolute URL a summary describes (the default port left out). */
+export function flowUrl(r: Pick<Row, "scheme" | "host" | "port" | "path" | "query">): string {
+  const p = urlParts(r);
+  return `${p.scheme}${p.host}${p.port}${p.path}${p.query}`;
+}
+
 const KNOWN_METHODS = new Set(["get", "post", "put", "patch", "delete", "head", "options", "connect"]);
 
 /** Suffix of the `--m-*` colour tokens for a method. */

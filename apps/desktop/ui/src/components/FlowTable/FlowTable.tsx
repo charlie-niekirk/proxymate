@@ -15,6 +15,7 @@ import {
 } from "react";
 
 import { AppIcon } from "@/components/AppIcon";
+import { CopyMenu } from "@/components/menus/items";
 import {
   ContextMenu,
   ContextMenuCheckboxItem,
@@ -72,7 +73,7 @@ export function FlowTable() {
   const pendingIndex = useRef<number | null>(null);
   // The row under a right-click: set by the row, read by the menu trigger.
   const pressedRow = useRef<Row | null>(null);
-  const [menuRow, setMenuRow] = useState<Row | null>(null);
+  const [menu, setMenu] = useState<{ row: Row; column: ColumnId | null } | null>(null);
 
   // eslint-disable-next-line react-hooks/incompatible-library -- TanStack Virtual is not compiler-safe; it re-renders through our version state.
   const virtualizer = useVirtualizer({
@@ -127,6 +128,8 @@ export function FlowTable() {
   );
 
   // Rows bubble their right-click first; outside a row there is no menu.
+  // The cell under the cursor (by its place in the row's grid) picks the
+  // menu's "Copy <column>" item.
   const onTableContextMenu = (e: MouseEvent) => {
     const row = pressedRow.current;
     pressedRow.current = null;
@@ -134,7 +137,9 @@ export function FlowTable() {
       e.preventDefault();
       return;
     }
-    setMenuRow(row);
+    const cellEl = (e.target as Element).closest<HTMLElement>('[role="row"] > div');
+    const at = cellEl?.parentElement ? Array.prototype.indexOf.call(cellEl.parentElement.children, cellEl) : -1;
+    setMenu({ row, column: columns[at]?.id ?? null });
   };
 
   const moveTo = (index: number) => {
@@ -223,7 +228,7 @@ export function FlowTable() {
           {len === 0 && <EmptyState />}
         </div>
       </ContextMenuTrigger>
-      <FlowContextMenu row={menuRow} />
+      <FlowContextMenu row={menu?.row ?? null} column={menu?.column ?? null} />
     </ContextMenu>
   );
 }
@@ -242,9 +247,11 @@ function EmptyState() {
       ) : (
         <>
           <span>Waiting for traffic</span>
-          <code className="bg-muted rounded px-2 py-1 font-mono text-xs" data-selectable>
-            curl -x http://{proxy} http://example.com/
-          </code>
+          <CopyMenu items={[{ label: "Copy command", text: `curl -x http://${proxy} http://example.com/`, what: "command" }]}>
+            <code className="bg-muted rounded px-2 py-1 font-mono text-xs" data-selectable data-testid="empty-curl">
+              curl -x http://{proxy} http://example.com/
+            </code>
+          </CopyMenu>
         </>
       )}
     </div>
@@ -427,6 +434,14 @@ const FlowRowView = memo(function FlowRowView({
 
 const dim = "text-muted-foreground group-data-[selected=true]/row:text-selection-foreground";
 
+/** The row's "…": opens the same menu a right-click does, under the button. */
+function openRowMenu(e: React.MouseEvent<HTMLButtonElement>) {
+  const box = e.currentTarget.getBoundingClientRect();
+  e.currentTarget.dispatchEvent(
+    new MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2, clientX: box.left, clientY: box.bottom }),
+  );
+}
+
 function RowCell({ id, row }: { id: ColumnId; row: Row }) {
   switch (id) {
     case "id":
@@ -505,8 +520,16 @@ function RowCell({ id, row }: { id: ColumnId; row: Row }) {
       );
     case "tools":
       return (
-        <div className={cn(cell, "justify-center opacity-0 group-hover/row:opacity-60")}>
-          <MoreHorizontal className="size-3" />
+        <div className={cn(cell, "justify-center")}>
+          <button
+            type="button"
+            aria-label="Flow actions"
+            className="rounded-sm opacity-0 group-hover/row:opacity-60 hover:opacity-100 focus-visible:opacity-100"
+            onClick={openRowMenu}
+            data-testid="row-tools"
+          >
+            <MoreHorizontal className="size-3" />
+          </button>
         </div>
       );
   }

@@ -3,6 +3,10 @@ import { CircleCheck, CircleX, LoaderCircle } from "lucide-react";
 import { useEffect, useMemo, useRef } from "react";
 
 import type { Header, Phase, RuleTestResult_Serialize } from "@/bindings";
+import { CopyItem, CopyMenu, SelectionItem } from "@/components/menus/items";
+import { useMenuTarget } from "@/components/menus/useMenuTarget";
+import { ContextMenu, ContextMenuContent, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu";
+import { headerLine } from "@/lib/copyFormats";
 import { displayHeaderName } from "@/lib/http";
 import { lineDiff, prettyForDiff, type DiffLine } from "@/lib/rewrite/lines";
 import { cn } from "@/lib/utils";
@@ -74,7 +78,14 @@ export function Preview({
         Body
         {lines && <span className="ml-auto normal-case">{changedLines === 0 ? "unchanged" : `${changedLines} changed line${changedLines === 1 ? "" : "s"}`}</span>}
       </div>
-      <div className="min-h-0 flex-1">{lines ? <Lines lines={lines} /> : <div className="text-muted-foreground p-2">No body.</div>}</div>
+      <CopyMenu
+        items={[
+          body && { label: `Copy ${side} body after`, text: body, what: "body" },
+          before.body && { label: `Copy ${side} body before`, text: before.body, what: "body" },
+        ]}
+      >
+        <div className="min-h-0 flex-1">{lines ? <Lines lines={lines} /> : <div className="text-muted-foreground p-2">No body.</div>}</div>
+      </CopyMenu>
     </div>
   );
 }
@@ -84,21 +95,47 @@ function HeaderDiff({ before, after }: { before: Header[]; after: Header[] }) {
   const was = new Set(before.map(key));
   const now = new Set(after.map(key));
   const gone = before.filter((h) => !now.has(key(h)));
+  const menu = useMenuTarget((k) => (k.startsWith("gone-") ? gone[Number(k.slice(5))] : after[Number(k)]), { always: true });
+  const line = (h: Header) => headerLine(displayHeaderName(h.name), h.value);
   return (
-    <div className="max-h-40 shrink-0 overflow-y-auto border-b py-0.5 font-mono text-[11px]" data-testid="preview-headers">
-      {after.map((h, i) => (
-        <div key={i} data-changed={!was.has(key(h))} className="flex gap-2 px-2 data-[changed=true]:bg-[var(--diff-add-bg)]">
-          <span className="text-muted-foreground shrink-0">{displayHeaderName(h.name)}</span>
-          <span className="truncate">{h.value}</span>
+    <ContextMenu>
+      <ContextMenuTrigger asChild onContextMenu={menu.onContextMenu}>
+        <div className="max-h-40 shrink-0 overflow-y-auto border-b py-0.5 font-mono text-[11px]" data-selectable data-testid="preview-headers">
+          {after.map((h, i) => (
+            <div key={i} data-changed={!was.has(key(h))} data-menu-key={i} className="flex gap-2 px-2 data-[changed=true]:bg-[var(--diff-add-bg)]">
+              <span className="text-muted-foreground shrink-0">{displayHeaderName(h.name)}</span>
+              <span className="truncate">{h.value}</span>
+            </div>
+          ))}
+          {gone.map((h, i) => (
+            <div key={`gone-${i}`} data-menu-key={`gone-${i}`} className="flex gap-2 bg-[var(--diff-del-bg)] px-2 text-[var(--diff-del)] line-through">
+              <span className="shrink-0">{displayHeaderName(h.name)}</span>
+              <span className="truncate">{h.value}</span>
+            </div>
+          ))}
         </div>
-      ))}
-      {gone.map((h, i) => (
-        <div key={`gone-${i}`} className="flex gap-2 bg-[var(--diff-del-bg)] px-2 text-[var(--diff-del)] line-through">
-          <span className="shrink-0">{displayHeaderName(h.name)}</span>
-          <span className="truncate">{h.value}</span>
-        </div>
-      ))}
-    </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="min-w-48" data-testid="preview-headers-menu">
+        <SelectionItem text={menu.selection} />
+        {menu.target && (
+          <>
+            <CopyItem text={line(menu.target)} what="header">
+              Copy as “Name: value”
+            </CopyItem>
+            <CopyItem text={menu.target.value} what="header value">
+              Copy value
+            </CopyItem>
+            <ContextMenuSeparator />
+          </>
+        )}
+        <CopyItem text={after.map(line).join("\n")} what="headers">
+          Copy headers after
+        </CopyItem>
+        <CopyItem text={before.map(line).join("\n")} what="headers">
+          Copy headers before
+        </CopyItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 

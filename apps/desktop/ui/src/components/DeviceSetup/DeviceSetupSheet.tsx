@@ -4,16 +4,17 @@ import { useState } from "react";
 
 import type { DeviceClient_Deserialize } from "@/bindings";
 import { EmulatorTab } from "@/components/DeviceSetup/EmulatorTab";
-import { CopyField } from "@/components/DeviceSetup/parts";
+import { CopyField, DeviceMenu } from "@/components/DeviceSetup/parts";
 import { AndroidTab, IPhoneTab, NoLanHint } from "@/components/DeviceSetup/PhoneTabs";
 import { SimulatorTab } from "@/components/DeviceSetup/SimulatorTab";
+import { CopyMenu } from "@/components/menus/items";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { setLanAccess, setLanInterface } from "@/lib/actions";
+import { decideDevice, forgetDevice, setLanAccess, setLanInterface } from "@/lib/actions";
 import { backend } from "@/lib/backend";
 import { deviceAccessKey } from "@/lib/query";
 import { cn } from "@/lib/utils";
@@ -118,9 +119,18 @@ function AccessBar() {
           <span className="text-muted-foreground">Interface</span>
           {interfaces.length ? (
             <Select value={access.interface ?? undefined} onValueChange={(name) => void setLanInterface(name)}>
-              <SelectTrigger className="w-full" data-testid="lan-interface">
-                <SelectValue />
-              </SelectTrigger>
+              <CopyMenu
+                items={[
+                  (() => {
+                    const ip = interfaces.find((i) => i.name === access.interface)?.ip;
+                    return ip && { label: "Copy IP address", text: ip, what: "IP address" };
+                  })(),
+                ]}
+              >
+                <SelectTrigger className="w-full" data-testid="lan-interface">
+                  <SelectValue />
+                </SelectTrigger>
+              </CopyMenu>
               <SelectContent>
                 {interfaces.map((i) => (
                   <SelectItem key={i.name} value={i.name} className="text-xs">
@@ -166,56 +176,60 @@ function DeviceRow({ device }: { device: DeviceClient_Deserialize }) {
   const act = (action: Promise<unknown>) =>
     void action.catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
   const decision = device.decision;
+  const decide = (allow: boolean) => act(decideDevice(device.ip, allow, device.nickname ?? null));
+  const forget = () => act(forgetDevice(device.ip));
   return (
-    <li className="flex items-center gap-2 px-2 py-1.5">
-      <span
-        className={cn(
-          "size-1.5 shrink-0 rounded-full",
-          decision === "allowed" && "bg-[var(--s-2xx)]",
-          decision === "pending" && "bg-[var(--s-4xx)]",
-          decision === "denied" && "bg-[var(--s-5xx)]",
-        )}
-      />
-      <div className="min-w-0 flex-1">
-        <div className="truncate font-medium">{device.label}</div>
-        <div className="text-muted-foreground truncate">
-          {decision === "pending"
-            ? `Waiting for your answer${device.waiting ? ` · ${device.waiting} held` : ""}`
-            : decision === "denied"
-              ? "Denied"
-              : `${device.flows} flows · ${device.https_decrypted} HTTPS decrypted`}
-          {error && <span className="text-[var(--s-failed)]"> · {error}</span>}
+    <DeviceMenu device={device} onDecide={decide} onForget={forget}>
+      <li className="flex items-center gap-2 px-2 py-1.5">
+        <span
+          className={cn(
+            "size-1.5 shrink-0 rounded-full",
+            decision === "allowed" && "bg-[var(--s-2xx)]",
+            decision === "pending" && "bg-[var(--s-4xx)]",
+            decision === "denied" && "bg-[var(--s-5xx)]",
+          )}
+        />
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-medium">{device.label}</div>
+          <div className="text-muted-foreground truncate">
+            {decision === "pending"
+              ? `Waiting for your answer${device.waiting ? ` · ${device.waiting} held` : ""}`
+              : decision === "denied"
+                ? "Denied"
+                : `${device.flows} flows · ${device.https_decrypted} HTTPS decrypted`}
+            {error && <span className="text-[var(--s-failed)]"> · {error}</span>}
+          </div>
         </div>
-      </div>
-      {decision !== "allowed" && (
+        {decision !== "allowed" && (
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label={`Allow ${device.ip}`}
+            onClick={() => decide(true)}
+          >
+            <CheckIcon />
+          </Button>
+        )}
+        {decision !== "denied" && (
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label={`Deny ${device.ip}`}
+            onClick={() => decide(false)}
+          >
+            <X />
+          </Button>
+        )}
         <Button
           variant="ghost"
           size="icon-xs"
-          aria-label={`Allow ${device.ip}`}
-          onClick={() => act(backend.decideDevice(device.ip, true, device.nickname ?? null))}
+          aria-label={`Forget ${device.ip}`}
+          className="text-muted-foreground"
+          onClick={forget}
         >
-          <CheckIcon />
+          <Trash2 />
         </Button>
-      )}
-      {decision !== "denied" && (
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          aria-label={`Deny ${device.ip}`}
-          onClick={() => act(backend.decideDevice(device.ip, false, device.nickname ?? null))}
-        >
-          <X />
-        </Button>
-      )}
-      <Button
-        variant="ghost"
-        size="icon-xs"
-        aria-label={`Forget ${device.ip}`}
-        className="text-muted-foreground"
-        onClick={() => act(backend.forgetDevice(device.ip))}
-      >
-        <Trash2 />
-      </Button>
-    </li>
+      </li>
+    </DeviceMenu>
   );
 }

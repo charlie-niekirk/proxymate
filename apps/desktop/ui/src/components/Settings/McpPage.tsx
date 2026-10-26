@@ -4,7 +4,10 @@ import { useState, type ReactNode } from "react";
 
 import type { McpAuditEntry_Serialize, McpCallOutcome, McpSettings, McpStatus_Serialize } from "@/bindings";
 import { CopyField } from "@/components/DeviceSetup/parts";
+import { CopyItem, CopyMenu, type CopyEntry } from "@/components/menus/items";
+import { useMenuTarget } from "@/components/menus/useMenuTarget";
 import { Button } from "@/components/ui/button";
+import { ContextMenu, ContextMenuContent, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { Switch } from "@/components/ui/switch";
 import { errorText } from "@/lib/actions";
 import { backend } from "@/lib/backend";
@@ -82,11 +85,18 @@ function ServingLine({ status }: { status: McpStatus_Serialize }) {
       ? ["var(--s-5xx)", `Not serving: ${status.error}`]
       : ["var(--muted-foreground)", status.settings.enabled ? "Starting…" : "Off"];
   return (
-    <div className="flex items-center gap-2 rounded-md border px-2 py-1.5" data-testid="mcp-serving">
-      <span className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: dot }} />
-      <span className="min-w-0 flex-1 truncate font-mono text-[11px]">{text}</span>
-      {status.settings.read_only && <span className="text-muted-foreground">read-only</span>}
-    </div>
+    <CopyMenu
+      items={[
+        status.url && { label: "Copy URL", text: status.url, what: "URL" },
+        status.error && { label: "Copy error", text: status.error, what: "error" },
+      ]}
+    >
+      <div className="flex items-center gap-2 rounded-md border px-2 py-1.5" data-testid="mcp-serving">
+        <span className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: dot }} />
+        <span className="min-w-0 flex-1 truncate font-mono text-[11px]">{text}</span>
+        {status.settings.read_only && <span className="text-muted-foreground">read-only</span>}
+      </div>
+    </CopyMenu>
   );
 }
 
@@ -98,6 +108,11 @@ function ConnectSection({ url }: { url: string }) {
     setConfirm(false);
   };
   if (!token) return null;
+  // The token stays masked on screen; menus copy it whole.
+  const parts: CopyEntry[] = [
+    { label: "Copy URL", text: url, what: "URL" },
+    { label: "Copy bearer token", text: token, what: "token", testId: "mcp-copy-token" },
+  ];
   return (
     <Section
       title="Connect an agent"
@@ -109,6 +124,7 @@ function ConnectSection({ url }: { url: string }) {
         display={claudeAddCommand(url, maskToken(token))}
         label="Copy the claude mcp add command"
         testId="mcp-copy-claude"
+        more={parts}
       />
       <Label>JSON config (Cursor, Claude Desktop, .mcp.json…)</Label>
       <CopyField
@@ -117,6 +133,7 @@ function ConnectSection({ url }: { url: string }) {
         label="Copy the JSON config"
         multiline
         testId="mcp-copy-json"
+        more={parts}
       />
       <p className="text-muted-foreground leading-4">
         Clients that only speak stdio can run <code className="font-mono">proxymate mcp-stdio</code> (the app binary),
@@ -156,14 +173,23 @@ function ClientsSection({ status }: { status: McpStatus_Serialize }) {
       ) : (
         <ul className="flex flex-col divide-y rounded-md border" data-testid="mcp-clients">
           {status.clients.map((c) => (
-            <li key={c.session} className="flex items-center gap-2 px-2 py-1.5">
-              <Bot className="size-3.5 text-[var(--rule-agent)]" />
-              <span className="font-medium">{c.name}</span>
-              <span className="text-muted-foreground">{c.version}</span>
-              <span className="text-muted-foreground ml-auto font-mono text-2xs">
-                session {c.session} · since {new Date(c.connected_at_ms ?? 0).toLocaleTimeString()}
-              </span>
-            </li>
+            <CopyMenu
+              key={c.session}
+              items={[
+                { label: "Copy name", text: c.name, what: "client name" },
+                { label: "Copy name and version", text: `${c.name} ${c.version}`, what: "client" },
+                { label: "Copy session id", text: c.session, what: "session id" },
+              ]}
+            >
+              <li className="flex items-center gap-2 px-2 py-1.5">
+                <Bot className="size-3.5 text-[var(--rule-agent)]" />
+                <span className="font-medium">{c.name}</span>
+                <span className="text-muted-foreground">{c.version}</span>
+                <span className="text-muted-foreground ml-auto font-mono text-2xs">
+                  session {c.session} · since {new Date(c.connected_at_ms ?? 0).toLocaleTimeString()}
+                </span>
+              </li>
+            </CopyMenu>
           ))}
         </ul>
       )}
@@ -190,6 +216,7 @@ function AuditSection() {
     await queryClient.invalidateQueries({ queryKey: mcpAuditKey });
   };
   const entries = data?.entries ?? [];
+  const menu = useMenuTarget((key) => entries.find((e) => String(e.id) === key));
   return (
     <Section
       title="Audit log"
@@ -209,25 +236,32 @@ function AuditSection() {
       {entries.length === 0 ? (
         <p className="text-muted-foreground">No calls yet.</p>
       ) : (
-        <div className="overflow-hidden rounded-md border" data-testid="mcp-audit">
-          <table className="w-full table-fixed text-[11px]">
-            <thead className="bg-muted/50 text-muted-foreground text-left">
-              <tr>
-                <th className="w-[72px] px-2 py-1 font-medium">Time</th>
-                <th className="w-[96px] px-2 py-1 font-medium">Client</th>
-                <th className="w-[140px] px-2 py-1 font-medium">Tool</th>
-                <th className="px-2 py-1 font-medium">Arguments</th>
-                <th className="w-[64px] px-2 py-1 font-medium">Result</th>
-                <th className="w-[52px] px-2 py-1 text-right font-medium">ms</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {entries.map((e) => (
-                <AuditRow key={e.id} entry={e} />
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <div className="overflow-hidden rounded-md border" data-testid="mcp-audit" onContextMenu={menu.onContextMenu}>
+              <table className="w-full table-fixed text-[11px]">
+                <thead className="bg-muted/50 text-muted-foreground text-left">
+                  <tr>
+                    <th className="w-[72px] px-2 py-1 font-medium">Time</th>
+                    <th className="w-[96px] px-2 py-1 font-medium">Client</th>
+                    <th className="w-[140px] px-2 py-1 font-medium">Tool</th>
+                    <th className="px-2 py-1 font-medium">Arguments</th>
+                    <th className="w-[64px] px-2 py-1 font-medium">Result</th>
+                    <th className="w-[52px] px-2 py-1 text-right font-medium">ms</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {entries.map((e) => (
+                    <AuditRow key={e.id} entry={e} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </ContextMenuTrigger>
+          <ContextMenuContent className="min-w-48" data-testid="audit-menu">
+            {menu.target && <AuditItems entry={menu.target} />}
+          </ContextMenuContent>
+        </ContextMenu>
       )}
       {data?.next !== null && data?.next !== undefined && limit < 1000 && (
         <Button size="xs" variant="ghost" className="self-start" onClick={() => setLimit((l) => l + 100)}>
@@ -238,10 +272,35 @@ function AuditSection() {
   );
 }
 
+function AuditItems({ entry: e }: { entry: McpAuditEntry_Serialize }) {
+  return (
+    <>
+      <CopyItem text={e.tool} what="tool name">
+        Copy tool
+      </CopyItem>
+      <CopyItem text={e.arguments} what="arguments" testId="audit-copy-arguments">
+        Copy arguments
+      </CopyItem>
+      {e.error && (
+        <CopyItem text={e.error} what="error">
+          Copy error
+        </CopyItem>
+      )}
+      <CopyItem text={e.client} what="client">
+        Copy client
+      </CopyItem>
+      <ContextMenuSeparator />
+      <CopyItem text={JSON.stringify(e, null, 2)} what="entry">
+        Copy entry as JSON
+      </CopyItem>
+    </>
+  );
+}
+
 function AuditRow({ entry: e }: { entry: McpAuditEntry_Serialize }) {
   const style = OUTCOME_STYLE[e.outcome];
   return (
-    <tr className="align-top">
+    <tr className="align-top" data-menu-key={e.id}>
       <td className="text-muted-foreground px-2 py-1 font-mono">{new Date(e.time_ms ?? 0).toLocaleTimeString()}</td>
       <td className="truncate px-2 py-1" title={e.session ? `session ${e.session}` : undefined}>
         {e.client}

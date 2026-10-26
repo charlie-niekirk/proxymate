@@ -2,7 +2,9 @@ import { ArrowDownToLine, CircleAlert, CircleCheck, Filter, HardDriveDownload, L
 import { useEffect, useRef, useState } from "react";
 
 import { SEARCH_INPUT_ID } from "@/components/FilterBar";
+import { CopyMenu } from "@/components/menus/items";
 import { Button } from "@/components/ui/button";
+import { ContextMenuItem } from "@/components/ui/context-menu";
 import { Toggle } from "@/components/ui/toggle";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { clearFlows } from "@/lib/actions";
@@ -134,18 +136,31 @@ function SaveStatus({ job }: { job: SaveJob }) {
   const name = path.split("/").pop() ?? path;
   if (error) {
     return (
-      <button className="mr-3 flex items-center gap-1 text-[var(--s-failed)]" onClick={() => clear(null)} title={error} data-testid="save-status">
-        <CircleAlert className="size-3" />
-        {job.label} failed: <span className="max-w-72 truncate">{error}</span>
-      </button>
+      <CopyMenu
+        items={[{ label: "Copy error", text: error, what: "error" }]}
+        extra={<ContextMenuItem onSelect={() => clear(null)}>Dismiss</ContextMenuItem>}
+      >
+        <button className="mr-3 flex items-center gap-1 text-[var(--s-failed)]" onClick={() => clear(null)} title={error} data-testid="save-status">
+          <CircleAlert className="size-3" />
+          {job.label} failed: <span className="max-w-72 truncate">{error}</span>
+        </button>
+      </CopyMenu>
     );
   }
   if (finished) {
     return (
-      <span className="mr-3 flex items-center gap-1" title={path} data-testid="save-status">
-        <CircleCheck className="size-3 text-[var(--s-2xx)]" />
-        Saved {nf.format(done)} flows to <span className="max-w-60 truncate">{name}</span>
-      </span>
+      <CopyMenu
+        items={[
+          { label: "Copy path", text: path, what: "path" },
+          { label: "Copy file name", text: name, what: "file name" },
+        ]}
+        extra={<ContextMenuItem onSelect={() => clear(null)}>Dismiss</ContextMenuItem>}
+      >
+        <span className="mr-3 flex items-center gap-1" title={path} data-testid="save-status">
+          <CircleCheck className="size-3 text-[var(--s-2xx)]" />
+          Saved {nf.format(done)} flows to <span className="max-w-60 truncate">{name}</span>
+        </span>
+      </CopyMenu>
     );
   }
   const pct = total > 0 ? Math.floor((done / total) * 100) : 0;

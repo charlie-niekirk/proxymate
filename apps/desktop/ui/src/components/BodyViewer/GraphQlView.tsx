@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 
+import { CopyMenu } from "@/components/menus/items";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { jsonText, parseGraphQlBody, type GraphQlOperation } from "@/lib/body/graphql";
@@ -45,7 +46,15 @@ export function Operations({ ops }: { ops: GraphQlOperation[] }) {
           </ToggleGroup>
         )}
         {op.type && <span className="font-mono text-[var(--syntax-keyword)]">{op.type}</span>}
-        <span className="font-mono font-semibold">{op.operationName ?? "anonymous"}</span>
+        <CopyMenu
+          items={[
+            op.operationName !== null && { label: "Copy operation name", text: op.operationName, what: "operation name" },
+            op.query !== "" && { label: "Copy query", text: op.query, what: "query" },
+            variables !== null && { label: "Copy variables", text: variables, what: "variables" },
+          ]}
+        >
+          <span className="font-mono font-semibold">{op.operationName ?? "anonymous"}</span>
+        </CopyMenu>
         {ops.length > 1 && <span className="text-muted-foreground ml-auto">batch of {ops.length}</span>}
       </Bar>
       <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">

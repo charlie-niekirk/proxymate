@@ -6,7 +6,10 @@ import type { BodyPart, ContentKind, ScriptKind, ScriptTestResult_Serialize } fr
 import { Checkbox, Choice } from "@/components/Rules/fields";
 import { MatcherBuilder } from "@/components/Rules/MatcherBuilder";
 import { RuleOriginBadge } from "@/components/Rules/RuleOriginBadge";
+import { CopyItem } from "@/components/menus/items";
+import { useMenuTarget } from "@/components/menus/useMenuTarget";
 import { Button } from "@/components/ui/button";
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -18,6 +21,7 @@ import {
   copyScriptTypes,
   deleteAgentScripts,
   deleteScript,
+  duplicateScript,
   errorText,
   exportScript,
   importScript,
@@ -131,8 +135,65 @@ function NewScriptMenu() {
   );
 }
 
+/** A script row's menu: what the form's buttons do, plus copies. */
+function ScriptItems({ script }: { script: Script }) {
+  const openScripts = useUi((s) => s.openScripts);
+  const store = useUi((s) => s.store);
+  const flow = useUi((s) => s.selectedId);
+  const fail = (what: string) => (e: unknown) => reportError(what, e);
+  return (
+    <>
+      <ContextMenuItem onSelect={() => openScripts({ scriptId: script.id })}>Open</ContextMenuItem>
+      <ContextMenuItem
+        onSelect={() => void setScriptEnabled(script.id, !script.enabled).catch(fail("Couldn't change the script"))}
+        data-testid="script-menu-toggle"
+      >
+        {script.enabled ? "Disable" : "Enable"}
+      </ContextMenuItem>
+      <ContextMenuItem
+        onSelect={() =>
+          void duplicateScript(script)
+            .then((copy) => openScripts({ scriptId: copy.id }))
+            .catch(fail("Couldn't duplicate the script"))
+        }
+        data-testid="script-menu-duplicate"
+      >
+        Duplicate
+      </ContextMenuItem>
+      {script.kind !== "view" && (
+        <ContextMenuItem
+          disabled={flow === null}
+          onSelect={() => flow !== null && void ruleForScript(store, flow, script).catch(fail("Couldn't draft a rule"))}
+        >
+          Create rule for selected flow…
+        </ContextMenuItem>
+      )}
+      <ContextMenuItem onSelect={() => void exportScript(script.id).catch(fail("Couldn't export the script"))}>Export…</ContextMenuItem>
+      <ContextMenuSeparator />
+      <CopyItem text={script.name} what="script name">
+        Copy name
+      </CopyItem>
+      <CopyItem text={script.source} what="source" testId="script-menu-copy-source">
+        Copy source
+      </CopyItem>
+      <ContextMenuSeparator />
+      <ContextMenuItem
+        variant="destructive"
+        onSelect={() =>
+          void deleteScript(script.id)
+            .then(() => openScripts({ scriptId: null }))
+            .catch(fail("Couldn't delete the script"))
+        }
+      >
+        Delete
+      </ContextMenuItem>
+    </>
+  );
+}
+
 function ScriptList({ scripts, selected, hasDraft }: { scripts: Script[]; selected: string | null; hasDraft: boolean }) {
   const openScripts = useUi((s) => s.openScripts);
+  const menu = useMenuTarget((key) => scripts.find((s) => s.id === key));
   const agentScripts = scripts.filter((s) => s.origin.kind === "agent").length;
   const onImport = () =>
     importScript().then(
@@ -162,53 +223,61 @@ function ScriptList({ scripts, selected, hasDraft }: { scripts: Script[]; select
           </Button>
         )}
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="flex flex-col p-1" data-testid="script-list">
-          {hasDraft && (
-            <div className="bg-selection text-selection-foreground mb-0.5 rounded-sm px-2 py-1 text-xs italic">
-              Unsaved script
-            </div>
-          )}
-          {scripts.length === 0 && !hasDraft && <div className="text-muted-foreground p-2 text-xs">No scripts yet.</div>}
-          {KIND_ORDER.map((kind) => {
-            const group = scripts.filter((s) => s.kind === kind);
-            if (group.length === 0) return null;
-            return (
-              <div key={kind} className="mb-1" data-testid={`script-group-${kind}`}>
-                <div className="text-muted-foreground px-1.5 pt-1 pb-0.5 text-2xs font-semibold tracking-wide uppercase">
-                  {KIND_LABELS[kind]}
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <div className="min-h-0 flex-1 overflow-y-auto" onContextMenu={menu.onContextMenu}>
+            <div className="flex flex-col p-1" data-testid="script-list">
+              {hasDraft && (
+                <div className="bg-selection text-selection-foreground mb-0.5 rounded-sm px-2 py-1 text-xs italic">
+                  Unsaved script
                 </div>
-                {group.map((script) => (
-                  <div
-                    key={script.id}
-                    onClick={() => openScripts({ scriptId: script.id })}
-                    data-selected={script.id === selected}
-                    data-testid="script-row"
-                    className={cn(
-                      "flex cursor-default items-center gap-1.5 rounded-sm px-1.5 py-1 text-xs",
-                      "hover:bg-accent data-[selected=true]:bg-selection data-[selected=true]:text-selection-foreground",
-                    )}
-                  >
-                    <Switch
-                      size="sm"
-                      checked={script.enabled}
-                      aria-label={script.enabled ? "Enabled" : "Disabled"}
-                      onClick={(e) => e.stopPropagation()}
-                      onCheckedChange={(on) =>
-                        void setScriptEnabled(script.id, on).catch((e: unknown) => reportError("Couldn't change the script", e))
-                      }
-                    />
-                    <span className={cn("min-w-0 flex-1 truncate font-medium", !script.enabled && "opacity-50")}>
-                      {script.name || "Untitled"}
-                    </span>
-                    <RuleOriginBadge origin={script.origin} />
+              )}
+              {scripts.length === 0 && !hasDraft && <div className="text-muted-foreground p-2 text-xs">No scripts yet.</div>}
+              {KIND_ORDER.map((kind) => {
+                const group = scripts.filter((s) => s.kind === kind);
+                if (group.length === 0) return null;
+                return (
+                  <div key={kind} className="mb-1" data-testid={`script-group-${kind}`}>
+                    <div className="text-muted-foreground px-1.5 pt-1 pb-0.5 text-2xs font-semibold tracking-wide uppercase">
+                      {KIND_LABELS[kind]}
+                    </div>
+                    {group.map((script) => (
+                      <div
+                        key={script.id}
+                        onClick={() => openScripts({ scriptId: script.id })}
+                        data-selected={script.id === selected}
+                        data-menu-key={script.id}
+                        data-testid="script-row"
+                        className={cn(
+                          "flex cursor-default items-center gap-1.5 rounded-sm px-1.5 py-1 text-xs",
+                          "hover:bg-accent data-[selected=true]:bg-selection data-[selected=true]:text-selection-foreground",
+                        )}
+                      >
+                        <Switch
+                          size="sm"
+                          checked={script.enabled}
+                          aria-label={script.enabled ? "Enabled" : "Disabled"}
+                          onClick={(e) => e.stopPropagation()}
+                          onCheckedChange={(on) =>
+                            void setScriptEnabled(script.id, on).catch((e: unknown) => reportError("Couldn't change the script", e))
+                          }
+                        />
+                        <span className={cn("min-w-0 flex-1 truncate font-medium", !script.enabled && "opacity-50")}>
+                          {script.name || "Untitled"}
+                        </span>
+                        <RuleOriginBadge origin={script.origin} />
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            );
-          })}
-        </div>
-      </div>
+                );
+              })}
+            </div>
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent className="min-w-56" data-testid="script-menu">
+          {menu.target && <ScriptItems script={menu.target} />}
+        </ContextMenuContent>
+      </ContextMenu>
     </div>
   );
 }
