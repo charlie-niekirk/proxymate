@@ -1,10 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { Eraser } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactElement } from "react";
 
 import type { ConsoleEntry_Serialize, ConsoleLevel } from "@/bindings";
 import { Checkbox } from "@/components/Rules/fields";
+import { CopyItem, SelectionItem } from "@/components/menus/items";
+import { useMenuTarget } from "@/components/menus/useMenuTarget";
 import { Button } from "@/components/ui/button";
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { backend } from "@/lib/backend";
 import { cn } from "@/lib/utils";
 import { startScriptConsole, useScriptConsole } from "@/store/scriptConsole";
@@ -39,14 +42,61 @@ export function ScriptConsole({ scriptId }: { scriptId: string | null }) {
           Clear
         </Button>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto" data-selectable>
-        {shown.length === 0 ? (
-          <div className="text-muted-foreground p-2 text-xs">Nothing logged yet. Use console.log in a script.</div>
-        ) : (
-          shown.map((entry) => <ConsoleLine key={entry.seq} entry={entry} showScript={!onlyThis || !scriptId} />)
-        )}
-      </div>
+      <ConsoleMenu entries={shown} onClear={() => void backend.clearScriptConsole()}>
+        <div className="min-h-0 flex-1 overflow-y-auto" data-selectable>
+          {shown.length === 0 ? (
+            <div className="text-muted-foreground p-2 text-xs">Nothing logged yet. Use console.log in a script.</div>
+          ) : (
+            shown.map((entry) => <ConsoleLine key={entry.seq} entry={entry} showScript={!onlyThis || !scriptId} />)
+          )}
+        </div>
+      </ConsoleMenu>
     </div>
+  );
+}
+
+/** `12:00:01 [warn] Script name: message`, for copying. */
+const lineText = (e: ConsoleEntry_Serialize) =>
+  `${new Date(e.time_ms ?? 0).toLocaleTimeString(undefined, { hour12: false })} [${e.level}] ${e.script_name}: ${e.message}`;
+
+/** Right-click on console lines: copy one or all, show its flow, clear. */
+export function ConsoleMenu({
+  entries,
+  onClear,
+  children,
+}: {
+  entries: ConsoleEntry_Serialize[];
+  onClear?: () => void;
+  children: ReactElement;
+}) {
+  const select = useUi((s) => s.select);
+  const menu = useMenuTarget((key) => entries.find((e) => String(e.seq) === key), { always: true });
+  const entry = menu.target;
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild onContextMenu={menu.onContextMenu}>
+        {children}
+      </ContextMenuTrigger>
+      <ContextMenuContent className="min-w-48" data-testid="console-menu">
+        <SelectionItem text={menu.selection} />
+        {entry && (
+          <>
+            <CopyItem text={entry.message} what="message" testId="console-copy-message">
+              Copy message
+            </CopyItem>
+            <CopyItem text={lineText(entry)} what="line">
+              Copy line
+            </CopyItem>
+            {entry.flow_id !== null && <ContextMenuItem onSelect={() => select(entry.flow_id)}>Show flow #{entry.flow_id + 1}</ContextMenuItem>}
+            <ContextMenuSeparator />
+          </>
+        )}
+        <CopyItem text={entries.map(lineText).join("\n")} what="console" disabled={entries.length === 0}>
+          Copy all
+        </CopyItem>
+        {onClear && <ContextMenuItem onSelect={onClear}>Clear console</ContextMenuItem>}
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 
@@ -54,7 +104,12 @@ export function ConsoleLine({ entry, showScript = false }: { entry: ConsoleEntry
   const select = useUi((s) => s.select);
   const time = new Date(entry.time_ms ?? 0).toLocaleTimeString(undefined, { hour12: false });
   return (
-    <div className="flex gap-2 border-b px-2 py-0.5 font-mono text-2xs leading-4 last:border-b-0" data-testid="console-line" data-level={entry.level}>
+    <div
+      className="flex gap-2 border-b px-2 py-0.5 font-mono text-2xs leading-4 last:border-b-0"
+      data-testid="console-line"
+      data-level={entry.level}
+      data-menu-key={entry.seq}
+    >
       <span className="text-muted-foreground shrink-0">{time}</span>
       {showScript && <span className="text-muted-foreground max-w-40 shrink-0 truncate">{entry.script_name}</span>}
       {entry.flow_id !== null && (

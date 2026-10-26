@@ -3,12 +3,24 @@ import { Bot, GripVertical, ListChecks, PencilLine, Plus, Save, Trash2 } from "l
 import { useEffect, useState, type DragEvent, type ReactNode } from "react";
 
 import type { RuleTestResult_Serialize } from "@/bindings";
+import { CopyItem } from "@/components/menus/items";
+import { useMenuTarget } from "@/components/menus/useMenuTarget";
 import { Button } from "@/components/ui/button";
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { bridge } from "@/dev/bridge";
-import { deleteAgentRules, deleteRule, openRewrite, reorderRules, saveRule, setRuleEnabled } from "@/lib/actions";
+import {
+  deleteAgentRules,
+  deleteRule,
+  duplicateRule,
+  openRewrite,
+  reorderRules,
+  reportError,
+  saveRule,
+  setRuleEnabled,
+} from "@/lib/actions";
 import { backend } from "@/lib/backend";
 import { queryClient, ruleSettingsKey, rulesKey } from "@/lib/query";
 import { isVisual } from "@/lib/rewrite/diff";
@@ -71,6 +83,65 @@ export function RulesEditor() {
   );
 }
 
+/** A rule row's menu: what the form and the drag handle do, plus copies. */
+function RuleItems({ rule, rules }: { rule: Rule; rules: Rule[] }) {
+  const openEditor = useUi((s) => s.openRulesEditor);
+  const store = useUi((s) => s.store);
+  const fail = (what: string) => (e: unknown) => reportError(what, e);
+  const move = (to: "top" | "bottom") => {
+    const ids = rules.map((r) => r.id).filter((id) => id !== rule.id);
+    void reorderRules(to === "top" ? [rule.id, ...ids] : [...ids, rule.id]).catch(fail("Couldn't move the rule"));
+  };
+  const index = rules.findIndex((r) => r.id === rule.id);
+  return (
+    <>
+      <ContextMenuItem onSelect={() => openEditor({ ruleId: rule.id })}>Open</ContextMenuItem>
+      <ContextMenuItem onSelect={() => void setRuleEnabled(rule.id, !rule.enabled).catch(fail("Couldn't change the rule"))} data-testid="rule-menu-toggle">
+        {rule.enabled ? "Disable" : "Enable"}
+      </ContextMenuItem>
+      {(rule.actions.some(isVisual) || (rule.origin.kind === "preset" && rule.origin.preset === "rewrite")) && (
+        <ContextMenuItem onSelect={() => void openRewrite(store, null, rule)}>Edit visually…</ContextMenuItem>
+      )}
+      <ContextMenuItem
+        onSelect={() =>
+          void duplicateRule(rule)
+            .then((copy) => openEditor({ ruleId: copy.id }))
+            .catch(fail("Couldn't duplicate the rule"))
+        }
+        data-testid="rule-menu-duplicate"
+      >
+        Duplicate
+      </ContextMenuItem>
+      <ContextMenuSeparator />
+      <ContextMenuItem disabled={index === 0} onSelect={() => move("top")}>
+        Move to top
+      </ContextMenuItem>
+      <ContextMenuItem disabled={index === rules.length - 1} onSelect={() => move("bottom")}>
+        Move to bottom
+      </ContextMenuItem>
+      <ContextMenuSeparator />
+      <CopyItem text={rule.name} what="rule name">
+        Copy name
+      </CopyItem>
+      <CopyItem text={JSON.stringify(rule, null, 2)} what="rule as JSON">
+        Copy as JSON
+      </CopyItem>
+      <ContextMenuSeparator />
+      <ContextMenuItem
+        variant="destructive"
+        onSelect={() => {
+          void deleteRule(rule.id)
+            .then(() => openEditor({ ruleId: null }))
+            .catch(fail("Couldn't delete the rule"));
+        }}
+        data-testid="rule-menu-delete"
+      >
+        Delete
+      </ContextMenuItem>
+    </>
+  );
+}
+
 function RuleList({ rules, selected, hasDraft }: { rules: Rule[]; selected: string | null; hasDraft: boolean }) {
   const openEditor = useUi((s) => s.openRulesEditor);
   const [dragged, setDragged] = useState<string | null>(null);
@@ -78,6 +149,7 @@ function RuleList({ rules, selected, hasDraft }: { rules: Rule[]; selected: stri
   const agentRules = rules.filter((r) => r.origin.kind === "agent").length;
   const scriptNames = useScriptNames();
 
+  const menu = useMenuTarget((key) => rules.find((r) => r.id === key));
   const onDrop = (target: string) => {
     if (!dragged || dragged === target) return;
     const ids = rules.map((r) => r.id);
@@ -110,66 +182,74 @@ function RuleList({ rules, selected, hasDraft }: { rules: Rule[]; selected: stri
         )}
       </div>
       {/* A plain scroller: ScrollArea's table layout defeats truncation. */}
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="flex flex-col p-1" data-testid="rule-list">
-          {hasDraft && (
-            <div className="bg-selection text-selection-foreground mb-0.5 rounded-sm px-2 py-1 text-xs italic">
-              Unsaved rule
-            </div>
-          )}
-          {rules.length === 0 && !hasDraft && <div className="text-muted-foreground p-2 text-xs">No rules yet.</div>}
-          {rules.map((rule) => (
-            <div
-              key={rule.id}
-              draggable
-              onDragStart={(e: DragEvent) => {
-                setDragged(rule.id);
-                e.dataTransfer.effectAllowed = "move";
-              }}
-              onDragOver={(e) => {
-                e.preventDefault();
-                setOver(rule.id);
-              }}
-              onDragLeave={() => setOver((o) => (o === rule.id ? null : o))}
-              onDrop={(e) => {
-                e.preventDefault();
-                onDrop(rule.id);
-                setOver(null);
-              }}
-              onDragEnd={() => setDragged(null)}
-              onClick={() => openEditor({ ruleId: rule.id })}
-              data-selected={rule.id === selected}
-              data-testid="rule-row"
-              className={cn(
-                "group flex cursor-default items-start gap-1 rounded-sm px-1 py-1 text-xs",
-                "hover:bg-accent data-[selected=true]:bg-selection data-[selected=true]:text-selection-foreground",
-                over === rule.id && dragged !== rule.id && "ring-primary ring-1",
-                dragged === rule.id && "opacity-50",
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <div className="min-h-0 flex-1 overflow-y-auto" onContextMenu={menu.onContextMenu}>
+            <div className="flex flex-col p-1" data-testid="rule-list">
+              {hasDraft && (
+                <div className="bg-selection text-selection-foreground mb-0.5 rounded-sm px-2 py-1 text-xs italic">
+                  Unsaved rule
+                </div>
               )}
-            >
-              <GripVertical className="text-muted-foreground mt-0.5 size-3 shrink-0 opacity-50" />
-              <input
-                type="checkbox"
-                className="mt-0.5 size-3 shrink-0 accent-[var(--primary)]"
-                checked={rule.enabled}
-                title={rule.enabled ? "Enabled" : "Disabled"}
-                onClick={(e) => e.stopPropagation()}
-                onChange={(e) => void setRuleEnabled(rule.id, e.target.checked)}
-              />
-              <div className={cn("min-w-0 flex-1", !rule.enabled && "opacity-50")}>
-                <div className="flex items-center gap-1">
-                  <span className="truncate font-medium">{rule.name || "Untitled"}</span>
-                  <RuleOriginBadge origin={rule.origin} />
+              {rules.length === 0 && !hasDraft && <div className="text-muted-foreground p-2 text-xs">No rules yet.</div>}
+              {rules.map((rule) => (
+                <div
+                  key={rule.id}
+                  draggable
+                  onDragStart={(e: DragEvent) => {
+                    setDragged(rule.id);
+                    e.dataTransfer.effectAllowed = "move";
+                  }}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setOver(rule.id);
+                  }}
+                  onDragLeave={() => setOver((o) => (o === rule.id ? null : o))}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    onDrop(rule.id);
+                    setOver(null);
+                  }}
+                  onDragEnd={() => setDragged(null)}
+                  onClick={() => openEditor({ ruleId: rule.id })}
+                  data-selected={rule.id === selected}
+                  data-menu-key={rule.id}
+                  data-testid="rule-row"
+                  className={cn(
+                    "group flex cursor-default items-start gap-1 rounded-sm px-1 py-1 text-xs",
+                    "hover:bg-accent data-[selected=true]:bg-selection data-[selected=true]:text-selection-foreground",
+                    over === rule.id && dragged !== rule.id && "ring-primary ring-1",
+                    dragged === rule.id && "opacity-50",
+                  )}
+                >
+                  <GripVertical className="text-muted-foreground mt-0.5 size-3 shrink-0 opacity-50" />
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 size-3 shrink-0 accent-[var(--primary)]"
+                    checked={rule.enabled}
+                    title={rule.enabled ? "Enabled" : "Disabled"}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={(e) => void setRuleEnabled(rule.id, e.target.checked)}
+                  />
+                  <div className={cn("min-w-0 flex-1", !rule.enabled && "opacity-50")}>
+                    <div className="flex items-center gap-1">
+                      <span className="truncate font-medium">{rule.name || "Untitled"}</span>
+                      <RuleOriginBadge origin={rule.origin} />
+                    </div>
+                    <div className="truncate font-mono text-2xs opacity-70">{matcherSummary(rule.matcher)}</div>
+                    <div className="truncate text-2xs opacity-70">
+                      {rule.actions.map((a) => actionSummary(a, scriptNames)).join(" · ") || "no actions"}
+                    </div>
+                  </div>
                 </div>
-                <div className="truncate font-mono text-2xs opacity-70">{matcherSummary(rule.matcher)}</div>
-                <div className="truncate text-2xs opacity-70">
-                  {rule.actions.map((a) => actionSummary(a, scriptNames)).join(" · ") || "no actions"}
-                </div>
-              </div>
+              ))}
             </div>
-          ))}
-        </div>
-      </div>
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent className="min-w-52" data-testid="rule-menu">
+          {menu.target && <RuleItems rule={menu.target} rules={rules} />}
+        </ContextMenuContent>
+      </ContextMenu>
       <BreakpointTimeout />
     </div>
   );

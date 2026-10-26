@@ -1,7 +1,9 @@
 import { CircleCheck, CircleX, FlaskConical, LoaderCircle } from "lucide-react";
 
 import type { RequestHead, ResponseHead, RuleTestResult_Serialize } from "@/bindings";
+import { CopyMenu } from "@/components/menus/items";
 import { Button } from "@/components/ui/button";
+import { headersBlock } from "@/lib/copyFormats";
 import { displayHeaderName } from "@/lib/http";
 
 /**
@@ -47,11 +49,13 @@ export function RuleTestPanel({
             )}
           </div>
           {result.notes.length > 0 && (
-            <ul className="text-muted-foreground list-disc pl-5">
-              {result.notes.map((n) => (
-                <li key={n}>{n}</li>
-              ))}
-            </ul>
+            <CopyMenu items={[{ label: "Copy notes", text: result.notes.join("\n"), what: "notes" }]}>
+              <ul className="text-muted-foreground list-disc pl-5" data-selectable>
+                {result.notes.map((n) => (
+                  <li key={n}>{n}</li>
+                ))}
+              </ul>
+            </CopyMenu>
           )}
           {result.matched && (
             <div className="grid grid-cols-2 gap-2">
@@ -71,15 +75,26 @@ export function RuleTestPanel({
 
 function Message({ title, head, body }: { title: string; head: RequestHead | ResponseHead; body: string | null }) {
   const start = "method" in head ? `${head.method} ${head.url}` : `${head.status} ${head.reason}`;
+  const headers = headersBlock(head.headers.map((h) => [displayHeaderName(h.name), h.value]));
+  const what = title.toLowerCase();
   return (
-    <div className="flex min-w-0 flex-col rounded-md border" data-selectable>
-      <div className="bg-muted/40 border-b px-2 py-0.5 font-semibold">{title}</div>
-      <pre className="max-h-56 overflow-auto px-2 py-1 font-mono text-2xs leading-4 break-all whitespace-pre-wrap">
-        {start}
-        {"\n"}
-        {head.headers.map((h) => `${displayHeaderName(h.name)}: ${h.value}`).join("\n")}
-        {body ? `\n\n${body.length > 4000 ? `${body.slice(0, 4000)}…` : body}` : ""}
-      </pre>
-    </div>
+    // The copies take the whole body; the panel shows its first 4000 characters.
+    <CopyMenu
+      items={[
+        { label: `Copy ${what}`, text: `${start}\n${headers}${body ? `\n\n${body}` : ""}`, what },
+        { label: "Copy headers", text: headers, what: "headers" },
+        body !== null && { label: "Copy body", text: body, what: "body" },
+      ]}
+    >
+      <div className="flex min-w-0 flex-col rounded-md border" data-selectable>
+        <div className="bg-muted/40 border-b px-2 py-0.5 font-semibold">{title}</div>
+        <pre className="max-h-56 overflow-auto px-2 py-1 font-mono text-2xs leading-4 break-all whitespace-pre-wrap">
+          {start}
+          {"\n"}
+          {head.headers.map((h) => `${displayHeaderName(h.name)}: ${h.value}`).join("\n")}
+          {body ? `\n\n${body.length > 4000 ? `${body.slice(0, 4000)}…` : body}` : ""}
+        </pre>
+      </div>
+    </CopyMenu>
   );
 }

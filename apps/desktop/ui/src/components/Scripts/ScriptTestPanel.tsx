@@ -4,11 +4,12 @@ import { useState } from "react";
 import type { BodyPart, RequestHead, ResponseHead, ScriptKind, ScriptTestResult_Serialize } from "@/bindings";
 import { ScriptViewBody } from "@/components/BodyViewer/ScriptViewBody";
 import { Choice } from "@/components/Rules/fields";
+import { CopyMenu } from "@/components/menus/items";
 import { Button } from "@/components/ui/button";
 import { displayHeaderName } from "@/lib/http";
 import { cn } from "@/lib/utils";
 
-import { ConsoleLine } from "./ScriptConsole";
+import { ConsoleLine, ConsoleMenu } from "./ScriptConsole";
 
 /**
  * A script's dry run against the selected flow (computed in Rust, in a
@@ -57,10 +58,16 @@ export function ScriptTestPanel({
       {result && (
         <div className="flex flex-col gap-2" data-testid="script-test-result">
           {result.error && (
-            <pre className="flex gap-1.5 rounded-md border border-[var(--s-failed)]/40 p-2 font-mono text-2xs whitespace-pre-wrap text-[var(--s-failed)]" data-testid="script-test-error">
-              <TriangleAlert className="mt-0.5 size-3 shrink-0" />
-              {result.error}
-            </pre>
+            <CopyMenu items={[{ label: "Copy error", text: result.error, what: "error" }]}>
+              <pre
+                className="flex gap-1.5 rounded-md border border-[var(--s-failed)]/40 p-2 font-mono text-2xs whitespace-pre-wrap text-[var(--s-failed)]"
+                data-selectable
+                data-testid="script-test-error"
+              >
+                <TriangleAlert className="mt-0.5 size-3 shrink-0" />
+                {result.error}
+              </pre>
+            </CopyMenu>
           )}
           {result.notes.length > 0 && (
             <ul className="text-muted-foreground list-disc pl-5">
@@ -101,12 +108,14 @@ export function ScriptTestPanel({
               </div>
             ))}
           {result.console.length > 0 && (
-            <div className="rounded-md border" data-testid="script-test-console">
-              <div className="bg-muted/40 border-b px-2 py-0.5 font-semibold">Console</div>
-              {result.console.map((entry, i) => (
-                <ConsoleLine key={i} entry={entry} />
-              ))}
-            </div>
+            <ConsoleMenu entries={result.console}>
+              <div className="rounded-md border" data-selectable data-testid="script-test-console">
+                <div className="bg-muted/40 border-b px-2 py-0.5 font-semibold">Console</div>
+                {result.console.map((entry, i) => (
+                  <ConsoleLine key={i} entry={entry} />
+                ))}
+              </div>
+            </ConsoleMenu>
           )}
           <div className="text-muted-foreground">Ran in {(result.duration_ms ?? 0).toFixed(1)} ms</div>
         </div>
@@ -159,31 +168,42 @@ function Lines({
   tone: "added" | "removed";
 }) {
   return (
-    <div className="flex min-w-0 flex-col rounded-md border" data-selectable>
-      <div className="bg-muted/40 border-b px-2 py-0.5 font-semibold">{title}</div>
-      <pre className="max-h-64 overflow-auto px-2 py-1 font-mono text-2xs leading-4 break-all whitespace-pre-wrap">
-        {lines.slice(0, 400).map((line, i) => (
-          <div
-            key={i}
-            className={cn(changed(line) && line !== "" && (tone === "added" ? "bg-[var(--s-2xx-bg)]" : "bg-[var(--s-5xx-bg)]"))}
-            data-changed={changed(line) && line !== "" ? tone : undefined}
-          >
-            {line || " "}
-          </div>
-        ))}
-      </pre>
-    </div>
+    // Copies take every line; the panel shows the first 400.
+    <CopyMenu items={[{ label: `Copy ${title.toLowerCase()}`, text: lines.join("\n"), what: title.toLowerCase() }]}>
+      <div className="flex min-w-0 flex-col rounded-md border" data-selectable>
+        <div className="bg-muted/40 border-b px-2 py-0.5 font-semibold">{title}</div>
+        <pre className="max-h-64 overflow-auto px-2 py-1 font-mono text-2xs leading-4 break-all whitespace-pre-wrap">
+          {lines.slice(0, 400).map((line, i) => (
+            <div
+              key={i}
+              className={cn(changed(line) && line !== "" && (tone === "added" ? "bg-[var(--s-2xx-bg)]" : "bg-[var(--s-5xx-bg)]"))}
+              data-changed={changed(line) && line !== "" ? tone : undefined}
+            >
+              {line || " "}
+            </div>
+          ))}
+        </pre>
+      </div>
+    </CopyMenu>
   );
 }
 
 function Message({ title, head, body }: { title: string; head: RequestHead | ResponseHead; body: string | null }) {
+  const what = title.toLowerCase();
   return (
-    <div className="flex min-w-0 flex-col rounded-md border" data-selectable>
-      <div className="bg-muted/40 border-b px-2 py-0.5 font-semibold">{title}</div>
-      <pre className="max-h-64 overflow-auto px-2 py-1 font-mono text-2xs leading-4 break-all whitespace-pre-wrap">
-        {headText(head).join("\n")}
-        {body ? `\n\n${body.length > 8000 ? `${body.slice(0, 8000)}…` : body}` : ""}
-      </pre>
-    </div>
+    <CopyMenu
+      items={[
+        { label: `Copy ${what}`, text: `${headText(head).join("\n")}${body ? `\n\n${body}` : ""}`, what },
+        body !== null && { label: "Copy body", text: body, what: "body" },
+      ]}
+    >
+      <div className="flex min-w-0 flex-col rounded-md border" data-selectable>
+        <div className="bg-muted/40 border-b px-2 py-0.5 font-semibold">{title}</div>
+        <pre className="max-h-64 overflow-auto px-2 py-1 font-mono text-2xs leading-4 break-all whitespace-pre-wrap">
+          {headText(head).join("\n")}
+          {body ? `\n\n${body.length > 8000 ? `${body.slice(0, 8000)}…` : body}` : ""}
+        </pre>
+      </div>
+    </CopyMenu>
   );
 }

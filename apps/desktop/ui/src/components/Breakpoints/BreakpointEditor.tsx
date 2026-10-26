@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { CirclePlay, OctagonPause, Plus, Reply, X, XCircle } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 
 import type { BreakpointInfo_Serialize, Header, MessageEdits_Deserialize } from "@/bindings";
 import { CodeEditor } from "@/components/Compose/CodeEditor";
@@ -8,11 +8,14 @@ import { keepEscapeInEditor } from "@/components/JsonEditor/escape";
 import { JsonEditor } from "@/components/JsonEditor/JsonEditor";
 import { MethodPill } from "@/components/FlowTable/cells";
 import { NumberInput } from "@/components/Rules/fields";
+import { CopyMenu } from "@/components/menus/items";
 import { Button } from "@/components/ui/button";
+import { ContextMenuItem, ContextMenuSeparator } from "@/components/ui/context-menu";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { bridge } from "@/dev/bridge";
+import { reportError, resolveBreakpoint } from "@/lib/actions";
 import { backend } from "@/lib/backend";
 import { languageFor } from "@/lib/compose";
 import { headerValue } from "@/lib/http";
@@ -82,25 +85,62 @@ export function BreakpointEditor() {
   );
 }
 
+/**
+ * A paused flow's menu: copy its URL, show its flow or rule, or let it go
+ * without the form (continue unmodified, abort).
+ */
+function QueueMenu({ bp, children }: { bp: BreakpointInfo_Serialize; children: ReactElement }) {
+  const select = useUi((s) => s.select);
+  const openRules = useUi((s) => s.openRulesEditor);
+  const resolve = (resolution: Parameters<typeof resolveBreakpoint>[1], what: string) =>
+    void resolveBreakpoint(bp.id, resolution).catch((e: unknown) => reportError(what, e));
+  return (
+    <CopyMenu
+      testId="breakpoint-menu"
+      items={[
+        { label: "Copy URL", text: bp.request.url, what: "URL" },
+        { label: "Copy method", text: bp.request.method, what: "method" },
+      ]}
+      extra={
+        <>
+          {bp.flow_id !== null && <ContextMenuItem onSelect={() => select(bp.flow_id)}>Show flow #{bp.flow_id + 1}</ContextMenuItem>}
+          <ContextMenuItem onSelect={() => openRules({ ruleId: bp.rule_id })}>Open rule “{bp.rule_name}”</ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem onSelect={() => resolve({ action: "continue", edits: {} }, "Couldn't continue the flow")}>
+            Continue unmodified
+          </ContextMenuItem>
+          <ContextMenuItem variant="destructive" onSelect={() => resolve({ action: "abort" }, "Couldn't abort the flow")}>
+            Abort
+          </ContextMenuItem>
+        </>
+      }
+    >
+      {children}
+    </CopyMenu>
+  );
+}
+
 function QueueItem({ bp, selected, onSelect }: { bp: BreakpointInfo_Serialize; selected: boolean; onSelect: () => void }) {
   return (
-    <button
-      type="button"
-      onClick={onSelect}
-      data-selected={selected}
-      className="hover:bg-accent data-[selected=true]:bg-selection data-[selected=true]:text-selection-foreground flex w-full min-w-0 flex-col gap-0.5 rounded-sm px-2 py-1 text-left text-xs"
-    >
-      <div className="flex items-center gap-1.5">
-        <PhasePill phase={bp.phase} />
-        <MethodPill method={bp.request.method} />
-        <span className="ml-auto font-mono text-2xs opacity-70">{bp.flow_id !== null ? `#${bp.flow_id + 1}` : ""}</span>
-      </div>
-      <span className="truncate font-mono text-2xs">{bp.request.url}</span>
-      <span className="flex items-center gap-1 text-2xs opacity-70">
-        <span className="truncate">{bp.rule_name}</span>
-        <Countdown deadline={bp.deadline_ms} />
-      </span>
-    </button>
+    <QueueMenu bp={bp}>
+      <button
+        type="button"
+        onClick={onSelect}
+        data-selected={selected}
+        className="hover:bg-accent data-[selected=true]:bg-selection data-[selected=true]:text-selection-foreground flex w-full min-w-0 flex-col gap-0.5 rounded-sm px-2 py-1 text-left text-xs"
+      >
+        <div className="flex items-center gap-1.5">
+          <PhasePill phase={bp.phase} />
+          <MethodPill method={bp.request.method} />
+          <span className="ml-auto font-mono text-2xs opacity-70">{bp.flow_id !== null ? `#${bp.flow_id + 1}` : ""}</span>
+        </div>
+        <span className="truncate font-mono text-2xs">{bp.request.url}</span>
+        <span className="flex items-center gap-1 text-2xs opacity-70">
+          <span className="truncate">{bp.rule_name}</span>
+          <Countdown deadline={bp.deadline_ms} />
+        </span>
+      </button>
+    </QueueMenu>
   );
 }
 
@@ -161,10 +201,10 @@ function BreakpointForm({ bp }: { bp: BreakpointInfo_Serialize }) {
     return out;
   };
 
-  const resolve = async (resolution: Parameters<typeof backend.resolveBreakpoint>[1]) => {
+  const resolve = async (resolution: Parameters<typeof resolveBreakpoint>[1]) => {
     setError(null);
     try {
-      await backend.resolveBreakpoint(bp.id, resolution);
+      await resolveBreakpoint(bp.id, resolution);
     } catch (e) {
       setError(errorText(e));
     }

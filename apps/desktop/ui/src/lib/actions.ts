@@ -1,6 +1,13 @@
 import { toast } from "sonner";
 
-import type { FlowSelection, PresetKind, RequestSpec_Deserialize, SaveProgress_Serialize, ScriptKind } from "@/bindings";
+import type {
+  BreakpointResolution_Deserialize,
+  FlowSelection,
+  PresetKind,
+  RequestSpec_Deserialize,
+  SaveProgress_Serialize,
+  ScriptKind,
+} from "@/bindings";
 import { backend } from "@/lib/backend";
 import { copyLater } from "@/lib/clipboard";
 import { withTerm } from "@/lib/copyFormats";
@@ -151,6 +158,11 @@ export async function saveRule(rule: Rule): Promise<Rule> {
   return normalizeRule(saved);
 }
 
+/** Saves a copy of `rule` as a new user rule ("<name> copy"); resolves to it. */
+export async function duplicateRule(rule: Rule): Promise<Rule> {
+  return saveRule({ ...normalizeRule(rule), id: "", name: `${rule.name || "Untitled"} copy`, origin: { kind: "user" } });
+}
+
 export async function deleteRule(id: string) {
   await backend.deleteRule(id);
   await refreshRules();
@@ -289,6 +301,13 @@ async function runSave(label: string, start: (onProgress: (p: SaveProgress_Seria
   }
 }
 
+// ---- Breakpoints ----
+
+/** Lets a paused flow go on (with edits), aborts it, or answers it. */
+export async function resolveBreakpoint(id: number, resolution: BreakpointResolution_Deserialize) {
+  await backend.resolveBreakpoint(id, resolution);
+}
+
 // ---- Device setup ----
 
 /** Allows or denies a LAN device (an allowed one is recorded under `nickname`). */
@@ -330,6 +349,11 @@ export async function saveScript(script: Script): Promise<Script> {
   const saved = script.id ? await backend.updateScript(script) : await backend.createScript(script);
   await refreshScripts();
   return normalizeScript(saved);
+}
+
+/** Saves a copy of `script` as a new user script ("<name> copy"); resolves to it. */
+export async function duplicateScript(script: Script): Promise<Script> {
+  return saveScript({ ...normalizeScript(script), id: "", name: `${script.name || "Untitled"} copy`, origin: { kind: "user" } });
 }
 
 export async function deleteScript(id: string) {
