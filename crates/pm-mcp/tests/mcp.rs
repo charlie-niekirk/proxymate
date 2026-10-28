@@ -448,6 +448,29 @@ async fn agents_replay_send_and_export() {
     let command = curl["command"].as_str().unwrap();
     assert!(command.starts_with("curl") && command.contains("/echo"), "{command}");
 
+    let python = ok(&client, "export_code", json!({ "id": echo, "language": "python" })).await;
+    let code = python["code"].as_str().unwrap();
+    assert!(
+        code.contains("requests.post(") && code.contains("hello agent"),
+        "{code}"
+    );
+
+    let repeated = ok(
+        &client,
+        "repeat_flow",
+        json!({ "id": id, "iterations": 20, "concurrency": 4, "apply_rules": false }),
+    )
+    .await;
+    assert_eq!(
+        (repeated["sent"].as_u64(), repeated["failed"].as_u64()),
+        (Some(20), Some(0))
+    );
+    assert_eq!(repeated["statuses"], json!([{ "status": 200, "count": 20 }]));
+    let last = repeated["last_flow"].as_u64().unwrap() as u32;
+    let flow = h.engine.get_flow(last).unwrap();
+    assert_eq!(flow.sent_by, Some(pm_model::SentBy::Repeat));
+    assert!(flow.client.as_deref().is_some_and(|c| c != "Proxymate"));
+
     let har = ok(&client, "export_har", json!({ "filter": "status:2xx" })).await;
     assert_eq!(har["har"]["log"]["version"], "1.2");
     assert_eq!(

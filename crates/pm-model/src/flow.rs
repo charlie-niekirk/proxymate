@@ -202,4 +202,19 @@ impl FlowSummary {
             (Scheme::Http | Scheme::Ws, 80) | (Scheme::Https | Scheme::Wss, 443)
         )
     }
+
+    /// `scheme://host[:port]/path[?query]`.
+    pub fn url(&self) -> String {
+        let port = if self.is_default_port() {
+            String::new()
+        } else {
+            format!(":{}", self.port)
+        };
+        let query = if self.query.is_empty() {
+            String::new()
+        } else {
+            format!("?{}", self.query)
+        };
+        format!("{}://{}{port}{}{query}", self.scheme.as_str(), self.host, self.path)
+    }
 }

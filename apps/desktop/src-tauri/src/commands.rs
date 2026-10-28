@@ -11,6 +11,7 @@ use pm_model::{
     SslSettings, StorageSettings, StorageStatus, StoreId, SystemProxyStatus, TrustStatus, UpdateSettings, ViewDelta,
     ViewId, ViewInfo, WsPage, WsQuery,
 };
+use pm_model::{CodeLanguage, FlowLabel, HeaderColumn, RepeatId, RepeatOpts, RepeatProgress};
 use pm_model::{ConsoleEntry, Script, ScriptId, ScriptSettings, ScriptTestResult, ScriptTestSpec, ViewResult};
 use pm_model::{DecodedBody, ProtoMapping, ProtoSchema};
 use tauri::State;
@@ -784,11 +785,99 @@ pub fn subscribe_storage(engine: EngineState<'_>, on_status: Channel<StorageStat
     engine.subscribe_storage(Box::new(move |status| on_status.send(status).is_ok()));
 }
 
-/// Pins or unpins live flows; pinned flows are never evicted.
+/// Pins or unpins flows of any store; pinned live flows are never evicted.
 #[tauri::command]
 #[specta::specta]
-pub fn pin_flows(engine: EngineState<'_>, ids: Vec<FlowId>, pinned: bool) {
-    engine.pin_flows(ids, pinned);
+pub fn pin_flows(
+    engine: EngineState<'_>,
+    store: StoreId,
+    selection: FlowSelection,
+    pinned: bool,
+) -> Result<u32, String> {
+    engine
+        .pin_flows_in(store, &selection, pinned)
+        .map_err(|e| e.to_string())
+}
+
+// ---- Workflow (M17) ----
+
+/// The ids a selection names, in its order.
+#[tauri::command]
+#[specta::specta]
+pub fn selected_ids(engine: EngineState<'_>, store: StoreId, selection: FlowSelection) -> Result<Vec<FlowId>, String> {
+    engine.selected_ids(store, &selection).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn get_flow_urls(engine: EngineState<'_>, store: StoreId, selection: FlowSelection) -> Result<Vec<String>, String> {
+    engine.flow_urls(store, &selection).map_err(|e| e.to_string())
+}
+
+/// Deletes flows; returns how many went.
+#[tauri::command]
+#[specta::specta]
+pub fn remove_flows(engine: EngineState<'_>, store: StoreId, selection: FlowSelection) -> Result<u32, String> {
+    engine.remove_flows_in(store, &selection).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn label_flows(
+    engine: EngineState<'_>,
+    store: StoreId,
+    selection: FlowSelection,
+    label: Option<FlowLabel>,
+) -> Result<u32, String> {
+    engine
+        .label_flows_in(store, &selection, label)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn comment_flow(engine: EngineState<'_>, store: StoreId, id: FlowId, comment: String) -> Result<(), String> {
+    engine.comment_flow_in(store, id, &comment).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn set_header_columns(engine: EngineState<'_>, columns: Vec<HeaderColumn>) -> Result<Vec<HeaderColumn>, String> {
+    engine.set_header_columns(columns).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn get_code(engine: EngineState<'_>, store: StoreId, id: FlowId, language: CodeLanguage) -> Result<String, String> {
+    engine.code_snippet(store, id, language).map_err(|e| e.to_string())
+}
+
+/// Starts repeating a recorded request; progress streams to `on_progress`.
+#[tauri::command]
+#[specta::specta]
+pub async fn start_repeat(
+    engine: EngineState<'_>,
+    store: StoreId,
+    id: FlowId,
+    opts: RepeatOpts,
+    on_progress: Channel<RepeatProgress>,
+) -> Result<RepeatId, String> {
+    let spec = engine.request_spec(store, id, false).map_err(|e| e.to_string())?;
+    engine
+        .repeat(
+            spec,
+            opts,
+            Box::new(move |progress| {
+                let _ = on_progress.send(progress);
+            }),
+        )
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn cancel_repeat(engine: EngineState<'_>, id: RepeatId) -> bool {
+    engine.cancel_repeat(id)
 }
 
 #[tauri::command]

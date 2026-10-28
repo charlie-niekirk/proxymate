@@ -58,6 +58,11 @@ impl Engine {
             .collect())
     }
 
+    /// The URLs of the flows `selection` names, in its order (bulk Copy URL).
+    pub fn flow_urls(&self, store: StoreId, selection: &FlowSelection) -> Result<Vec<String>, Error> {
+        Ok(self.selected_flows(store, selection)?.iter().map(|f| f.url()).collect())
+    }
+
     /// Deletes flows from `store`, pinned ones too; flows still in flight
     /// stay. Live flows' details go, and segment files no flow left uses
     /// are deleted. A document's file isn't touched: only its tab changes.
@@ -283,6 +288,18 @@ impl Engine {
     /// `SentBy::Repeat`). Returns at once; `sink` hears the counts as they
     /// go, and last with `finished` set. [`Engine::cancel_repeat`] stops it.
     pub fn repeat(self: &Arc<Self>, spec: RequestSpec, opts: RepeatOpts, sink: RepeatSink) -> Result<RepeatId, Error> {
+        self.repeat_as(spec, opts, SendOrigin::User, sink)
+    }
+
+    /// [`Engine::repeat`] on behalf of `origin` (an agent's name goes in
+    /// the Client column).
+    pub fn repeat_as(
+        self: &Arc<Self>,
+        spec: RequestSpec,
+        opts: RepeatOpts,
+        origin: SendOrigin,
+        sink: RepeatSink,
+    ) -> Result<RepeatId, Error> {
         if !(1..=MAX_REPEAT_ITERATIONS).contains(&opts.iterations) {
             return Err(Error::Invalid(format!(
                 "iterations must be 1 to {MAX_REPEAT_ITERATIONS}"
@@ -318,6 +335,7 @@ impl Engine {
                     cancel.clone(),
                 );
                 let opts = opts.clone();
+                let origin = origin.clone();
                 tasks.push(tokio::spawn(async move {
                     loop {
                         if cancel.load(Ordering::Relaxed) || next.fetch_add(1, Ordering::Relaxed) >= opts.iterations {
@@ -329,7 +347,7 @@ impl Engine {
                         let send = SendOpts {
                             apply_rules: opts.apply_rules,
                             wait: true,
-                            origin: SendOrigin::User,
+                            origin: origin.clone(),
                         };
                         match engine.send_marked(spec.clone(), send, pm_model::SentBy::Repeat).await {
                             Ok(flow) => {

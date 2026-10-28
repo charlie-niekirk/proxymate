@@ -6,9 +6,9 @@ import { invoke as __TAURI_INVOKE, Channel } from "@tauri-apps/api/core";
 
 /** Commands */
 export const commands = {
-	createView: (store: number, filter: FilterSpec_Deserialize, sort: SortSpec) => typedError<ViewInfo_Serialize, string>(__TAURI_INVOKE("create_view", { store, filter, sort })),
+	createView: (store: number, filter: FilterSpec_Deserialize, sort: SortSpec_Deserialize) => typedError<ViewInfo_Serialize, string>(__TAURI_INVOKE("create_view", { store, filter, sort })),
 	setFilter: (view: number, filter: FilterSpec_Deserialize) => typedError<ViewInfo_Serialize, string>(__TAURI_INVOKE("set_filter", { view, filter })),
-	setSort: (view: number, sort: SortSpec) => typedError<ViewInfo_Serialize, string>(__TAURI_INVOKE("set_sort", { view, sort })),
+	setSort: (view: number, sort: SortSpec_Deserialize) => typedError<ViewInfo_Serialize, string>(__TAURI_INVOKE("set_sort", { view, sort })),
 	dropView: (view: number) => __TAURI_INVOKE<void>("drop_view", { view }),
 	getRows: (view: number, start: number, count: number) => typedError<RowsPage_Serialize, string>(__TAURI_INVOKE("get_rows", { view, start, count })),
 	getFlow: (store: number, id: number) => __TAURI_INVOKE<FlowSummary_Serialize | null>("get_flow", { store, id }),
@@ -135,20 +135,32 @@ export const commands = {
 	 *  without `path`, asks where. Resolves to the path (`None` if cancelled)
 	 *  once the save has started; `on_progress` hears the rest.
 	 */
-	saveSession: (store: number, selection: FlowSelection, path: string | null, fileName: string, onProgress: Channel<SaveProgress_Deserialize>) => typedError<string | null, string>(__TAURI_INVOKE("save_session", { store, selection, path, fileName, onProgress })),
+	saveSession: (store: number, selection: FlowSelection_Deserialize, path: string | null, fileName: string, onProgress: Channel<SaveProgress_Deserialize>) => typedError<string | null, string>(__TAURI_INVOKE("save_session", { store, selection, path, fileName, onProgress })),
 	/**
 	 *  Exports flows of a store as a HAR file in the background; like
 	 *  [`save_session`].
 	 */
-	exportHar: (store: number, selection: FlowSelection, path: string | null, fileName: string, onProgress: Channel<SaveProgress_Deserialize>) => typedError<string | null, string>(__TAURI_INVOKE("export_har", { store, selection, path, fileName, onProgress })),
+	exportHar: (store: number, selection: FlowSelection_Deserialize, path: string | null, fileName: string, onProgress: Channel<SaveProgress_Deserialize>) => typedError<string | null, string>(__TAURI_INVOKE("export_har", { store, selection, path, fileName, onProgress })),
 	getStorageSettings: () => __TAURI_INVOKE<StorageSettings_Serialize>("get_storage_settings"),
 	/**  Saves new limits; flows past them are evicted straight away. */
 	setStorageSettings: (settings: StorageSettings_Deserialize) => typedError<StorageSettings_Serialize, string>(__TAURI_INVOKE("set_storage_settings", { settings })),
 	getStorageStatus: () => __TAURI_INVOKE<StorageStatus_Serialize>("get_storage_status"),
 	/**  Streams the storage status (flows, disk use, write errors) as it changes. */
 	subscribeStorage: (onStatus: Channel<StorageStatus_Deserialize>) => __TAURI_INVOKE<void>("subscribe_storage", { onStatus }),
-	/**  Pins or unpins live flows; pinned flows are never evicted. */
-	pinFlows: (ids: number[], pinned: boolean) => __TAURI_INVOKE<void>("pin_flows", { ids, pinned }),
+	/**  Pins or unpins flows of any store; pinned live flows are never evicted. */
+	pinFlows: (store: number, selection: FlowSelection_Deserialize, pinned: boolean) => typedError<number, string>(__TAURI_INVOKE("pin_flows", { store, selection, pinned })),
+	/**  The ids a selection names, in its order. */
+	selectedIds: (store: number, selection: FlowSelection_Deserialize) => typedError<number[], string>(__TAURI_INVOKE("selected_ids", { store, selection })),
+	getFlowUrls: (store: number, selection: FlowSelection_Deserialize) => typedError<string[], string>(__TAURI_INVOKE("get_flow_urls", { store, selection })),
+	/**  Deletes flows; returns how many went. */
+	removeFlows: (store: number, selection: FlowSelection_Deserialize) => typedError<number, string>(__TAURI_INVOKE("remove_flows", { store, selection })),
+	labelFlows: (store: number, selection: FlowSelection_Deserialize, label: FlowLabel | null) => typedError<number, string>(__TAURI_INVOKE("label_flows", { store, selection, label })),
+	commentFlow: (store: number, id: number, comment: string) => typedError<null, string>(__TAURI_INVOKE("comment_flow", { store, id, comment })),
+	setHeaderColumns: (columns: HeaderColumn[]) => typedError<HeaderColumn[], string>(__TAURI_INVOKE("set_header_columns", { columns })),
+	getCode: (store: number, id: number, language: CodeLanguage) => typedError<string, string>(__TAURI_INVOKE("get_code", { store, id, language })),
+	/**  Starts repeating a recorded request; progress streams to `on_progress`. */
+	startRepeat: (store: number, id: number, opts: RepeatOpts_Deserialize, onProgress: Channel<RepeatProgress_Deserialize>) => typedError<number, string>(__TAURI_INVOKE("start_repeat", { store, id, opts, onProgress })),
+	cancelRepeat: (id: number) => __TAURI_INVOKE<boolean>("cancel_repeat", { id }),
 	getProxySettings: () => __TAURI_INVOKE<ProxySettings_Serialize>("get_proxy_settings"),
 	/**
 	 *  Saves the port and upstream pool settings, restarting the listener if
@@ -674,6 +686,19 @@ export type CertSummary = {
 	sha256: string,
 };
 
+/**  Languages Copy as code writes (`pm-core/src/io/snippets.rs`). */
+export type CodeLanguage = "curl" | 
+/**  JavaScript `fetch`. */
+"fetch" | 
+/**  Python `requests`. */
+"python" | "httpie" | 
+/**  Go `net/http`. */
+"go" | 
+/**  Swift `URLSession`. */
+"swift" | 
+/**  Kotlin OkHttp. */
+"kotlin" | "powershell";
+
 /**
  *  One line of the script console: a script's `console.*` call, or an
  *  error the engine reports for it.
@@ -1118,11 +1143,18 @@ export type FlowDetail_Serialize = {
 };
 
 /**
+ *  A colour label the user puts on flows (M17). Shown as a dot in the
+ *  Notes column, and matched by the DSL's `label:`.
+ */
+export type FlowLabel = "red" | "orange" | "yellow" | "green" | "blue" | "purple";
+
+/**
  *  One flow table row in a compact positional form (a JSON array on the wire).
  * 
  *  Field order: `id, state, scheme, method, host, port, path, query, status,
  *  content_kind, client, started_at_ms, duration_ms, req_size, resp_size, edited,
- *  http_version, tls, graphql_op, sent_by, pinned, grpc_status`.
+ *  http_version, tls, graphql_op, sent_by, pinned, grpc_status, label, comment,
+ *  extra`. `extra` holds the header columns' values (M17) and stays last.
  */
 export type FlowRow = FlowRow_Serialize | FlowRow_Deserialize;
 
@@ -1131,18 +1163,20 @@ export type FlowRow = FlowRow_Serialize | FlowRow_Deserialize;
  * 
  *  Field order: `id, state, scheme, method, host, port, path, query, status,
  *  content_kind, client, started_at_ms, duration_ms, req_size, resp_size, edited,
- *  http_version, tls, graphql_op, sent_by, pinned, grpc_status`.
+ *  http_version, tls, graphql_op, sent_by, pinned, grpc_status, label, comment,
+ *  extra`. `extra` holds the header columns' values (M17) and stays last.
  */
-export type FlowRow_Deserialize = [number, FlowState, Scheme, string, string, number, string, string, number | null, ContentKind, string | null, number | null, number | null, number, number, boolean, HttpVersion, TlsStatus, string | null, SentBy | null, boolean, number | null];
+export type FlowRow_Deserialize = [number, FlowState, Scheme, string, string, number, string, string, number | null, ContentKind, string | null, number | null, number | null, number, number, boolean, HttpVersion, TlsStatus, string | null, SentBy | null, boolean, number | null, FlowLabel | null, string | null, (string | null)[]];
 
 /**
  *  One flow table row in a compact positional form (a JSON array on the wire).
  * 
  *  Field order: `id, state, scheme, method, host, port, path, query, status,
  *  content_kind, client, started_at_ms, duration_ms, req_size, resp_size, edited,
- *  http_version, tls, graphql_op, sent_by, pinned, grpc_status`.
+ *  http_version, tls, graphql_op, sent_by, pinned, grpc_status, label, comment,
+ *  extra`. `extra` holds the header columns' values (M17) and stays last.
  */
-export type FlowRow_Serialize = [number, FlowState, Scheme, string, string, number, string, string, number | null, ContentKind, string | null, number | null, number | null, number, number, boolean, HttpVersion, TlsStatus, string | null, SentBy | null, boolean, number | null];
+export type FlowRow_Serialize = [number, FlowState, Scheme, string, string, number, string, string, number | null, ContentKind, string | null, number | null, number | null, number, number, boolean, HttpVersion, TlsStatus, string | null, SentBy | null, boolean, number | null, FlowLabel | null, string | null, (string | null)[]];
 
 /**
  *  What rules did to one flow. Drives the Edited column and the
@@ -1201,11 +1235,29 @@ export type FlowRules_Serialize = {
 };
 
 /**  Which flows of a store to save or export. */
-export type FlowSelection = 
+export type FlowSelection = FlowSelection_Serialize | FlowSelection_Deserialize;
+
+/**  Which flows of a store to save or export. */
+export type FlowSelection_Deserialize = 
 /**  Every flow in the store. */
 { kind: "all" } | 
-/**  The rows of a view, in its order (the current filter and sort). */
-{ kind: "view"; view: number } | 
+/**
+ *  The rows of a view, in its order (the current filter and sort),
+ *  but for `except`: ⌘A then ⌘-click, without listing 100k ids.
+ */
+{ kind: "view"; view: number; except?: number[] } | 
+/**  These flows, in this order. */
+{ kind: "ids"; ids: number[] };
+
+/**  Which flows of a store to save or export. */
+export type FlowSelection_Serialize = 
+/**  Every flow in the store. */
+{ kind: "all" } | 
+/**
+ *  The rows of a view, in its order (the current filter and sort),
+ *  but for `except`: ⌘A then ⌘-click, without listing 100k ids.
+ */
+{ kind: "view"; view: number; except: number[] } | 
 /**  These flows, in this order. */
 { kind: "ids"; ids: number[] };
 
@@ -1271,6 +1323,15 @@ export type FlowSummary_Deserialize = {
 	pinned?: boolean,
 	/**  The `grpc-status` of a gRPC call (0 is OK), once its trailers came. */
 	grpc_status?: number | null,
+	/**  The user's colour label (M17). */
+	label?: FlowLabel | null,
+	/**  The user's note on the flow (M17). */
+	comment?: string | null,
+	/**
+	 *  Values of the header columns, in the order they were set
+	 *  (`Engine::set_header_columns`); empty until filled.
+	 */
+	extra?: (string | null)[],
 };
 
 /**
@@ -1316,6 +1377,15 @@ export type FlowSummary_Serialize = {
 	pinned: boolean,
 	/**  The `grpc-status` of a gRPC call (0 is OK), once its trailers came. */
 	grpc_status: number | null,
+	/**  The user's colour label (M17). */
+	label: FlowLabel | null,
+	/**  The user's note on the flow (M17). */
+	comment: string | null,
+	/**
+	 *  Values of the header columns, in the order they were set
+	 *  (`Engine::set_header_columns`); empty until filled.
+	 */
+	extra: (string | null)[],
 };
 
 /**  A gRPC call's outcome. */
@@ -1356,6 +1426,13 @@ export type GrpcStatus_Serialize = {
 export type Header = {
 	name: string,
 	value: string,
+};
+
+/**  A flow table column showing one request or response header. */
+export type HeaderColumn = {
+	part: BodyPart,
+	/**  Matched case-insensitively. */
+	name: string,
 };
 
 export type HostCount = {
@@ -1755,6 +1832,84 @@ export type ProxyStatus_Serialize = {
 	error: string | null,
 	/**  False while recording is paused: traffic is forwarded but not kept. */
 	recording: boolean,
+};
+
+/**  How `Engine::repeat` sends a request again and again. */
+export type RepeatOpts = RepeatOpts_Serialize | RepeatOpts_Deserialize;
+
+/**  How `Engine::repeat` sends a request again and again. */
+export type RepeatOpts_Deserialize = {
+	/**  1 to 10,000. */
+	iterations: number,
+	/**  Requests in flight at once, 1 to 64. */
+	concurrency: number,
+	/**  Pause before each request (per worker), in milliseconds. */
+	delay_ms?: number,
+	/**  Run each request through the rules, as `SendOpts::apply_rules`. */
+	apply_rules?: boolean,
+};
+
+/**  How `Engine::repeat` sends a request again and again. */
+export type RepeatOpts_Serialize = {
+	/**  1 to 10,000. */
+	iterations: number,
+	/**  Requests in flight at once, 1 to 64. */
+	concurrency: number,
+	/**  Pause before each request (per worker), in milliseconds. */
+	delay_ms: number,
+	/**  Run each request through the rules, as `SendOpts::apply_rules`. */
+	apply_rules: boolean,
+};
+
+/**  A repeat's progress, pushed as it goes; the last one has `finished`. */
+export type RepeatProgress = RepeatProgress_Serialize | RepeatProgress_Deserialize;
+
+/**  A repeat's progress, pushed as it goes; the last one has `finished`. */
+export type RepeatProgress_Deserialize = {
+	id: number,
+	/**  Requests that have finished (answered or failed). */
+	done: number,
+	total: number,
+	/**  Requests that got no response. */
+	failed: number,
+	/**  By status, ascending; failures (`status: null`) first. */
+	statuses: StatusCount_Deserialize[],
+	/**  Durations of the finished requests, in milliseconds. */
+	min_ms?: number | null,
+	p50_ms?: number | null,
+	p95_ms?: number | null,
+	max_ms?: number | null,
+	/**  The first and last flow the repeat recorded. */
+	first_flow?: number | null,
+	last_flow?: number | null,
+	finished: boolean,
+	cancelled: boolean,
+	/**  Why it stopped early (the request couldn't be sent at all). */
+	error?: string | null,
+};
+
+/**  A repeat's progress, pushed as it goes; the last one has `finished`. */
+export type RepeatProgress_Serialize = {
+	id: number,
+	/**  Requests that have finished (answered or failed). */
+	done: number,
+	total: number,
+	/**  Requests that got no response. */
+	failed: number,
+	/**  By status, ascending; failures (`status: null`) first. */
+	statuses: StatusCount_Serialize[],
+	/**  Durations of the finished requests, in milliseconds. */
+	min_ms: number | null,
+	p50_ms: number | null,
+	p95_ms: number | null,
+	max_ms: number | null,
+	/**  The first and last flow the repeat recorded. */
+	first_flow: number | null,
+	last_flow: number | null,
+	finished: boolean,
+	cancelled: boolean,
+	/**  Why it stopped early (the request couldn't be sent at all). */
+	error: string | null,
 };
 
 export type RequestHead = {
@@ -2237,7 +2392,9 @@ export type Script_Serialize = {
  *  The flow-table marker of a flow Proxymate sent itself (the summary's
  *  `sent_by`); `None` there for traffic that came through the proxy.
  */
-export type SentBy = "user" | "agent";
+export type SentBy = "user" | "agent" | 
+/**  One of a Repeat's requests (M17). */
+"repeat";
 
 /**
  *  The sidebar's Apps and Domains, aggregated over every flow in the store.
@@ -2323,11 +2480,24 @@ export type SortDir = "asc" | "desc";
 /**  Sortable flow table columns. */
 export type SortKey = 
 /**  Arrival order. The only key that supports cheap incremental appends. */
-"id" | "url" | "method" | "status" | "duration" | "req_size" | "resp_size";
+"id" | "url" | "method" | "status" | "duration" | "req_size" | "resp_size" | 
+/**  A header column (M17): `SortSpec.extra` says which. */
+"extra";
 
-export type SortSpec = {
+export type SortSpec = SortSpec_Serialize | SortSpec_Deserialize;
+
+export type SortSpec_Deserialize = {
 	key: SortKey,
 	dir: SortDir,
+	/**  The header column `SortKey::Extra` sorts by. */
+	extra?: number,
+};
+
+export type SortSpec_Serialize = {
+	key: SortKey,
+	dir: SortDir,
+	/**  The header column `SortKey::Extra` sorts by. */
+	extra: number,
 };
 
 /**  One event of a `text/event-stream` response. */
@@ -2446,6 +2616,23 @@ export type SslSettings_Serialize = {
 	 *  bundle). Matching is case-insensitive.
 	 */
 	exclude_apps: string[],
+};
+
+/**  How many responses had one status. */
+export type StatusCount = StatusCount_Serialize | StatusCount_Deserialize;
+
+/**  How many responses had one status. */
+export type StatusCount_Deserialize = {
+	/**  `None` counts failed requests (no response). */
+	status?: number | null,
+	count: number,
+};
+
+/**  How many responses had one status. */
+export type StatusCount_Serialize = {
+	/**  `None` counts failed requests (no response). */
+	status: number | null,
+	count: number,
 };
 
 export type StatusRange = {
