@@ -51,6 +51,11 @@ pub(crate) enum FlowEvent {
         req_size: u64,
         resp_size: u64,
     },
+    /// A gRPC call's status, from its trailers.
+    Grpc {
+        id: FlowId,
+        status: u8,
+    },
     /// A rule changed the flow (the Edited column).
     Edited {
         id: FlowId,

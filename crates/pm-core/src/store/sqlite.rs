@@ -32,7 +32,9 @@ use super::segments::SegmentStore;
 pub(crate) const FORMAT: &str = "proxymate-session";
 /// Bumped whenever the tables or the postcard layouts change. Version 2
 /// (M14) appended `FlowRules.scripts`, the last field of a `FlowDetail`.
-pub(crate) const VERSION: u32 = 2;
+/// Version 3 (M16) appended `FlowDetail.trailers` and the `grpc_status`
+/// column, and added content kinds after `Binary`.
+pub(crate) const VERSION: u32 = 3;
 /// The oldest version this Proxymate still reads.
 const OLDEST: u32 = 1;
 
@@ -62,6 +64,7 @@ CREATE TABLE flows (
     tls TEXT NOT NULL,
     graphql_op TEXT,
     sent_by TEXT,
+    grpc_status INTEGER,
     detail BLOB NOT NULL,
     ws BLOB,
     sse BLOB
@@ -134,9 +137,9 @@ impl SessionWriter {
             .prepare_cached(
                 "INSERT INTO flows (id, state, scheme, method, host, port, path, query, status, content_kind, client,
                     started_at_ms, duration_ms, req_size, resp_size, edited, http_version, tls, graphql_op, sent_by,
-                    detail, ws, sse)
+                    grpc_status, detail, ws, sse)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
-                    ?21, ?22, ?23)",
+                    ?21, ?22, ?23, ?24)",
             )
             .and_then(|mut insert| {
                 insert.execute(params![
@@ -160,6 +163,7 @@ impl SessionWriter {
                     enum_text(&s.tls),
                     s.graphql_op.as_deref(),
                     s.sent_by.as_ref().map(enum_text),
+                    s.grpc_status,
                     detail,
                     ws,
                     sse,
@@ -236,12 +240,15 @@ impl SqliteBackend {
                 "this session is format version {version}; this Proxymate reads versions {OLDEST} to {VERSION}"
             )));
         }
+        // Before version 3 there was no gRPC status.
+        let grpc_status = if version >= 3 { "grpc_status" } else { "NULL" };
         let summaries = conn
-            .prepare(
+            .prepare(&format!(
                 "SELECT id, state, scheme, method, host, port, path, query, status, content_kind, client,
-                    started_at_ms, duration_ms, req_size, resp_size, edited, http_version, tls, graphql_op, sent_by
-                 FROM flows ORDER BY id",
-            )
+                    started_at_ms, duration_ms, req_size, resp_size, edited, http_version, tls, graphql_op, sent_by,
+                    {grpc_status}
+                 FROM flows ORDER BY id"
+            ))
             .and_then(|mut stmt| {
                 let mut interned = Interner::default();
                 stmt.query_map([], |row| summary(row, &mut interned))?
@@ -281,8 +288,13 @@ impl BlobBackend for SqliteBackend {
         let Some(mut bytes) = self.blob("SELECT detail FROM flows WHERE id = ?1", [id])? else {
             return Ok(None);
         };
+        // Fields appended since: version 1 had no `FlowRules.scripts` (an
+        // empty list is one 0), versions 1 and 2 no `trailers` (`None` is
+        // one 0).
         if self.version == 1 {
-            // Version 1 had no `FlowRules.scripts`: an empty list is one 0.
+            bytes.push(0);
+        }
+        if self.version <= 2 {
             bytes.push(0);
         }
         let detail: FlowDetail = postcard::from_bytes(&bytes).map_err(io::Error::other)?;
@@ -405,6 +417,7 @@ fn summary(row: &Row<'_>, interned: &mut Interner) -> rusqlite::Result<FlowSumma
             None => None,
         },
         pinned: false,
+        grpc_status: row.get(20)?,
     })
 }
 

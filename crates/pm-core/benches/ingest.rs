@@ -50,6 +50,7 @@ fn detail(flow: &FlowSummary) -> FlowDetail {
         tls: None,
         timing: Default::default(),
         rules: Default::default(),
+        trailers: None,
     }
 }
 

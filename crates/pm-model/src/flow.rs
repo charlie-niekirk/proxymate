@@ -87,6 +87,13 @@ pub enum ContentKind {
     Font,
     Pdf,
     Binary,
+    // M16. New kinds go after `Binary`: `BodyInfo.kind` is in the postcard
+    // `FlowDetail`, so the variant indices are part of the session format.
+    /// gRPC or gRPC-web: length-prefixed protobuf messages.
+    Grpc,
+    Protobuf,
+    MessagePack,
+    Cbor,
 }
 
 /// The compact per-flow record kept in the summary arena (~150-200 B).
@@ -131,6 +138,9 @@ pub struct FlowSummary {
     /// Pinned by the user: kept when the flow cap evicts older flows.
     #[serde(default)]
     pub pinned: bool,
+    /// The `grpc-status` of a gRPC call (0 is OK), once its trailers came.
+    #[serde(default)]
+    pub grpc_status: Option<u8>,
 }
 
 impl FlowSummary {

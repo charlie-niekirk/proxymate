@@ -433,6 +433,7 @@ fn record_request(engine: &Arc<Engine>, req: &Request<Incoming>, origin: Origin)
         graphql_op: None,
         sent_by: None,
         pinned: false,
+        grpc_status: None,
     };
     let headers = headers(req.headers());
     let detail = FlowDetail {
@@ -450,6 +451,7 @@ fn record_request(engine: &Arc<Engine>, req: &Request<Incoming>, origin: Origin)
         tls: origin.tls_info,
         timing: Timing::default(),
         rules: Default::default(),
+        trailers: None,
     };
     let mut detail = detail;
     detail.request_body.encoding = content_encoding(&detail.request.headers);

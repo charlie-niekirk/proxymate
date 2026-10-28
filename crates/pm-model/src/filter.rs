@@ -44,7 +44,12 @@ impl ContentGroup {
             ContentKind::Image | ContentKind::Svg | ContentKind::Video | ContentKind::Audio | ContentKind::Font => {
                 ContentGroup::Media
             }
-            ContentKind::None | ContentKind::Binary => ContentGroup::Other,
+            ContentKind::None
+            | ContentKind::Binary
+            | ContentKind::Grpc
+            | ContentKind::Protobuf
+            | ContentKind::MessagePack
+            | ContentKind::Cbor => ContentGroup::Other,
         }
     }
 }

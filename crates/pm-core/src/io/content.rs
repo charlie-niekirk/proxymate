@@ -43,6 +43,13 @@ pub fn kind_from_content_type(value: &str) -> ContentKind {
     let (top, sub) = mime.split_once('/').unwrap_or((mime.as_str(), ""));
     match (top, sub) {
         ("", _) => ContentKind::None,
+        // Before `+json`: `application/grpc+json` is still gRPC framing.
+        ("application", s) if is_grpc_subtype(s) => ContentKind::Grpc,
+        ("application", "x-protobuf" | "protobuf" | "vnd.google.protobuf" | "x-google-protobuf") => {
+            ContentKind::Protobuf
+        }
+        ("application", "msgpack" | "x-msgpack" | "vnd.msgpack") => ContentKind::MessagePack,
+        ("application", "cbor") => ContentKind::Cbor,
         (_, "json") | (_, "graphql-response+json") => ContentKind::Json,
         (_, "graphql") | (_, "graphql+json") => ContentKind::GraphQl,
         (_, s) if s.ends_with("+json") => ContentKind::Json,
@@ -66,6 +73,12 @@ pub fn kind_from_content_type(value: &str) -> ContentKind {
     }
 }
 
+/// `grpc`, `grpc+proto`, `grpc-web`, `grpc-web-text+proto`, …
+fn is_grpc_subtype(sub: &str) -> bool {
+    let base = sub.split_once('+').map_or(sub, |(base, _)| base);
+    matches!(base, "grpc" | "grpc-web" | "grpc-web-text")
+}
+
 /// Detects what a body holds from its `Content-Type` (if any) and its first
 /// bytes, already decoded. An empty `head` means there is no body.
 ///
@@ -82,6 +95,14 @@ pub fn detect(content_type: Option<&str>, head: &[u8]) -> Detected {
     }
     let header = content_type.map_or(ContentKind::None, kind_from_content_type);
     let header_mime = content_type.map(essence).filter(|m| !m.is_empty());
+    // Binary formats without a signature: a frame or a field tag can look
+    // like a magic number, so their header wins outright.
+    if matches!(
+        header,
+        ContentKind::Grpc | ContentKind::Protobuf | ContentKind::MessagePack | ContentKind::Cbor
+    ) {
+        return Detected::new(header, header_mime.unwrap_or_default());
+    }
     if let Some(sniffed) = sniff_magic(head) {
         return sniffed;
     }
@@ -470,10 +491,28 @@ mod tests {
             ("application/pdf", Pdf),
             ("application/octet-stream", Binary),
             ("", ContentKind::None),
+            ("application/grpc", ContentKind::Grpc),
+            ("application/grpc+proto", ContentKind::Grpc),
+            ("application/grpc+json", ContentKind::Grpc),
+            ("application/grpc-web+proto", ContentKind::Grpc),
+            ("application/grpc-web-text", ContentKind::Grpc),
+            ("application/x-protobuf; messageType=x.Y", ContentKind::Protobuf),
+            ("application/vnd.google.protobuf", ContentKind::Protobuf),
+            ("application/x-msgpack", ContentKind::MessagePack),
+            ("application/msgpack", ContentKind::MessagePack),
+            ("application/cbor", ContentKind::Cbor),
         ];
         for (value, kind) in cases {
             assert_eq!(kind_from_content_type(value), kind, "{value}");
         }
+    }
+
+    #[test]
+    fn signatureless_binary_headers_beat_magic_bytes() {
+        // A gRPC frame whose length bytes read like an ICO header.
+        let frame = [0u8, 0, 1, 0, 4, 8, 1, 16, 2];
+        assert_eq!(kind(Some("application/grpc"), &frame).0, ContentKind::Grpc);
+        assert_eq!(kind(Some("application/x-protobuf"), &png()).0, ContentKind::Protobuf);
     }
 
     fn kind(ct: Option<&str>, body: &[u8]) -> (ContentKind, Option<String>) {

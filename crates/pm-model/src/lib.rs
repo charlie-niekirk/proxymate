@@ -11,6 +11,7 @@ mod filter;
 mod flow;
 mod mcp;
 mod platform;
+mod protobuf;
 mod rules;
 mod scripts;
 mod send;
@@ -30,6 +31,7 @@ pub use filter::{ContentGroup, FilterSpec, ProtocolFilter, SearchScope, SortDir,
 pub use flow::{ContentKind, FlowId, FlowState, FlowSummary, Scheme};
 pub use mcp::{MCP_DEFAULT_PORT, McpAuditEntry, McpAuditPage, McpCallOutcome, McpClient, McpSettings, McpStatus};
 pub use platform::{AppCount, DomainNode, HostCount, KeychainTrust, SidebarSnapshot, SystemProxyStatus, TrustStatus};
+pub use protobuf::{Badge, DecodedBody, DecodedFormat, DecodedMessage, GrpcStatus, ProtoMapping, ProtoSchema};
 pub use rules::{
     Action, AppliedRule, BlockMode, BreakpointBody, BreakpointId, BreakpointInfo, BreakpointResolution, FlowRules,
     GLOBAL_THROTTLE_RULE_ID, KvMatch, MapLocalSource, Matcher, MessageEdits, Pattern, PatternKind, Phase, PresetKind,

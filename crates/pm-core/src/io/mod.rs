@@ -5,6 +5,10 @@
 pub mod content;
 pub mod curl;
 pub mod decode;
+pub mod grpc;
 pub mod har;
+pub mod objects;
 pub mod session;
 pub mod sse;
+pub mod tree;
+pub mod wire;

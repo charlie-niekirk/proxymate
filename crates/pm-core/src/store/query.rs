@@ -12,6 +12,9 @@
 //! - `status:` `404`, `4xx`, `400-499` or a list of those.
 //! - `ct:` a content chip (`json form xml js css graphql document media
 //!   other`) or kind (`html image video font pdf binary …`).
+//!   M16 adds `grpc`, `protobuf`, `msgpack` and `cbor` (under `other`).
+//! - `grpc:` a gRPC status code or name (`0`, `5`, `not_found`, a list);
+//!   `grpc:!0` is any status but those (failed calls).
 //! - `app:` a case-insensitive substring of the client app.
 //! - `state:` `active paused completed failed blocked tunnel`; `is:edited`.
 //! - `dur` (ms, or with `s`), `size` (response), `reqsize`, `id`: compare with
@@ -49,6 +52,8 @@ enum Term {
     Scheme(Vec<Scheme>),
     Status(Vec<(u16, u16)>),
     Content(Vec<ContentKind>),
+    /// gRPC status codes; `true` matches any status *but* these.
+    Grpc(Vec<u8>, bool),
     /// Lower-cased.
     App(Vec<u8>),
     State(Vec<FlowState>),
@@ -83,7 +88,7 @@ enum Cmp {
     Eq,
 }
 
-const KEYS: &str = "host, path, method, scheme, status, ct, app, state, is, dur, size, reqsize, id, header, reqheader, resheader, body, reqbody, resbody";
+const KEYS: &str = "host, path, method, scheme, status, ct, grpc, app, state, is, dur, size, reqsize, id, header, reqheader, resheader, body, reqbody, resbody";
 
 impl FlowQuery {
     /// Parses a query; a term that doesn't parse is an error naming it.
@@ -233,6 +238,22 @@ fn parse_term(token: &Token) -> Result<(bool, Term), String> {
                 .collect::<Result<Vec<_>, _>>()?
                 .concat(),
         ),
+        "grpc" => {
+            let (except, codes) = match value.strip_prefix('!') {
+                Some(rest) => (true, rest),
+                None => (false, value),
+            };
+            Term::Grpc(
+                codes
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())
+                    .map(|c| c.parse::<u8>().ok().or_else(|| crate::io::grpc::code_of_name(c)))
+                    .collect::<Option<_>>()
+                    .ok_or_else(|| bad("grpc takes status codes or names: 0, 5, not_found, !0"))?,
+                except,
+            )
+        }
         "app" | "client" => Term::App(value.to_ascii_lowercase().into_bytes()),
         "state" => Term::State(
             list()
@@ -335,7 +356,7 @@ fn state(s: &str) -> Option<FlowState> {
     })
 }
 
-const ALL_KINDS: [ContentKind; 17] = [
+const ALL_KINDS: [ContentKind; 21] = [
     ContentKind::None,
     ContentKind::Json,
     ContentKind::Xml,
@@ -353,6 +374,10 @@ const ALL_KINDS: [ContentKind; 17] = [
     ContentKind::Font,
     ContentKind::Pdf,
     ContentKind::Binary,
+    ContentKind::Grpc,
+    ContentKind::Protobuf,
+    ContentKind::MessagePack,
+    ContentKind::Cbor,
 ];
 
 /// A chip name covers its group's kinds; a kind name just itself.
@@ -388,6 +413,10 @@ fn content_kinds(name: &str) -> Option<Vec<ContentKind>> {
         "pdf" => ContentKind::Pdf,
         "binary" => ContentKind::Binary,
         "multipart" => ContentKind::Multipart,
+        "grpc" => ContentKind::Grpc,
+        "protobuf" | "proto" | "pb" => ContentKind::Protobuf,
+        "msgpack" | "messagepack" => ContentKind::MessagePack,
+        "cbor" => ContentKind::Cbor,
         "none" => ContentKind::None,
         _ => return None,
     };
@@ -408,6 +437,7 @@ impl Term {
                 .status
                 .is_some_and(|s| ranges.iter().any(|(from, to)| (*from..=*to).contains(&s))),
             Term::Content(kinds) => kinds.contains(&f.content_kind),
+            Term::Grpc(codes, except) => f.grpc_status.is_some_and(|s| codes.contains(&s) != *except),
             Term::App(needle) => f
                 .client
                 .as_deref()
@@ -491,6 +521,7 @@ mod tests {
             graphql_op: None,
             sent_by: None,
             pinned: false,
+            grpc_status: None,
         }
     }
 
@@ -545,6 +576,30 @@ mod tests {
         ] {
             assert!(!matches(q), "{q} should not match");
         }
+    }
+
+    #[test]
+    fn grpc_terms() {
+        let parse = |q: &str| FlowQuery::parse(q).unwrap_or_else(|e| panic!("{q}: {e}"));
+        let mut f = flow();
+        f.content_kind = ContentKind::Grpc;
+        assert!(!parse("grpc:0").matches(&f), "no status yet");
+        assert!(!parse("grpc:!0").matches(&f), "no status yet");
+        assert!(parse("ct:grpc").matches(&f) && parse("ct:other").matches(&f));
+        f.grpc_status = Some(5);
+        for q in ["grpc:5", "grpc:NOT_FOUND", "grpc:0,not_found", "grpc:!0", "-grpc:0"] {
+            assert!(parse(q).matches(&f), "{q} should match");
+        }
+        f.grpc_status = Some(0);
+        for q in ["grpc:ok", "grpc:0"] {
+            assert!(parse(q).matches(&f), "{q} should match");
+        }
+        assert!(!parse("grpc:!0").matches(&f));
+        assert!(FlowQuery::parse("grpc:nope").is_err());
+        assert!(parse("ct:msgpack,cbor,protobuf").matches(&FlowSummary {
+            content_kind: ContentKind::Cbor,
+            ..flow()
+        }));
     }
 
     #[test]

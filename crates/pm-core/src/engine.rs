@@ -23,6 +23,7 @@ use crate::ingest::{self, FlowEvent, IngestTx};
 use crate::integration::Platform;
 use crate::io::{decode, sse};
 use crate::mcp::McpState;
+use crate::protos::Protos;
 use crate::proxy::{self, ProxyConfig, ProxyHandle};
 use crate::recorder::{FlowRecorder, is_event_stream};
 use crate::rules::Rules;
@@ -94,6 +95,8 @@ pub struct Engine {
     pub(crate) settings: Settings,
     /// Opened sessions and HAR imports.
     pub(crate) docs: Documents,
+    /// Protobuf schemas, "Decode as…" mappings and decoded bodies.
+    pub(crate) protos: Protos,
     /// `Engine::send`'s client, made on first use.
     pub(crate) sender: OnceLock<proxy::Sender>,
     /// Held while the listener is moved (port change, LAN access), so two
@@ -125,6 +128,7 @@ impl Engine {
         let mcp = McpState::load(config.data_dir.as_deref());
         let devices = DeviceRegistry::load(config.data_dir.as_deref(), devices::HOLD);
         let app_settings = Settings::load(config.data_dir.as_deref());
+        let protos = Protos::load(config.data_dir.as_deref());
         let root = config
             .data_dir
             .unwrap_or_else(|| std::env::temp_dir().join("proxymate"));
@@ -170,6 +174,7 @@ impl Engine {
             mcp,
             settings: app_settings,
             docs: Documents::default(),
+            protos,
             sender: OnceLock::new(),
             restart: tokio::sync::Mutex::new(()),
         });

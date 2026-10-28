@@ -1,5 +1,5 @@
-//! A body wrapper that hands every data frame to the flow recorder as it
-//! passes through. Frames are forwarded unchanged and immediately, so
+//! A body wrapper that hands every data frame (and trailers) to the flow
+//! recorder as it passes through. Frames are forwarded unchanged and immediately, so
 //! streaming responses (SSE, LLM tokens) stay live end to end.
 
 use std::pin::Pin;
@@ -51,8 +51,12 @@ where
         let frame = ready!(Pin::new(&mut this.inner).poll_frame(cx));
         match &frame {
             Some(Ok(frame)) => {
-                if let (Some(tap), Some(data)) = (&this.tap, frame.data_ref()) {
-                    tap.recorder.body_data(tap.part, data);
+                if let Some(tap) = &this.tap {
+                    if let Some(data) = frame.data_ref() {
+                        tap.recorder.body_data(tap.part, data);
+                    } else if let Some(trailers) = frame.trailers_ref() {
+                        tap.recorder.trailers(tap.part, trailers);
+                    }
                 }
             }
             Some(Err(err)) => this.end(BodyEnd::Error(err.to_string())),

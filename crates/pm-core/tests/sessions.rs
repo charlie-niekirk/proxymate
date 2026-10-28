@@ -98,6 +98,7 @@ fn record(engine: &Arc<Engine>, n: usize) {
             tls: None,
             timing: Timing::default(),
             rules: Default::default(),
+            trailers: None,
         };
         let recorder = engine.begin_flow(summary, detail).expect("recording");
         let (request, response) = body_for(i);

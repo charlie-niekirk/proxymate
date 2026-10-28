@@ -453,6 +453,7 @@ fn record_connect(
         graphql_op: None,
         sent_by: None,
         pinned: false,
+        grpc_status: None,
     };
     let detail = FlowDetail {
         id: 0,
@@ -464,6 +465,7 @@ fn record_connect(
         tls: tls_info,
         timing: Timing::default(),
         rules: Default::default(),
+        trailers: None,
     };
     target.peer.begin_flow(engine, summary, detail)
 }
