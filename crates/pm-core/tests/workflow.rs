@@ -134,7 +134,8 @@ fn deleting_flows_frees_segments_no_kept_flow_uses() {
     assert!(after < before - 128 * 1024 * 1024, "{after} of {before}");
     let kept = engine.body(100, BodyPart::Response, false).unwrap();
     assert_eq!(kept.bytes.len(), 2 * 1024 * 1024);
-    assert_eq!(kept.bytes[0], (100 % 251) as u8);
+    // Flow 100's body is filled with its id (below 251).
+    assert_eq!(kept.bytes[0], 100);
 
     // A whole view, but for the exceptions.
     let view = engine.create_view(FilterSpec::default(), SortSpec::default()).view;

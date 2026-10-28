@@ -38,7 +38,7 @@ Run these from the repo root unless noted.
 | TLS test upstream (h2 + h1) | `cargo run -p pm-testkit --bin upstream -- --tls` prints its port and CA file. Start the app with `PROXYMATE_EXTRA_UPSTREAM_CA=<that file>`, then `curl -x http://127.0.0.1:9090 --cacert ~/Library/Application\ Support/Proxymate/ca/proxymate-ca.pem https://localhost:<port>/json --http2 -v` |
 | Rewrite dialog in the browser UI | `npm run dev`, then `http://localhost:1420/?zoo&select=0&rewrite=0`. In the app with `VITE_PM_REMOTE=1`: `{"rewrite":{"flow":3}}`, then `{"rewriteEdit":{"side":"response","json":[{"set":"/a","raw":"1"}],"save":true}}` (see `src/dev/remote.ts`) |
 | Open the app on a response tab | `VITE_PM_RESPONSE_TAB=TLS` (or `Timing`, …), for screenshots from a shell |
-| Drive the app from a shell | Start with `VITE_PM_REMOTE=1`, then `curl -d '{"select":3,"requestTab":"Body"}' localhost:1420/__pm_remote` (also `responseTab`, `viewer: {kind, viewer}`, `theme`; M8: `replay`, `editReplay`, `compose`, `composeSend`, `store`, `openDocument`, `saveSession`, `exportHar`, and `curl`, whose answer is at `/__pm_remote/out`; M14: `scripts`, `scriptTemplate`, `scriptSource`, `saveScript`, `testScript`; M15: `{"contextMenu":{"testid":"request-headers","row":1}}` right-clicks any element). See `src/dev/remote.ts` |
+| Drive the app from a shell | Start with `VITE_PM_REMOTE=1`, then `curl -d '{"select":3,"requestTab":"Body"}' localhost:1420/__pm_remote` (also `responseTab`, `viewer: {kind, viewer}`, `theme`; M8: `replay`, `editReplay`, `compose`, `composeSend`, `store`, `openDocument`, `saveSession`, `exportHar`, and `curl`, whose answer is at `/__pm_remote/out`; M14: `scripts`, `scriptTemplate`, `scriptSource`, `saveScript`, `testScript`; M15: `{"contextMenu":{"testid":"request-headers","row":1}}` right-clicks any element; M17: `selectIds`, `selectAll`, `label`, `comment`, `headerColumns`, `compare`, `repeat`, `code`, `deleteSelection`). See `src/dev/remote.ts` |
 | gRPC upstream (M16) | `cargo run -p pm-testkit --bin upstream -- --grpc [PORT]` (tonic, TLS, `shop.v1.Orders`; prints its CA). Start the app with `PROXYMATE_EXTRA_UPSTREAM_CA=<that file>`, then `HTTPS_PROXY=http://127.0.0.1:9090 grpcurl -cacert ~/Library/Application\ Support/Proxymate/ca/proxymate-ca.pem -import-path crates/pm-testkit/proto -proto shop.proto -d '{"id":"o1"}' localhost.:<port> shop.v1.Orders/GetOrder` (`localhost.`: Go never proxies `localhost`) |
 | Regenerate the zoo's binary fixtures and their decoded output | `UPDATE_ZOO=1 cargo test -p pm-testkit zoo` then `UPDATE_ZOO=1 cargo test -p pm-core --test zoo` |
 | Body-viewer zoo through the proxy | `cargo run -p pm-testkit --bin upstream -- --zoo [127.0.0.1:9090]` sends one flow per fixture in `crates/pm-testkit/fixtures/zoo/` |
@@ -77,7 +77,8 @@ crates/pm-core       headless Engine: proxy/ (h1 forward proxy, mitm.rs: CONNECT
                      HARs), replay, client (loopback peer → app), trust (handshake check), integration (the OS-facing
                      Engine methods), rules/, scripts/ (M14: QuickJS workers, prelude.js, native.rs, proxymate.d.ts), synth,
                      protos.rs (M16: schemas, mappings, Engine::decode_body_in), io/grpc.rs (framing, status), io/wire.rs
-                     (schema-less protobuf), io/objects.rs (MessagePack, CBOR), io/tree.rs (ordered JSON + badges)
+                     (schema-less protobuf), io/objects.rs (MessagePack, CBOR), io/tree.rs (ordered JSON + badges),
+                     workflow.rs (M17: delete, annotations, header columns, Repeat), io/snippets.rs (Copy as code)
 crates/pm-platform   OS integration traits; macos/ impls, stub.rs elsewhere: fs (private files), sysproxy (backup +
                      restore over a ProxyBackend; networksetup), trust (keychain), procinfo (libproc port scan, app
                      bundles, icons), process (kqueue exit wait), netif (if-addrs), simctl and adb (over a
@@ -224,8 +225,8 @@ Targets:
 **Replay, cURL, HAR and sessions (M8)**
 - `Engine::send(RequestSpec, SendOpts)` is the one way Proxymate sends a request itself (Replay, Compose, MCP). It goes through `proxy/exchange.rs` like proxied traffic; the flow's summary gets `sent_by`.
 - Flow ids are per store. The live capture is `LIVE_STORE` (0); every opened session or HAR is a document store. Flow-level Engine methods have `*_in(store, …)` forms (the live-only ones stay for existing callers); view ids already encode their store. UI code reads the active store from `useUi().store` and puts it in query keys (`flowKey(store, id)`).
-- Golden files are in `crates/pm-core/tests/golden/` (cURL and HAR); rewrite them with `UPDATE_GOLDEN=1 cargo test -p pm-core --lib io::`. The Chrome HAR fixture is `crates/pm-core/tests/fixtures/chrome-devtools.har`.
-- A session's postcard layouts are part of its format: bump `store/sqlite.rs` `VERSION` when `FlowDetail` or the message types change shape. Version 3 (M16) still reads versions 2 and 1 (`tests/fixtures/session-v1.proxymate`; `a_version_2_session_still_opens` makes a v2 file from a v3 one).
+- Golden files are in `crates/pm-core/tests/golden/` (cURL, HAR and M17's `snippets/`); rewrite them with `UPDATE_GOLDEN=1 cargo test -p pm-core --lib io::`. The Chrome HAR fixture is `crates/pm-core/tests/fixtures/chrome-devtools.har`.
+- A session's postcard layouts are part of its format: bump `store/sqlite.rs` `VERSION` when `FlowDetail` or the message types change shape. Version 4 (M17: the `annotations` table) and version 3 (M16) still read versions 2 and 1 (`tests/fixtures/session-v1.proxymate`; `a_version_2_session_still_opens` makes a v2 file from a v3 one).
 - postcard can't deserialize internally tagged enums (`#[serde(tag = …)]`). Anything inside `FlowDetail` must not be one, or must serialize by hand like `RuleOrigin`.
 
 **Visual rewrite (M13)**
@@ -241,3 +242,12 @@ Targets:
 - Schemas live compiled in `app.sqlite` (`proto_schemas`); mappings are the `proto_mappings` settings row. Any change goes through `Protos::reload`, which bumps the generation the decode cache keys on.
 - `.proto` files compile with `protox` (no `protoc`), in the app and in pm-testkit's `build.rs`. Tests import `pm_testkit::grpc::SHOP_PROTO` with `ProtoImport::Sources`.
 - Trailers-only gRPC responses carry `grpc-status` in the response headers and have no trailers; read the status with `io::grpc::status_code` on the trailers, then the headers.
+
+**Workflow (M17)**
+- The table's selection is flow ids (`lib/selection.ts`: ids, or a whole view with exceptions), never positions. Bulk actions take it as a `FlowSelection` (`currentSelection()` in `lib/actions.ts`); `Engine::selected_ids` resolves one in any store.
+- `extra` is `FlowRow`'s last field (header column values); `label` and `comment` come before it. New row fields go before `extra`, with `decodeRow` and its test.
+- Labels, comments and pins of the live store go through ingest; a document's are applied to its store directly. Session format 4 keeps them in `annotations`; a new annotation is a new column there, not a `FlowDetail` change.
+- Header columns are global: `Engine::set_header_columns` bumps a generation, recorders send values for new flows (`Engine::header_cells`) and a background thread backfills the rest. Never write a value without the generation it belongs to.
+- `remove_flows_in` frees segments by their oldest and newest writer (`SegmentStore::in_use_through`); every `append` must still name its flow.
+- Copy as code renders a `RequestSpec` in `io/snippets.rs`; add a language there, in `CodeLanguage` (after the last variant), in `CODE_LANGUAGES` (`lib/flow.ts`) and a golden directory.
+- `Engine::repeat` sends through `Engine::send`; anything that sends many requests should too, so rules, recording and `sent_by` stay consistent.

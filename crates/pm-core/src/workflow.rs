@@ -13,7 +13,7 @@ use pm_model::{
     RepeatId, RepeatOpts, RepeatProgress, RequestSpec, SendOpts, SendOrigin, StatusCount, StoreId,
 };
 
-use crate::ingest::FlowEvent;
+use crate::ingest::{ExtraCells, FlowEvent};
 use crate::io::snippets;
 use crate::store::{BlobBackend, Store};
 use crate::{Engine, Error};
@@ -420,11 +420,7 @@ fn cells(
 
 /// Values found for `ids` (only the headers present, so a backfill never
 /// clears what a recorder set meanwhile).
-fn backfill_cells(
-    backend: &dyn BlobBackend,
-    columns: &[HeaderColumn],
-    ids: &[FlowId],
-) -> Vec<(FlowId, Vec<(u8, Option<Arc<str>>)>)> {
+fn backfill_cells(backend: &dyn BlobBackend, columns: &[HeaderColumn], ids: &[FlowId]) -> Vec<ExtraCells> {
     use rayon::prelude::*;
     ids.par_iter()
         .filter_map(|&id| {

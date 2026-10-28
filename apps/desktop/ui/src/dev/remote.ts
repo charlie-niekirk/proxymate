@@ -1,9 +1,21 @@
-import type { ContentKind, MessageEdits_Deserialize, PresetKind, RequestSpec_Serialize } from "@/bindings";
+import type {
+  CodeLanguage,
+  ContentKind,
+  FlowLabel,
+  HeaderColumn,
+  MessageEdits_Deserialize,
+  PresetKind,
+  RequestSpec_Serialize,
+} from "@/bindings";
+import { headerColumnId } from "@/components/FlowTable/columns";
 import type { ViewerId } from "@/components/BodyViewer/registry";
 import { bridge } from "@/dev/bridge";
 import { backend } from "@/lib/backend";
 import {
   closeDocument,
+  commentFlow,
+  deleteSelection,
+  labelSelection,
   editAndReplay,
   exportHar,
   openDocument,
@@ -15,6 +27,7 @@ import {
 } from "@/lib/actions";
 import { decodedRootKey, protoSchemasKey, protoTypesKey, queryClient } from "@/lib/query";
 import { normalizeRule, THROTTLE_PRESETS } from "@/lib/rules";
+import { range } from "@/lib/selection";
 import type { PointerEdit } from "@/components/Rewrite/RewriteDialog";
 import { TEMPLATES, newScript } from "@/lib/scripts";
 import { forceTheme } from "@/lib/theme";
@@ -68,6 +81,14 @@ import { useUi, type DeviceTab, type RequestTab, type ResponseTab, type Settings
  * - M16: `{"importProto": ["/path/shop.proto"]}` imports a schema (as
  *   Settings › Protobuf does, without its file dialog); `{"removeProto": 1}`
  *   removes one. Either posts the schema list to the outbox.
+ * - M17: `{"selectIds": [3, 5, 9]}` selects those flows (the last focused),
+ *   `{"selectAll": true}`; `{"label": "red"}` labels the selection (`null`
+ *   removes it); `{"comment": {"flow": 3, "text": "…"}}`;
+ *   `{"headerColumns": [{"part": "response", "name": "x-trace"}]}` replaces
+ *   the header columns; `{"compare": [3, 5]}` opens Compare on two flows of
+ *   the active tab; `{"repeat": 3}` opens Repeat on flow 3;
+ *   `{"code": {"flow": 3, "language": "python"}}` posts Copy as code's text
+ *   to the outbox; `{"deleteSelection": true}` deletes the selection.
  * - M14: `{"scripts": true}` / `false` opens or closes the Scripts window;
  *   `{"scripts": "<id>"}` opens it on that script;
  *   `{"scriptTemplate": "decode-base64-json"}` opens a new script from a
@@ -133,12 +154,23 @@ interface Command {
   saveSession?: string;
   exportHar?: string;
   importProto?: string[];
+  selectIds?: number[];
+  selectAll?: boolean;
+  label?: FlowLabel | null;
+  comment?: { flow: number; text: string };
+  headerColumns?: HeaderColumn[];
+  compare?: [number, number];
+  repeat?: number;
+  code?: { flow: number; language: CodeLanguage };
+  deleteSelection?: boolean;
   removeProto?: number;
 }
 
 async function apply(cmd: Command) {
   const ui = useUi.getState();
   if (cmd.select !== undefined) ui.select(cmd.select);
+  if (cmd.selectIds) ui.setSelection(range(cmd.selectIds), cmd.selectIds.at(-1) ?? null);
+  if (cmd.selectAll) ui.setSelection({ all: true, ids: new Set() });
   if (cmd.requestTab) ui.setRequestTab(cmd.requestTab);
   if (cmd.responseTab) ui.setResponseTab(cmd.responseTab);
   if (cmd.viewer) ui.setViewer(cmd.viewer.kind, cmd.viewer.viewer);
@@ -222,6 +254,17 @@ async function apply(cmd: Command) {
   if (cmd.curl !== undefined) await post("/__pm_remote/out", await backend.getCurl(store, cmd.curl));
   if (cmd.saveSession) await saveSession({ kind: "all" }, cmd.saveSession);
   if (cmd.exportHar) await exportHar(undefined, cmd.exportHar);
+  if (cmd.label !== undefined) await labelSelection(cmd.label);
+  if (cmd.comment) await commentFlow(store, cmd.comment.flow, cmd.comment.text);
+  if (cmd.headerColumns) {
+    const prefs = usePrefs.getState();
+    for (const c of prefs.headerColumns) prefs.removeHeaderColumn(headerColumnId(c));
+    for (const c of cmd.headerColumns) usePrefs.getState().addHeaderColumn(c);
+  }
+  if (cmd.compare) ui.openCompare({ store, id: cmd.compare[0] }, { store, id: cmd.compare[1] });
+  if (cmd.repeat !== undefined) ui.openRepeat(store, cmd.repeat);
+  if (cmd.code) await post("/__pm_remote/out", await backend.getCode(store, cmd.code.flow, cmd.code.language));
+  if (cmd.deleteSelection) await deleteSelection();
   if (cmd.importProto || cmd.removeProto !== undefined) {
     if (cmd.importProto) await backend.importProtoSchema(cmd.importProto);
     if (cmd.removeProto !== undefined) await backend.removeProtoSchema(cmd.removeProto);

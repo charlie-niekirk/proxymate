@@ -19,6 +19,9 @@ const BATCH_WINDOW: Duration = Duration::from_millis(5);
 /// ...or once it holds this many events.
 const BATCH_MAX: usize = 50_000;
 
+/// One flow's header column values: `(column, value)` pairs (M17).
+pub(crate) type ExtraCells = (FlowId, Vec<(u8, Option<Arc<str>>)>);
+
 /// A change to the summary arena. Body bytes never travel here.
 pub(crate) enum FlowEvent {
     Started(FlowSummary),
@@ -89,7 +92,7 @@ pub(crate) enum FlowEvent {
     /// Ignored unless `generation` is the store's current column set.
     Extra {
         generation: u32,
-        values: Vec<(FlowId, Vec<(u8, Option<Arc<str>>)>)>,
+        values: Vec<ExtraCells>,
     },
     /// The header columns changed (M17): every flow's values are dropped
     /// until they are filled again for `generation`.

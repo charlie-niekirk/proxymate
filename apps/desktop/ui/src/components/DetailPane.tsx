@@ -105,6 +105,25 @@ export function DetailPane() {
           {(flow.tls === "intercepted" || flow.tls === "likely_pinned") && <BypassButton host={flow.host} compact />}
         </div>
       </UrlBarMenu>
+      {(flow.label || flow.comment) && (
+        <button
+          type="button"
+          className="hover:bg-accent/50 flex h-6 shrink-0 items-center gap-2 border-b px-2 text-left text-xs"
+          onClick={() => useUi.getState().openComment(store, flow.id)}
+          title="Edit the comment"
+          data-testid="flow-notes"
+        >
+          {flow.label && (
+            <span
+              className="rounded-sm px-1.5 text-[11px] leading-4 font-medium capitalize"
+              style={{ color: `var(--label-${flow.label})`, background: `var(--label-${flow.label}-bg)` }}
+            >
+              {flow.label}
+            </span>
+          )}
+          {flow.comment && <span className="text-muted-foreground min-w-0 truncate">{flow.comment}</span>}
+        </button>
+      )}
       {detail && <RuleBadges rules={detail.rules} />}
       {flow.tls === "likely_pinned" && (
         <div
