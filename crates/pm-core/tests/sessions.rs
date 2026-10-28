@@ -378,3 +378,51 @@ fn a_version_1_session_still_opens() {
     let health = engine.flow_detail_in(doc.store, 1).unwrap().unwrap();
     assert_eq!(health.response.unwrap().status, 200);
 }
+
+/// A session saved by M14–M15 (format version 2, before
+/// `FlowDetail.trailers` and the `grpc_status` column) still opens. Made
+/// here by taking those back out of a version 3 file.
+#[test]
+fn a_version_2_session_still_opens() {
+    let dir = temp_dir();
+    let engine = engine(&dir);
+    record(&engine, 3);
+    let path = dir.join("v2.proxymate");
+    let (total, _) = finish(|sink| {
+        engine
+            .save_session(LIVE_STORE, &FlowSelection::All, path.clone(), sink)
+            .unwrap()
+    });
+    assert_eq!(total, 3);
+    {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        let details: Vec<(i64, Vec<u8>)> = conn
+            .prepare("SELECT id, detail FROM flows")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        for (id, mut detail) in details {
+            // `trailers: None` is the last byte.
+            assert_eq!(detail.pop(), Some(0));
+            conn.execute(
+                "UPDATE flows SET detail = ?1 WHERE id = ?2",
+                rusqlite::params![detail, id],
+            )
+            .unwrap();
+        }
+        conn.execute_batch(
+            "ALTER TABLE flows DROP COLUMN grpc_status; UPDATE meta SET value = '2' WHERE key = 'version';",
+        )
+        .unwrap();
+    }
+    let doc = engine.open_document(&path).expect("a v2 session opens");
+    assert_eq!(doc.flows, 3);
+    let flow = engine.get_flow_in(doc.store, 1).unwrap();
+    assert_eq!(flow.grpc_status, None);
+    let detail = engine.flow_detail_in(doc.store, 1).unwrap().unwrap();
+    assert_eq!(detail.request.headers[0].value, "1");
+    assert_eq!(detail.trailers, None);
+    let _ = std::fs::remove_dir_all(dir);
+}

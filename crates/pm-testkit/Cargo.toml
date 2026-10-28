@@ -11,7 +11,7 @@ pm-core.workspace = true
 pm-model.workspace = true
 tokio = { workspace = true, features = ["signal"] }
 hyper.workspace = true
-hyper-util.workspace = true
+hyper-util = { workspace = true, features = ["service", "server"] }
 http.workspace = true
 http-body.workspace = true
 http-body-util.workspace = true
@@ -26,6 +26,23 @@ tokio-rustls.workspace = true
 rcgen.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# The gRPC upstream (M16). Generated from proto/shop.proto by protox, so no
+# `protoc` is needed.
+tonic = { version = "0.14", default-features = false, features = ["codegen", "gzip", "zstd"] }
+tonic-prost = "0.14"
+tonic-web = "0.14"
+prost = "0.14"
+prost-types = "0.14"
+tower = { version = "0.5", default-features = false, features = ["util"] }
+base64 = "0.23"
+
+[dev-dependencies]
+rmpv = "1.3"
+ciborium = "0.2"
+
+[build-dependencies]
+tonic-prost-build = { version = "0.14", default-features = false }
+protox = "0.10"
 
 [lints]
 workspace = true

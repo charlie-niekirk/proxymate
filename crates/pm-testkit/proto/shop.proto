@@ -1,0 +1,45 @@
+// The pm-testkit gRPC upstream (M16): `cargo run -p pm-testkit --bin
+// upstream -- --grpc`. Import this file in Proxymate to see the calls
+// decoded with a schema.
+syntax = "proto3";
+
+package shop.v1;
+
+import "google/protobuf/timestamp.proto";
+
+service Orders {
+  // Unary. The id "missing" fails with NOT_FOUND and status details.
+  rpc GetOrder(GetOrderRequest) returns (Order);
+  // Server streaming: `count` orders, `interval_ms` apart.
+  rpc ListOrders(ListOrdersRequest) returns (stream Order);
+}
+
+message GetOrderRequest {
+  string id = 1;
+}
+
+message ListOrdersRequest {
+  uint32 count = 1;
+  uint32 interval_ms = 2;
+}
+
+message Order {
+  enum State {
+    STATE_UNSPECIFIED = 0;
+    PLACED = 1;
+    SHIPPED = 2;
+  }
+  string id = 1;
+  // Past 2^53, so it only stays exact as a string.
+  int64 total_cents = 2;
+  repeated LineItem items = 3;
+  State state = 4;
+  google.protobuf.Timestamp placed_at = 5;
+  bytes token = 6;
+  double rating = 7;
+}
+
+message LineItem {
+  string sku = 1;
+  uint32 quantity = 2;
+}
