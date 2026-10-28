@@ -63,7 +63,10 @@ export function BodyViewer({
 }) {
   const contentType = headerValue(headers, "content-type") ?? null;
   // Flows recorded before detection ran (or still streaming) fall back to the header.
-  const kind: ContentKind = info.kind !== "none" ? info.kind : info.size > 0 ? fallbackKind(contentType) : "none";
+  // A trailers-only gRPC response has no body but still has a status to show.
+  const grpcHeader = kindFromContentType(contentType) === "grpc";
+  const kind: ContentKind =
+    info.kind !== "none" ? info.kind : info.size > 0 || (grpcHeader && part === "response") ? fallbackKind(contentType) : "none";
   const preferred = useUi((s) => s.viewerByKind[kind]);
   const store = useUi((s) => s.store);
   const setViewer = useUi((s) => s.setViewer);
@@ -112,7 +115,9 @@ export function BodyViewer({
       );
     }
   }
-  if (info.size === 0 && options.length === 0) return <Centered>{finished ? "No body" : "Waiting for body…"}</Centered>;
+  if (info.size === 0 && options.length === 0 && !(kind === "grpc" && part === "response")) {
+    return <Centered>{finished ? "No body" : "Waiting for body…"}</Centered>;
+  }
   // Decoded viewers show a gRPC stream as it arrives.
   if (!finished && def.source !== "decoded") return <Centered>Body streaming · {formatSize(info.size)} so far</Centered>;
 

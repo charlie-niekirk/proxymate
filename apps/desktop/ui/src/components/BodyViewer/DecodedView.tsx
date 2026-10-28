@@ -140,7 +140,7 @@ function MessageList({
         >
           <span className="text-muted-foreground w-8 shrink-0 tabular-nums">#{m.index + 1}</span>
           <span className="text-muted-foreground w-14 shrink-0 text-right tabular-nums">{formatSize(m.size)}</span>
-          <span className="flex w-24 shrink-0 gap-1 font-sans text-[10px]">
+          <span className="flex w-40 shrink-0 gap-1 font-sans text-[10px] whitespace-nowrap">
             {m.compressed && <Tag>compressed</Tag>}
             {m.schema_less && <Tag>schema-less</Tag>}
             {m.error && !m.schema_less && <Tag warn>error</Tag>}

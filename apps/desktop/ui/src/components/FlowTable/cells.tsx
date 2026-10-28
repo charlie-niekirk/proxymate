@@ -44,11 +44,11 @@ export function StatusPill({
       : pillStyle(`s-${token}`);
   return (
     <span
-      className={cn(pillBase, token === "active" && "animate-pulse", grpc !== null && "truncate", className)}
+      className={cn(pillBase, token === "active" && "animate-pulse", grpc !== null && "max-w-full", className)}
       style={style}
       title={grpc !== null && status !== null ? `gRPC ${statusLabel(status, state, grpc)} (${grpc}) · HTTP ${status}` : undefined}
     >
-      {statusLabel(status, state, grpc)}
+      {grpc !== null ? <span className="truncate">{statusLabel(status, state, grpc)}</span> : statusLabel(status, state)}
     </span>
   );
 }

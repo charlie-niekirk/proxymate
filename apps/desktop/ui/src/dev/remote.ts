@@ -13,6 +13,7 @@ import {
   saveSession,
   setThrottle,
 } from "@/lib/actions";
+import { decodedRootKey, protoSchemasKey, protoTypesKey, queryClient } from "@/lib/query";
 import { normalizeRule, THROTTLE_PRESETS } from "@/lib/rules";
 import type { PointerEdit } from "@/components/Rewrite/RewriteDialog";
 import { TEMPLATES, newScript } from "@/lib/scripts";
@@ -64,6 +65,9 @@ import { useUi, type DeviceTab, type RequestTab, type ResponseTab, type Settings
  * - `{"openDocument": "/path/x.har"}`, `{"closeDocument": 1}`.
  * - `{"saveSession": "/path/x.proxymate"}` saves the active tab;
  *   `{"exportHar": "/path/x.har"}` exports what the table shows.
+ * - M16: `{"importProto": ["/path/shop.proto"]}` imports a schema (as
+ *   Settings › Protobuf does, without its file dialog); `{"removeProto": 1}`
+ *   removes one. Either posts the schema list to the outbox.
  * - M14: `{"scripts": true}` / `false` opens or closes the Scripts window;
  *   `{"scripts": "<id>"}` opens it on that script;
  *   `{"scriptTemplate": "decode-base64-json"}` opens a new script from a
@@ -128,6 +132,8 @@ interface Command {
   closeDocument?: number;
   saveSession?: string;
   exportHar?: string;
+  importProto?: string[];
+  removeProto?: number;
 }
 
 async function apply(cmd: Command) {
@@ -216,6 +222,12 @@ async function apply(cmd: Command) {
   if (cmd.curl !== undefined) await post("/__pm_remote/out", await backend.getCurl(store, cmd.curl));
   if (cmd.saveSession) await saveSession({ kind: "all" }, cmd.saveSession);
   if (cmd.exportHar) await exportHar(undefined, cmd.exportHar);
+  if (cmd.importProto || cmd.removeProto !== undefined) {
+    if (cmd.importProto) await backend.importProtoSchema(cmd.importProto);
+    if (cmd.removeProto !== undefined) await backend.removeProtoSchema(cmd.removeProto);
+    for (const queryKey of [protoSchemasKey, protoTypesKey, decodedRootKey]) await queryClient.invalidateQueries({ queryKey });
+    await post("/__pm_remote/out", JSON.stringify(await backend.listProtoSchemas()));
+  }
 }
 
 async function savedRule(id: string) {
