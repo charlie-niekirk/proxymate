@@ -440,6 +440,7 @@ The details, secrets and key rotation are in `docs/RELEASING.md`.
   - By default milestones run sequentially: each starts after the previous PR is merged.
   - Once M2 is merged, M3 (body viewers), M4 (macOS integration) and M6 (WebSockets) touch mostly separate areas and may run as parallel sessions if desired.
   - M5 (rules) must precede M7 (MCP write tools).
+  - After M15 the order is M16, M17, M18, M19, M20, M21 (see "Post-M15 roadmap"). M12 is independent of all of them and can land at any point.
 - **Kickoff prompt per session:** "Implement milestone MN from docs/PLAN.md in this repo. Branch from main as `mN-<slug>`, follow CLAUDE.md, meet the milestone's Done criteria, and open a PR."
 
 ## Milestones (each is one session and one PR, and ends with something you can demo)
@@ -461,6 +462,12 @@ The details, secrets and key rotation are in `docs/RELEASING.md`.
 | M13 | `m13-visual-rewrite` | Interactive rewrite: editable JSON tree plus header/query/form/GraphQL editors, with diff → actions, an exact JSON splicer, and the Rewrite dialog (see "M13" below) | Edit a captured flow, save it, replay it: only the changed paths are patched |
 | M14 | `m14-scripting` | JavaScript scripts on QuickJS: view, rewrite and mock scripts, the Scripts window, script views in the inspector, MCP script tools, session format 2 | A base64 JSON field shows decoded in the inspector on live and saved flows; script errors show while flows pass; timeouts and memory limits hold |
 | M15 | `m15-context-menus` | Right-click menus with copy actions on every surface that shows data (see "Context menus (M15)"), one clipboard helper with toasts, the native-menu policy | Header, URL, body, hex, flow-cell, WebSocket, MCP-token and rule-row menus copy the right text (`e2e/menus.spec.ts`); copy formats unit-tested; a release build shows no native menu on blank space |
+| M16 | `m16-protobuf-grpc` | gRPC and gRPC-web framing and trailers, schema-less protobuf decoding, `.proto`/descriptor schemas, MessagePack and CBOR viewers (see "M16") | `grpcurl` through the proxy shows decoded unary and streaming calls with and without a schema, and the gRPC status; zoo snapshots for protobuf, MessagePack and CBOR |
+| M17 | `m17-workflow` | Multi-select and bulk actions, delete flows, labels and comments (kept in sessions, with pins), header columns, Compare two flows, copy as code, Repeat with iterations, search highlighting in bodies (see "M17") | e2e for multi-select, labels, header columns and Compare; golden files per code language; a 1,000-iteration repeat reports the right counts |
+| M18 | `m18-network` | Upstream proxies (HTTP and SOCKS5, per host, with auth), a SOCKS5 listener, reverse proxies, client certificates, DNS overrides, Settings › Network (see "M18") | curl through Proxymate chained to a testkit proxy, `curl --socks5-hostname`, a reverse proxy on a local port, an mTLS upstream and a DNS override, all as integration tests |
+| M19 | `m19-websocket-rules` | Rules on WebSocket handshakes, message actions (rewrite, drop, delay), message breakpoints, sending and resending messages, `onWsMessage` scripts (see "M19") | Against the testkit echo: a rule rewrites a JSON field in text messages, a breakpoint edits one, the UI and MCP inject one, order is kept |
+| M20 | `m20-offline-mocking` | Serve from a recorded session or HAR, Charles session import, OpenAPI import (operation labels and mock rules) (see "M20") | Record against the testkit upstream, stop it, "Mock from session" answers the same; the Charles fixtures import; the Petstore spec's rules answer |
+| M21 | `m21-capture-targets` | Intercepted terminal and browser launchers, recording allow/block lists, No Caching and Block Cookies toggles, auto-save (see "M21") | A launched Chrome decrypts without keychain trust; node, python and curl in the launched terminal decrypt; a never-recorded host makes no flow; an auto-saved session opens |
 
 ## Post-v1 milestones: M13 visual rewrite and M14 scripting
 
@@ -526,6 +533,96 @@ The user asked for two features beyond v1:
 
 ### M14: Scripting (`m14-scripting`)
 The design as built is "Scripting (M14)" above (with the rules evaluation order, session format 2 and the MCP script tools in their sections).
+
+## Post-M15 roadmap: M16–M21
+
+### Context
+After v0.3.0 the user asked for a feature audit against Proxyman, Charles, HTTP Toolkit, mitmproxy and Fiddler (a Proxymate mobile app is out of scope). Proxymate already leads on table and filter performance, the depth of its MCP server, lossless JSON rewrites and deep search. The gaps fell into six groups, which the user put in this order: protobuf and gRPC (M16), everyday workflow (M17), network plumbing (M18), WebSocket rules (M19), offline mocking (M20), capture targets and noise (M21). M12 (Linux and Windows) stays as planned and is independent of all six.
+
+**Rules that apply to every milestone here:**
+- New `Action` variants go after `Script`. That changes the postcard `FlowDetail`, so bump the session `VERSION` in `store/sqlite.rs` (each milestone takes the next one; every older version still opens) and move CLAUDE.md's "last variant" note.
+- New `ContentKind` variants go after `Binary`, for the same reason (`BodyInfo.kind` is in the detail).
+- New `FlowRow` fields are appended, with `decodeRow` and its test updated.
+- New settings are `app.sqlite` rows owned by `pm-core/src/settings.rs`, with a Settings section and Engine methods; adapters still call only `Engine`.
+
+### M16: Protobuf and gRPC (`m16-protobuf-grpc`)
+- **Detection (`io/content.rs`).** New kinds after `Binary`: `Grpc` (`application/grpc`, `+proto`, and `application/grpc-web`, `+proto`, `-text`), `Protobuf` (`application/x-protobuf`, `application/protobuf`, `application/vnd.google.protobuf`), `MessagePack` (`application/msgpack`, `x-msgpack`) and `Cbor` (`application/cbor`). They get filter chips under Other and DSL `ct:` names.
+- **gRPC framing.** A body is split into length-prefixed messages (1-byte compressed flag, 4-byte length). Each message is decompressed according to `grpc-encoding` (identity, gzip, deflate, zstd). For gRPC-web, `-text` bodies are base64-decoded first, and the trailer frame (flag `0x80`) is parsed in place of HTTP trailers. Streaming calls are split as their bytes arrive, so server streams stay live like SSE.
+- **Trailers.** HTTP/2 response trailers are recorded in `FlowDetail`, at the end, so the session `VERSION` bumps. `grpc-status`, a percent-decoded `grpc-message` and `grpc-status-details-bin` (decoded as `google.rpc.Status`) are shown. `FlowSummary.grpc_status` (an appended `FlowRow` field) lets the Status pill read `OK` or `NOT_FOUND`, and adds a DSL `grpc:` term (`grpc:!0` for failures).
+- **Schema-less decoding.** The protobuf wire format is decoded to a tree of field numbers, wire types and values: varint as signed or unsigned, fixed32/64 as numbers and floats, and length-delimited fields tried as a nested message, then as UTF-8, then as bytes. Packed repeated fields are guessed.
+- **Schemas.** Users import `.proto` files (compiled in Rust with `protox`, no `protoc` needed) or a `FileDescriptorSet` (`buf build -o`, `protoc --descriptor_set_out`). They live in an `app.sqlite` `proto_schemas` table. Decoding uses `prost-reflect` into proto3 JSON.
+  - A gRPC path (`/pkg.Service/Method`) finds its request and response types by itself.
+  - Plain protobuf over HTTP, and binary WebSocket messages, need a mapping (a `Matcher`, a part and a message type), set from the viewer's "Decode as…".
+  - Server reflection (`grpc.reflection.v1`) is a follow-up.
+- **Viewers.** The gRPC viewer lists the messages (index, direction, size, compressed) with each one in the read-only JSON tree, plus the trailers. A protobuf body uses the same tree, and schema-less fields show their numbers and wire types. MessagePack (`rmp-serde`) and CBOR (`ciborium`) become JSON trees, with bytes, ext types and tags badged. All decoding runs in Rust (`Engine::decode_body`), cached like view scripts, so MCP gets the same output.
+- **MCP.** `get_flow_body` gains `format: "decoded"` for these kinds, and there is a read-only `list_proto_schemas`. Rewriting protobuf (re-encoding edited JSON) is a follow-up; breakpoints show the decoded form read-only and edit the bytes as hex.
+- **Tests.** pm-testkit gains a tonic gRPC upstream (unary, server streaming, an error status, gzip messages, and a gRPC-web endpoint), and the zoo gains protobuf, MessagePack and CBOR fixtures. There are unit tests for framing, the schema-less decoder and `.proto` import; Playwright snapshots each viewer in dark and light.
+
+### M17: Workflow (`m17-workflow`)
+- **Multi-select.** The selection is flow ids, not positions: ⇧-click selects a range, ⌘-click toggles, and ⌘A selects the whole view. A whole-view selection is stored as `{view, except}`, so 100k rows never materialise. The inspector follows the focused row. Bulk actions take a `FlowSelection` (`ids` or `view` plus `except`): copy URLs or cURL, Export HAR, Save Session, pin, label, replay in order, and delete.
+- **Delete flows.** `Engine::remove_flows_in(store, selection)` reuses eviction's gaps and segment bookkeeping (`Store::evict`, `SegmentStore::drop_through`), so disk is freed when no kept flow still uses a segment. ⌫ deletes the selection; ⌘⌫ still clears.
+- **Labels and comments.** `FlowSummary.label` (six colours, `--label-*` tokens added to the contrast test) and a comment per flow. Sessions save them, and pins too, in a new `annotations` table, which bumps the session `VERSION`; this removes the "a saved session doesn't keep pins" limitation. New DSL terms: `label:red`, `is:commented`, `comment:"…"`. The Edited column becomes a Notes column that shows the label dot and a comment icon too.
+- **Header columns.** "Add column" in the header's context menu takes a request or response header name (up to 8, `ColumnSettings` in prefs). Ingest copies those values into a per-store column table; existing flows are backfilled in the background, like deep search. `FlowRow` gains a trailing `extra: Vec<Option<String>>`. Header columns can be sorted and get "Filter by".
+- **Compare.** "Compare" on two selected flows, from any stores, opens a window with the request line, status, headers (a key/value diff, with an option to ignore volatile headers such as `date`), bodies (the M13 line diff over pretty-printed, order-kept text) and timing.
+- **Copy as code.** `io/snippets.rs` renders a `RequestSpec` as JavaScript `fetch`, Python `requests`, HTTPie, Go `net/http`, Swift `URLSession`, Kotlin OkHttp and PowerShell, with golden files beside cURL's. Snippets appear under the Copy submenu and as an MCP `export_code{id, language}`.
+- **Repeat.** "Repeat…" (⌥⌘R) sets iterations (up to 10,000), concurrency (up to 64) and a delay. `Engine::repeat(spec, RepeatOpts)` sends through `Engine::send` and pushes progress. Its flows get `sent_by: Replay` and a repeat group, and a summary shows status counts and min, p50, p95 and max. MCP gets a write tool, `repeat_flow`.
+- **Search highlighting.** When the filter has `body:` or bare-text terms, matches are highlighted in CodeMirror viewers and the JSON tree, with next and previous buttons.
+
+### M18: Network plumbing (`m18-network`)
+- **One dialer.** `proxy/dial.rs` owns every upstream connection: the MITM's `dial_tcp`, the plain-HTTP pool (a custom connector replaces `HttpConnector`), `send.rs`, WebSockets and Map Remote. The trust probe and the onboarding server never dial. The dialer applies DNS overrides, then upstream-proxy routing, then client certificates (when TLS is set up). `FlowDetail` records the route it took (`via`, at the end; the session `VERSION` bumps), and the TLS and Timing tabs show it.
+- **Upstream proxies.** `UpstreamSettings` holds rules in order, each a list of host globs and a proxy: `Http{host, port, auth}`, `Socks5{host, port, auth}` or `Direct`, plus a bypass list.
+  - HTTP upstreams get `CONNECT` for TLS and WebSockets and absolute form for plain HTTP. SOCKS5 resolves names remotely.
+  - Auth is Basic or SOCKS username/password. The secret is kept by a new `pm-platform` `SecretStore` trait (the keychain on macOS, a 0600 file elsewhere).
+  - "Use the proxy that was set before Proxymate" reads the system proxy backup, which matters when Proxymate is the system proxy on a corporate network.
+  - A loop guard refuses an upstream that is one of our own addresses and ports.
+  - PAC files and NTLM/Kerberos are follow-ups.
+- **SOCKS5 listener.** On the same port: `sniff.rs` routes a leading `0x05` byte to a SOCKS5 handshake (no auth, CONNECT only, IPv4, IPv6 and domain targets; `Engine::admit` and the LAN allow-list apply as before). The stream then goes through the CONNECT path, so the SSL policy decides between MITM and passthrough. Plain HTTP is sniffed, and anything else becomes a recorded TCP tunnel flow.
+- **Reverse proxies.** Each `ReverseProxy{listen_port, target_url, preserve_host, tls}` is its own listener. With `tls`, the listener serves a leaf for `localhost` and its addresses. Its flows record the target URL, the Client column shows "Reverse :<port>", and rules apply as usual.
+- **Client certificates.** `ClientCertSettings` maps host globs to a PKCS#12 file (its password in the `SecretStore`) or PEM files. The upstream `ClientConfig` uses `with_client_auth_cert`, cached per host and identity. A handshake that ends in `certificate_required` explains itself in the failure banner with a link to the setting.
+- **DNS overrides.** Host globs map to IPs, applied before resolution. SNI and `Host` don't change. A DoH resolver is a follow-up.
+- **UI and MCP.** Settings › Network has Upstream, SOCKS, Reverse Proxies, Client Certificates and DNS. The toolbar's "Listening on …" menu lists the extra listeners. `get_status` reports them read-only; there are no MCP write tools for network settings.
+- **Tests.** pm-testkit gains an HTTP CONNECT proxy with Basic auth, a SOCKS5 server and client, and an mTLS upstream that requires a client certificate from its test CA. Integration tests cover chaining, auth failures, the loop guard, SOCKS into MITM, a reverse proxy over plain and TLS, mTLS, and DNS overrides for a name that doesn't exist.
+
+### M19: WebSocket rules (`m19-websocket-rules`)
+- **Handshakes.** The upgrade request goes through `proxy/exchange.rs`'s request phase: header and query actions, Map Remote, Block and request breakpoints apply. Response-phase header actions apply to the `101`. Body actions don't apply.
+- **Message actions.** A new action, after `Script`: `WsMessage{direction, filter: Option<Pattern>, op}`, where `op` is `Drop`, `Replace{find, replace}`, `JsonSet`/`JsonRemove` (the M13 splicer on text messages), `Delay{ms}` or `Breakpoint`. Rewrite scripts gain an optional `onWsMessage(context, message)` that returns the message, a replacement or `null` to drop it. The `.d.ts`, prelude, API surface and completions are updated together.
+- **Message breakpoints.** A paused message holds later messages in its direction, so order is kept; the other direction keeps flowing. The Breakpoint Editor edits text, the JSON tree or hex, then Send or Drop. The rule-settings timeout applies, and MCP's `resolve_breakpoint` covers messages.
+- **Sending.** `Engine::ws_send(flow, direction, payload)` injects a text or binary message into an open connection (the relay re-frames anyway). The WebSocket panel gets a composer and "Resend" on any recorded message. Replaying a WebSocket flow reconnects with the recorded handshake. MCP gets `send_websocket_message`.
+- **Recording.** Messages carry `edited`, `injected` and `dropped` flags (the message types change shape, so the session `VERSION` bumps) and show as badges. The original of an edited message is kept alongside it.
+- **Tests.** Against the testkit echo: a handshake header rule, a JSON field rewrite, drop, delay, a breakpoint edit and timeout, injection from the Engine and MCP, and order under load.
+
+### M20: Offline mocking (`m20-offline-mocking`)
+- **Serve from a recording.** A new action, after `Script`: `ServeFrom{source, key, on_miss, pick}`.
+  - `source` is a mock library entry: "Mock from session…" on a document tab or saved session copies the session or HAR into `<data dir>/mocks/<uuid>.proxymate`, so the rule survives the original file moving.
+  - `key` is method, scheme, host, path and the query compared order-insensitively, optionally plus a body hash.
+  - `on_miss` is pass through, 404 or 502. `pick` is the first, last or round-robin of the matching entries.
+  - The index is built when rules compile and held in the `CompiledRuleSet`; bodies are read through `SqliteBackend`. It is terminal like `MapLocal`: the first answer (Map Local, a mock script or ServeFrom) wins, and response-phase actions still run.
+  - The preset drafts one rule matching the session's hosts. MCP gets a `create_serve_from` sugar tool.
+- **Charles import.** Charles JSON (`.chlsj`) and XML (`.chlsx`) sessions open as documents, like HARs. The binary `.chls` format is Java serialisation and is not supported; the import dialog says to export JSON from Charles.
+- **OpenAPI import.** OpenAPI 3.0 and 3.1 (JSON or YAML) specs are stored in `app.sqlite`.
+  - Flows whose method and path match an operation show its `operationId` and summary in the inspector, with a DSL `op:` term.
+  - "Generate mocks" drafts one rule per operation from its examples (or a minimal instance of the response schema) as inline Map Local bodies, disabled until reviewed.
+  - Validating responses against the schema is a follow-up.
+- **Tests.** Record against the testkit upstream, save, stop the upstream, and check ServeFrom answers byte-identically (misses and round-robin too). Charles fixtures exported from Charles 5 round-trip, and the Petstore spec's rules answer.
+
+### M21: Capture targets and noise (`m21-capture-targets`)
+- **Launchers.** An "Intercept" toolbar menu and palette commands start pre-configured targets through a new `pm-platform` `Launcher` trait (tested with a fake `command::Runner`).
+  - **Terminal:** Terminal.app or iTerm, with the "Copy terminal env" variables plus `NODE_USE_ENV_PROXY`, `GIT_SSL_CAINFO`, `AWS_CA_BUNDLE`, `DENO_CERT`, `PIP_CERT`, `CARGO_HTTP_CAINFO` and `JAVA_TOOL_OPTIONS` proxy properties.
+  - **Chromium browsers** (Chrome, Edge, Brave, Arc): a temporary `--user-data-dir`, `--proxy-server` and `--ignore-certificate-errors-spki-list=<CA SPKI hash>`, so they decrypt without keychain trust.
+  - **Firefox:** a temporary profile whose `user.js` sets the proxy and trusts the CA.
+  - Launched processes are tracked by pid tree, and their flows show as "<App> (Intercepted)". Docker and JVM attach are follow-ups.
+- **Recording allow/block lists.** `RecordingSettings{only, never}` are host globs, checked with a `GlobSet` when a flow begins. Unrecorded traffic is still proxied, the SSL policy and rules still apply, and nothing is teed. The footer counts what was not recorded, and the flow table's "Never record this host" adds to the list.
+- **No Caching and Block Cookies.** Toolbar toggles backed by built-in rules like `builtin-throttle`:
+  - `builtin-no-cache` removes the conditional request headers and sets `Cache-Control: no-cache` and `Pragma: no-cache`; on responses it sets `no-store` and removes `ETag`, `Last-Modified` and `Expires`.
+  - `builtin-no-cookies` removes `Cookie` and `Set-Cookie`.
+- **Auto-save.** Settings › Storage can save the live capture every N minutes to a folder as a rotating `.proxymate` (keeping the newest K), off the ingest thread, using M8's background save.
+- **Tests.** Launcher command lines are checked against the fake runner. Real launches are a manual checklist in the PR (they need the user's OK). Integration tests cover the recording lists and both built-in rules.
+
+### Later (not scheduled)
+- HTTP/3 and QUIC MITM, ws-over-h2 (RFC 8441), h2c.
+- Android: the CA in the emulator's system store (writable-system or a tmpfs over `cacerts`, and the APEX store on Android 14+), and Frida unpinning.
+- Per-process capture for apps that ignore the system proxy. This needs a Network Extension, which needs Developer ID signing (see "Packaging, signing and updates").
+- PAC files and NTLM/Kerberos upstream auth, DoH, gRPC server reflection, protobuf rewrites, OpenAPI validation, Docker interception, saved request collections.
 
 ## Critical files (to be created)
 - `crates/pm-model/src/lib.rs`: the shared types that drive the TS bindings and the MCP schemas.
