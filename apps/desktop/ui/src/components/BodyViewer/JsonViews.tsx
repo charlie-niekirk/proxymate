@@ -112,7 +112,14 @@ export function JsonTree({ bytes }: { bytes: Uint8Array }) {
   return <Tree root={parsed.data} />;
 }
 
-function Tree({ root }: { root: unknown }) {
+/** Notes on values by JSON pointer: wire types, `bytes`, ext types, tags. */
+export type TreeBadges = ReadonlyMap<string, readonly string[]>;
+
+/**
+ * The tree over an already parsed value, with `badges` after the values
+ * they note (decoded protobuf, MessagePack and CBOR).
+ */
+export function Tree({ root, badges, testId = "json-tree" }: { root: unknown; badges?: TreeBadges; testId?: string }) {
   const [filter, setFilter] = useState("");
   const [expanded, setExpanded] = useState(() => expandedTo(root, 1));
   const scroller = useRef<HTMLDivElement>(null);
@@ -151,7 +158,7 @@ function Tree({ root }: { root: unknown }) {
 
   const matchCount = "matches" in result && roots[0]?.match ? result.matches.length : null;
   return (
-    <div className="flex h-full flex-col" data-testid="json-tree">
+    <div className="flex h-full flex-col" data-testid={testId}>
       <div className="flex h-7 shrink-0 items-center gap-2 border-b px-2">
         <Input
           value={filter}
@@ -170,7 +177,14 @@ function Tree({ root }: { root: unknown }) {
           <div ref={scroller} className="min-h-0 flex-1 overflow-auto font-mono text-[11.5px]" onContextMenu={menu.onContextMenu} data-selectable>
             <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
               {virtualizer.getVirtualItems().map((item) => (
-                <TreeLine key={item.key} index={item.index} row={rows[item.index]!} top={item.start} onToggle={toggle} />
+                <TreeLine
+                  key={item.key}
+                  index={item.index}
+                  row={rows[item.index]!}
+                  top={item.start}
+                  onToggle={toggle}
+                  badges={badges?.get(rows[item.index]!.ptr)}
+                />
               ))}
             </div>
           </div>
@@ -210,11 +224,13 @@ const TreeLine = memo(function TreeLine({
   row,
   top,
   onToggle,
+  badges,
 }: {
   index: number;
   row: TreeRow;
   top: number;
   onToggle: (ptr: string, deep: boolean, value?: unknown) => void;
+  badges?: readonly string[];
 }) {
   const Caret = row.expanded ? ChevronDown : ChevronRight;
   const expandable = row.container !== null && row.size > 0;
@@ -236,6 +252,15 @@ const TreeLine = memo(function TreeLine({
         </span>
       )}
       <Value row={row} />
+      {badges?.map((b) => (
+        <span
+          key={b}
+          className="text-muted-foreground ml-1 shrink-0 rounded-sm border px-1 font-sans text-[10px] leading-[14px]"
+          data-testid="tree-badge"
+        >
+          {b}
+        </span>
+      ))}
     </div>
   );
 });

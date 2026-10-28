@@ -9,6 +9,11 @@ describe("content detection", () => {
     expect(kindFromContentType("application/json; charset=utf-8")).toBe("json");
     expect(kindFromContentType("application/graphql")).toBe("graphql");
     expect(kindFromContentType("image/svg+xml")).toBe("svg");
+    expect(kindFromContentType("application/grpc+json")).toBe("grpc");
+    expect(kindFromContentType("application/grpc-web-text")).toBe("grpc");
+    expect(kindFromContentType("application/x-protobuf; messageType=a.B")).toBe("protobuf");
+    expect(kindFromContentType("application/x-msgpack")).toBe("messagepack");
+    expect(kindFromContentType("application/cbor")).toBe("cbor");
     expect(kindFromContentType("multipart/form-data; boundary=x")).toBe("multipart");
     expect(kindFromContentType("font/woff2")).toBe("font");
     expect(kindFromContentType(null)).toBe("none");

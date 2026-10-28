@@ -25,12 +25,14 @@ import type {
   UpdateSettings,
   ViewDelta_Serialize,
   WsMessage_Serialize,
+  DecodedBody_Serialize,
 } from "@/bindings";
 import type { Backend } from "@/lib/backend";
 import { GLOBAL_THROTTLE_RULE_ID, emptyMatcher, normalizeRule, type Rule } from "@/lib/rules";
 import { newId, parseDoc, toJson, type JNode } from "@/lib/json/doc";
 import { createMockDevices } from "@/lib/mockDevices";
 import { createMockMcp } from "@/lib/mockMcp";
+import { createMockProtos } from "@/lib/mockProtos";
 import { createMockScripts } from "@/lib/mockScripts";
 
 /** A fully specified mock flow with bodies (the dev zoo, see `dev/zoo.ts`). */
@@ -38,6 +40,8 @@ export interface MockFlow {
   row: FlowRow_Serialize;
   detail: FlowDetail_Serialize;
   bodies: Record<BodyPart, { raw: Uint8Array; decoded: Uint8Array }>;
+  /** What `decodeBody` answers (M16): the engine's output for the zoo fixture. */
+  decodedBodies?: Partial<Record<BodyPart, DecodedBody_Serialize>>;
 }
 
 /**
@@ -85,6 +89,7 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
       !connect && kinds[(i * 5) % kinds.length] === "graphql" ? "GetViewer" : null,
       i % 211 === 3 ? "user" : null,
       false,
+      null,
     ];
     // A few are WebSockets and event streams, for the message panels.
     if (!connect && i % 61 === 13) return asStream(row, "websocket");
@@ -182,6 +187,7 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
     none: "other", json: "json", xml: "xml", html: "document", formurlencoded: "form", multipart: "form",
     graphql: "graphql", javascript: "js", css: "css", text: "document", image: "media", svg: "media",
     video: "media", audio: "media", font: "media", pdf: "document", binary: "other",
+    grpc: "other", protobuf: "other", messagepack: "other", cbor: "other",
   };
   const groupOf = (k: ContentKind): ContentGroup => GROUPS[k];
 
@@ -253,6 +259,7 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
         req_size: f[13], resp_size: f[14], edited: f[15], http_version: f[16], tls: f[17], graphql_op: f[18],
         sent_by: f[19],
         pinned: f[20],
+        grpc_status: f[21],
       };
     },
     async subscribe(view, onDelta: (d: ViewDelta_Serialize) => void) {
@@ -318,6 +325,7 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
         },
         error: f[17] === "likely_pinned" ? "The client rejected the Proxymate certificate. It sent an unknown_ca alert." : null,
         rules: mockFlowRules(f[15], id),
+        trailers: null,
         tls,
         timing: {
           dns_ms: id % 4 === 0 ? 3.2 : null,
@@ -670,7 +678,7 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
         [
           id, "completed", https ? "https" : "http", spec.method, url.hostname, Number(url.port) || (https ? 443 : 80),
           url.pathname, url.search.slice(1), 200, "json", "Proxymate", Date.now(), 120, (spec.body ?? "").length, 512,
-          false, "HTTP/1.1", https ? "intercepted" : "none", null, "user", false,
+          false, "HTTP/1.1", https ? "intercepted" : "none", null, "user", false, null,
         ],
       ];
       return id;
@@ -725,6 +733,7 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
       return () => {};
     },
     ...createMockMcp(now),
+    ...createMockProtos((store, id) => (store === 0 ? full.get(id)?.decodedBodies : undefined)),
     async appVersion() {
       return "0.1.0";
     },

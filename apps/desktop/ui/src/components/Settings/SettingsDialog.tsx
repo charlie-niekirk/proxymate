@@ -1,4 +1,4 @@
-import { Bot, HardDrive, Laptop, Palette, RefreshCw, Settings, ShieldCheck, SlidersHorizontal, Wifi, type LucideIcon } from "lucide-react";
+import { Bot, Braces, HardDrive, Laptop, Palette, RefreshCw, Settings, ShieldCheck, SlidersHorizontal, Wifi, type LucideIcon } from "lucide-react";
 
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
@@ -8,6 +8,7 @@ import { AdvancedPage } from "./AdvancedPage";
 import { AppearancePage } from "./AppearancePage";
 import { ClientsPage } from "./ClientsPage";
 import { McpPage } from "./McpPage";
+import { ProtobufPage } from "./ProtobufPage";
 import { ProxyPage } from "./ProxyPage";
 import { SslPage } from "./SslPage";
 import { StoragePage } from "./StoragePage";
@@ -18,6 +19,7 @@ const PAGES: { id: SettingsPage; label: string; icon: LucideIcon; page: () => Re
   { id: "ssl", label: "SSL Proxying", icon: ShieldCheck, page: () => <SslPage /> },
   { id: "clients", label: "Clients", icon: Laptop, page: () => <ClientsPage /> },
   { id: "storage", label: "Storage", icon: HardDrive, page: () => <StoragePage /> },
+  { id: "protobuf", label: "Protobuf", icon: Braces, page: () => <ProtobufPage /> },
   { id: "appearance", label: "Appearance", icon: Palette, page: () => <AppearancePage /> },
   { id: "advanced", label: "Advanced", icon: SlidersHorizontal, page: () => <AdvancedPage /> },
   { id: "mcp", label: "MCP", icon: Bot, page: () => <McpPage /> },

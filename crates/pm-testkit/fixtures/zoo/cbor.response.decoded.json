@@ -1,0 +1,40 @@
+{
+  "format": "cbor",
+  "messages": [
+    {
+      "index": 0,
+      "compressed": false,
+      "size": 0,
+      "json": "{\n  \"id\": 4012,\n  \"name\": \"ada\",\n  \"created\": 1700000000,\n  \"uuid\": \"AAECAwQFBgcICQoLDA0ODw==\",\n  \"blob\": \"yv4=\",\n  \"nested\": {\n    \"ok\": true,\n    \"ratio\": 0.25\n  },\n  \"1\": \"an int key\"\n}",
+      "badges": [
+        {
+          "pointer": "/created",
+          "label": "tag 1 · epoch time"
+        },
+        {
+          "pointer": "/uuid",
+          "label": "tag 37 · UUID"
+        },
+        {
+          "pointer": "/uuid",
+          "label": "bytes · 16"
+        },
+        {
+          "pointer": "/blob",
+          "label": "bytes · 2"
+        },
+        {
+          "pointer": "/1",
+          "label": "key: int"
+        }
+      ],
+      "schema_less": false,
+      "error": null
+    }
+  ],
+  "message_type": null,
+  "status": null,
+  "trailers": [],
+  "pending_bytes": 0,
+  "error": null
+}

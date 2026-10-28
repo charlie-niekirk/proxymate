@@ -10,6 +10,8 @@ import type { ViewerInput } from "./Viewer";
 
 // The GraphQL operations list is also shown for GET requests, from `BodyViewer`.
 export { Operations } from "./GraphQlView";
+// Decoded viewers (M16) load their own data, from `BodyViewer`.
+export { DecodedView } from "./DecodedView";
 
 /** Renders one body with one viewer from the registry (loaded lazily by `Viewer`). */
 export function ViewerSwitch({ viewer, bytes, url, mime, size, contentType, highlight, bodyId, onSave }: ViewerInput) {

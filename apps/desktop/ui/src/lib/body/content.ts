@@ -20,6 +20,13 @@ export function kindFromContentType(contentType: string | null | undefined): Con
   const mime = essence(contentType);
   const [top = "", sub = ""] = mime.split("/");
   if (!mime) return "none";
+  // Before `+json`: `application/grpc+json` is still gRPC framing.
+  if (top === "application" && ["grpc", "grpc-web", "grpc-web-text"].includes(sub.split("+")[0]!)) return "grpc";
+  if (["application/x-protobuf", "application/protobuf", "application/vnd.google.protobuf", "application/x-google-protobuf"].includes(mime)) {
+    return "protobuf";
+  }
+  if (["application/msgpack", "application/x-msgpack", "application/vnd.msgpack"].includes(mime)) return "messagepack";
+  if (mime === "application/cbor") return "cbor";
   if (sub === "json" || sub === "graphql-response+json") return "json";
   if (sub === "graphql" || sub === "graphql+json") return "graphql";
   if (sub.endsWith("+json")) return "json";
@@ -107,13 +114,17 @@ function sniffText(head: Uint8Array): Sniffed | null {
 }
 
 /** Detects a body from its Content-Type and first bytes, like the Rust detector. */
+const SIGNATURELESS: ContentKind[] = ["grpc", "protobuf", "messagepack", "cbor"];
+
 export function sniff(bytes: Uint8Array, contentType?: string | null): Sniffed {
   const head = bytes.subarray(0, 16 * 1024);
   if (head.length === 0) return { kind: "none", mime: essence(contentType) };
-  const magic = sniffMagic(head);
-  if (magic) return magic;
   const header = kindFromContentType(contentType);
   const mime = essence(contentType);
+  // Binary formats without a signature: their header wins, as in Rust.
+  if (SIGNATURELESS.includes(header)) return { kind: header, mime };
+  const magic = sniffMagic(head);
+  if (magic) return magic;
   if (header === "none" || header === "text" || mime === "application/octet-stream") {
     const text = sniffText(head);
     if (!text) return { kind: "binary", mime: "application/octet-stream" };

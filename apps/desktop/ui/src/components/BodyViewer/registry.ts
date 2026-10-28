@@ -23,12 +23,18 @@ export type ViewerId =
   | "audio"
   | "pdf"
   | "font"
+  | "grpc"
+  | "decoded"
   | "hex";
 
 export interface ViewerDef {
   label: string;
-  /** "bytes" viewers get the decoded body; "url" viewers load it from `bodyUrl`. */
-  source: "bytes" | "url";
+  /**
+   * "bytes" viewers get the decoded body; "url" viewers load it from
+   * `bodyUrl`; "decoded" viewers get the engine's `decodeBody` (M16), and
+   * show a live stream as it arrives.
+   */
+  source: "bytes" | "url" | "decoded";
   /** Syntax-highlighted text, which falls back to plain text for huge bodies. */
   code: boolean;
 }
@@ -50,6 +56,8 @@ export const VIEWERS: Record<ViewerId, ViewerDef> = {
   audio: { label: "Audio", source: "url", code: false },
   pdf: { label: "PDF", source: "url", code: false },
   font: { label: "Font", source: "url", code: false },
+  grpc: { label: "gRPC", source: "decoded", code: false },
+  decoded: { label: "Decoded", source: "decoded", code: false },
   hex: { label: "Hex", source: "bytes", code: false },
 };
 
@@ -71,6 +79,10 @@ const BY_KIND: Record<ContentKind, ViewerId[]> = {
   font: ["font", "hex"],
   pdf: ["pdf", "hex"],
   binary: ["hex", "text"],
+  grpc: ["grpc", "hex"],
+  protobuf: ["decoded", "hex"],
+  messagepack: ["decoded", "hex"],
+  cbor: ["decoded", "hex"],
 };
 
 export function viewersFor(kind: ContentKind): ViewerId[] {

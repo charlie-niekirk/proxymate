@@ -122,6 +122,28 @@ async fn every_zoo_fixture_is_detected() {
             .is_err()
     );
 
+    // What the UI's mock backend shows for them: the engine's own output,
+    // `<fixture>.<part>.decoded.json` (`UPDATE_ZOO=1` rewrites them).
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../pm-testkit/fixtures/zoo");
+    for (name, parts) in [
+        ("grpc-web", &[BodyPart::Request, BodyPart::Response][..]),
+        ("protobuf", &[BodyPart::Response]),
+        ("msgpack", &[BodyPart::Response]),
+        ("cbor", &[BodyPart::Response]),
+    ] {
+        for &part in parts {
+            let part_name = serde_json::to_value(part).unwrap();
+            let file = dir.join(format!("{name}.{}.decoded.json", part_name.as_str().unwrap()));
+            let json = serde_json::to_string_pretty(&decoded(name, part)).unwrap() + "\n";
+            if std::env::var_os("UPDATE_ZOO").is_some() {
+                std::fs::write(&file, json).unwrap();
+            } else {
+                let current = std::fs::read_to_string(&file).unwrap_or_default();
+                assert_eq!(current, json, "{} is stale: UPDATE_ZOO=1", file.display());
+            }
+        }
+    }
+
     // The chips filter on the detected kind.
     let chip = |group| {
         let filter = FilterSpec {

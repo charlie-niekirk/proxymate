@@ -484,7 +484,7 @@ function RowCell({ id, row }: { id: ColumnId; row: Row }) {
     case "status":
       return (
         <div className={cn(cell, "justify-center")}>
-          <StatusPill status={row.status} state={row.state} />
+          <StatusPill status={row.status} state={row.state} grpc={row.grpcStatus} />
         </div>
       );
     case "time":

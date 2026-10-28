@@ -42,3 +42,11 @@ export const proxySettingsKey = ["proxy-settings"] as const;
 export const storageSettingsKey = ["storage-settings"] as const;
 export const updateSettingsKey = ["update-settings"] as const;
 export const appVersionKey = ["app-version"] as const;
+/** Imported protobuf schemas, their message types and "Decode as…" mappings (M16). */
+export const protoSchemasKey = ["proto-schemas"] as const;
+export const protoTypesKey = ["proto-types"] as const;
+export const protoMappingsKey = ["proto-mappings"] as const;
+/** Every decoded body; invalidated when schemas or mappings change. */
+export const decodedRootKey = ["decoded"] as const;
+export const decodedKey = (store: number, id: number, part: string, size: number, finished: boolean) =>
+  [...decodedRootKey, store, id, part, size, finished] as const;

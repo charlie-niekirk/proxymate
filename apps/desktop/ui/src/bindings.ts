@@ -183,6 +183,22 @@ export const commands = {
 	testScript: (store: number, flow: number, spec: ScriptTestSpec_Deserialize) => typedError<ScriptTestResult_Serialize, string>(__TAURI_INVOKE("test_script", { store, flow, spec })),
 	/**  The view scripts' views of one body; empty when none applies. */
 	getFlowViews: (store: number, flow: number, part: BodyPart) => typedError<ViewResult_Serialize[], string>(__TAURI_INVOKE("get_flow_views", { store, flow, part })),
+	/**
+	 *  A gRPC, protobuf, MessagePack or CBOR body decoded to JSON trees (live
+	 *  flows too, as far as they've arrived).
+	 */
+	decodeBody: (store: number, flow: number, part: BodyPart) => typedError<DecodedBody_Serialize, string>(__TAURI_INVOKE("decode_body", { store, flow, part })),
+	listProtoSchemas: () => __TAURI_INVOKE<ProtoSchema[]>("list_proto_schemas"),
+	/**
+	 *  Imports `.proto` files or one descriptor set; with no paths, asks with
+	 *  a file dialog. `None` if the dialog was cancelled.
+	 */
+	importProtoSchema: (paths: string[] | null) => typedError<ProtoSchema | null, string>(__TAURI_INVOKE("import_proto_schema", { paths })),
+	removeProtoSchema: (id: number) => typedError<null, string>(__TAURI_INVOKE("remove_proto_schema", { id })),
+	/**  Every message type the schemas define, for "Decode as…". */
+	listProtoMessageTypes: () => __TAURI_INVOKE<string[]>("list_proto_message_types"),
+	listProtoMappings: () => __TAURI_INVOKE<ProtoMapping_Serialize[]>("list_proto_mappings"),
+	setProtoMappings: (mappings: ProtoMapping_Deserialize[]) => typedError<null, string>(__TAURI_INVOKE("set_proto_mappings", { mappings })),
 	/**  Console entries newer than `since`, oldest first. */
 	getScriptConsole: (since: number | null, limit: number) => __TAURI_INVOKE<ConsoleEntry_Serialize[]>("get_script_console", { since, limit }),
 	clearScriptConsole: () => __TAURI_INVOKE<void>("clear_script_console"),
@@ -465,6 +481,12 @@ export type AppliedRule_Serialize = {
 	phase: Phase,
 };
 
+export type Badge = {
+	/**  JSON pointer of the value, `""` for the root. */
+	pointer: string,
+	label: string,
+};
+
 export type BlockMode = 
 /**  Answers with this status and a short text body. */
 { kind: "status"; status: number } | 
@@ -707,7 +729,121 @@ export type ContentGroup = "json" | "form" | "xml" | "js" | "css" | "graphql" | 
  */
 export type ContentKind = 
 /**  No body, or not detected yet. */
-"none" | "json" | "xml" | "html" | "formurlencoded" | "multipart" | "graphql" | "javascript" | "css" | "text" | "image" | "svg" | "video" | "audio" | "font" | "pdf" | "binary";
+"none" | "json" | "xml" | "html" | "formurlencoded" | "multipart" | "graphql" | "javascript" | "css" | "text" | "image" | "svg" | "video" | "audio" | "font" | "pdf" | "binary" | 
+/**  gRPC or gRPC-web: length-prefixed protobuf messages. */
+"grpc" | "protobuf" | "messagepack" | "cbor";
+
+/**  What `Engine::decode_body` made of a body. */
+export type DecodedBody = DecodedBody_Serialize | DecodedBody_Deserialize;
+
+/**  What `Engine::decode_body` made of a body. */
+export type DecodedBody_Deserialize = {
+	format: DecodedFormat,
+	/**  gRPC: one per length-prefixed message. Otherwise exactly one. */
+	messages: DecodedMessage_Deserialize[],
+	/**
+	 *  The protobuf message type the messages were decoded as, when a
+	 *  schema applied.
+	 */
+	message_type?: string | null,
+	/**
+	 *  gRPC responses: the call's status, from the HTTP/2 trailers, a
+	 *  trailers-only response's headers or the gRPC-web trailer frame.
+	 */
+	status?: GrpcStatus_Deserialize | null,
+	/**  gRPC responses: the trailers (HTTP/2, or the gRPC-web trailer frame). */
+	trailers: Header[],
+	/**
+	 *  Bytes after the last whole message: the rest of a message still
+	 *  streaming, or a body cut at the capture limit.
+	 */
+	pending_bytes: number,
+	/**
+	 *  Why the body as a whole couldn't be decoded (bad base64, an unknown
+	 *  `grpc-encoding`); messages decoded before the problem are kept.
+	 */
+	error?: string | null,
+};
+
+/**  What `Engine::decode_body` made of a body. */
+export type DecodedBody_Serialize = {
+	format: DecodedFormat,
+	/**  gRPC: one per length-prefixed message. Otherwise exactly one. */
+	messages: DecodedMessage_Serialize[],
+	/**
+	 *  The protobuf message type the messages were decoded as, when a
+	 *  schema applied.
+	 */
+	message_type: string | null,
+	/**
+	 *  gRPC responses: the call's status, from the HTTP/2 trailers, a
+	 *  trailers-only response's headers or the gRPC-web trailer frame.
+	 */
+	status: GrpcStatus_Serialize | null,
+	/**  gRPC responses: the trailers (HTTP/2, or the gRPC-web trailer frame). */
+	trailers: Header[],
+	/**
+	 *  Bytes after the last whole message: the rest of a message still
+	 *  streaming, or a body cut at the capture limit.
+	 */
+	pending_bytes: number,
+	/**
+	 *  Why the body as a whole couldn't be decoded (bad base64, an unknown
+	 *  `grpc-encoding`); messages decoded before the problem are kept.
+	 */
+	error: string | null,
+};
+
+export type DecodedFormat = "grpc" | "grpcweb" | "protobuf" | "messagepack" | "cbor";
+
+/**  One decoded message (the whole body, outside gRPC). */
+export type DecodedMessage = DecodedMessage_Serialize | DecodedMessage_Deserialize;
+
+/**  One decoded message (the whole body, outside gRPC). */
+export type DecodedMessage_Deserialize = {
+	index: number,
+	/**  The gRPC frame's compressed flag. */
+	compressed: boolean,
+	/**  Payload bytes as framed on the wire, before decompression. */
+	size: number,
+	/**  The value as pretty JSON text, so 64-bit numbers stay exact. */
+	json: string,
+	/**
+	 *  Notes on values, by JSON pointer: protobuf wire types, `bytes`,
+	 *  MessagePack ext types, CBOR tags.
+	 */
+	badges: Badge[],
+	/**  Decoded from the wire format alone: object keys are field numbers. */
+	schema_less: boolean,
+	/**
+	 *  Why this message didn't decode (it then shows schema-less, or as
+	 *  Base64).
+	 */
+	error?: string | null,
+};
+
+/**  One decoded message (the whole body, outside gRPC). */
+export type DecodedMessage_Serialize = {
+	index: number,
+	/**  The gRPC frame's compressed flag. */
+	compressed: boolean,
+	/**  Payload bytes as framed on the wire, before decompression. */
+	size: number,
+	/**  The value as pretty JSON text, so 64-bit numbers stay exact. */
+	json: string,
+	/**
+	 *  Notes on values, by JSON pointer: protobuf wire types, `bytes`,
+	 *  MessagePack ext types, CBOR tags.
+	 */
+	badges: Badge[],
+	/**  Decoded from the wire format alone: object keys are field numbers. */
+	schema_less: boolean,
+	/**
+	 *  Why this message didn't decode (it then shows schema-less, or as
+	 *  Base64).
+	 */
+	error: string | null,
+};
 
 /**
  *  A view's deep search: header and body predicates checked in the
@@ -950,6 +1086,11 @@ export type FlowDetail_Deserialize = {
 	timing: Timing_Deserialize,
 	/**  What rules did to the flow. */
 	rules?: FlowRules_Deserialize,
+	/**
+	 *  HTTP/2 response trailers (gRPC's `grpc-status` and friends). Last:
+	 *  session format 3 appended it.
+	 */
+	trailers?: Header[] | null,
 };
 
 /**
@@ -969,6 +1110,11 @@ export type FlowDetail_Serialize = {
 	timing: Timing_Serialize,
 	/**  What rules did to the flow. */
 	rules: FlowRules_Serialize,
+	/**
+	 *  HTTP/2 response trailers (gRPC's `grpc-status` and friends). Last:
+	 *  session format 3 appended it.
+	 */
+	trailers: Header[] | null,
 };
 
 /**
@@ -976,7 +1122,7 @@ export type FlowDetail_Serialize = {
  * 
  *  Field order: `id, state, scheme, method, host, port, path, query, status,
  *  content_kind, client, started_at_ms, duration_ms, req_size, resp_size, edited,
- *  http_version, tls, graphql_op, sent_by, pinned`.
+ *  http_version, tls, graphql_op, sent_by, pinned, grpc_status`.
  */
 export type FlowRow = FlowRow_Serialize | FlowRow_Deserialize;
 
@@ -985,18 +1131,18 @@ export type FlowRow = FlowRow_Serialize | FlowRow_Deserialize;
  * 
  *  Field order: `id, state, scheme, method, host, port, path, query, status,
  *  content_kind, client, started_at_ms, duration_ms, req_size, resp_size, edited,
- *  http_version, tls, graphql_op, sent_by, pinned`.
+ *  http_version, tls, graphql_op, sent_by, pinned, grpc_status`.
  */
-export type FlowRow_Deserialize = [number, FlowState, Scheme, string, string, number, string, string, number | null, ContentKind, string | null, number | null, number | null, number, number, boolean, HttpVersion, TlsStatus, string | null, SentBy | null, boolean];
+export type FlowRow_Deserialize = [number, FlowState, Scheme, string, string, number, string, string, number | null, ContentKind, string | null, number | null, number | null, number, number, boolean, HttpVersion, TlsStatus, string | null, SentBy | null, boolean, number | null];
 
 /**
  *  One flow table row in a compact positional form (a JSON array on the wire).
  * 
  *  Field order: `id, state, scheme, method, host, port, path, query, status,
  *  content_kind, client, started_at_ms, duration_ms, req_size, resp_size, edited,
- *  http_version, tls, graphql_op, sent_by, pinned`.
+ *  http_version, tls, graphql_op, sent_by, pinned, grpc_status`.
  */
-export type FlowRow_Serialize = [number, FlowState, Scheme, string, string, number, string, string, number | null, ContentKind, string | null, number | null, number | null, number, number, boolean, HttpVersion, TlsStatus, string | null, SentBy | null, boolean];
+export type FlowRow_Serialize = [number, FlowState, Scheme, string, string, number, string, string, number | null, ContentKind, string | null, number | null, number | null, number, number, boolean, HttpVersion, TlsStatus, string | null, SentBy | null, boolean, number | null];
 
 /**
  *  What rules did to one flow. Drives the Edited column and the
@@ -1123,6 +1269,8 @@ export type FlowSummary_Deserialize = {
 	sent_by?: SentBy | null,
 	/**  Pinned by the user: kept when the flow cap evicts older flows. */
 	pinned?: boolean,
+	/**  The `grpc-status` of a gRPC call (0 is OK), once its trailers came. */
+	grpc_status?: number | null,
 };
 
 /**
@@ -1166,6 +1314,39 @@ export type FlowSummary_Serialize = {
 	sent_by: SentBy | null,
 	/**  Pinned by the user: kept when the flow cap evicts older flows. */
 	pinned: boolean,
+	/**  The `grpc-status` of a gRPC call (0 is OK), once its trailers came. */
+	grpc_status: number | null,
+};
+
+/**  A gRPC call's outcome. */
+export type GrpcStatus = GrpcStatus_Serialize | GrpcStatus_Deserialize;
+
+/**  A gRPC call's outcome. */
+export type GrpcStatus_Deserialize = {
+	code: number,
+	/**  `OK`, `NOT_FOUND`, … (`UNKNOWN(<n>)` past 16). */
+	name: string,
+	/**  `grpc-message`, percent-decoded. */
+	message?: string | null,
+	/**
+	 *  `grpc-status-details-bin` decoded as `google.rpc.Status`, as JSON
+	 *  text.
+	 */
+	details?: string | null,
+};
+
+/**  A gRPC call's outcome. */
+export type GrpcStatus_Serialize = {
+	code: number,
+	/**  `OK`, `NOT_FOUND`, … (`UNKNOWN(<n>)` past 16). */
+	name: string,
+	/**  `grpc-message`, percent-decoded. */
+	message: string | null,
+	/**
+	 *  `grpc-status-details-bin` decoded as `google.rpc.Status`, as JSON
+	 *  text.
+	 */
+	details: string | null,
 };
 
 /**
@@ -1464,6 +1645,55 @@ export type Pattern_Serialize = {
 export type Phase = "request" | "response";
 
 export type PresetKind = "map_local" | "breakpoint" | "rewrite" | "map_remote" | "block" | "throttle";
+
+/**
+ *  "Decode as…": protobuf bodies matching `matcher` (and `part`, when set)
+ *  decode as `message_type`. gRPC needs none: its path names the method.
+ */
+export type ProtoMapping = ProtoMapping_Serialize | ProtoMapping_Deserialize;
+
+/**
+ *  "Decode as…": protobuf bodies matching `matcher` (and `part`, when set)
+ *  decode as `message_type`. gRPC needs none: its path names the method.
+ */
+export type ProtoMapping_Deserialize = {
+	id: string,
+	matcher: Matcher_Deserialize,
+	part?: BodyPart | null,
+	/**  Fully qualified, e.g. `shop.v1.Order`. */
+	message_type: string,
+};
+
+/**
+ *  "Decode as…": protobuf bodies matching `matcher` (and `part`, when set)
+ *  decode as `message_type`. gRPC needs none: its path names the method.
+ */
+export type ProtoMapping_Serialize = {
+	id: string,
+	matcher: Matcher_Serialize,
+	part: BodyPart | null,
+	/**  Fully qualified, e.g. `shop.v1.Order`. */
+	message_type: string,
+};
+
+/**
+ *  An imported schema: `.proto` files compiled in Rust, or a
+ *  `FileDescriptorSet`.
+ */
+export type ProtoSchema = {
+	id: number,
+	name: string,
+	/**
+	 *  The `.proto` files it defines (imports from other schemas and the
+	 *  well-known types aren't listed).
+	 */
+	files: string[],
+	/**  Fully qualified service names. */
+	services: string[],
+	/**  Number of message types it defines. */
+	messages: number,
+	added_at_ms: number,
+};
 
 /**  Protocol chip in the filter row. */
 export type ProtocolFilter = "all" | "http" | "https" | "websocket";

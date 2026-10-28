@@ -36,6 +36,7 @@ import { HIGHLIGHT_LIMIT, LOAD_LIMIT, suggestedFileName } from "./util";
 import { Viewer } from "./Viewer";
 
 const Operations = lazy(() => loadViewers().then((m) => ({ default: m.Operations })));
+const DecodedView = lazy(() => loadViewers().then((m) => ({ default: m.DecodedView })));
 
 /**
  * The Body tab: picks the best viewer for the body's detected kind (the
@@ -112,13 +113,14 @@ export function BodyViewer({
     }
   }
   if (info.size === 0 && options.length === 0) return <Centered>{finished ? "No body" : "Waiting for body…"}</Centered>;
-  if (!finished) return <Centered>Body streaming · {formatSize(info.size)} so far</Centered>;
+  // Decoded viewers show a gRPC stream as it arrives.
+  if (!finished && def.source !== "decoded") return <Centered>Body streaming · {formatSize(info.size)} so far</Centered>;
 
   const save = () => {
     setSaveError(null);
     backend.saveBody(store, id, part, true, suggestedFileName(url, mime, part)).catch((e: unknown) => setSaveError(String(e)));
   };
-  const loaded = def.source === "bytes" ? body : bodyUrl;
+  const loaded = def.source === "url" ? bodyUrl : body;
   const bytes = body.data?.bytes ?? null;
   const tooBig = bytes !== null && bytes.length > HIGHLIGHT_LIMIT;
   const highlight = !tooBig || highlightAnyway;
@@ -217,6 +219,10 @@ export function BodyViewer({
           <div className="min-h-0 flex-1">
             {scriptView ? (
               <ScriptViewBody option={scriptView} bodyId={`${id}-${part}`} />
+            ) : def.source === "decoded" ? (
+              <Suspense fallback={<Centered>Loading…</Centered>}>
+                <DecodedView id={id} part={part} size={info.size} finished={finished} url={url} grpc={kind === "grpc"} />
+              </Suspense>
             ) : loaded.isError ? (
               <Centered>Couldn&apos;t load body: {String(loaded.error)}</Centered>
             ) : !loaded.data ? (

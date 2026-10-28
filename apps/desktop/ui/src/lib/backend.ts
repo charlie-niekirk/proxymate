@@ -13,6 +13,10 @@ import {
   type ScriptTestResult_Serialize,
   type ScriptTestSpec_Deserialize,
   type ViewResult_Serialize,
+  type DecodedBody_Serialize,
+  type ProtoMapping_Deserialize,
+  type ProtoMapping_Serialize,
+  type ProtoSchema,
   type BodyPart,
   type BreakpointInfo_Deserialize,
   type BreakpointInfo_Serialize,
@@ -275,6 +279,16 @@ export interface Backend {
   testScript(store: number, flow: number, spec: ScriptTestSpec_Deserialize): Promise<ScriptTestResult_Serialize>;
   /** What the enabled view scripts make of one body; empty when none applies. */
   getFlowViews(store: number, flow: number, part: BodyPart): Promise<ViewResult_Serialize[]>;
+  /** A gRPC, protobuf, MessagePack or CBOR body as JSON trees (M16); live flows too. */
+  decodeBody(store: number, flow: number, part: BodyPart): Promise<DecodedBody_Serialize>;
+  listProtoSchemas(): Promise<ProtoSchema[]>;
+  /** `.proto` files or one descriptor set; asks with a file dialog without `paths`. Null if cancelled. */
+  importProtoSchema(paths: string[] | null): Promise<ProtoSchema | null>;
+  removeProtoSchema(id: number): Promise<void>;
+  /** Every message type the imported schemas define, for "Decode as…". */
+  listProtoMessageTypes(): Promise<string[]>;
+  listProtoMappings(): Promise<ProtoMapping_Serialize[]>;
+  setProtoMappings(mappings: ProtoMapping_Deserialize[]): Promise<void>;
   /** Console entries newer than `since`, oldest first, at most `limit`. */
   getScriptConsole(since: number | null, limit: number): Promise<ConsoleEntry_Serialize[]>;
   clearScriptConsole(): Promise<void>;
@@ -453,6 +467,17 @@ const tauriBackend: Backend = {
   deleteAgentScripts: () => unwrap(commands.deleteAgentScripts()),
   testScript: (store, flow, spec) => unwrap(commands.testScript(store, flow, spec)),
   getFlowViews: (store, flow, part) => unwrap(commands.getFlowViews(store, flow, part)),
+  decodeBody: (store, flow, part) => unwrap(commands.decodeBody(store, flow, part)),
+  listProtoSchemas: () => commands.listProtoSchemas(),
+  importProtoSchema: (paths) => unwrap(commands.importProtoSchema(paths)),
+  removeProtoSchema: async (id) => {
+    await unwrap(commands.removeProtoSchema(id));
+  },
+  listProtoMessageTypes: () => commands.listProtoMessageTypes(),
+  listProtoMappings: () => commands.listProtoMappings(),
+  setProtoMappings: async (mappings) => {
+    await unwrap(commands.setProtoMappings(mappings));
+  },
   getScriptConsole: (since, limit) => commands.getScriptConsole(since, limit),
   clearScriptConsole: () => commands.clearScriptConsole(),
   subscribeScriptConsole: async (onSeq) => {

@@ -29,7 +29,7 @@ export type ResponseTab = "Header" | "Body" | "Raw" | "TLS" | "Timing";
 export type DeviceTab = "simulator" | "iphone" | "android" | "emulator";
 
 /** Settings pages, in the order the dialog lists them. */
-export type SettingsPage = "proxy" | "ssl" | "clients" | "storage" | "appearance" | "advanced" | "mcp" | "updates";
+export type SettingsPage = "proxy" | "ssl" | "clients" | "storage" | "protobuf" | "appearance" | "advanced" | "mcp" | "updates";
 
 /** The live capture's store; opened documents have their own. */
 export const LIVE_STORE = 0;

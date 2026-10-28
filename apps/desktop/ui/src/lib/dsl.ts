@@ -35,6 +35,7 @@ export const DSL_KEYS: Key[] = [
   { key: "method", detail: "GET, POST…; comma-separated" },
   { key: "status", detail: "404, 4xx or 400-499" },
   { key: "ct", detail: "content type: json, form, xml, js, css, graphql, document, media…" },
+  { key: "grpc", detail: "gRPC status: 0, not_found; !0 for failed calls" },
   { key: "app", detail: "client app (substring)" },
   { key: "scheme", detail: "http, https, ws, wss" },
   { key: "state", detail: "active, paused, completed, failed, blocked, tunnel" },
@@ -54,7 +55,8 @@ export const DSL_KEYS: Key[] = [
 const VALUES: Record<string, string[]> = {
   method: ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "CONNECT"],
   status: ["2xx", "3xx", "4xx", "5xx", "200", "301", "304", "400", "401", "403", "404", "500", "502", "503"],
-  ct: ["json", "form", "xml", "js", "css", "graphql", "document", "media", "other", "html", "image", "video", "font", "pdf", "binary"],
+  ct: ["json", "form", "xml", "js", "css", "graphql", "document", "media", "other", "html", "image", "video", "font", "pdf", "binary", "grpc", "protobuf", "msgpack", "cbor"],
+  grpc: ["!0", "0", "ok", "not_found", "unavailable", "internal", "unauthenticated", "permission_denied", "deadline_exceeded"],
   scheme: ["http", "https", "ws", "wss"],
   state: ["active", "paused", "completed", "failed", "blocked", "tunnel"],
   is: ["edited", "pinned", "failed", "active", "paused", "blocked", "tunnel", "completed"],

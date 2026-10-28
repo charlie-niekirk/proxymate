@@ -153,7 +153,8 @@ fn value_node(value: Value<'_>, pointer: &str, badges: &mut Badges, depth: usize
                 badges.add(pointer, format!("varint · uint64 {v}"));
                 Node::I64(v as i64)
             } else {
-                let label = if v & 1 == 1 && v > 1 {
+                // Only small odd values are plausibly a zigzagged sint.
+                let label = if v & 1 == 1 && v > 1 && v <= u64::from(u32::MAX) {
                     format!("varint · sint {zigzag}")
                 } else {
                     "varint".to_owned()

@@ -80,7 +80,7 @@ export function DetailPane() {
             tone="bar"
             className="min-w-0 flex-1 text-xs"
           />
-          <StatusPill status={flow.status} state={flow.state} />
+          <StatusPill status={flow.status} state={flow.state} grpc={flow.grpc_status} />
           <span
             className="text-muted-foreground rounded-sm border px-1 font-mono text-2xs leading-4"
             data-testid="http-version"
@@ -198,12 +198,25 @@ function ResponsePane({ flow, detail }: Inspected & { detail: FlowDetail_Seriali
       )}
       <ScrollTab value="Header">
         {response ? (
-          <KvTable
-            rows={response.headers.map((h) => [displayHeaderName(h.name), h.value])}
-            kind="header"
-            side="response"
-            testId="response-headers"
-          />
+          <>
+            <KvTable
+              rows={response.headers.map((h) => [displayHeaderName(h.name), h.value])}
+              kind="header"
+              side="response"
+              testId="response-headers"
+            />
+            {detail.trailers && detail.trailers.length > 0 && (
+              <>
+                <div className="text-muted-foreground border-y px-2 py-1 text-[11px] font-medium">Trailers</div>
+                <KvTable
+                  rows={detail.trailers.map((h) => [displayHeaderName(h.name), h.value])}
+                  kind="header"
+                  side="response"
+                  testId="response-trailers"
+                />
+              </>
+            )}
+          </>
         ) : (
           noResponse
         )}
