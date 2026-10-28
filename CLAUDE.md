@@ -6,7 +6,7 @@ A fast desktop HTTP(S) debugging proxy (in the vein of Proxyman / Charles), buil
 
 ## Delivery workflow (mandatory)
 
-- Each milestone (M0–M12 in `docs/PLAN.md`) is built in **its own Claude session** and lands as **its own PR**.
+- Each milestone (M0–M21 in `docs/PLAN.md`) is built in **its own Claude session** and lands as **its own PR**.
 - Branch from the latest `main` as `mN-<slug>` (for example `m1-http-proxy`). Use the branch name the Milestones table gives.
 - Do not implement more than one milestone in a session, and do not start the next one.
 - Open the PR titled `MN: <Title>`. Its description covers:
