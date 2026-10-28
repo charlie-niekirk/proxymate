@@ -181,6 +181,7 @@ mod tests {
             tls: None,
             timing: Timing::default(),
             rules: Default::default(),
+            trailers: None,
         }
     }
 

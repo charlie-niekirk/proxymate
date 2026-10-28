@@ -6,14 +6,14 @@ import { decodeRow, formatCount, formatDuration, formatMs, formatSize, methodTok
 
 const tuple: FlowRow_Serialize = [
   7, "completed", "https", "GET", "api.example.com", 443, "/v1/users", "page=2", 404, "json", "Safari", 1.5, 42, 0, 1024, true,
-  "HTTP/2", "intercepted", "GetUser", "agent", true,
+  "HTTP/2", "intercepted", "GetUser", "agent", true, 5,
 ];
 
 describe("decodeRow", () => {
   it("maps the positional tuple to named fields", () => {
     const row = decodeRow(tuple);
     expect(row).toMatchObject({ id: 7, method: "GET", host: "api.example.com", status: 404, contentKind: "json", edited: true });
-    expect(row).toMatchObject({ httpVersion: "HTTP/2", tls: "intercepted", graphqlOp: "GetUser", sentBy: "agent", pinned: true });
+    expect(row).toMatchObject({ httpVersion: "HTTP/2", tls: "intercepted", graphqlOp: "GetUser", sentBy: "agent", pinned: true, grpcStatus: 5 });
   });
 });
 
@@ -49,6 +49,16 @@ describe("colour tokens", () => {
     expect(statusLabel(null, "tunnel")).toBe("Tunnel");
     expect(statusLabel(101, "active")).toBe("Active");
     expect(statusLabel(null, "active")).toBe("…");
+  });
+
+  it("reads gRPC statuses by name", () => {
+    expect(statusLabel(200, "completed", 0)).toBe("OK");
+    expect(statusLabel(200, "completed", 5)).toBe("NOT_FOUND");
+    expect(statusLabel(200, "completed", 40)).toBe("UNKNOWN(40)");
+    expect(statusLabel(200, "active", 0)).toBe("…");
+    expect(statusToken(200, "completed", 0)).toBe("2xx");
+    expect(statusToken(200, "completed", 5)).toBe("4xx");
+    expect(statusToken(200, "completed", 14)).toBe("5xx");
   });
 });
 

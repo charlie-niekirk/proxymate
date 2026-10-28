@@ -7,11 +7,13 @@
 //! here for tests and benches.
 
 pub mod client;
+pub mod grpc;
 pub mod stream;
 pub mod tls;
 pub mod upstream;
 pub mod zoo;
 
+pub use grpc::GrpcUpstream;
 pub use pm_core::synth;
 pub use tls::{Alpn, TestCa, TlsUpstream};
 pub use upstream::{RawUpstream, Upstream};

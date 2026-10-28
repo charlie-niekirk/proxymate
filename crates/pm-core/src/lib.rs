@@ -11,6 +11,7 @@ mod integration;
 pub mod io;
 pub mod mcp;
 mod notify;
+mod protos;
 pub mod proxy;
 mod recorder;
 mod replay;
@@ -30,6 +31,7 @@ pub use documents::ProgressSink;
 pub use engine::{BodyBytes, DeltaSink, Engine, EngineConfig, PUBLISH_INTERVAL};
 pub use integration::SidebarSink;
 pub use mcp::McpSink;
+pub use protos::ProtoImport;
 pub use proxy::ProxyConfig;
 pub use recorder::{BodyEnd, FlowRecorder, WsRecorder};
 pub use rules::{BreakpointSink, RuleError, RulesSink};
@@ -78,4 +80,7 @@ pub enum Error {
     /// A setting out of range, with what is allowed.
     #[error("{0}")]
     Invalid(String),
+    /// A protobuf schema that doesn't compile or load, or a bad mapping.
+    #[error("protobuf: {0}")]
+    Proto(String),
 }

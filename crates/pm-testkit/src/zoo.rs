@@ -122,6 +122,8 @@ pub fn file_bytes(name: &str) -> &'static [u8] {
         "form.txt",
         "graphql-request.json",
         "graphql-response.json",
+        "grpc-web-request.bin",
+        "grpc-web-response.bin",
         "image.avif",
         "image.bmp",
         "image.png",
@@ -130,8 +132,11 @@ pub fn file_bytes(name: &str) -> &'static [u8] {
         "nested.json",
         "notes.txt",
         "ok.json",
+        "order.pb",
         "page.html",
         "photo.jpg",
+        "profile.cbor",
+        "profile.msgpack",
         "random.bin",
         "styles.min.css",
         "tone.mp3",
@@ -205,5 +210,94 @@ mod tests {
         assert!(body.len() >= BIG_JSON_LEN);
         let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert!(value["items"].as_array().unwrap().len() > 10_000);
+    }
+}
+
+/// The binary fixtures (M16) are generated: `UPDATE_ZOO=1 cargo test -p
+/// pm-testkit zoo` rewrites them, otherwise the test checks they're current.
+#[cfg(test)]
+mod binary_fixtures {
+    use prost::Message;
+
+    use crate::grpc::{self, order, shop};
+
+    fn order_pb() -> Vec<u8> {
+        order("o-1001").encode_to_vec()
+    }
+
+    /// A gRPC-web exchange: the response's last frame holds the trailers.
+    fn grpc_web() -> (Vec<u8>, Vec<u8>) {
+        let request = grpc::frame(&shop::GetOrderRequest { id: "o-1001".into() }).to_vec();
+        let mut response = grpc::frame(&order("o-1001")).to_vec();
+        let trailers = b"grpc-status:0\r\ngrpc-message:\r\n";
+        response.push(0x80);
+        response.extend_from_slice(&(trailers.len() as u32).to_be_bytes());
+        response.extend_from_slice(trailers);
+        (request, response)
+    }
+
+    fn msgpack() -> Vec<u8> {
+        use rmpv::Value as V;
+        let value = V::Map(vec![
+            ("id".into(), V::from(4012)),
+            ("user".into(), "ada".into()),
+            ("roles".into(), V::Array(vec!["admin".into(), "ops".into()])),
+            ("active".into(), V::Boolean(true)),
+            ("score".into(), V::F64(98.5)),
+            ("big".into(), V::from(u64::MAX)),
+            (
+                "avatar".into(),
+                V::Binary(vec![0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+            ),
+            ("seen_at".into(), V::Ext(-1, 1_700_000_000u32.to_be_bytes().to_vec())),
+            (V::from(7), "an int key".into()),
+            ("meta".into(), V::Nil),
+        ]);
+        let mut out = Vec::new();
+        rmpv::encode::write_value(&mut out, &value).expect("encode");
+        out
+    }
+
+    fn cbor() -> Vec<u8> {
+        use ciborium::Value as V;
+        let value = V::Map(vec![
+            ("id".into(), V::Integer(4012.into())),
+            ("name".into(), V::Text("ada".into())),
+            ("created".into(), V::Tag(1, Box::new(V::Integer(1_700_000_000.into())))),
+            ("uuid".into(), V::Tag(37, Box::new(V::Bytes((0u8..16).collect())))),
+            ("blob".into(), V::Bytes(vec![0xca, 0xfe])),
+            (
+                "nested".into(),
+                V::Map(vec![("ok".into(), V::Bool(true)), ("ratio".into(), V::Float(0.25))]),
+            ),
+            (V::Integer(1.into()), V::Text("an int key".into())),
+        ]);
+        let mut out = Vec::new();
+        ciborium::ser::into_writer(&value, &mut out).expect("encode");
+        out
+    }
+
+    #[test]
+    fn are_current() {
+        let (request, response) = grpc_web();
+        let files = [
+            ("order.pb", order_pb()),
+            ("grpc-web-request.bin", request),
+            ("grpc-web-response.bin", response),
+            ("profile.msgpack", msgpack()),
+            ("profile.cbor", cbor()),
+        ];
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/zoo");
+        for (name, bytes) in files {
+            if std::env::var_os("UPDATE_ZOO").is_some() {
+                std::fs::write(dir.join(name), &bytes).expect("write fixture");
+            } else {
+                assert_eq!(
+                    super::file_bytes(name),
+                    bytes.as_slice(),
+                    "{name} is stale: UPDATE_ZOO=1"
+                );
+            }
+        }
     }
 }

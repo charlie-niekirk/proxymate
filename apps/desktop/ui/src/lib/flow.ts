@@ -26,6 +26,8 @@ export interface Row {
   sentBy: SentBy | null;
   /** Pinned flows outlive eviction. */
   pinned: boolean;
+  /** A gRPC call's `grpc-status` (0 is OK), once its trailers came. */
+  grpcStatus: number | null;
 }
 
 export function decodeRow(t: FlowRow_Serialize): Row {
@@ -51,6 +53,7 @@ export function decodeRow(t: FlowRow_Serialize): Row {
     graphqlOp: t[18],
     sentBy: t[19],
     pinned: t[20],
+    grpcStatus: t[21],
   };
 }
 
@@ -90,7 +93,36 @@ export function methodToken(method: string): string {
 }
 
 /** Suffix of the `--s-*` colour tokens for a flow's status pill. */
-export function statusToken(status: number | null, state: FlowState): string {
+/** gRPC status names by code. */
+const GRPC_CODES = [
+  "OK",
+  "CANCELLED",
+  "UNKNOWN",
+  "INVALID_ARGUMENT",
+  "DEADLINE_EXCEEDED",
+  "NOT_FOUND",
+  "ALREADY_EXISTS",
+  "PERMISSION_DENIED",
+  "RESOURCE_EXHAUSTED",
+  "FAILED_PRECONDITION",
+  "ABORTED",
+  "OUT_OF_RANGE",
+  "UNIMPLEMENTED",
+  "INTERNAL",
+  "UNAVAILABLE",
+  "DATA_LOSS",
+  "UNAUTHENTICATED",
+] as const;
+
+export function grpcName(code: number): string {
+  return GRPC_CODES[code] ?? `UNKNOWN(${code})`;
+}
+
+/** Server-side failures colour like 5xx, the caller's like 4xx. */
+const GRPC_SERVER_FAULTS = new Set([2, 4, 13, 14, 15]);
+
+export function statusToken(status: number | null, state: FlowState, grpc: number | null = null): string {
+  if (state === "completed" && grpc !== null) return grpc === 0 ? "2xx" : GRPC_SERVER_FAULTS.has(grpc) ? "5xx" : "4xx";
   switch (state) {
     case "active":
     case "paused":
@@ -110,7 +142,8 @@ export function statusToken(status: number | null, state: FlowState): string {
 }
 
 /** Text shown in the status pill. */
-export function statusLabel(status: number | null, state: FlowState): string {
+export function statusLabel(status: number | null, state: FlowState, grpc: number | null = null): string {
+  if ((state === "completed" || state === "blocked") && grpc !== null) return grpcName(grpc);
   switch (state) {
     case "active":
       // Switched protocols and still open: a live WebSocket.

@@ -1,0 +1,32 @@
+{
+  "format": "messagepack",
+  "messages": [
+    {
+      "index": 0,
+      "compressed": false,
+      "size": 0,
+      "json": "{\n  \"id\": 4012,\n  \"user\": \"ada\",\n  \"roles\": [\n    \"admin\",\n    \"ops\"\n  ],\n  \"active\": true,\n  \"score\": 98.5,\n  \"big\": 18446744073709551615,\n  \"avatar\": \"iVBORw0KGgo=\",\n  \"seen_at\": \"ZVPxAA==\",\n  \"7\": \"an int key\",\n  \"meta\": null\n}",
+      "badges": [
+        {
+          "pointer": "/avatar",
+          "label": "bin · 8"
+        },
+        {
+          "pointer": "/seen_at",
+          "label": "ext -1 · timestamp 2023-11-14T22:13:20Z"
+        },
+        {
+          "pointer": "/7",
+          "label": "key: int"
+        }
+      ],
+      "schema_less": false,
+      "error": null
+    }
+  ],
+  "message_type": null,
+  "status": null,
+  "trailers": [],
+  "pending_bytes": 0,
+  "error": null
+}

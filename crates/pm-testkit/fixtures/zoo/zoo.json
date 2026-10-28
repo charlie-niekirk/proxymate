@@ -27,6 +27,10 @@
     { "name": "mp3", "file": "tone.mp3", "type": "audio/mpeg", "kind": "audio" },
     { "name": "pdf", "file": "document.pdf", "type": "application/pdf", "kind": "pdf" },
     { "name": "font", "file": "font.woff2", "type": "font/woff2", "kind": "font" },
-    { "name": "binary", "file": "random.bin", "type": "application/octet-stream", "kind": "binary" }
+    { "name": "binary", "file": "random.bin", "type": "application/octet-stream", "kind": "binary" },
+    { "name": "grpc-web", "method": "POST", "request": { "file": "grpc-web-request.bin", "type": "application/grpc-web+proto" }, "file": "grpc-web-response.bin", "type": "application/grpc-web+proto", "kind": "grpc" },
+    { "name": "protobuf", "file": "order.pb", "type": "application/x-protobuf", "kind": "protobuf" },
+    { "name": "msgpack", "file": "profile.msgpack", "type": "application/x-msgpack", "kind": "messagepack" },
+    { "name": "cbor", "file": "profile.cbor", "type": "application/cbor", "kind": "cbor" }
   ]
 }

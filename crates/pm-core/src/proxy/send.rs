@@ -91,6 +91,7 @@ impl Sender {
             graphql_op: None,
             sent_by: Some(opts.origin.sent_by()),
             pinned: false,
+            grpc_status: None,
         };
         let headers: Vec<Header> = super::headers_of(&request.headers);
         let detail = FlowDetail {
@@ -111,6 +112,7 @@ impl Sender {
             tls: None,
             timing: Timing::default(),
             rules: Default::default(),
+            trailers: None,
         };
         let recorder = engine.record_flow(summary, detail);
         let id = recorder.id();

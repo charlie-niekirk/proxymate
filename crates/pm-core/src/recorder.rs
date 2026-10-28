@@ -18,10 +18,13 @@ use pm_model::{
 use crate::Engine;
 use crate::ingest::FlowEvent;
 use crate::io::content::{self, GRAPHQL_MAX, SNIFF_LEN};
-use crate::io::decode;
+use crate::io::{decode, grpc};
 use crate::proxy::now_ms;
 use crate::store::{Capture, SegmentStore, SseLog, StoredDetail, WsLog};
 
+/// gRPC-web bodies up to this size are read at the end for their trailer
+/// frame.
+const GRPC_WEB_TRAILER_MAX: usize = 8 * 1024 * 1024;
 /// Size updates for a streaming body go out at most this often.
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
 
@@ -275,6 +278,24 @@ impl FlowRecorder {
         }
     }
 
+    /// Records HTTP/2 trailers (gRPC's status). Request trailers are rare
+    /// and not kept.
+    pub fn trailers(&self, part: BodyPart, trailers: &http::HeaderMap) {
+        if part != BodyPart::Response {
+            return;
+        }
+        let mut state = self.flow.state.lock();
+        if state.finished.is_some() {
+            return;
+        }
+        let list = state.detail.trailers.get_or_insert_with(Vec::new);
+        list.extend(
+            trailers
+                .iter()
+                .map(|(name, value)| pm_model::Header::new(name.as_str(), String::from_utf8_lossy(value.as_bytes()))),
+        );
+    }
+
     /// Marks a body as ended. The end of the response body finishes the flow.
     pub fn body_end(&self, part: BodyPart, end: BodyEnd) {
         match part {
@@ -374,6 +395,7 @@ impl FlowRecorder {
                     state.detect_request(&details.segments);
                 }
                 state.detect_response();
+                state.grpc_trailers(&details.segments);
                 FlowEvent::Content {
                     id: self.flow.id,
                     content_kind: content::flow_kind(state.detail.request_body.kind, state.detail.response_body.kind),
@@ -406,9 +428,19 @@ impl FlowRecorder {
             let (req_size, resp_size) = sizes.unwrap_or((state.request.size, state.response.size));
             (stored, req_size, resp_size, content, end_state)
         };
+        let grpc_status = stored.detail.response.as_ref().and_then(|r| {
+            let trailers = stored.detail.trailers.as_deref().unwrap_or_default();
+            grpc::status_code(trailers).or_else(|| grpc::status_code(&r.headers))
+        });
         let _ = details.persist(self.flow.id, stored);
         if let Some(content) = content {
             engine.ingest().send(content);
+        }
+        if let Some(status) = grpc_status {
+            engine.ingest().send(FlowEvent::Grpc {
+                id: self.flow.id,
+                status,
+            });
         }
         engine.ingest().send(FlowEvent::Finished {
             id: self.flow.id,
@@ -566,6 +598,36 @@ impl LiveState {
         let info = &mut self.detail.response_body;
         info.kind = detected.kind;
         info.mime = detected.mime;
+    }
+
+    /// A gRPC-web response carries its trailers in a final frame of the
+    /// body: kept as the flow's trailers, like HTTP/2 ones.
+    fn grpc_trailers(&mut self, segments: &SegmentStore) {
+        if self.detail.response_body.kind != ContentKind::Grpc || self.detail.trailers.is_some() {
+            return;
+        }
+        let Some(response) = &self.detail.response else {
+            return;
+        };
+        let flavor = grpc::Flavor::of(header_value(&response.headers, "content-type"));
+        if !flavor.is_web() || self.response.truncated || self.response.captured as usize > GRPC_WEB_TRAILER_MAX {
+            return;
+        }
+        let Ok(body) = self.response.snapshot(segments) else {
+            return;
+        };
+        let body = match &self.detail.response_body.encoding {
+            Some(encoding) => match decode::decode(encoding, &body) {
+                Ok(body) => body,
+                Err(_) => return,
+            },
+            None => body,
+        };
+        // Compressed messages needn't be decompressed to find the trailers.
+        let framed = grpc::split(&body, flavor, None);
+        if !framed.trailers.is_empty() {
+            self.detail.trailers = Some(framed.trailers);
+        }
     }
 
     fn capture(&self, part: BodyPart) -> &Capture {

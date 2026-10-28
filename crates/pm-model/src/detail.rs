@@ -101,6 +101,10 @@ pub struct FlowDetail {
     /// What rules did to the flow.
     #[serde(default)]
     pub rules: FlowRules,
+    /// HTTP/2 response trailers (gRPC's `grpc-status` and friends). Last:
+    /// session format 3 appended it.
+    #[serde(default)]
+    pub trailers: Option<Vec<Header>>,
 }
 
 /// Which body of a flow.

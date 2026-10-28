@@ -858,6 +858,7 @@ fn flow(entry: &Entry) -> Option<SavedFlow> {
         graphql_op: graphql.and_then(|g| g.operation).map(Arc::from),
         sent_by: None,
         pinned: false,
+        grpc_status: None,
     };
     let detail = FlowDetail {
         id: 0,
@@ -888,6 +889,7 @@ fn flow(entry: &Entry) -> Option<SavedFlow> {
         tls: None,
         timing,
         rules: Default::default(),
+        trailers: None,
     };
     Some(SavedFlow {
         summary,
@@ -1103,6 +1105,7 @@ mod tests {
             graphql_op: None,
             sent_by: None,
             pinned: false,
+            grpc_status: None,
         }
     }
 
@@ -1140,6 +1143,7 @@ mod tests {
                 reused_connection: false,
             },
             rules: Default::default(),
+            trailers: None,
         }
     }
 

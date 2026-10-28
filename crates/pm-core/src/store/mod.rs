@@ -238,6 +238,7 @@ impl Store {
                     f.req_size = req_size;
                     f.resp_size = resp_size;
                 }),
+                FlowEvent::Grpc { id, status } => self.modify(id, first_new, |f| f.grpc_status = Some(status)),
                 FlowEvent::Edited { id } => self.modify(id, first_new, |f| f.edited = true),
                 FlowEvent::State { id, state } => self.modify(id, first_new, |f| {
                     // A late "continue" must not revive a finished flow.

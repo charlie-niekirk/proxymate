@@ -1,4 +1,4 @@
-import type { BodyInfo_Serialize, ContentKind, FlowRow_Serialize } from "@/bindings";
+import type { BodyInfo_Serialize, BodyPart, ContentKind, DecodedBody_Serialize, FlowRow_Serialize } from "@/bindings";
 import { sniff } from "@/lib/body/content";
 import type { MockFlow } from "@/lib/mockBackend";
 
@@ -50,6 +50,19 @@ async function gzip(bytes: Uint8Array): Promise<Uint8Array> {
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
+/** Kinds the engine decodes; their decoded form is a fixture too. */
+const DECODED: ContentKind[] = ["grpc", "protobuf", "messagepack", "cbor"];
+
+async function decodedBodies(f: Fixture): Promise<Partial<Record<BodyPart, DecodedBody_Serialize>> | undefined> {
+  if (!DECODED.includes(f.kind)) return undefined;
+  const parts: BodyPart[] = f.request ? ["request", "response"] : ["response"];
+  const out: Partial<Record<BodyPart, DecodedBody_Serialize>> = {};
+  for (const part of parts) {
+    out[part] = JSON.parse(new TextDecoder().decode(await file(`${f.name}.${part}.decoded.json`))) as DecodedBody_Serialize;
+  }
+  return out;
+}
+
 function info(raw: Uint8Array, kind: ContentKind, mime: string | null, encoding: string | null): BodyInfo_Serialize {
   return { size: raw.length, captured: raw.length, truncated: false, encoding, complete: true, kind, mime };
 }
@@ -63,11 +76,14 @@ export async function loadZoo(): Promise<MockFlow[]> {
       const raw = f.encoding === "gzip" ? await gzip(plain) : plain;
       const request = f.request ? await file(f.request.file) : new Uint8Array();
       const response = sniff(plain, f.type ?? null);
-      const requestKind = f.kind === "graphql" ? "graphql" : f.request ? sniff(request, f.request.type).kind : "none";
+      const requestKind = f.kind === "graphql" || f.kind === "grpc" ? f.kind : f.request ? sniff(request, f.request.type).kind : "none";
+      const decoded = await decodedBodies(f);
+      const grpcStatus = decoded?.response?.status?.code ?? null;
       const method = f.method ?? "GET";
       const row: FlowRow_Serialize = [
         id, "completed", "https", method, "zoo.proxymate.test", 443, `/zoo/${f.name}`, "", f.status ?? 200, f.kind, "Zoo",
         start + id * 1000, 12 + id, request.length, raw.length, false, "HTTP/2", "intercepted", f.graphql_op ?? null, null, false,
+        grpcStatus,
       ];
       const headers = (type: string | undefined, length: number, encoding?: string) => [
         ...(type ? [{ name: "content-type", value: type }] : []),
@@ -100,7 +116,9 @@ export async function loadZoo(): Promise<MockFlow[]> {
           tls: null,
           timing: { dns_ms: 1.2, connect_ms: 3.4, tls_ms: 8.9, ttfb_ms: 20, transfer_ms: 4, reused_connection: false },
           rules: { applied: [], rewrite_skipped: null, breakpoint_timeout: false, mocked: false, scripts: [] },
+          trailers: decoded?.response?.trailers.length ? decoded.response.trailers : null,
         },
+        decodedBodies: decoded,
         bodies: {
           request: { raw: request, decoded: request },
           response: { raw, decoded: plain },

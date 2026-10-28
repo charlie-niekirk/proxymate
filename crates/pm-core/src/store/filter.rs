@@ -122,6 +122,7 @@ mod tests {
             graphql_op: None,
             sent_by: None,
             pinned: false,
+            grpc_status: None,
         }
     }
 

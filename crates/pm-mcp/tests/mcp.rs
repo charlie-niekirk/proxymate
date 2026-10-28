@@ -679,3 +679,73 @@ async fn agents_dry_run_and_create_exact_rewrites() {
     client.cancel().await.unwrap();
     h.stop().await;
 }
+
+/// M16: `format: "decoded"` gives agents the inspector's decoding, and
+/// `list_proto_schemas` what was imported.
+#[tokio::test]
+async fn decoded_bodies_and_proto_schemas() {
+    let h = Harness::start().await;
+    let upstream = Upstream::start().await;
+    for name in ["msgpack", "grpc-web"] {
+        let fixture = pm_testkit::zoo::fixture(name).unwrap();
+        let mut req = http::Request::builder()
+            .method(fixture.method.as_str())
+            .uri(upstream.url(&fixture.path()));
+        if let Some(r) = &fixture.request {
+            req = req.header("content-type", &r.content_type);
+        }
+        let body = fixture.request_body().map(Bytes::from_static).unwrap_or_default();
+        let response = client::send(h.proxy, req.body(Full::new(body)).unwrap()).await;
+        let _ = response.into_body().collect().await;
+    }
+    eventually(WAIT, || {
+        h.engine.flush();
+        (0..2)
+            .all(|id| {
+                h.engine
+                    .get_flow(id)
+                    .is_some_and(|f| f.state != pm_model::FlowState::Active)
+            })
+            .then_some(())
+    })
+    .await;
+    h.engine
+        .import_proto_schema(
+            "shop",
+            pm_core::ProtoImport::Sources(vec![("shop.proto".into(), pm_testkit::grpc::SHOP_PROTO.into())]),
+        )
+        .unwrap();
+
+    let (client, _) = h.client().await;
+    let msgpack = ok(&client, "get_flow_body", json!({ "id": 0, "format": "decoded" })).await;
+    assert_eq!(msgpack["format"], "messagepack");
+    assert_eq!(msgpack["messages"][0]["value"]["user"], "ada");
+    assert_eq!(msgpack["messages"][0]["value"]["big"], json!(u64::MAX));
+    assert!(
+        msgpack["messages"][0]["badges"]["/seen_at"]
+            .as_str()
+            .unwrap()
+            .starts_with("ext -1")
+    );
+
+    // The zoo serves gRPC-web at /zoo/grpc-web, not a service path: schema-less.
+    let grpc = ok(&client, "get_flow_body", json!({ "id": 1, "format": "decoded" })).await;
+    assert_eq!(grpc["format"], "grpcweb");
+    assert_eq!(grpc["status"]["name"], "OK");
+    assert_eq!(grpc["messages"][0]["schema_less"], true);
+    assert_eq!(grpc["messages"][0]["value"]["1"], "o-1001");
+    let pointer = ok(
+        &client,
+        "get_flow_body",
+        json!({ "id": 1, "format": "decoded", "json_pointer": "/3/1/1" }),
+    )
+    .await;
+    assert_eq!(pointer["messages"][0]["value"], "mug");
+
+    let schemas = ok(&client, "list_proto_schemas", json!({})).await;
+    assert_eq!(schemas["schemas"][0]["services"][0], "shop.v1.Orders");
+    assert_eq!(schemas["mappings"], json!([]));
+
+    let json_body = call(&client, "get_flow_body", json!({ "id": 999, "format": "decoded" })).await;
+    assert_eq!(json_body.is_error, Some(true));
+}

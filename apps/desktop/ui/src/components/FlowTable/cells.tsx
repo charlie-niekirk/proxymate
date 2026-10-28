@@ -25,15 +25,30 @@ export function MethodPill({ method, className }: { method: string; className?: 
   );
 }
 
-export function StatusPill({ status, state, className }: { status: number | null; state: FlowState; className?: string }) {
-  const token = statusToken(status, state);
+export function StatusPill({
+  status,
+  state,
+  grpc = null,
+  className,
+}: {
+  status: number | null;
+  state: FlowState;
+  /** A gRPC status, which the pill shows by name instead of the HTTP one. */
+  grpc?: number | null;
+  className?: string;
+}) {
+  const token = statusToken(status, state, grpc);
   const style: CSSProperties =
     token === "failed"
       ? { color: "var(--s-failed)", boxShadow: "inset 0 0 0 1px var(--s-failed)" }
       : pillStyle(`s-${token}`);
   return (
-    <span className={cn(pillBase, token === "active" && "animate-pulse", className)} style={style}>
-      {statusLabel(status, state)}
+    <span
+      className={cn(pillBase, token === "active" && "animate-pulse", grpc !== null && "max-w-full", className)}
+      style={style}
+      title={grpc !== null && status !== null ? `gRPC ${statusLabel(status, state, grpc)} (${grpc}) · HTTP ${status}` : undefined}
+    >
+      {grpc !== null ? <span className="truncate">{statusLabel(status, state, grpc)}</span> : statusLabel(status, state)}
     </span>
   );
 }

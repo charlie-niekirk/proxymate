@@ -93,6 +93,7 @@ macro_rules! def {
 
 const FILTER_HELP: &str = "Filter DSL: space-separated terms, all must match; `-` negates. host:*.example.com \
 path:/api/* method:POST,PUT status:4xx|404|400-499 ct:json|form|xml|js|css|graphql|document|media|html|image \
+grpc:0|not_found|!0 (gRPC status; !0 = failed calls) ct:grpc|protobuf|msgpack|cbor \
 app:Safari state:active|completed|failed|blocked|paused|tunnel is:edited is:pinned dur>500 dur<2s size>1mb \
 reqsize>10kb id>120. Bare words (or \"quoted phrases\") search the URL. Header and body terms read each flow's \
 detail, so they are slower: header:x-request-id (any header line; reqheader:/resheader: for one side), \
@@ -128,7 +129,13 @@ fn defs() -> Vec<Def> {
             "get_flow_body",
             Read,
             GetFlowBody,
-            "A flow's request or response body, decoded (gzip/br/deflate/zstd) by default. JSON can be pretty-printed or narrowed with a JSON pointer. Text comes back as UTF-8, binary as base64. Use offset/max_bytes to page through big bodies."
+            "A flow's request or response body, decoded (gzip/br/deflate/zstd) by default. JSON can be pretty-printed or narrowed with a JSON pointer. Text comes back as UTF-8, binary as base64. Use offset/max_bytes to page through big bodies. For gRPC, protobuf, MessagePack and CBOR bodies, format: decoded returns the messages as JSON (with imported .proto schemas, else schema-less with field numbers as keys) plus the gRPC status and trailers; offset is then the first message index."
+        ),
+        def!(
+            "list_proto_schemas",
+            Read,
+            NoParams,
+            "Imported protobuf schemas (.proto files or descriptor sets, imported in the app): their files, services and message counts, plus the \"Decode as\" mappings for protobuf that isn't gRPC. gRPC calls find their message types from the path when a schema defines the service."
         ),
         def!(
             "get_websocket_messages",
@@ -394,6 +401,10 @@ pub(crate) async fn call(ctx: &Ctx<'_>, name: &str, args: JsonObject) -> ToolRes
         "search_flows" => search_flows(ctx, parse(args)?).await,
         "get_flow" => get_flow(ctx, parse(args)?),
         "get_flow_body" => get_flow_body(ctx, parse(args)?).await,
+        "list_proto_schemas" => Ok(json!({
+            "schemas": ctx.engine.proto_schemas(),
+            "mappings": ctx.engine.proto_mappings(),
+        })),
         "get_websocket_messages" => get_ws_messages(ctx, parse(args)?),
         "wait_for_flow" => wait_for_flow(ctx, parse(args)?).await,
         "list_rules" => list_rules(ctx, parse(args)?),
@@ -584,6 +595,8 @@ enum BodyFormat {
     /// Parsed and pretty-printed; an error if it isn't JSON.
     Json,
     Base64,
+    /// gRPC, protobuf, MessagePack or CBOR decoded to JSON messages.
+    Decoded,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -1101,6 +1114,7 @@ fn brief(f: &FlowSummary) -> Value {
         "tls": f.tls,
         "edited": f.edited,
         "graphql_operation": f.graphql_op.as_deref(),
+        "grpc_status": f.grpc_status,
     })
 }
 
@@ -1232,6 +1246,7 @@ fn get_flow(ctx: &Ctx<'_>, p: GetFlow) -> ToolResult {
             "version": r.version,
             "headers": head(&r.headers),
             "body": detail.response_body,
+            "trailers": detail.trailers,
         })),
         "error": detail.error,
     });
@@ -1265,6 +1280,9 @@ fn get_flow(ctx: &Ctx<'_>, p: GetFlow) -> ToolResult {
 }
 
 async fn get_flow_body(ctx: &Ctx<'_>, p: GetFlowBody) -> ToolResult {
+    if p.format == BodyFormat::Decoded {
+        return decoded_body(ctx, p).await;
+    }
     let (_, detail) = detail_of(ctx, p.id)?;
     let part: BodyPart = p.part.into();
     let info = match part {
@@ -1319,7 +1337,9 @@ async fn get_flow_body(ctx: &Ctx<'_>, p: GetFlowBody) -> ToolResult {
     let slice = &bytes[start..end];
     let (text, encoding) = match format {
         BodyFormat::Base64 => (base64::engine::general_purpose::STANDARD.encode(slice), "base64"),
-        BodyFormat::Text | BodyFormat::Json => (String::from_utf8_lossy(slice).into_owned(), "utf8"),
+        BodyFormat::Text | BodyFormat::Json | BodyFormat::Decoded => {
+            (String::from_utf8_lossy(slice).into_owned(), "utf8")
+        }
         BodyFormat::Auto => match std::str::from_utf8(slice) {
             Ok(s) => (s.to_owned(), "utf8"),
             // A cut can split a character; that's still text.
@@ -1347,6 +1367,77 @@ async fn get_flow_body(ctx: &Ctx<'_>, p: GetFlowBody) -> ToolResult {
         "encoding": encoding,
         "note": note,
         "body": text,
+    }))
+}
+
+/// `format: decoded`: the same decoding as the inspector's viewers
+/// (`Engine::decode_body_in`). Pages by message: `offset` is the first
+/// message, and messages are added until `max_bytes` of JSON.
+async fn decoded_body(ctx: &Ctx<'_>, p: GetFlowBody) -> ToolResult {
+    let part: BodyPart = p.part.into();
+    let engine = ctx.engine.clone();
+    let id = p.id;
+    let decoded = tokio::task::spawn_blocking(move || engine.decode_body_in(LIVE_STORE, id, part))
+        .await
+        .map_err(|e| ToolError(e.to_string()))??;
+    let max = p.max_bytes.map_or(BODY_DEFAULT, |m| (m as usize).min(BODY_MAX));
+    let start = (p.offset as usize).min(decoded.messages.len());
+    let mut used = 0;
+    let mut messages = Vec::new();
+    for m in &decoded.messages[start..] {
+        if used > 0 && used + m.json.len() > max {
+            break;
+        }
+        used += m.json.len();
+        let value: Value = serde_json::from_str(&m.json).unwrap_or(Value::Null);
+        let value = match &p.json_pointer {
+            Some(pointer) => value.pointer(pointer).cloned().unwrap_or(Value::Null),
+            None => value,
+        };
+        let mut out = json!({
+            "index": m.index,
+            "compressed": m.compressed,
+            "size": m.size,
+            "schema_less": m.schema_less,
+            "value": value,
+        });
+        if !m.badges.is_empty() {
+            let badges: serde_json::Map<String, Value> = m
+                .badges
+                .iter()
+                .map(|b| {
+                    (
+                        if b.pointer.is_empty() {
+                            "/".into()
+                        } else {
+                            b.pointer.clone()
+                        },
+                        json!(b.label),
+                    )
+                })
+                .collect();
+            out["badges"] = Value::Object(badges);
+        }
+        if let Some(error) = &m.error {
+            out["error"] = json!(error);
+        }
+        messages.push(out);
+    }
+    let end = start + messages.len();
+    Ok(json!({
+        "id": p.id,
+        "part": part,
+        "format": decoded.format,
+        "message_type": decoded.message_type,
+        "status": decoded.status,
+        "trailers": decoded.trailers,
+        "total_messages": decoded.messages.len(),
+        "offset": start,
+        "messages": messages,
+        "more": end < decoded.messages.len(),
+        "next_offset": (end < decoded.messages.len()).then_some(end),
+        "pending_bytes": decoded.pending_bytes,
+        "error": decoded.error,
     }))
 }
 

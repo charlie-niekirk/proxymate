@@ -6,7 +6,7 @@ import { pickViewer, VIEWERS, viewersFor } from "./registry";
 
 const KINDS: ContentKind[] = [
   "none", "json", "xml", "html", "formurlencoded", "multipart", "graphql", "javascript", "css", "text",
-  "image", "svg", "video", "audio", "font", "pdf", "binary",
+  "image", "svg", "video", "audio", "font", "pdf", "binary", "grpc", "protobuf", "messagepack", "cbor",
 ];
 
 describe("viewer registry", () => {
@@ -23,5 +23,7 @@ describe("viewer registry", () => {
     expect(pickViewer("image", "json-tree")).toBe("image");
     expect(pickViewer("svg", undefined)).toBe("image");
     expect(pickViewer("binary", undefined)).toBe("hex");
+    expect(pickViewer("grpc", undefined)).toBe("grpc");
+    expect(pickViewer("cbor", "json-tree")).toBe("decoded");
   });
 });

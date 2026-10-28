@@ -66,7 +66,7 @@ pub struct ViewInfo {
 ///
 /// Field order: `id, state, scheme, method, host, port, path, query, status,
 /// content_kind, client, started_at_ms, duration_ms, req_size, resp_size, edited,
-/// http_version, tls, graphql_op, sent_by, pinned`.
+/// http_version, tls, graphql_op, sent_by, pinned, grpc_status`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct FlowRow(
     pub FlowId,
@@ -90,6 +90,7 @@ pub struct FlowRow(
     pub Option<Arc<str>>,
     pub Option<SentBy>,
     pub bool,
+    pub Option<u8>,
 );
 
 impl From<&FlowSummary> for FlowRow {
@@ -116,6 +117,7 @@ impl From<&FlowSummary> for FlowRow {
             f.graphql_op.clone(),
             f.sent_by,
             f.pinned,
+            f.grpc_status,
         )
     }
 }
@@ -158,11 +160,12 @@ mod tests {
             graphql_op: Some("GetUser".into()),
             sent_by: Some(SentBy::User),
             pinned: true,
+            grpc_status: Some(5),
         };
         let json = serde_json::to_string(&FlowRow::from(&summary)).unwrap();
         assert_eq!(
             json,
-            r#"[7,"completed","https","GET","api.example.com",443,"/v1/users","page=2",200,"json","Safari",1.5,42,0,1024,false,"HTTP/2","intercepted","GetUser","user",true]"#
+            r#"[7,"completed","https","GET","api.example.com",443,"/v1/users","page=2",200,"json","Safari",1.5,42,0,1024,false,"HTTP/2","intercepted","GetUser","user",true,5]"#
         );
     }
 }

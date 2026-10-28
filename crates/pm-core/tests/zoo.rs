@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use pm_core::{Engine, EngineConfig, ProxyConfig};
-use pm_model::{BodyPart, ContentGroup, ContentKind, FilterSpec, FlowState, SortSpec};
+use pm_model::{BodyPart, ContentGroup, ContentKind, FilterSpec, FlowState, LIVE_STORE, SortSpec};
 use pm_testkit::Upstream;
 use pm_testkit::client::eventually;
 use pm_testkit::zoo;
@@ -74,7 +74,13 @@ async fn every_zoo_fixture_is_detected() {
                 "{}: request kind",
                 fixture.name
             );
-            assert_eq!(detail.response_body.kind, ContentKind::Json, "{}", fixture.name);
+            // gRPC answers in kind; the others answer with JSON.
+            let response = if flow.content_kind == ContentKind::Grpc {
+                ContentKind::Grpc
+            } else {
+                ContentKind::Json
+            };
+            assert_eq!(detail.response_body.kind, response, "{}", fixture.name);
         }
     }
 
@@ -88,6 +94,55 @@ async fn every_zoo_fixture_is_detected() {
     assert_eq!(mime("webp").as_deref(), Some("image/webp"));
     assert_eq!(mime("gif-animated").as_deref(), Some("image/gif"));
     assert_eq!(mime("font").as_deref(), Some("font/woff2"));
+
+    // The binary kinds decode (M16); gRPC-web's status is in its body.
+    let id_of = |name: &str| fixtures.iter().position(|f| f.name == name).unwrap() as u32;
+    let decoded = |name: &str, part| engine.decode_body_in(LIVE_STORE, id_of(name), part).unwrap();
+    let grpc = decoded("grpc-web", BodyPart::Response);
+    assert_eq!((grpc.messages.len(), grpc.status.map(|s| s.code)), (1, Some(0)));
+    assert_eq!(engine.get_flow(id_of("grpc-web")).unwrap().grpc_status, Some(0));
+    assert!(grpc.messages[0].json.contains("tea-earl-grey"));
+    let request = decoded("grpc-web", BodyPart::Request);
+    assert!(request.messages[0].json.contains("o-1001"));
+    let pb = decoded("protobuf", BodyPart::Response);
+    assert!(pb.messages[0].schema_less && pb.messages[0].json.contains("o-1001"));
+    let msgpack = decoded("msgpack", BodyPart::Response);
+    assert!(msgpack.messages[0].json.contains("\"big\": 18446744073709551615"));
+    assert!(
+        msgpack.messages[0]
+            .badges
+            .iter()
+            .any(|b| b.label.starts_with("ext -1 · timestamp"))
+    );
+    let cbor = decoded("cbor", BodyPart::Response);
+    assert!(cbor.messages[0].badges.iter().any(|b| b.label == "tag 37 · UUID"));
+    assert!(
+        engine
+            .decode_body_in(LIVE_STORE, id_of("json"), BodyPart::Response)
+            .is_err()
+    );
+
+    // What the UI's mock backend shows for them: the engine's own output,
+    // `<fixture>.<part>.decoded.json` (`UPDATE_ZOO=1` rewrites them).
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../pm-testkit/fixtures/zoo");
+    for (name, parts) in [
+        ("grpc-web", &[BodyPart::Request, BodyPart::Response][..]),
+        ("protobuf", &[BodyPart::Response]),
+        ("msgpack", &[BodyPart::Response]),
+        ("cbor", &[BodyPart::Response]),
+    ] {
+        for &part in parts {
+            let part_name = serde_json::to_value(part).unwrap();
+            let file = dir.join(format!("{name}.{}.decoded.json", part_name.as_str().unwrap()));
+            let json = serde_json::to_string_pretty(&decoded(name, part)).unwrap() + "\n";
+            if std::env::var_os("UPDATE_ZOO").is_some() {
+                std::fs::write(&file, json).unwrap();
+            } else {
+                let current = std::fs::read_to_string(&file).unwrap_or_default();
+                assert_eq!(current, json, "{} is stale: UPDATE_ZOO=1", file.display());
+            }
+        }
+    }
 
     // The chips filter on the detected kind.
     let chip = |group| {

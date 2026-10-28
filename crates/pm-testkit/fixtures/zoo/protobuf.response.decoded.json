@@ -1,0 +1,76 @@
+{
+  "format": "protobuf",
+  "messages": [
+    {
+      "index": 0,
+      "compressed": false,
+      "size": 71,
+      "json": "{\n  \"1\": \"o-1001\",\n  \"2\": 1152921504606846983,\n  \"3\": [\n    {\n      \"1\": \"tea-earl-grey\",\n      \"2\": 2\n    },\n    {\n      \"1\": \"mug\",\n      \"2\": 1\n    }\n  ],\n  \"4\": 2,\n  \"5\": {\n    \"1\": 1700000000\n  },\n  \"6\": \"3q2+7w==\",\n  \"7\": 4.5\n}",
+      "badges": [
+        {
+          "pointer": "/1",
+          "label": "string"
+        },
+        {
+          "pointer": "/2",
+          "label": "varint"
+        },
+        {
+          "pointer": "/3",
+          "label": "repeated"
+        },
+        {
+          "pointer": "/3/0",
+          "label": "message"
+        },
+        {
+          "pointer": "/3/0/1",
+          "label": "string"
+        },
+        {
+          "pointer": "/3/0/2",
+          "label": "varint"
+        },
+        {
+          "pointer": "/3/1",
+          "label": "message"
+        },
+        {
+          "pointer": "/3/1/1",
+          "label": "string"
+        },
+        {
+          "pointer": "/3/1/2",
+          "label": "varint"
+        },
+        {
+          "pointer": "/4",
+          "label": "varint"
+        },
+        {
+          "pointer": "/5",
+          "label": "message"
+        },
+        {
+          "pointer": "/5/1",
+          "label": "varint"
+        },
+        {
+          "pointer": "/6",
+          "label": "bytes · 4"
+        },
+        {
+          "pointer": "/7",
+          "label": "fixed64 · double · int 4616752568008179712"
+        }
+      ],
+      "schema_less": true,
+      "error": null
+    }
+  ],
+  "message_type": null,
+  "status": null,
+  "trailers": [],
+  "pending_bytes": 0,
+  "error": null
+}

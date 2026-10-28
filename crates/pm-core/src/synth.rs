@@ -231,6 +231,7 @@ impl Generator {
             graphql_op,
             sent_by: None,
             pinned: false,
+            grpc_status: None,
         }
     }
 
