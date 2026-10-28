@@ -67,6 +67,8 @@ pub enum SortKey {
     Duration,
     ReqSize,
     RespSize,
+    /// A header column (M17): `SortSpec.extra` says which.
+    Extra,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, Type)]
@@ -81,6 +83,9 @@ pub enum SortDir {
 pub struct SortSpec {
     pub key: SortKey,
     pub dir: SortDir,
+    /// The header column `SortKey::Extra` sorts by.
+    #[serde(default)]
+    pub extra: u8,
 }
 
 /// What a view shows. Shared by the filter row, the sidebar and (from M7) MCP.

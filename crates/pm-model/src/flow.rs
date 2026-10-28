@@ -96,6 +96,47 @@ pub enum ContentKind {
     Cbor,
 }
 
+/// A colour label the user puts on flows (M17). Shown as a dot in the
+/// Notes column, and matched by the DSL's `label:`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum FlowLabel {
+    Red,
+    Orange,
+    Yellow,
+    Green,
+    Blue,
+    Purple,
+}
+
+impl FlowLabel {
+    pub const ALL: [FlowLabel; 6] = [
+        FlowLabel::Red,
+        FlowLabel::Orange,
+        FlowLabel::Yellow,
+        FlowLabel::Green,
+        FlowLabel::Blue,
+        FlowLabel::Purple,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            FlowLabel::Red => "red",
+            FlowLabel::Orange => "orange",
+            FlowLabel::Yellow => "yellow",
+            FlowLabel::Green => "green",
+            FlowLabel::Blue => "blue",
+            FlowLabel::Purple => "purple",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<FlowLabel> {
+        FlowLabel::ALL
+            .into_iter()
+            .find(|l| l.as_str().eq_ignore_ascii_case(name))
+    }
+}
+
 /// The compact per-flow record kept in the summary arena (~150-200 B).
 ///
 /// Strings that repeat across flows (`method`, `host`, `client`) are interned
@@ -141,6 +182,16 @@ pub struct FlowSummary {
     /// The `grpc-status` of a gRPC call (0 is OK), once its trailers came.
     #[serde(default)]
     pub grpc_status: Option<u8>,
+    /// The user's colour label (M17).
+    #[serde(default)]
+    pub label: Option<FlowLabel>,
+    /// The user's note on the flow (M17).
+    #[serde(default)]
+    pub comment: Option<Arc<str>>,
+    /// Values of the header columns, in the order they were set
+    /// (`Engine::set_header_columns`); empty until filled.
+    #[serde(default)]
+    pub extra: Vec<Option<Arc<str>>>,
 }
 
 impl FlowSummary {

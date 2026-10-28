@@ -60,6 +60,8 @@ pub struct Store {
     /// An eviction that found nothing it may drop (everything old is
     /// pinned or in flight) isn't tried again below this many flows.
     evict_retry_at: u32,
+    /// The header column set the flows' `extra` values belong to.
+    extra_generation: u32,
 }
 
 /// Flows dropped by one eviction, for the engine to forget their details.
@@ -269,6 +271,46 @@ impl Store {
                         view.rebuild(&[]);
                     }
                 }
+                FlowEvent::Label { ids, label } => {
+                    for id in ids {
+                        if self.get(id).is_some_and(|f| f.label != label) {
+                            self.modify(id, first_new, |f| f.label = label);
+                        }
+                    }
+                }
+                FlowEvent::Comment { id, comment } => self.modify(id, first_new, |f| f.comment = comment),
+                FlowEvent::Extra { generation, values } => {
+                    if generation != self.extra_generation {
+                        continue;
+                    }
+                    for (id, cells) in values {
+                        let changed = self.get(id).is_some_and(|f| {
+                            cells
+                                .iter()
+                                .any(|(i, v)| f.extra.get(*i as usize).cloned().flatten() != *v)
+                        });
+                        if changed {
+                            self.modify(id, first_new, |f| {
+                                for (i, value) in cells {
+                                    let i = i as usize;
+                                    if f.extra.len() <= i {
+                                        f.extra.resize(i + 1, None);
+                                    }
+                                    f.extra[i] = value;
+                                }
+                            });
+                        }
+                    }
+                }
+                FlowEvent::Columns { generation } => {
+                    self.extra_generation = generation;
+                    for f in &mut self.flows {
+                        f.extra = Vec::new();
+                    }
+                    for view in self.views.values_mut() {
+                        view.rebuild(&self.flows);
+                    }
+                }
                 FlowEvent::Flush(ack) => acks.push(ack),
             }
         }
@@ -351,6 +393,42 @@ impl Store {
             }
         }
         Some(Eviction { evicted, kept, through })
+    }
+
+    /// Deletes flows (M17), pinned ones too. Flows still in flight stay:
+    /// their recorders would write them back. Views rebuild over the new
+    /// positions. Returns the ids removed, sorted.
+    pub(crate) fn remove(&mut self, ids: &std::collections::HashSet<FlowId>) -> Vec<FlowId> {
+        let mut removed = Vec::new();
+        let sidebar = &mut self.sidebar;
+        let mut unpinned = 0;
+        self.flows.retain(|f| {
+            if !ids.contains(&f.id) || matches!(f.state, FlowState::Active | FlowState::Paused) {
+                return true;
+            }
+            sidebar.remove(f);
+            unpinned += u32::from(f.pinned);
+            removed.push(f.id);
+            false
+        });
+        self.pinned -= unpinned;
+        if !removed.is_empty() {
+            for view in self.views.values_mut() {
+                view.forget_deep(&removed);
+                view.rebuild(&self.flows);
+            }
+        }
+        removed
+    }
+
+    /// True if the store has a flow with an id in `low..=high`.
+    pub(crate) fn has_flow_in(&self, low: FlowId, high: FlowId) -> bool {
+        high >= low && !self.flows_in(low, high.saturating_add(1)).is_empty()
+    }
+
+    /// The header column set the flows' values belong to.
+    pub(crate) fn extra_generation(&self) -> u32 {
+        self.extra_generation
     }
 
     /// Changes a flow in place. Flows appended earlier in this batch are not
@@ -593,6 +671,7 @@ mod tests {
         let sort = SortSpec {
             key: SortKey::RespSize,
             dir: SortDir::Desc,
+            ..Default::default()
         };
         let view = store.create_view(FilterSpec::default(), sort).view;
         let mut generator = Generator::new(9);

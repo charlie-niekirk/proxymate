@@ -302,7 +302,15 @@ fn har_files_open_as_documents_and_export_views() {
     let out = dir.join("view.har");
     let (total, updates) = finish(|sink| {
         engine
-            .export_har(store, &FlowSelection::View { view: view.view }, out.clone(), sink)
+            .export_har(
+                store,
+                &FlowSelection::View {
+                    view: view.view,
+                    except: vec![],
+                },
+                out.clone(),
+                sink,
+            )
             .unwrap()
     });
     assert_eq!((total, updates.last().unwrap().error.clone()), (1, None));
@@ -316,7 +324,13 @@ fn har_files_open_as_documents_and_export_views() {
     let live_view = engine.create_view(FilterSpec::default(), SortSpec::default()).view;
     assert!(
         engine
-            .selected_flows(store, &FlowSelection::View { view: live_view })
+            .selected_flows(
+                store,
+                &FlowSelection::View {
+                    view: live_view,
+                    except: vec![]
+                }
+            )
             .is_err()
     );
 

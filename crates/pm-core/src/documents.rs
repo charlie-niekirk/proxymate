@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use parking_lot::RwLock;
-use pm_model::{DocumentInfo, DocumentKind, FlowSelection, FlowSummary, LIVE_STORE, SaveProgress, StoreId};
+use pm_model::{DocumentInfo, DocumentKind, FlowId, FlowSelection, FlowSummary, LIVE_STORE, SaveProgress, StoreId};
 use rusqlite::Connection;
 
 use crate::io::{har, session};
@@ -70,14 +70,16 @@ impl Documents {
 impl Engine {
     /// Opens a saved session (`.proxymate`) or imports a HAR file as a new
     /// document, by its contents rather than its extension.
-    pub fn open_document(&self, path: &Path) -> Result<DocumentInfo, Error> {
+    pub fn open_document(self: &Arc<Self>, path: &Path) -> Result<DocumentInfo, Error> {
         let mut magic = [0u8; 16];
         let is_sqlite = std::fs::File::open(path)
             .and_then(|mut f| io::Read::read_exact(&mut f, &mut magic))
             .is_ok_and(|()| &magic == b"SQLite format 3\0");
         if is_sqlite {
             let opened = session::open(path).map_err(|e| Error::Document(e.to_string()))?;
-            self.docs.add(DocumentKind::Session, path, opened)
+            let info = self.docs.add(DocumentKind::Session, path, opened)?;
+            self.columns_for_document(info.store);
+            Ok(info)
         } else {
             self.import_har(path)
         }
@@ -85,7 +87,7 @@ impl Engine {
 
     /// Imports a HAR 1.2 file (Chrome's `_webSocketMessages` included) as a
     /// new document. The flows are converted into session tables in memory.
-    pub fn import_har(&self, path: &Path) -> Result<DocumentInfo, Error> {
+    pub fn import_har(self: &Arc<Self>, path: &Path) -> Result<DocumentInfo, Error> {
         let bytes = std::fs::read(path)?;
         let flows = har::import(&bytes).map_err(|e| Error::Document(format!("{}: {e}", path.display())))?;
         let conn = Connection::open_in_memory().map_err(|e| Error::Document(e.to_string()))?;
@@ -96,7 +98,9 @@ impl Engine {
         }
         let conn = writer.finish().map_err(|e| Error::Document(e.to_string()))?;
         let opened = SqliteBackend::open(conn)?;
-        self.docs.add(DocumentKind::Har, path, opened)
+        let info = self.docs.add(DocumentKind::Har, path, opened)?;
+        self.columns_for_document(info.store);
+        Ok(info)
     }
 
     /// Closes a document; its views stop.
@@ -121,11 +125,16 @@ impl Engine {
         let pick = |s: &Store| -> Result<Vec<FlowSummary>, Error> {
             match selection {
                 FlowSelection::All => Ok(s.flows().to_vec()),
-                FlowSelection::View { view } => {
+                FlowSelection::View { view, except } => {
                     if view >> VIEW_STORE_SHIFT != store {
                         return Err(Error::UnknownView(*view));
                     }
-                    s.view_flows(*view)
+                    let mut flows = s.view_flows(*view)?;
+                    if !except.is_empty() {
+                        let except: std::collections::HashSet<FlowId> = except.iter().copied().collect();
+                        flows.retain(|f| !except.contains(&f.id));
+                    }
+                    Ok(flows)
                 }
                 FlowSelection::Ids { ids } => Ok(ids.iter().filter_map(|&id| s.get(id).cloned()).collect()),
             }

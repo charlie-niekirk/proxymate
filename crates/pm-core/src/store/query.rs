@@ -20,6 +20,8 @@
 //! - `dur` (ms, or with `s`), `size` (response), `reqsize`, `id`: compare with
 //!   `> >= < <= =`; sizes take `b kb mb gb`.
 //! - `is:pinned`.
+//! - M17: `label:red` (a list, or `any`), `is:labelled`, `is:commented`,
+//!   and `comment:` (a case-insensitive substring of the flow's note).
 //! - Deep terms, which need the flow's detail or bodies: `header:` (a
 //!   substring of any `name: value` line; `reqheader:`/`resheader:` for one
 //!   side) and `body:` (a substring of the decoded body; `reqbody:`,
@@ -32,7 +34,7 @@
 //! as text; in strict mode (MCP) it is an error, so agents learn about typos.
 
 use globset::{GlobBuilder, GlobMatcher};
-use pm_model::{ContentGroup, ContentKind, FlowId, FlowState, FlowSummary, Scheme};
+use pm_model::{ContentGroup, ContentKind, FlowId, FlowLabel, FlowState, FlowSummary, Scheme};
 
 use super::deep::{DeepQuery, DeepTerm, Side};
 use super::filter::contains_ignore_ascii_case;
@@ -59,6 +61,11 @@ enum Term {
     State(Vec<FlowState>),
     Edited,
     Pinned,
+    /// Any of these labels; empty is any label at all.
+    Label(Vec<FlowLabel>),
+    Commented,
+    /// Lower-cased.
+    Comment(Vec<u8>),
     Num(Field, Cmp, f64),
     /// Needs the detail or a body: judged by a deep search.
     Deep(DeepTerm),
@@ -88,7 +95,7 @@ enum Cmp {
     Eq,
 }
 
-const KEYS: &str = "host, path, method, scheme, status, ct, grpc, app, state, is, dur, size, reqsize, id, header, reqheader, resheader, body, reqbody, resbody";
+const KEYS: &str = "host, path, method, scheme, status, ct, grpc, app, state, is, label, comment, dur, size, reqsize, id, header, reqheader, resheader, body, reqbody, resbody";
 
 impl FlowQuery {
     /// Parses a query; a term that doesn't parse is an error naming it.
@@ -263,11 +270,33 @@ fn parse_term(token: &Token) -> Result<(bool, Term), String> {
         "is" => match value.to_ascii_lowercase().as_str() {
             "edited" => Term::Edited,
             "pinned" => Term::Pinned,
+            "labelled" | "labeled" => Term::Label(Vec::new()),
+            "commented" => Term::Commented,
             other => match state(other) {
                 Some(s) => Term::State(vec![s]),
-                None => return Err(bad("is: takes edited, pinned or a state")),
+                None => return Err(bad("is: takes edited, pinned, labelled, commented or a state")),
             },
         },
+        "label" => {
+            let labels: Vec<&str> = list().collect();
+            if labels.iter().any(|l| l.eq_ignore_ascii_case("any")) {
+                Term::Label(Vec::new())
+            } else {
+                Term::Label(
+                    labels
+                        .into_iter()
+                        .map(|l| {
+                            FlowLabel::parse(l).ok_or_else(|| {
+                                bad(&format!(
+                                    "unknown label {l:?} (red, orange, yellow, green, blue, purple, any)"
+                                ))
+                            })
+                        })
+                        .collect::<Result<_, _>>()?,
+                )
+            }
+        }
+        "comment" | "note" => Term::Comment(value.to_ascii_lowercase().into_bytes()),
         "header" | "headers" => Term::Deep(DeepTerm::header(Side::Both, value)),
         "reqheader" | "req.header" => Term::Deep(DeepTerm::header(Side::Request, value)),
         "resheader" | "respheader" | "res.header" => Term::Deep(DeepTerm::header(Side::Response, value)),
@@ -445,6 +474,12 @@ impl Term {
             Term::State(states) => states.contains(&f.state),
             Term::Edited => f.edited,
             Term::Pinned => f.pinned,
+            Term::Label(labels) => f.label.is_some_and(|l| labels.is_empty() || labels.contains(&l)),
+            Term::Commented => f.comment.is_some(),
+            Term::Comment(needle) => f
+                .comment
+                .as_deref()
+                .is_some_and(|c| contains_ignore_ascii_case(c.as_bytes(), needle)),
             Term::Deep(_) => true,
             Term::Num(field, cmp, value) => {
                 let actual = match field {
@@ -522,6 +557,9 @@ mod tests {
             sent_by: None,
             pinned: false,
             grpc_status: None,
+            label: None,
+            comment: None,
+            extra: Vec::new(),
         }
     }
 
@@ -600,6 +638,32 @@ mod tests {
             content_kind: ContentKind::Cbor,
             ..flow()
         }));
+    }
+
+    #[test]
+    fn annotation_terms() {
+        let parse = |q: &str| FlowQuery::parse(q).unwrap_or_else(|e| panic!("{q}: {e}"));
+        let mut f = flow();
+        for q in ["label:red", "label:any", "is:labelled", "is:commented", "comment:todo"] {
+            assert!(!parse(q).matches(&f), "{q} should not match a bare flow");
+        }
+        f.label = Some(FlowLabel::Red);
+        f.comment = Some("Check the TODO here".into());
+        for q in [
+            "label:red",
+            "label:Blue,red",
+            "label:any",
+            "is:labeled",
+            "is:commented",
+            "comment:todo",
+            "comment:\"the todo\"",
+            "-label:green",
+        ] {
+            assert!(parse(q).matches(&f), "{q} should match");
+        }
+        assert!(!parse("label:green").matches(&f));
+        assert!(!parse("comment:nope").matches(&f));
+        assert!(FlowQuery::parse("label:pink").unwrap_err().contains("unknown label"));
     }
 
     #[test]

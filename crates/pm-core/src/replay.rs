@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use base64::Engine as _;
-use pm_model::{BodyPart, FlowId, Header, RequestSpec, SendOpts, StoreId};
+use pm_model::{BodyPart, FlowId, Header, RequestSpec, SendOpts, SentBy, StoreId};
 
 use crate::io::{curl, decode, session};
 use crate::{Engine, Error, proxy};
@@ -40,8 +40,19 @@ impl Engine {
     /// Errors are about the spec itself (a bad method, URL or header); an
     /// unreachable upstream is a failed flow, not an error.
     pub async fn send(self: &Arc<Self>, spec: RequestSpec, opts: SendOpts) -> Result<FlowId, Error> {
+        let sent_by = opts.origin.sent_by();
+        self.send_marked(spec, opts, sent_by).await
+    }
+
+    /// [`Engine::send`], with the flow marked `sent_by` (Repeat's flows).
+    pub(crate) async fn send_marked(
+        self: &Arc<Self>,
+        spec: RequestSpec,
+        opts: SendOpts,
+        sent_by: SentBy,
+    ) -> Result<FlowId, Error> {
         let sender = self.sender.get_or_init(|| proxy::Sender::new(Arc::downgrade(self)));
-        let (id, task) = sender.send(self, spec, &opts)?;
+        let (id, task) = sender.send(self, spec, &opts, sent_by)?;
         if opts.wait {
             let _ = task.await;
         }

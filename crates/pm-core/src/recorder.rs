@@ -98,7 +98,30 @@ impl FlowRecorder {
             }),
         });
         engine.details().add_live(flow.clone());
-        FlowRecorder { flow }
+        let recorder = FlowRecorder { flow };
+        recorder.header_cells(BodyPart::Request);
+        recorder
+    }
+
+    /// Sends the header column values (M17) of one side, if any column is
+    /// about it.
+    fn header_cells(&self, part: BodyPart) {
+        let Some(engine) = self.flow.engine.upgrade() else {
+            return;
+        };
+        let event = {
+            let state = self.flow.state.lock();
+            match part {
+                BodyPart::Request => engine.header_cells(self.flow.id, part, &state.detail.request.headers),
+                BodyPart::Response => match &state.detail.response {
+                    Some(response) => engine.header_cells(self.flow.id, part, &response.headers),
+                    None => None,
+                },
+            }
+        };
+        if let Some(event) = event {
+            engine.ingest().send(event);
+        }
     }
 
     pub fn id(&self) -> FlowId {
@@ -154,6 +177,7 @@ impl FlowRecorder {
             status,
             content_kind,
         });
+        self.header_cells(BodyPart::Response);
     }
 
     /// Replaces the recorded request head with what rules (or a
@@ -165,6 +189,8 @@ impl FlowRecorder {
         }
         state.detail.request_body.encoding = content_encoding(&head.headers);
         state.detail.request = head;
+        drop(state);
+        self.header_cells(BodyPart::Request);
     }
 
     /// The request head as recorded so far (after rewrites).

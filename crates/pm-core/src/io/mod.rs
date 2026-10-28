@@ -9,6 +9,7 @@ pub mod grpc;
 pub mod har;
 pub mod objects;
 pub mod session;
+pub mod snippets;
 pub mod sse;
 pub mod tree;
 pub mod wire;

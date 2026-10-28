@@ -147,23 +147,37 @@ impl DetailStore {
         self.sse.lock().get(&id).cloned()
     }
 
+    /// Forgets deleted flows (M17), and deletes the segment files no flow
+    /// left can use: `remaining(low, high)` says whether the store still
+    /// has a flow with an id in `low..=high`. Returns the bytes freed.
+    pub fn remove(&self, removed: &[FlowId], remaining: impl Fn(FlowId, FlowId) -> bool) -> u64 {
+        let Some(&through) = removed.iter().max() else {
+            return 0;
+        };
+        self.forget(removed);
+        let keep = self.segments.in_use_through(through, remaining);
+        self.segments.drop_through(through, &keep)
+    }
+
+    fn forget(&self, ids: &[FlowId]) {
+        let mut persisted = self.persisted.lock();
+        let mut live = self.live.lock();
+        let mut ws = self.ws.lock();
+        let mut sse = self.sse.lock();
+        for id in ids {
+            persisted.remove(id);
+            live.remove(id);
+            ws.remove(id);
+            sse.remove(id);
+            self.cache.invalidate(id);
+        }
+    }
+
     /// Forgets evicted flows. Their segment files go once nothing kept uses
     /// them: `kept` are the older flows that stay (pinned or in flight),
     /// and `through` the newest evicted id. Returns the bytes freed.
     pub fn evict(&self, evicted: &[FlowId], kept: &[FlowId], through: FlowId) -> u64 {
-        {
-            let mut persisted = self.persisted.lock();
-            let mut live = self.live.lock();
-            let mut ws = self.ws.lock();
-            let mut sse = self.sse.lock();
-            for id in evicted {
-                persisted.remove(id);
-                live.remove(id);
-                ws.remove(id);
-                sse.remove(id);
-                self.cache.invalidate(id);
-            }
-        }
+        self.forget(evicted);
         let mut keep = HashSet::new();
         for &id in kept {
             // Without knowing where a kept flow's data is, deleting anything

@@ -333,7 +333,7 @@ impl View {
         let is = self.accepts(new);
         match (was, is) {
             (true, true) => {
-                if !self.is_arrival_order() && compare_key(self.sort.key, old, new) != Ordering::Equal {
+                if !self.is_arrival_order() && compare_key(self.sort, old, new) != Ordering::Equal {
                     self.needs_resort = true;
                 } else {
                     self.changed.push(new.id);
@@ -400,7 +400,7 @@ impl View {
 
     fn sort_indices(&mut self, flows: &[FlowSummary]) {
         self.needs_resort = false;
-        let SortSpec { key, dir } = self.sort;
+        let SortSpec { key, dir, extra } = self.sort;
         if key == SortKey::Id {
             // Positions are pushed in arrival order, which is id order.
             if dir == SortDir::Asc {
@@ -412,7 +412,7 @@ impl View {
         }
         let cmp = |a: &Pos, b: &Pos| {
             let (fa, fb) = (&flows[*a as usize], &flows[*b as usize]);
-            let ord = compare_key(key, fa, fb).then(a.cmp(b));
+            let ord = compare_key(SortSpec { key, dir, extra }, fa, fb).then(a.cmp(b));
             if dir == SortDir::Desc { ord.reverse() } else { ord }
         };
         if self.indices.len() >= PARALLEL_THRESHOLD {
@@ -423,8 +423,8 @@ impl View {
     }
 }
 
-fn compare_key(key: SortKey, a: &FlowSummary, b: &FlowSummary) -> Ordering {
-    match key {
+fn compare_key(sort: SortSpec, a: &FlowSummary, b: &FlowSummary) -> Ordering {
+    match sort.key {
         SortKey::Id => a.id.cmp(&b.id),
         SortKey::Url => a
             .host
@@ -436,6 +436,11 @@ fn compare_key(key: SortKey, a: &FlowSummary, b: &FlowSummary) -> Ordering {
         SortKey::Duration => a.duration_ms.cmp(&b.duration_ms),
         SortKey::ReqSize => a.req_size.cmp(&b.req_size),
         SortKey::RespSize => a.resp_size.cmp(&b.resp_size),
+        // Flows without the header sort first, like a missing status.
+        SortKey::Extra => {
+            let at = |f: &FlowSummary| f.extra.get(sort.extra as usize).cloned().flatten();
+            at(a).cmp(&at(b))
+        }
     }
 }
 

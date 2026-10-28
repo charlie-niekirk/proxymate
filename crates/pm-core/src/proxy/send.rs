@@ -59,6 +59,7 @@ impl Sender {
         engine: &Arc<Engine>,
         spec: RequestSpec,
         opts: &SendOpts,
+        sent_by: pm_model::SentBy,
     ) -> Result<(FlowId, JoinHandle<()>), Error> {
         let request = Prepared::new(spec)?;
         let client = match &opts.origin {
@@ -89,9 +90,12 @@ impl Sender {
                 TlsStatus::None
             },
             graphql_op: None,
-            sent_by: Some(opts.origin.sent_by()),
+            sent_by: Some(sent_by),
             pinned: false,
             grpc_status: None,
+            label: None,
+            comment: None,
+            extra: Vec::new(),
         };
         let headers: Vec<Header> = super::headers_of(&request.headers);
         let detail = FlowDetail {

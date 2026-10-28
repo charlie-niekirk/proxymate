@@ -12,6 +12,8 @@
 //! - `bodies(flow, part, data)`: each body zstd-compressed, still
 //!   content-encoded as recorded. Empty bodies have no row.
 //! - `messages(flow, idx, data)`: WebSocket payloads, zstd-compressed.
+//! - `annotations(flow, pinned, label, comment)` (version 4, M17): what
+//!   the user added to a flow. Flows without any have no row.
 
 use std::collections::HashMap;
 use std::io;
@@ -33,8 +35,9 @@ pub(crate) const FORMAT: &str = "proxymate-session";
 /// Bumped whenever the tables or the postcard layouts change. Version 2
 /// (M14) appended `FlowRules.scripts`, the last field of a `FlowDetail`.
 /// Version 3 (M16) appended `FlowDetail.trailers` and the `grpc_status`
-/// column, and added content kinds after `Binary`.
-pub(crate) const VERSION: u32 = 3;
+/// column, and added content kinds after `Binary`. Version 4 (M17) added
+/// the `annotations` table.
+pub(crate) const VERSION: u32 = 4;
 /// The oldest version this Proxymate still reads.
 const OLDEST: u32 = 1;
 
@@ -71,6 +74,7 @@ CREATE TABLE flows (
 );
 CREATE TABLE bodies (flow INTEGER NOT NULL, part INTEGER NOT NULL, data BLOB NOT NULL, PRIMARY KEY (flow, part)) WITHOUT ROWID;
 CREATE TABLE messages (flow INTEGER NOT NULL, idx INTEGER NOT NULL, data BLOB NOT NULL, PRIMARY KEY (flow, idx)) WITHOUT ROWID;
+CREATE TABLE annotations (flow INTEGER PRIMARY KEY, pinned INTEGER NOT NULL, label TEXT, comment TEXT);
 ";
 
 /// One flow to write, whatever store it comes from.
@@ -180,6 +184,14 @@ impl SessionWriter {
                 .and_then(|mut insert| insert.execute(params![id, part, data]))
                 .map_err(io::Error::other)?;
         }
+        if s.pinned || s.label.is_some() || s.comment.is_some() {
+            self.conn
+                .prepare_cached("INSERT INTO annotations (flow, pinned, label, comment) VALUES (?1, ?2, ?3, ?4)")
+                .and_then(|mut insert| {
+                    insert.execute(params![id, s.pinned, s.label.map(|l| l.as_str()), s.comment.as_deref()])
+                })
+                .map_err(io::Error::other)?;
+        }
         if let Some(ws) = &flow.ws {
             for (meta, payload) in &ws.messages {
                 if payload.is_empty() {
@@ -258,6 +270,10 @@ impl SqliteBackend {
         if summaries.iter().enumerate().any(|(i, s)| s.id as usize != i) {
             return Err(bad("the session's flow ids aren't consecutive".into()));
         }
+        let mut summaries = summaries;
+        if version >= 4 {
+            annotate(&conn, &mut summaries).map_err(|e| bad(format!("can't read the session's annotations: {e}")))?;
+        }
         Ok(Opened {
             summaries,
             backend: SqliteBackend {
@@ -297,6 +313,7 @@ impl BlobBackend for SqliteBackend {
         if self.version <= 2 {
             bytes.push(0);
         }
+        // Version 4 changed no postcard layout.
         let detail: FlowDetail = postcard::from_bytes(&bytes).map_err(io::Error::other)?;
         self.details.insert(id, Arc::new(detail.clone()));
         Ok(Some(detail))
@@ -418,7 +435,33 @@ fn summary(row: &Row<'_>, interned: &mut Interner) -> rusqlite::Result<FlowSumma
         },
         pinned: false,
         grpc_status: row.get(20)?,
+        label: None,
+        comment: None,
+        extra: Vec::new(),
     })
+}
+
+/// Applies the `annotations` rows to the summaries they belong to.
+fn annotate(conn: &Connection, summaries: &mut [FlowSummary]) -> rusqlite::Result<()> {
+    let mut stmt = conn.prepare("SELECT flow, pinned, label, comment FROM annotations")?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, u32>(0)?,
+            row.get::<_, bool>(1)?,
+            row.get::<_, Option<String>>(2)?,
+            row.get::<_, Option<String>>(3)?,
+        ))
+    })?;
+    for row in rows {
+        let (flow, pinned, label, comment) = row?;
+        if let Some(s) = summaries.get_mut(flow as usize) {
+            s.pinned = pinned;
+            // A label this version doesn't know is dropped, not an error.
+            s.label = label.as_deref().and_then(pm_model::FlowLabel::parse);
+            s.comment = comment.filter(|c| !c.is_empty()).map(Arc::from);
+        }
+    }
+    Ok(())
 }
 
 /// A fieldless enum as its serde name (`"completed"`, `"HTTP/2"`).

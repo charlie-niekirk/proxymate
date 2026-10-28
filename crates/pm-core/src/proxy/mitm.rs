@@ -454,6 +454,9 @@ fn record_connect(
         sent_by: None,
         pinned: false,
         grpc_status: None,
+        label: None,
+        comment: None,
+        extra: Vec::new(),
     };
     let detail = FlowDetail {
         id: 0,
