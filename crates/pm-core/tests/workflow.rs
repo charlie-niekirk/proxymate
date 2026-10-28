@@ -112,30 +112,30 @@ fn walk(path: &Path) -> u64 {
 fn deleting_flows_frees_segments_no_kept_flow_uses() {
     let dir = temp_dir();
     let engine = engine(&dir);
-    // 2 MB bodies: about 32 flows per 64 MB segment, so 200 flows fill
-    // several segments.
-    record(&engine, 200, 2 * 1024 * 1024);
+    // 2 MB bodies: about 32 flows per 64 MB segment, so 100 flows fill
+    // four segments (about 200 MB, removed at the end).
+    record(&engine, 100, 2 * 1024 * 1024);
     let before = segment_bytes(&dir);
-    assert!(before > 300 * 1024 * 1024, "{before}");
+    assert!(before > 150 * 1024 * 1024, "{before}");
 
     // Deleting a flow in the middle of a segment frees nothing on disk.
     assert_eq!(engine.remove_flows_in(LIVE_STORE, &ids(&[40])).unwrap(), 1);
-    assert_eq!(engine.total(), 199);
+    assert_eq!(engine.total(), 99);
     assert!(engine.get_flow(40).is_none());
     assert_eq!(segment_bytes(&dir), before);
     assert!(engine.flow_detail(40).unwrap().is_none());
 
-    // Pinned flows go when asked; the first 100 flows' segments are freed
-    // but the one shared with flow 100 stays.
+    // Pinned flows go when asked; the first two segments are freed, the
+    // one shared with flow 70 stays.
     engine.pin_flows_in(LIVE_STORE, &ids(&[3]), true).unwrap();
-    let first: Vec<u32> = (0..100).collect();
-    assert_eq!(engine.remove_flows_in(LIVE_STORE, &ids(&first)).unwrap(), 99);
+    let first: Vec<u32> = (0..70).collect();
+    assert_eq!(engine.remove_flows_in(LIVE_STORE, &ids(&first)).unwrap(), 69);
     let after = segment_bytes(&dir);
-    assert!(after < before - 128 * 1024 * 1024, "{after} of {before}");
-    let kept = engine.body(100, BodyPart::Response, false).unwrap();
+    assert!(after < before - 120 * 1024 * 1024, "{after} of {before}");
+    let kept = engine.body(70, BodyPart::Response, false).unwrap();
     assert_eq!(kept.bytes.len(), 2 * 1024 * 1024);
-    // Flow 100's body is filled with its id (below 251).
-    assert_eq!(kept.bytes[0], 100);
+    // Flow 70's body is filled with its id (below 251).
+    assert_eq!(kept.bytes[0], 70);
 
     // A whole view, but for the exceptions.
     let view = engine.create_view(FilterSpec::default(), SortSpec::default()).view;
@@ -144,13 +144,13 @@ fn deleting_flows_frees_segments_no_kept_flow_uses() {
             LIVE_STORE,
             &FlowSelection::View {
                 view,
-                except: vec![150, 151],
+                except: vec![80, 81],
             },
         )
         .unwrap();
-    assert_eq!(removed, 98);
+    assert_eq!(removed, 28);
     let left: Vec<u32> = engine.selected_ids(LIVE_STORE, &FlowSelection::All).unwrap();
-    assert_eq!(left, vec![150, 151]);
+    assert_eq!(left, vec![80, 81]);
     assert_eq!(engine.get_rows(view, 0, 10).unwrap().len, 2);
     let _ = std::fs::remove_dir_all(dir);
 }
