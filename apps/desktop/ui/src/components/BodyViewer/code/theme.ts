@@ -33,6 +33,8 @@ export const codeTheme = EditorView.theme({
   ".cm-searchMatch": { backgroundColor: "var(--code-match)", borderRadius: "2px" },
   ".cm-searchMatch.cm-searchMatch-selected": { backgroundColor: "var(--code-match-current)" },
   ".cm-selectionMatch": { backgroundColor: "var(--code-match)" },
+  // M17: the filter's body terms.
+  ".cm-pm-filter-match": { backgroundColor: "var(--code-match)", borderRadius: "2px", boxShadow: "inset 0 -1px 0 var(--code-match-current)" },
   ".cm-matchingBracket, &.cm-focused .cm-matchingBracket": {
     backgroundColor: "var(--code-match)",
     outline: "1px solid var(--code-match-current)",

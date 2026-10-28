@@ -6,7 +6,7 @@ import { decodeRow, formatCount, formatDuration, formatMs, formatSize, methodTok
 
 const tuple: FlowRow_Serialize = [
   7, "completed", "https", "GET", "api.example.com", 443, "/v1/users", "page=2", 404, "json", "Safari", 1.5, 42, 0, 1024, true,
-  "HTTP/2", "intercepted", "GetUser", "agent", true, 5,
+  "HTTP/2", "intercepted", "GetUser", "agent", true, 5, "red", "check this", ["req-1", null],
 ];
 
 describe("decodeRow", () => {
@@ -14,6 +14,7 @@ describe("decodeRow", () => {
     const row = decodeRow(tuple);
     expect(row).toMatchObject({ id: 7, method: "GET", host: "api.example.com", status: 404, contentKind: "json", edited: true });
     expect(row).toMatchObject({ httpVersion: "HTTP/2", tls: "intercepted", graphqlOp: "GetUser", sentBy: "agent", pinned: true, grpcStatus: 5 });
+    expect(row).toMatchObject({ label: "red", comment: "check this", extra: ["req-1", null] });
   });
 });
 

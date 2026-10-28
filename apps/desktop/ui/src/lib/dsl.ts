@@ -39,7 +39,9 @@ export const DSL_KEYS: Key[] = [
   { key: "app", detail: "client app (substring)" },
   { key: "scheme", detail: "http, https, ws, wss" },
   { key: "state", detail: "active, paused, completed, failed, blocked, tunnel" },
-  { key: "is", detail: "edited, pinned or a state" },
+  { key: "is", detail: "edited, pinned, labelled, commented or a state" },
+  { key: "label", detail: "red, orange, yellow, green, blue, purple or any" },
+  { key: "comment", detail: "the flow's comment contains…" },
   { key: "header", detail: "any header line contains… (deep search)" },
   { key: "reqheader", detail: "a request header contains… (deep search)" },
   { key: "resheader", detail: "a response header contains… (deep search)" },
@@ -59,7 +61,8 @@ const VALUES: Record<string, string[]> = {
   grpc: ["!0", "0", "ok", "not_found", "unavailable", "internal", "unauthenticated", "permission_denied", "deadline_exceeded"],
   scheme: ["http", "https", "ws", "wss"],
   state: ["active", "paused", "completed", "failed", "blocked", "tunnel"],
-  is: ["edited", "pinned", "failed", "active", "paused", "blocked", "tunnel", "completed"],
+  is: ["edited", "pinned", "labelled", "commented", "failed", "active", "paused", "blocked", "tunnel", "completed"],
+  label: ["red", "orange", "yellow", "green", "blue", "purple", "any"],
 };
 
 const ALIASES: Record<string, string> = {
@@ -70,7 +73,44 @@ const ALIASES: Record<string, string> = {
   proto: "scheme",
   respbody: "resbody",
   respheader: "resheader",
+  note: "comment",
 };
+
+/** DSL keys whose values aren't body text (so a bare word after them isn't a body search). */
+const NOT_BODY = new Set([
+  ...DSL_KEYS.map((k) => k.key),
+  ...Object.keys(ALIASES),
+  "headers",
+  "req.header",
+  "res.header",
+]);
+
+/**
+ * What the body viewers highlight (M17): the values of `body:`,
+ * `reqbody:`/`resbody:` (for that side) and bare words or quoted phrases,
+ * lower-cased, longest first. Negated terms don't count.
+ */
+export function bodySearchTerms(text: string, part: "request" | "response"): string[] {
+  const out = new Set<string>();
+  const re = /(-?)(?:([\w.]+)(:|[<>=]+))?("([^"]*)"|\S+)/g;
+  for (const m of text.matchAll(re)) {
+    const [, negate, key, op, raw, quoted] = m;
+    if (negate) continue;
+    const value = (quoted ?? raw ?? "").trim();
+    if (!value) continue;
+    const k = key?.toLowerCase();
+    if (k === undefined) {
+      // A bare word that is a key with no value yet (`body:`) isn't text.
+      if (!/^[\w.]+:$/.test(value)) out.add(value.toLowerCase());
+      continue;
+    }
+    if (op !== ":") continue;
+    const side = { body: "both", reqbody: "request", "req.body": "request", resbody: "response", respbody: "response", "res.body": "response" }[k];
+    if (side === "both" || side === part) out.add(value.toLowerCase());
+    else if (!side && !NOT_BODY.has(k)) out.add(`${k}:${value}`.toLowerCase());
+  }
+  return [...out].filter((t) => t.length > 0).sort((a, b) => b.length - a.length);
+}
 
 const MAX = 8;
 

@@ -3,18 +3,27 @@ import { focusFlowTable, focusInspector } from "@/lib/focus";
 import { SIDEBAR_FILTER_ID } from "@/components/Sidebar";
 import {
   clearFlows,
+  compareSelection,
+  copyFlowCode,
   copyFlowCurl,
   copyFlowUrl,
+  copySelectionUrls,
+  deleteSelection,
   editAndReplay,
   exportHar,
+  labelSelection,
   openDocument,
   openRewrite,
   pinFlows,
   replayFlow,
+  replaySelection,
   reportError,
   saveSession,
   setRecording,
 } from "@/lib/actions";
+import { CODE_LANGUAGES, FLOW_LABELS } from "@/lib/flow";
+import { FLOW_TABLE_ID } from "@/lib/focus";
+import { selectionCount } from "@/lib/selection";
 import { backend } from "@/lib/backend";
 import { proxyStatusKey, queryClient } from "@/lib/query";
 import { usePrefs } from "@/store/prefs";
@@ -32,6 +41,15 @@ export interface AppCommand {
   group: CommandGroup;
   /** The key pressed with ⌘: a letter, `Backspace` or `,`. */
   key?: string;
+  /** With ⌥ as well (⌥⌘R). */
+  alt?: boolean;
+  /**
+   * The key alone, without ⌘ (⌫ deletes the selection), and only while the
+   * flow table has the focus.
+   */
+  bare?: boolean;
+  /** Only while the flow table has the focus (⌘A selects every flow). */
+  inTable?: boolean;
   /** Extra words the palette matches on. */
   keywords?: string[];
   /** False hides it from the palette and ignores its key. */
@@ -39,11 +57,13 @@ export interface AppCommand {
   run: () => void | Promise<void>;
 }
 
-/** How a command's key is shown: ⌘R, ⌘⌫. */
-export function shortcutLabel(key: string): string {
+/** How a command's key is shown: ⌘R, ⌘⌫, ⌥⌘R, ⌫. */
+export function shortcutLabel(key: string, mods: { alt?: boolean; bare?: boolean } = {}): string {
   const mac = navigator.userAgent.includes("Mac");
-  const name = key === "Backspace" ? "⌫" : key.length === 1 ? key.toUpperCase() : key;
-  return mac ? `⌘${name}` : `Ctrl+${name}`;
+  const name = key === "Backspace" ? (mac ? "⌫" : "Backspace") : key.length === 1 ? key.toUpperCase() : key;
+  if (mods.bare) return name;
+  if (mac) return `${mods.alt ? "⌥" : ""}⌘${name}`;
+  return `Ctrl+${mods.alt ? "Alt+" : ""}${name}`;
 }
 
 /** The selected flow's summary, if one is selected. */
@@ -68,6 +88,7 @@ async function sendableSelection(): Promise<number | null> {
 }
 
 const hasSelection = () => useUi.getState().selectedId !== null;
+const selectedCount = () => selectionCount(useUi.getState().selection, useUi.getState().stats.len);
 const isLive = () => useUi.getState().store === LIVE_STORE;
 
 function focusInput(id: string) {
@@ -136,7 +157,97 @@ export const COMMANDS: AppCommand[] = [
     title: "Copy URL of selected flow",
     group: "Flows",
     enabled: hasSelection,
-    run: () => copyFlowUrl(useUi.getState().store, useUi.getState().selectedId!),
+    run: () =>
+      selectedCount() > 1 ? copySelectionUrls() : copyFlowUrl(useUi.getState().store, useUi.getState().selectedId!),
+  },
+  ...CODE_LANGUAGES.map(
+    (l): AppCommand => ({
+      id: `copy-code-${l.id}`,
+      title: `Copy selected flow as ${l.label}`,
+      group: "Flows",
+      keywords: ["code", "snippet", "export"],
+      enabled: hasSelection,
+      run: () => copyFlowCode(useUi.getState().store, useUi.getState().selectedId!, l.id),
+    }),
+  ),
+  {
+    id: "repeat",
+    title: "Repeat selected flow…",
+    group: "Flows",
+    key: "r",
+    alt: true,
+    keywords: ["load", "iterations", "rate limit", "stress"],
+    enabled: hasSelection,
+    run: async () => {
+      const id = await sendableSelection();
+      if (id !== null) useUi.getState().openRepeat(useUi.getState().store, id);
+    },
+  },
+  {
+    id: "select-all",
+    title: "Select all flows",
+    group: "Flows",
+    key: "a",
+    inTable: true,
+    run: () => useUi.getState().setSelection({ all: true, ids: new Set() }),
+  },
+  {
+    id: "delete",
+    title: "Delete selected flows",
+    group: "Flows",
+    key: "Backspace",
+    bare: true,
+    keywords: ["remove"],
+    enabled: () => selectedCount() > 0,
+    run: () => deleteSelection().then(() => undefined).catch((e: unknown) => reportError("Delete failed", e)),
+  },
+  {
+    id: "replay-selection",
+    title: "Replay selected flows in order",
+    group: "Flows",
+    enabled: () => selectedCount() > 1,
+    run: () => replaySelection().catch((e: unknown) => reportError("Replay failed", e)),
+  },
+  {
+    id: "compare",
+    title: "Compare the two selected flows",
+    group: "Flows",
+    keywords: ["diff"],
+    enabled: () => selectedCount() === 2,
+    run: () => compareSelection(),
+  },
+  {
+    id: "comment",
+    title: "Comment on selected flow…",
+    group: "Flows",
+    keywords: ["note", "annotate"],
+    enabled: hasSelection,
+    run: () => useUi.getState().openComment(useUi.getState().store, useUi.getState().selectedId!),
+  },
+  ...FLOW_LABELS.map(
+    (label): AppCommand => ({
+      id: `label-${label}`,
+      title: `Label selected flows ${label[0]!.toUpperCase()}${label.slice(1)}`,
+      group: "Flows",
+      keywords: ["colour", "color", "tag", "mark"],
+      enabled: () => selectedCount() > 0,
+      run: () => labelSelection(label).catch((e: unknown) => reportError("Label failed", e)),
+    }),
+  ),
+  {
+    id: "label-none",
+    title: "Remove label from selected flows",
+    group: "Flows",
+    keywords: ["colour", "color", "tag"],
+    enabled: () => selectedCount() > 0,
+    run: () => labelSelection(null).catch((e: unknown) => reportError("Label failed", e)),
+  },
+  {
+    id: "add-header-column",
+    title: "Add header column…",
+    group: "Flows",
+    keywords: ["column", "header", "table"],
+    run: () => useUi.getState().setAddColumnOpen(true),
   },
   {
     id: "copy-curl",
@@ -219,6 +330,20 @@ export const COMMANDS: AppCommand[] = [
     run: () => useUi.getState().setText("is:pinned"),
   },
   {
+    id: "labelled",
+    title: "Show labelled flows",
+    group: "Navigate",
+    keywords: ["colour", "color", "tag"],
+    run: () => useUi.getState().setText("is:labelled"),
+  },
+  {
+    id: "commented",
+    title: "Show commented flows",
+    group: "Navigate",
+    keywords: ["note"],
+    run: () => useUi.getState().setText("is:commented"),
+  },
+  {
     id: "deep-search",
     title: "Search request and response bodies…",
     group: "Navigate",
@@ -295,12 +420,21 @@ export function isEditable(target: EventTarget | null): boolean {
   );
 }
 
+function inFlowTable(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement && target.closest(`#${FLOW_TABLE_ID}`) !== null;
+}
+
 /** The command `e` triggers, if any (the palette's own ⌘K aside). */
 export function commandForKey(e: KeyboardEvent): AppCommand | undefined {
-  if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return undefined;
-  const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-  const command = COMMANDS.find((c) => c.key === key);
+  if (e.shiftKey) return undefined;
+  const modified = e.metaKey || e.ctrlKey;
+  // ⌥ turns letters into symbols on a Mac keyboard: match the physical key.
+  const key = e.key.length === 1 ? (e.altKey && /^Key[A-Z]$/.test(e.code) ? e.code.slice(3) : e.key).toLowerCase() : e.key;
+  const command = COMMANDS.find(
+    (c) => c.key === key && (c.bare ? !modified && !e.altKey : modified && Boolean(c.alt) === e.altKey),
+  );
   if (!command || command.enabled?.() === false) return undefined;
+  if ((command.bare || command.inTable) && !inFlowTable(e.target)) return undefined;
   // In text, ⌘⌫ deletes to the start of the line; in a body viewer ⌘F
   // searches the body.
   if (command.id === "clear" && isEditable(e.target)) return undefined;

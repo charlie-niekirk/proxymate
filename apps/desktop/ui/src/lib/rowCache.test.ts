@@ -10,7 +10,7 @@ function fakeView(ids: number[]) {
   const fetchPage = vi.fn(async (start: number, count: number): Promise<RowsPage_Serialize> => {
     requests.push(start);
     const rows = ids.slice(start, start + count).map(
-      (id): FlowRow_Serialize => [id, "completed", "https", "GET", "h", 443, "/", "", 200, "json", null, 0, 1, 0, 0, false, "HTTP/1.1", "intercepted", null, null, false, null],
+      (id): FlowRow_Serialize => [id, "completed", "https", "GET", "h", 443, "/", "", 200, "json", null, 0, 1, 0, 0, false, "HTTP/1.1", "intercepted", null, null, false, null, null, null, []],
     );
     return { view: 1, start, len: ids.length, rows };
   });

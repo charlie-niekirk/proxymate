@@ -9,7 +9,10 @@ import type {
   FilterSpec_Deserialize,
   FlowDetail_Serialize,
   FlowSelection,
+  FlowSelection_Deserialize,
   FlowRow_Serialize,
+  HeaderColumn,
+  SortSpec_Deserialize,
   FlowSummary_Serialize,
   ProxyStatus_Serialize,
   SaveProgress_Serialize,
@@ -90,6 +93,9 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
       i % 211 === 3 ? "user" : null,
       false,
       null,
+      null,
+      null,
+      [],
     ];
     // A few are WebSockets and event streams, for the message panels.
     if (!connect && i % 61 === 13) return asStream(row, "websocket");
@@ -141,14 +147,59 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
     sha256: "3F9A".repeat(16),
   };
 
+  let lastRepeat = 0;
+  const cancelledRepeats = new Set<number>();
   const views = new Map<number, number[]>();
+  const viewFilters = new Map<number, FilterSpec_Deserialize>();
   let nextView = 0;
   // Opened documents show the first flows of the mock data, under the same ids.
   let documents: DocumentInfo[] = [];
   let lastDocument = 0;
   let updateSettings: UpdateSettings = { check_at_launch: true };
   const DOCUMENT_FLOWS = 50;
-  const storeFlows = (store: number) => (store === 0 ? flows : flows.slice(0, DOCUMENT_FLOWS));
+  // Deleted flows stay in `flows` (ids index it) but leave every view.
+  const removed = new Set<number>();
+  const storeFlows = (store: number) => (store === 0 ? flows : flows.slice(0, DOCUMENT_FLOWS)).filter((f) => !removed.has(f[0]));
+  let headerColumns: HeaderColumn[] = [];
+  // The headers the synthetic flows' details have (fixtures carry their own).
+  const headerLists = (f: FlowRow_Serialize): Record<BodyPart, { name: string; value: string }[]> => {
+    const fixture = full.get(f[0]);
+    if (fixture) return { request: fixture.detail.request.headers, response: fixture.detail.response?.headers ?? [] };
+    return {
+      request: [
+        { name: "host", value: f[4] },
+        { name: "user-agent", value: "curl/8.7.1" },
+        { name: "accept", value: "*/*" },
+      ],
+      response: [{ name: "content-type", value: f[9] === "json" ? "application/json" : "text/plain" }],
+    };
+  };
+  const withExtra = (f: FlowRow_Serialize): FlowRow_Serialize => {
+    if (headerColumns.length === 0) return f;
+    const lists = headerLists(f);
+    const extra = headerColumns.map((c) => lists[c.part].find((h) => h.name.toLowerCase() === c.name)?.value ?? null);
+    return [...f.slice(0, 24), extra] as unknown as FlowRow_Serialize;
+  };
+  // A view's sort, for header columns (the mock sorts by nothing else).
+  const viewSorts = new Map<number, SortSpec_Deserialize>();
+  const sortIds = (ids: number[], sort: SortSpec_Deserialize | undefined): number[] => {
+    if (!sort || sort.key !== "extra") return ids;
+    const at = (id: number) => withExtra(flows[id]!)[24][sort.extra ?? 0] ?? "";
+    const out = [...ids].sort((a, b) => at(a).localeCompare(at(b)) || a - b);
+    return sort.dir === "desc" ? out.reverse() : out;
+  };
+  const changed = (ids: number[], structural = false) => {
+    for (const [view, sink] of deltaSinks) {
+      sink({ view, seq: 0, total: flows.length, len: views.get(view)?.length ?? 0, appended: 0, changed: ids, structural, deep: null });
+    }
+  };
+  const idsOf = async (store: number, selection: FlowSelection_Deserialize): Promise<number[]> => {
+    await ready;
+    if (selection.kind === "ids") return selection.ids.filter((id) => flows[id] && !removed.has(id));
+    if (selection.kind === "all") return storeFlows(store).map((f) => f[0]);
+    const except = new Set(selection.except ?? []);
+    return (views.get(selection.view) ?? []).filter((id) => !except.has(id));
+  };
 
   let rules: Rule[] = [
     {
@@ -204,6 +255,12 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
       // The DSL lives in Rust; the mock knows `is:pinned` and plain text.
       const words = text.split(/\s+/).filter(Boolean);
       if (words.includes("is:pinned") && !f[20]) continue;
+      if ((words.includes("is:labelled") || words.includes("label:any")) && !f[22]) continue;
+      const label = words.find((w) => w.startsWith("label:") && w !== "label:any");
+      if (label && !label.slice(6).split(",").includes(f[22] ?? "")) continue;
+      if (words.includes("is:commented") && !f[23]) continue;
+      const comment = words.find((w) => w.startsWith("comment:"));
+      if (comment && !(f[23] ?? "").toLowerCase().includes(comment.slice(8).replace(/"/g, ""))) continue;
       const plain = words.filter((w) => !w.includes(":")).join(" ");
       if (plain && !`${f[4]}${f[6]}${f[7]}`.toLowerCase().includes(plain)) continue;
       out.push(f[0]);
@@ -222,22 +279,28 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
   }
 
   const api: Backend = {
-    async createView(store, filter: FilterSpec_Deserialize) {
+    async createView(store, filter: FilterSpec_Deserialize, sort) {
       await ready;
       const start = performance.now();
       // Like the engine: a document's view ids carry its store.
       const view = store * 2 ** 24 + ++nextView;
-      views.set(view, refilter(filter, store));
+      viewSorts.set(view, sort);
+      viewFilters.set(view, filter);
+      views.set(view, sortIds(refilter(filter, store), sort));
       return info(view, start);
     },
     async setFilter(view, filter) {
       await ready;
       const start = performance.now();
-      views.set(view, refilter(filter, Math.floor(view / 2 ** 24)));
+      viewFilters.set(view, filter);
+      views.set(view, sortIds(refilter(filter, Math.floor(view / 2 ** 24)), viewSorts.get(view)));
       return info(view, start);
     },
-    async setSort(view) {
+    async setSort(view, sort) {
       await ready;
+      viewSorts.set(view, sort);
+      const filter = viewFilters.get(view);
+      if (filter) views.set(view, sortIds(refilter(filter, Math.floor(view / 2 ** 24)), sort));
       return info(view, performance.now());
     },
     async dropView(view) {
@@ -247,12 +310,12 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
     async getRows(view, start, n) {
       await ready;
       const ids = views.get(view) ?? [];
-      return { view, start, len: ids.length, rows: ids.slice(start, start + n).map((id) => flows[id]!) };
+      return { view, start, len: ids.length, rows: ids.slice(start, start + n).map((id) => withExtra(flows[id]!)) };
     },
     async getFlow(_store, id): Promise<FlowSummary_Serialize | null> {
       await ready;
       const f = flows[id];
-      if (!f) return null;
+      if (!f || removed.has(id)) return null;
       return {
         id: f[0], state: f[1], scheme: f[2], method: f[3], host: f[4], port: f[5], path: f[6], query: f[7],
         status: f[8], content_kind: f[9], client: f[10], started_at_ms: f[11], duration_ms: f[12],
@@ -260,6 +323,9 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
         sent_by: f[19],
         pinned: f[20],
         grpc_status: f[21],
+        label: f[22],
+        comment: f[23],
+        extra: withExtra(f)[24],
       };
     },
     async subscribe(view, onDelta: (d: ViewDelta_Serialize) => void) {
@@ -432,16 +498,90 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
       onStorage = cb;
       setTimeout(() => cb(storageStatus()), 0);
     },
-    async pinFlows(ids, pinned) {
-      await ready;
-      for (const id of ids) {
-        const f = flows[id];
-        if (f) f[20] = pinned;
-      }
-      for (const [view, sink] of deltaSinks) {
-        sink({ view, seq: 0, total: flows.length, len: views.get(view)?.length ?? 0, appended: 0, changed: ids, structural: false, deep: null });
-      }
+    async pinFlows(store, selection, pinned) {
+      const ids = await idsOf(store, selection);
+      for (const id of ids) flows[id]![20] = pinned;
+      changed(ids);
       onStorage?.(storageStatus());
+      return ids.length;
+    },
+    selectedIds: idsOf,
+    async getFlowUrls(store, selection) {
+      return (await idsOf(store, selection)).map((id) => {
+        const f = flows[id]!;
+        return `${f[2]}://${f[4]}${f[6]}${f[7] ? `?${f[7]}` : ""}`;
+      });
+    },
+    async removeFlows(store, selection) {
+      const ids = await idsOf(store, selection);
+      for (const id of ids) removed.add(id);
+      const gone = new Set(ids);
+      for (const [view, list] of views) views.set(view, list.filter((id) => !gone.has(id)));
+      changed([], true);
+      onSidebar?.(sidebar(storeFlows(sidebarStore), sidebarStore));
+      onStorage?.(storageStatus());
+      return ids.length;
+    },
+    async labelFlows(store, selection, label) {
+      const ids = await idsOf(store, selection);
+      for (const id of ids) flows[id]![22] = label;
+      changed(ids);
+      return ids.length;
+    },
+    async commentFlow(_store, id, comment) {
+      await ready;
+      const f = flows[id];
+      if (!f) throw new Error(`unknown flow ${id}`);
+      f[23] = comment.trim() || null;
+      changed([id]);
+    },
+    async setHeaderColumns(columns) {
+      await ready;
+      headerColumns = columns.map((c) => ({ part: c.part, name: c.name.trim().toLowerCase() }));
+      changed([], true);
+      return headerColumns;
+    },
+    async getCode(store, id, language) {
+      const spec = await this.getRequestSpec(store, id);
+      if (language === "curl") return this.getCurl(store, id);
+      const headers = spec.headers.map((h) => `    ${JSON.stringify(h.name)}: ${JSON.stringify(h.value)},`).join("\n");
+      return `// ${language} (mock)\nfetch(${JSON.stringify(spec.url)}, {\n  method: ${JSON.stringify(spec.method)},\n  headers: {\n${headers}\n  },\n});`;
+    },
+    async startRepeat(store, id, opts, onProgress) {
+      await ready;
+      const repeat = ++lastRepeat;
+      const total = opts.iterations;
+      const f = flows[id];
+      const status = f?.[8] ?? null;
+      let done = 0;
+      const tick = () => {
+        done = Math.min(total, done + Math.max(1, Math.ceil(total / 10)));
+        const finished = done >= total || cancelledRepeats.has(repeat);
+        onProgress({
+          id: repeat,
+          done,
+          total,
+          failed: status === null ? done : 0,
+          statuses: [{ status, count: done }],
+          min_ms: 12,
+          p50_ms: 40,
+          p95_ms: 95,
+          max_ms: 180,
+          first_flow: null,
+          last_flow: null,
+          finished,
+          cancelled: finished && done < total,
+          error: null,
+        });
+        if (!finished) setTimeout(tick, 60);
+      };
+      setTimeout(tick, 30);
+      void store;
+      return repeat;
+    },
+    async cancelRepeat(id) {
+      cancelledRepeats.add(id);
+      return true;
     },
     async getProxySettings() {
       return proxySettings;
@@ -678,7 +818,7 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
         [
           id, "completed", https ? "https" : "http", spec.method, url.hostname, Number(url.port) || (https ? 443 : 80),
           url.pathname, url.search.slice(1), 200, "json", "Proxymate", Date.now(), 120, (spec.body ?? "").length, 512,
-          false, "HTTP/1.1", https ? "intercepted" : "none", null, "user", false, null,
+          false, "HTTP/1.1", https ? "intercepted" : "none", null, "user", false, null, null, null, [],
         ],
       ];
       return id;

@@ -12,6 +12,7 @@ import type {
   SortSpec,
 } from "@/bindings";
 import type { ViewerId } from "@/components/BodyViewer/registry";
+import { EMPTY_SELECTION, single, toggle, type TableSelection } from "@/lib/selection";
 import type { Rule } from "@/lib/rules";
 import type { Script } from "@/lib/scripts";
 import { usePrefs } from "@/store/prefs";
@@ -41,6 +42,12 @@ export interface SaveJob {
   progress: SaveProgress_Serialize;
 }
 
+/** A flow in some store (Compare takes flows from any tabs). */
+export interface FlowRef {
+  store: number;
+  id: number;
+}
+
 export interface FilterTiming {
   /** Engine refilter time reported by Rust. */
   engineMs: number;
@@ -60,7 +67,20 @@ interface UiState {
   save: SaveJob | null;
   filter: FilterSpec_Deserialize;
   sort: SortSpec;
+  /** The focused flow: the inspector shows it. Always in `selection`, if any. */
   selectedId: number | null;
+  /** Every selected flow (M17); bulk actions take it. */
+  selection: TableSelection;
+  /** Two flows side by side (M17), from any stores. */
+  compare: { open: boolean; a: FlowRef | null; b: FlowRef | null };
+  /** "Mark for Compare": the flow a later "Compare with Marked" (any tab) goes against. */
+  compareMark: FlowRef | null;
+  /** The Repeat dialog (M17) for a flow of `store`. */
+  repeat: { open: boolean; store: number; flow: number | null };
+  /** The comment editor (M17) for a flow of `store`. */
+  comment: { open: boolean; store: number; flow: number | null };
+  /** The "Add header column" dialog (M17). */
+  addColumnOpen: boolean;
   stats: ViewStats;
   /** The table's deep search (header and body terms), while its filter has any. */
   deep: DeepProgress | null;
@@ -109,7 +129,20 @@ interface UiState {
   clearContent(): void;
   setScope(scope: { host?: string | null; client?: string | null }): void;
   setSort(sort: SortSpec): void;
+  /** Selects just this flow (or nothing) and focuses it. */
   select(id: number | null): void;
+  /** ⌘-click: adds or removes a flow, focusing it when added. */
+  toggleSelected(id: number): void;
+  /** Replaces the selection (⇧-click, ⌘A), focusing `focus`. */
+  setSelection(selection: TableSelection, focus?: number | null): void;
+  openCompare(a: FlowRef, b: FlowRef): void;
+  markForCompare(flow: FlowRef | null): void;
+  closeCompare(): void;
+  openRepeat(store: number, flow: number): void;
+  closeRepeat(): void;
+  openComment(store: number, flow: number): void;
+  closeComment(): void;
+  setAddColumnOpen(open: boolean): void;
   setStats(stats: ViewStats): void;
   setDeep(deep: DeepProgress | null): void;
   setFilterTiming(timing: FilterTiming): void;
@@ -145,6 +178,12 @@ export const useUi = create<UiState>()((set) => ({
   // Remembered across launches (store/prefs.ts).
   sort: usePrefs.getState().sort,
   selectedId: null,
+  selection: EMPTY_SELECTION,
+  compare: { open: false, a: null, b: null },
+  compareMark: null,
+  repeat: { open: false, store: LIVE_STORE, flow: null },
+  comment: { open: false, store: LIVE_STORE, flow: null },
+  addColumnOpen: false,
   stats: { len: 0, total: 0 },
   deep: null,
   filterTiming: null,
@@ -165,7 +204,8 @@ export const useUi = create<UiState>()((set) => ({
   settings: { open: false, page: "proxy" },
   paletteOpen: false,
 
-  setStore: (store) => set((s) => (s.store === store ? {} : { store, selectedId: null, stats: { len: 0, total: 0 } })),
+  setStore: (store) =>
+    set((s) => (s.store === store ? {} : { store, selectedId: null, selection: EMPTY_SELECTION, stats: { len: 0, total: 0 } })),
   setDocuments: (documents) => set({ documents }),
   setView: (view) => set({ view }),
   // Bumping `seq` remounts the form, so a new spec never inherits the last one's edits.
@@ -187,7 +227,25 @@ export const useUi = create<UiState>()((set) => ({
     usePrefs.getState().setSort(sort);
     set({ sort });
   },
-  select: (selectedId) => set({ selectedId }),
+  select: (selectedId) => set({ selectedId, selection: single(selectedId) }),
+  toggleSelected: (id) =>
+    set((s) => {
+      const selection = toggle(s.selection, id);
+      const added = selection.all ? !selection.ids.has(id) : selection.ids.has(id);
+      // Unselecting the focused flow moves the focus to another selected one.
+      const rest = selection.all ? null : [...selection.ids].at(-1);
+      const selectedId = added ? id : s.selectedId === id ? (rest ?? null) : s.selectedId;
+      return { selection, selectedId };
+    }),
+  setSelection: (selection, focus) => set((s) => ({ selection, selectedId: focus === undefined ? s.selectedId : focus })),
+  openCompare: (a, b) => set({ compare: { open: true, a, b } }),
+  markForCompare: (compareMark) => set({ compareMark }),
+  closeCompare: () => set((s) => ({ compare: { ...s.compare, open: false } })),
+  openRepeat: (store, flow) => set({ repeat: { open: true, store, flow } }),
+  closeRepeat: () => set((s) => ({ repeat: { ...s.repeat, open: false } })),
+  openComment: (store, flow) => set({ comment: { open: true, store, flow } }),
+  closeComment: () => set((s) => ({ comment: { ...s.comment, open: false } })),
+  setAddColumnOpen: (addColumnOpen) => set({ addColumnOpen }),
   setStats: (stats) => set({ stats }),
   setDeep: (deep) => set((s) => (sameDeep(s.deep, deep) ? {} : { deep })),
   setFilterTiming: (filterTiming) => set({ filterTiming }),

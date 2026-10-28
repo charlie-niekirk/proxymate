@@ -2,6 +2,9 @@ import { BreakpointEditor } from "@/components/Breakpoints/BreakpointEditor";
 import { CertWizard } from "@/components/CertWizard";
 import { CommandPalette } from "@/components/CommandPalette";
 import { ComposeDialog } from "@/components/Compose/ComposeDialog";
+import { CompareDialog } from "@/components/Workflow/CompareDialog";
+import { RepeatDialog } from "@/components/Workflow/RepeatDialog";
+import { AddColumnDialog, CommentDialog } from "@/components/Workflow/SmallDialogs";
 import { DetailPane } from "@/components/DetailPane";
 import { DeviceAllowPrompt } from "@/components/DeviceAllowPrompt";
 import { DeviceSetupSheet } from "@/components/DeviceSetup/DeviceSetupSheet";
@@ -62,6 +65,10 @@ export function AppShell() {
     <RewriteDialog />
     <ScriptsWindow />
     <ComposeDialog />
+    <CompareDialog />
+    <RepeatDialog />
+    <CommentDialog />
+    <AddColumnDialog />
     <BreakpointEditor />
     <DeviceSetupSheet />
     <SettingsDialog />

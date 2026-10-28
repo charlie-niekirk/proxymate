@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { accept, hasDeepTerms, suggest, termAt } from "./dsl";
+import { accept, hasDeepTerms, suggest, termAt, bodySearchTerms } from "./dsl";
 
 const ctx = { hosts: ["api.github.com", "github.com", "localhost"], domains: ["github.com"], apps: ["Safari", "Google Chrome"] };
 
@@ -37,5 +37,18 @@ describe("dsl autocomplete", () => {
     expect(hasDeepTerms("host:a body:token")).toBe(true);
     expect(hasDeepTerms("-reqheader:x-debug")).toBe(true);
     expect(hasDeepTerms("somebody:x body")).toBe(false);
+  });
+});
+
+describe("bodySearchTerms", () => {
+  it("takes body terms for the right side and bare text", () => {
+    expect(bodySearchTerms('host:*.example.com body:needle resbody:"two words" -body:skip token', "response")).toEqual([
+      "two words",
+      "needle",
+      "token",
+    ]);
+    expect(bodySearchTerms("reqbody:abc resbody:xyz", "request")).toEqual(["abc"]);
+    expect(bodySearchTerms("status:4xx dur>500 label:red is:commented", "response")).toEqual([]);
+    expect(bodySearchTerms("body:", "response")).toEqual([]);
   });
 });

@@ -10,6 +10,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { clearFlows } from "@/lib/actions";
 import { shortcutLabel } from "@/lib/commands";
 import { formatSize } from "@/lib/flow";
+import { selectionCount } from "@/lib/selection";
 import { useStorage } from "@/store/storage";
 import { LIVE_STORE, useUi, type SaveJob } from "@/store/ui";
 
@@ -17,7 +18,8 @@ const nf = new Intl.NumberFormat();
 
 export function Footer() {
   const { len, total } = useUi((s) => s.stats);
-  const selected = useUi((s) => s.selectedId !== null);
+  const selected = useUi((s) => (s.selectedId !== null ? 1 : 0));
+  const count = useUi((s) => selectionCount(s.selection, s.stats.len));
   const timing = useUi((s) => s.filterTiming);
   const autoScroll = useUi((s) => s.autoScroll);
   const setAutoScroll = useUi((s) => s.setAutoScroll);
@@ -47,7 +49,15 @@ export function Footer() {
         <ArrowDownToLine /> Auto Select
       </Toggle>
       <div className="flex-1 text-center tabular-nums" data-testid="row-count">
-        {selected ? "1 / " : ""}
+        {count > 1 ? (
+          <span className="text-foreground font-medium" data-testid="selection-count">
+            {nf.format(count)} selected ·{" "}
+          </span>
+        ) : selected ? (
+          "1 / "
+        ) : (
+          ""
+        )}
         {nf.format(len)} of {nf.format(total)} rows
       </div>
       {deep && <DeepStatus checked={deep.checked} total={deep.total} matched={deep.matched} running={deep.running} />}

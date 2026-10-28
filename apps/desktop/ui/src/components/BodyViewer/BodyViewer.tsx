@@ -22,6 +22,7 @@ import { backend } from "@/lib/backend";
 import { essence, kindFromContentType } from "@/lib/body/content";
 import { parseGraphQlQueryString } from "@/lib/body/graphql";
 import { copyBodyText } from "@/lib/clipboard";
+import { bodySearchTerms } from "@/lib/dsl";
 import { formatSize } from "@/lib/flow";
 import { headerValue } from "@/lib/http";
 import { flowViewsKey } from "@/lib/query";
@@ -31,6 +32,7 @@ import { useUi } from "@/store/ui";
 import { loadViewers, preloadViewer } from "./code/load";
 import { Bar, Centered, Note } from "./parts";
 import { ScriptViewBody } from "./ScriptViewBody";
+import { BodySearchContext } from "./searchTerms";
 import { pickViewer, VIEWERS, viewersFor, type ViewerId } from "./registry";
 import { HIGHLIGHT_LIMIT, LOAD_LIMIT, suggestedFileName } from "./util";
 import { Viewer } from "./Viewer";
@@ -69,6 +71,8 @@ export function BodyViewer({
     info.kind !== "none" ? info.kind : info.size > 0 || (grpcHeader && part === "response") ? fallbackKind(contentType) : "none";
   const preferred = useUi((s) => s.viewerByKind[kind]);
   const store = useUi((s) => s.store);
+  const filterText = useUi((s) => s.filter.text);
+  const searchTerms = useMemo(() => bodySearchTerms(filterText, part), [filterText, part]);
   const setViewer = useUi((s) => s.setViewer);
   const viewer = pickViewer(kind, preferred);
   const def = VIEWERS[viewer];
@@ -220,6 +224,7 @@ export function BodyViewer({
       ))}
       {scriptView?.view.truncated && <Note tone="warn">The script&apos;s view was cut at 8 MB.</Note>}
       <BodyCopyContext.Provider value={{ bytes, what: "body", onSave: save }}>
+        <BodySearchContext.Provider value={searchTerms}>
         <BodyFallbackMenu>
           <div className="min-h-0 flex-1">
             {scriptView ? (
@@ -247,6 +252,7 @@ export function BodyViewer({
             )}
           </div>
         </BodyFallbackMenu>
+        </BodySearchContext.Provider>
       </BodyCopyContext.Provider>
     </div>
   );

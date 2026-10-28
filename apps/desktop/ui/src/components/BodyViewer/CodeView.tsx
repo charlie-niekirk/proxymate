@@ -16,9 +16,12 @@ import { cn } from "@/lib/utils";
 
 import type { CodeLanguage } from "./code/languages";
 import { loadCodeView } from "./code/load";
+import { useBodySearch } from "./searchTerms";
 
 export interface CodeViewProps {
   text: string;
+  /** Terms to mark, with a bar to step through them (M17: the filter's body terms). */
+  matches?: readonly string[];
   language: CodeLanguage;
   highlight?: boolean;
   wrap?: boolean;
@@ -50,6 +53,7 @@ const CodeMirrorView = lazy(() => loadCodeView().then((m) => ({ default: m.CodeM
 export function CodeView({ menuItems, className, ...props }: Omit<CodeViewProps, "onHandle"> & { menuItems?: ReactNode }) {
   const handle = useRef<CodeHandle | null>(null);
   const [selection, setSelection] = useState("");
+  const terms = useBodySearch();
   const onContextMenu = (e: React.MouseEvent) => {
     // WebKit selects the word under the cursor just before this event, and
     // CodeMirror only hears about it later: trust the DOM unless CodeMirror's
@@ -63,7 +67,7 @@ export function CodeView({ menuItems, className, ...props }: Omit<CodeViewProps,
       <ContextMenuTrigger asChild onContextMenu={onContextMenu}>
         <div className={cn("h-full min-h-0", className)}>
           <Suspense fallback={<div className="h-full min-h-0" data-testid="code-view-loading" />}>
-            <CodeMirrorView {...props} onHandle={(h) => (handle.current = h)} />
+            <CodeMirrorView matches={terms} {...props} onHandle={(h) => (handle.current = h)} />
           </Suspense>
         </div>
       </ContextMenuTrigger>

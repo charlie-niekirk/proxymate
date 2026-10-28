@@ -2,7 +2,9 @@ import { toast } from "sonner";
 
 import type {
   BreakpointResolution_Deserialize,
-  FlowSelection,
+  CodeLanguage,
+  FlowLabel,
+  FlowSelection_Deserialize,
   PresetKind,
   RequestSpec_Deserialize,
   SaveProgress_Serialize,
@@ -11,7 +13,8 @@ import type {
 import { backend } from "@/lib/backend";
 import { copyLater } from "@/lib/clipboard";
 import { withTerm } from "@/lib/copyFormats";
-import { flowUrl } from "@/lib/flow";
+import { CODE_LANGUAGES, flowUrl } from "@/lib/flow";
+import { toFlowSelection } from "@/lib/selection";
 import {
   androidKey,
   caInfoKey,
@@ -51,10 +54,99 @@ export function addFilterTerm(term: string) {
   ui.setText(withTerm(ui.filter.text, term));
 }
 
-/** Pins or unpins live flows: pinned flows are kept when old flows are evicted. */
-export async function pinFlows(ids: number[], pinned: boolean) {
-  await backend.pinFlows(ids, pinned);
-  for (const id of ids) void queryClient.invalidateQueries({ queryKey: ["flow", LIVE_STORE, id] });
+/** Pins or unpins flows: pinned live flows are kept when old flows are evicted. */
+export async function pinFlows(ids: number[], pinned: boolean, store = useUi.getState().store) {
+  await pinSelection(pinned, { kind: "ids", ids }, store);
+}
+
+// ---- Selection and bulk actions (M17) ----
+
+/** The table's selection as the engine takes it. */
+export function currentSelection(): FlowSelection_Deserialize {
+  const { selection, view } = useUi.getState();
+  return toFlowSelection(selection, view);
+}
+
+/** Summaries and details of `store` may have changed: refetch them. */
+function flowsChanged(store: number) {
+  void queryClient.invalidateQueries({ queryKey: ["flow", store] });
+}
+
+export async function pinSelection(pinned: boolean, selection = currentSelection(), store = useUi.getState().store) {
+  await backend.pinFlows(store, selection, pinned);
+  flowsChanged(store);
+}
+
+export async function labelSelection(label: FlowLabel | null, selection = currentSelection(), store = useUi.getState().store) {
+  await backend.labelFlows(store, selection, label);
+  flowsChanged(store);
+}
+
+/** Sets (or, empty, removes) a flow's note. */
+export async function commentFlow(store: number, id: number, comment: string) {
+  await backend.commentFlow(store, id, comment);
+  flowsChanged(store);
+}
+
+/** Deletes the selected flows (⌫); the focus moves off them. */
+export async function deleteSelection(selection = currentSelection(), store = useUi.getState().store) {
+  const n = await backend.removeFlows(store, selection);
+  useUi.getState().select(null);
+  queryClient.removeQueries({ queryKey: ["flow", store] });
+  queryClient.removeQueries({ queryKey: ["body", store] });
+  if (n > 1) toast.success(`Deleted ${n.toLocaleString()} flows`);
+  return n;
+}
+
+/** One URL per line. */
+export async function copySelectionUrls(selection = currentSelection(), store = useUi.getState().store) {
+  await copyLater(async () => (await backend.getFlowUrls(store, selection)).join("\n"), "URLs");
+}
+
+/** At most this many cURL commands are copied at once. */
+const CURL_MAX = 500;
+
+/** The selected requests as cURL commands, a blank line apart. */
+export async function copySelectionCurl(selection = currentSelection(), store = useUi.getState().store) {
+  await copyLater(async () => {
+    const ids = await backend.selectedIds(store, selection);
+    if (ids.length > CURL_MAX) throw new Error(`select at most ${CURL_MAX} flows to copy as cURL`);
+    const commands = await Promise.all(ids.map((id) => backend.getCurl(store, id).catch(() => null)));
+    return commands.filter((c) => c !== null).join("\n\n");
+  }, "cURL commands");
+}
+
+/** Sends the selected requests again, one after the other, in arrival order. */
+export async function replaySelection(selection = currentSelection(), store = useUi.getState().store) {
+  const ids = await backend.selectedIds(store, selection);
+  let last: number | null = null;
+  let failed = 0;
+  for (const id of ids) {
+    const flow = await backend.getFlow(store, id);
+    if (!flow || flow.method === "CONNECT" || flow.scheme === "ws" || flow.scheme === "wss") continue;
+    try {
+      last = await backend.replayFlow(store, id, true);
+    } catch {
+      failed += 1;
+    }
+  }
+  if (last !== null) showSent(last);
+  if (failed > 0) reportError("Some flows weren't replayed", `${failed} of ${ids.length} couldn't be sent`);
+}
+
+/** Compare: the two selected flows, oldest on the left. */
+export async function compareSelection(selection = currentSelection(), store = useUi.getState().store) {
+  const ids = await backend.selectedIds(store, selection);
+  if (ids.length !== 2) {
+    reportError("Can't compare", "select exactly two flows");
+    return;
+  }
+  useUi.getState().openCompare({ store, id: ids[0]! }, { store, id: ids[1]! });
+}
+
+/** The request as code (Rust renders every language; cURL keeps its own path). */
+export async function copyFlowCode(store: number, flow: number, language: CodeLanguage) {
+  await copyLater(() => backend.getCode(store, flow, language), `${CODE_LANGUAGES.find((l) => l.id === language)?.label ?? language} code`);
 }
 
 /** Pauses or resumes recording; traffic is forwarded either way. */
@@ -265,7 +357,7 @@ function suggestedName(extension: string) {
 }
 
 /** Saves the active tab's flows (all of them, by default) as a `.proxymate` session. */
-export async function saveSession(selection: FlowSelection = { kind: "all" }, path: string | null = null) {
+export async function saveSession(selection: FlowSelection_Deserialize = { kind: "all" }, path: string | null = null) {
   const store = useUi.getState().store;
   await runSave("Saving session", (onProgress) =>
     backend.saveSession(store, selection, path, suggestedName("proxymate"), onProgress),
@@ -273,9 +365,9 @@ export async function saveSession(selection: FlowSelection = { kind: "all" }, pa
 }
 
 /** Exports flows of the active tab as HAR: what the table shows, by default. */
-export async function exportHar(selection?: FlowSelection, path: string | null = null) {
+export async function exportHar(selection?: FlowSelection_Deserialize, path: string | null = null) {
   const { store, view } = useUi.getState();
-  const which: FlowSelection = selection ?? (view !== null ? { kind: "view", view } : { kind: "all" });
+  const which: FlowSelection_Deserialize = selection ?? (view !== null ? { kind: "view", view } : { kind: "all" });
   await runSave("Exporting HAR", (onProgress) => backend.exportHar(store, which, path, suggestedName("har"), onProgress));
 }
 

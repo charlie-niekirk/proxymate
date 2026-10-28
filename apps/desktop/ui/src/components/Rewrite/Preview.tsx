@@ -141,7 +141,8 @@ function HeaderDiff({ before, after }: { before: Header[]; after: Header[] }) {
 
 const LINE = 18;
 
-function Lines({ lines }: { lines: DiffLine[] }) {
+/** A virtualised line diff (also Compare's body diff, M17). */
+export function Lines({ lines, testId = "preview-body" }: { lines: DiffLine[]; testId?: string }) {
   const scroller = useRef<HTMLDivElement>(null);
   // eslint-disable-next-line react-hooks/incompatible-library -- TanStack Virtual is not compiler-safe; rows re-render through their props.
   const virtualizer = useVirtualizer({ count: lines.length, getScrollElement: () => scroller.current, estimateSize: () => LINE, overscan: 30 });
@@ -151,7 +152,7 @@ function Lines({ lines }: { lines: DiffLine[] }) {
     if (first >= 0) virtualizer.scrollToIndex(Math.max(0, first - 3), { align: "start" });
   }, [first, virtualizer]);
   return (
-    <div ref={scroller} className="h-full overflow-auto font-mono text-[11px]" data-testid="preview-body" data-selectable>
+    <div ref={scroller} className="h-full overflow-auto font-mono text-[11px]" data-testid={testId} data-selectable>
       <div style={{ height: virtualizer.getTotalSize(), position: "relative", minWidth: "100%" }}>
         {virtualizer.getVirtualItems().map((item) => {
           const line = lines[item.index]!;
