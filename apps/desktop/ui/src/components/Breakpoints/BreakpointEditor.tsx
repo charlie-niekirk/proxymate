@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { CirclePlay, OctagonPause, Plus, Reply, X, XCircle } from "lucide-react";
+import { ArrowDown, ArrowUp, CirclePlay, OctagonPause, Plus, Reply, Trash2, X, XCircle } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 
 import type { BreakpointInfo_Serialize, Header, MessageEdits_Deserialize } from "@/bindings";
@@ -18,7 +18,9 @@ import { bridge } from "@/dev/bridge";
 import { reportError, resolveBreakpoint } from "@/lib/actions";
 import { backend } from "@/lib/backend";
 import { languageFor } from "@/lib/compose";
-import { headerValue } from "@/lib/http";
+import { base64, hexBytes } from "@/lib/copyFormats";
+import { bodyText, headerValue } from "@/lib/http";
+import { parseHex } from "@/lib/stream";
 import { cleanHeaders } from "@/lib/rules";
 import { cn } from "@/lib/utils";
 import { useUndoable } from "@/hooks/useUndoable";
@@ -31,8 +33,10 @@ const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 /**
  * The Breakpoint Editor: the queue of paused flows and the selected one's
  * message, editable before it goes on. Execute sends it (with any edits),
- * Abort closes the connection, Respond answers the client directly. The
- * first resolution wins, whether from here or from an agent.
+ * Abort closes the connection, Respond answers the client directly. A held
+ * WebSocket message (M19) is edited as text, a JSON tree or hex, then sent
+ * on or dropped. The first resolution wins, whether from here or from an
+ * agent.
  */
 export function BreakpointEditor() {
   const open = useUi((s) => s.breakpointsOpen);
@@ -71,7 +75,9 @@ export function BreakpointEditor() {
             </div>
           </div>
           <div className="min-w-0 flex-1">
-            {selected ? (
+            {selected?.message ? (
+              <MessageForm key={selected.id} bp={selected} />
+            ) : selected ? (
               <BreakpointForm key={selected.id} bp={selected} />
             ) : (
               <div className="text-muted-foreground flex h-full items-center justify-center text-xs">
@@ -110,7 +116,7 @@ function QueueMenu({ bp, children }: { bp: BreakpointInfo_Serialize; children: R
             Continue unmodified
           </ContextMenuItem>
           <ContextMenuItem variant="destructive" onSelect={() => resolve({ action: "abort" }, "Couldn't abort the flow")}>
-            Abort
+            {bp.message ? "Drop the message" : "Abort"}
           </ContextMenuItem>
         </>
       }
@@ -131,7 +137,7 @@ function QueueItem({ bp, selected, onSelect }: { bp: BreakpointInfo_Serialize; s
       >
         <div className="flex items-center gap-1.5">
           <PhasePill phase={bp.phase} />
-          <MethodPill method={bp.request.method} />
+          {bp.message ? <MessagePill direction={bp.message.direction} /> : <MethodPill method={bp.request.method} />}
           <span className="ml-auto font-mono text-2xs opacity-70">{bp.flow_id !== null ? `#${bp.flow_id + 1}` : ""}</span>
         </div>
         <span className="truncate font-mono text-2xs">{bp.request.url}</span>
@@ -151,6 +157,19 @@ function PhasePill({ phase }: { phase: "request" | "response" }) {
       style={{ color: "var(--s-paused)", backgroundColor: "var(--s-paused-bg)" }}
     >
       {phase === "request" ? "Request" : "Response"}
+    </span>
+  );
+}
+
+function MessagePill({ direction }: { direction: "sent" | "received" }) {
+  return (
+    <span className="text-muted-foreground inline-flex items-center gap-0.5 text-2xs font-semibold">
+      {direction === "sent" ? (
+        <ArrowUp className="size-3 text-[var(--ws-sent)]" />
+      ) : (
+        <ArrowDown className="size-3 text-[var(--ws-received)]" />
+      )}
+      WebSocket
     </span>
   );
 }
@@ -309,6 +328,163 @@ function BreakpointForm({ bp }: { bp: BreakpointInfo_Serialize }) {
         <Button size="sm" onClick={() => void execute()} data-testid="bp-execute">
           <CirclePlay />
           Execute
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+type MessageMode = "text" | "tree" | "hex";
+
+/**
+ * A held WebSocket message: its payload as text, a JSON tree or hex. Send
+ * goes on with any edits (hex edits as bytes), Drop never forwards it.
+ * Later messages in its direction wait until it is resolved.
+ */
+function MessageForm({ bp }: { bp: BreakpointInfo_Serialize }) {
+  const held = bp.message!;
+  const { data: original, isPending } = useQuery({
+    queryKey: ["breakpoint-body", bp.id],
+    queryFn: async () => new Uint8Array(await backend.getBreakpointBody(bp.id)),
+    staleTime: Infinity,
+    gcTime: 0,
+  });
+  const originalText = useMemo(() => (original ? bodyText(original) : null), [original]);
+  const isJson = originalText !== null && parsed(originalText) !== null;
+  const [mode, setMode] = useState<MessageMode | null>(null);
+  const [text, setText] = useState<string | null>(null);
+  const [hex, setHex] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  // Remounts the text editors from the current text after a mode switch.
+  const [revision, setRevision] = useState(0);
+  // Binary that isn't UTF-8 can only be edited as hex.
+  const shown: MessageMode = mode ?? (originalText === null || held.opcode === "binary" ? "hex" : isJson ? "tree" : "text");
+  const currentText = text ?? originalText ?? "";
+  const currentHex = hex ?? hexBytes(original ?? new Uint8Array());
+
+  const switchTo = (next: MessageMode) => {
+    setError(null);
+    let nextText = text ?? originalText ?? "";
+    if (next === "hex" && shown !== "hex") {
+      setHex(hexBytes(text === null ? (original ?? new Uint8Array()) : new TextEncoder().encode(text)));
+    }
+    if (next !== "hex" && shown === "hex" && hex !== null) {
+      const bytes = parseHex(hex);
+      const decoded = bytes ? bodyText(bytes) : null;
+      if (decoded === null) return setError("The bytes aren't UTF-8 text: keep editing them as hex.");
+      nextText = decoded;
+      setText(decoded);
+    }
+    if (next === "tree" && parsed(nextText) === null) return setError("The text isn't valid JSON.");
+    setRevision((r) => r + 1);
+    setMode(next);
+  };
+
+  const edits = (): MessageEdits_Deserialize | string => {
+    if (!bp.body.editable) return {};
+    if (shown === "hex") {
+      if (hex === null) return {};
+      const bytes = parseHex(hex);
+      if (bytes === null) return "That isn't hex: use pairs of digits like 0a ff 3c.";
+      return original && hexBytes(bytes) === hexBytes(original) ? {} : { body_base64: base64(bytes) };
+    }
+    return text === null || text === originalText ? {} : { body: text };
+  };
+  const resolve = async (resolution: Parameters<typeof resolveBreakpoint>[1]) => {
+    setError(null);
+    try {
+      await resolveBreakpoint(bp.id, resolution);
+    } catch (e) {
+      setError(errorText(e));
+    }
+  };
+  // `extra` (dev/remote.ts) is merged over the form's edits.
+  const send = async (extra: MessageEdits_Deserialize | null = null) => {
+    const e = edits();
+    if (typeof e === "string") return setError(e);
+    await resolve({ action: "continue", edits: extra ? { ...e, ...extra } : e });
+  };
+  const drop = () => resolve({ action: "abort" });
+
+  useEffect(() => {
+    bridge.executeBreakpoint = send;
+    bridge.abortBreakpoint = drop;
+    return () => {
+      bridge.executeBreakpoint = undefined;
+      bridge.abortBreakpoint = undefined;
+    };
+  });
+
+  const modes: MessageMode[] = originalText === null ? ["hex"] : isJson ? ["text", "tree", "hex"] : ["text", "hex"];
+  return (
+    <div className="flex h-full flex-col" data-testid="message-form">
+      <div className="flex items-center gap-2 border-b px-3 py-2 text-xs">
+        <PhasePill phase={bp.phase} />
+        <MessagePill direction={held.direction} />
+        <span className="truncate font-medium">{bp.rule_name}</span>
+        <span className="text-muted-foreground ml-auto flex items-center gap-1">
+          continues in <Countdown deadline={bp.deadline_ms} />
+        </span>
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col gap-2 p-3 text-xs">
+        <div className="text-muted-foreground truncate font-mono" title={bp.request.url}>
+          {bp.request.url}
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-muted-foreground font-semibold">
+            {held.direction === "sent" ? "Sent by the client" : "From the server"} · {held.opcode === "text" ? "Text" : "Binary"} ·{" "}
+            {bp.body.size.toLocaleString()} bytes
+          </span>
+          <span className="text-muted-foreground">Later messages this way wait behind it.</span>
+          <div className="ml-auto flex items-center gap-1 text-[11px]" data-testid="bp-message-mode">
+            {modes.map((m) => (
+              <button
+                key={m}
+                type="button"
+                data-active={shown === m}
+                onClick={() => switchTo(m)}
+                className="text-muted-foreground data-[active=true]:bg-accent data-[active=true]:text-foreground h-5 rounded-sm px-1.5"
+                data-testid={`bp-message-${m}`}
+              >
+                {m === "text" ? "Text" : m === "tree" ? "Tree" : "Hex"}
+              </button>
+            ))}
+          </div>
+        </div>
+        {bp.body.note && <span className="text-muted-foreground">{bp.body.note}</span>}
+        <div className="min-h-0 flex-1 overflow-hidden rounded-md border">
+          {isPending ? null : shown === "hex" ? (
+            <textarea
+              value={currentHex}
+              onChange={(e) => setHex(e.target.value)}
+              readOnly={!bp.body.editable}
+              spellCheck={false}
+              className="bg-background h-full w-full resize-none p-2 font-mono text-xs outline-none"
+              data-testid="bp-message-hex-input"
+            />
+          ) : shown === "tree" && originalText !== null && parsed(currentText) ? (
+            <TreeBody key={revision} initial={parsed(currentText)!} original={originalText} onChange={setText} testId="bp-message-json" />
+          ) : (
+            <CodeEditor
+              key={revision}
+              value={currentText}
+              language={isJson ? "json" : "text"}
+              onChange={setText}
+              readOnly={!bp.body.editable}
+              testId="bp-message-text"
+            />
+          )}
+        </div>
+      </div>
+      <div className="flex items-center gap-2 border-t px-3 py-2">
+        <span className="min-w-0 flex-1 truncate text-xs text-[var(--s-failed)]">{error}</span>
+        <Button variant="ghost" size="sm" onClick={() => void drop()} data-testid="bp-drop">
+          <Trash2 />
+          Drop
+        </Button>
+        <Button size="sm" onClick={() => void send()} data-testid="bp-send">
+          <CirclePlay />
+          Send
         </Button>
       </div>
     </div>

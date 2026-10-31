@@ -229,9 +229,17 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
     },
   ];
   let ruleSettings = { breakpoint_timeout_secs: 300 };
-  // Dev only: `?breakpoint` seeds a paused request, for the Breakpoint Editor.
-  let breakpoints: BreakpointInfo_Serialize[] =
-    typeof window !== "undefined" && new URLSearchParams(window.location.search).has("breakpoint") ? [mockBreakpoint(now)] : [];
+  // Dev only: `?breakpoint` seeds a paused request, `?breakpoint=ws` a held
+  // WebSocket message, for the Breakpoint Editor.
+  const seed = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("breakpoint") : null;
+  let breakpoints: BreakpointInfo_Serialize[] = seed === null ? [] : [seed === "ws" ? mockMessageBreakpoint(now) : mockBreakpoint(now)];
+  // Messages sent from the composer, per flow; the mock connections stay open.
+  const sentMessages = new Map<number, { meta: WsMessage_Serialize; bytes: Uint8Array }[]>();
+  const closedSockets = new Set<number>();
+  const wsLog = (id: number) => {
+    const recorded = mockMessages(flows[id]?.[11] ?? 0).map((meta) => ({ meta, bytes: mockPayload(meta) }));
+    return [...recorded, ...(sentMessages.get(id) ?? [])];
+  };
   let onBreakpoints: ((q: BreakpointInfo_Serialize[]) => void) | null = null;
   const pushBreakpoints = () => onBreakpoints?.(breakpoints);
   const sorted = () => [...rules].sort((a, b) => a.order - b.order);
@@ -454,26 +462,59 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
       return fileName;
     },
     async getWebsocketMessages(_store, id, query, start, n) {
-      const all = flows[id]?.[2] === "wss" || flows[id]?.[2] === "ws" ? mockMessages(flows[id]![11] ?? 0) : [];
+      const all = flows[id]?.[2] === "wss" || flows[id]?.[2] === "ws" ? wsLog(id).map((m) => m.meta) : [];
       const text = query.text.trim().toLowerCase();
       const matching = all.filter(
         (m) => (query.direction === null || m.direction === query.direction) && (!text || m.preview.toLowerCase().includes(text)),
       );
-      const close = all.length ? { code: 1000, reason: "bye", by: "sent" as const } : null;
+      // Every other mock socket is still open, so the composer shows.
+      const open = id % 2 === 1 && !closedSockets.has(id);
+      const close = all.length && !open ? { code: 1000, reason: "bye", by: "sent" as const } : null;
       return {
         total: all.length,
         len: matching.length,
         start,
         messages: matching.slice(start, start + n),
-        open: false,
+        open,
         close,
         dropped: 0,
       };
     },
     async getWebsocketPayload(_store, id, index) {
-      const m = mockMessages(flows[id]?.[11] ?? 0)[index];
-      const bytes = m?.opcode === "binary" ? Uint8Array.from({ length: 48 }, (_, i) => (i * 37) % 256) : new TextEncoder().encode(m?.preview ?? "");
-      return bytes.buffer as ArrayBuffer;
+      const m = wsLog(id)[index];
+      if (!m) throw new Error(`flow ${id} has no message ${index}`);
+      return m.bytes.slice().buffer as ArrayBuffer;
+    },
+    async getWebsocketOriginal(_store, id, index) {
+      const m = wsLog(id)[index];
+      if (!m?.meta.edited) throw new Error(`message ${index + 1} wasn't edited`);
+      return new TextEncoder().encode(m.meta.preview.replace(/"price":\d+/, '"price":4.2')).buffer as ArrayBuffer;
+    },
+    async wsSend(id, message) {
+      if (id % 2 === 0 || closedSockets.has(id)) throw new Error(`flow ${id}'s WebSocket isn't open`);
+      const bytes = message.binary ? Uint8Array.from(atob(message.payload), (c) => c.charCodeAt(0)) : new TextEncoder().encode(message.payload);
+      const log = sentMessages.get(id) ?? [];
+      const index = wsLog(id).length;
+      log.push({
+        meta: {
+          index,
+          direction: message.direction,
+          opcode: message.binary ? "binary" : "text",
+          len: bytes.length,
+          time_ms: Date.now(),
+          truncated: false,
+          close_code: null,
+          preview: message.binary ? "" : message.payload.slice(0, 256),
+          edited: false,
+          injected: true,
+          dropped: false,
+        },
+        bytes,
+      });
+      sentMessages.set(id, log);
+    },
+    async wsClose(id) {
+      closedSockets.add(id);
     },
     async getSseEvents(_store, id, search, start, n) {
       const all = flows[id]?.[6] === SSE_PATH ? mockEvents(flows[id]![11] ?? 0) : [];
@@ -978,6 +1019,10 @@ function asStream(row: FlowRow_Serialize, kind: "websocket" | "sse"): FlowRow_Se
   return out;
 }
 
+function mockPayload(m: WsMessage_Serialize): Uint8Array {
+  return m.opcode === "binary" ? Uint8Array.from({ length: 48 }, (_, i) => (i * 37) % 256) : new TextEncoder().encode(m.preview);
+}
+
 function mockMessages(started: number): WsMessage_Serialize[] {
   return Array.from({ length: 40 }, (_, i) => {
     const sent = i % 2 === 0;
@@ -993,6 +1038,10 @@ function mockMessages(started: number): WsMessage_Serialize[] {
       truncated: false,
       close_code: last ? 1000 : null,
       preview,
+      // A rule edited one, dropped another; Proxymate sent a third.
+      edited: i === 7,
+      injected: i === 12,
+      dropped: i === 9,
     };
   });
 }
@@ -1056,6 +1105,23 @@ function mockBreakpoint(now: number): BreakpointInfo_Serialize {
     },
     response: null,
     body: { size: 48, editable: true, note: null },
+    message: null,
+  };
+}
+
+function mockMessageBreakpoint(now: number): BreakpointInfo_Serialize {
+  return {
+    id: 2,
+    flow_id: 13,
+    phase: "response",
+    rule_id: "mock-ws-bp",
+    rule_name: "Hold ticker messages",
+    paused_at_ms: now,
+    deadline_ms: now + 300_000,
+    request: { method: "GET", url: "wss://stream.example.com/socket", version: "HTTP/1.1", headers: [] },
+    response: null,
+    body: { size: 48, editable: true, note: null },
+    message: { direction: "received", opcode: "text" },
   };
 }
 

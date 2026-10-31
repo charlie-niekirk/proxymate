@@ -96,7 +96,7 @@ describe("the editor's completions match proxymate.d.ts", () => {
 
 describe("templates", () => {
   it("export their kind's entry point", () => {
-    const entry = { view: /export function onView\(/, mock: /export function onMock\(/, rewrite: /export function on(Request|Response)\(/ };
+    const entry = { view: /export function onView\(/, mock: /export function onMock\(/, rewrite: /export function on(Request|Response|WsMessage)\(/ };
     for (const t of TEMPLATES) expect(t.source, t.id).toMatch(entry[t.kind]);
   });
 

@@ -6,6 +6,7 @@ import type {
   MessageEdits_Deserialize,
   PresetKind,
   RequestSpec_Serialize,
+  WsSend,
 } from "@/bindings";
 import { headerColumnId } from "@/components/FlowTable/columns";
 import type { ViewerId } from "@/components/BodyViewer/registry";
@@ -95,6 +96,11 @@ import { useUi, type DeviceTab, type RequestTab, type ResponseTab, type Settings
  *   template; `{"scriptSource": "…"}` replaces the open draft's source (and
  *   remounts the editor); `{"saveScript": true}` presses Save;
  *   `{"testScript": "response"}` presses Test (view scripts: that body).
+ * - M19: `{"wsSend": {"flow": 3, "direction": "received", "payload": "hi",
+ *   "binary": false}}` sends into an open WebSocket as the composer does;
+ *   `{"wsClose": 3}` closes it. A held message takes
+ *   `{"breakpointAction": {"execute": {"body": "…"}}}` (or `body_base64`)
+ *   and `{"breakpointAction": {"abort": true}}` drops it.
  */
 interface Command {
   select?: number;
@@ -164,6 +170,8 @@ interface Command {
   code?: { flow: number; language: CodeLanguage };
   deleteSelection?: boolean;
   removeProto?: number;
+  wsSend?: WsSend & { flow: number };
+  wsClose?: number;
 }
 
 async function apply(cmd: Command) {
@@ -240,6 +248,11 @@ async function apply(cmd: Command) {
   if (cmd.breakpoints !== undefined) ui.setBreakpointsOpen(cmd.breakpoints);
   if (cmd.breakpointAction?.execute) await bridge.executeBreakpoint?.(cmd.breakpointAction.execute);
   if (cmd.breakpointAction?.abort) await bridge.abortBreakpoint?.();
+  if (cmd.wsSend) {
+    const { flow, ...message } = cmd.wsSend;
+    await backend.wsSend(flow, message);
+  }
+  if (cmd.wsClose !== undefined) await backend.wsClose(cmd.wsClose);
   if (cmd.store !== undefined) ui.setStore(cmd.store);
   if (cmd.openDocument) await openDocument(cmd.openDocument);
   if (cmd.closeDocument !== undefined) await closeDocument(cmd.closeDocument);

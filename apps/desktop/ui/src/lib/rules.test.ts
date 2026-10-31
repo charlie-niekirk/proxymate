@@ -3,10 +3,12 @@ import { describe, expect, it } from "vitest";
 import {
   ACTION_TYPES,
   GLOBAL_THROTTLE_RULE_ID,
+  WS_OP_LABELS,
   THROTTLE_PRESETS,
   actionSummary,
   activeThrottle,
   defaultAction,
+  defaultWsOp,
   emptyMatcher,
   formatStatusRanges,
   isBuiltin,
@@ -27,6 +29,16 @@ describe("rules helpers", () => {
       expect(action.type).toBe(type);
       expect(actionSummary(action)).not.toBe("");
     }
+  });
+
+  it("builds and summarises every WebSocket message op", () => {
+    for (const kind of Object.keys(WS_OP_LABELS) as (keyof typeof WS_OP_LABELS)[]) {
+      const op = defaultWsOp(kind);
+      expect(op.kind).toBe(kind);
+      expect(actionSummary({ type: "WsMessage", direction: "received", filter: null, op })).toMatch(/^received /);
+    }
+    const drop = { type: "WsMessage" as const, direction: null, filter: { kind: "exact" as const, value: "ping", case_insensitive: false }, op: { kind: "drop" as const } };
+    expect(actionSummary(drop)).toBe("ws = ping drop");
   });
 
   it("labels patterns and summarises matchers", () => {

@@ -1,18 +1,21 @@
 import { ArrowDown, ArrowUp, Plus, X } from "lucide-react";
 import { useState } from "react";
 
-import type { MapLocalSource, Scheme } from "@/bindings";
+import type { MapLocalSource, Scheme, WsDirection } from "@/bindings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   ACTION_TYPES,
   actionLabel,
+  WS_OP_LABELS,
   defaultAction,
+  defaultWsOp,
   jsonSetText,
   moveItem,
   type Action,
   type ActionType,
+  type WsOpKind,
 } from "@/lib/rules";
 
 import { parseLossless } from "@/lib/body/losslessJson";
@@ -71,7 +74,7 @@ function AddAction({ onAdd }: { onAdd: (type: ActionType) => void }) {
           Add action
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-64 p-1 text-xs">
+      <PopoverContent align="start" className="max-h-(--radix-popover-content-available-height) w-64 overflow-y-auto p-1 text-xs">
         {groups.map((group) => (
           <div key={group} className="py-0.5">
             <div className="text-muted-foreground px-2 py-0.5 text-2xs font-semibold uppercase">{group}</div>
@@ -318,7 +321,78 @@ function ActionForm({ action, onChange }: { action: Action; onChange: (action: A
       );
     case "Script":
       return <ScriptActionForm action={action} onChange={onChange} />;
+    case "WsMessage":
+      return <WsMessageForm action={action} onChange={onChange} />;
   }
+}
+
+const BOTH = "both";
+
+/**
+ * Acts on the text and binary messages of a WebSocket whose handshake the
+ * rule matches, in one or both directions, optionally only on messages
+ * whose payload matches a filter.
+ */
+function WsMessageForm({ action, onChange }: { action: Extract<Action, { type: "WsMessage" }>; onChange: (a: Action) => void }) {
+  const { op } = action;
+  const setOp = (next: typeof op) => onChange({ ...action, op: next });
+  return (
+    <>
+      <Field label="Messages">
+        <Choice
+          value={action.direction ?? BOTH}
+          options={[
+            { value: BOTH, label: "Both ways" },
+            { value: "sent", label: "Sent by the client" },
+            { value: "received", label: "From the server" },
+          ]}
+          onChange={(v) => onChange({ ...action, direction: v === BOTH ? null : (v as WsDirection) })}
+          className="w-40"
+          testId="ws-direction"
+        />
+      </Field>
+      <Field label="Containing">
+        <PatternInput value={action.filter ?? null} optional placeholder="any message" onChange={(filter) => onChange({ ...action, filter })} testId="ws-filter" />
+      </Field>
+      <Field label="Do">
+        <Choice
+          value={op.kind}
+          options={(Object.keys(WS_OP_LABELS) as WsOpKind[]).map((k) => ({ value: k, label: WS_OP_LABELS[k] }))}
+          onChange={(kind) => setOp(defaultWsOp(kind))}
+          className="w-32"
+          testId="ws-op"
+        />
+        {op.kind === "delay" && (
+          <>
+            <NumberInput value={op.ms} onChange={(ms) => setOp({ ...op, ms: ms ?? 0 })} />
+            <span className="text-muted-foreground text-xs">ms; later messages wait behind it</span>
+          </>
+        )}
+        {op.kind === "drop" && <span className="text-muted-foreground text-xs">recorded, never forwarded</span>}
+        {op.kind === "breakpoint" && <span className="text-muted-foreground text-xs">later messages wait behind it</span>}
+      </Field>
+      {op.kind === "replace" && (
+        <>
+          <Field label="Find">
+            <PatternInput value={op.pattern} onChange={(p) => p && setOp({ ...op, pattern: p })} />
+          </Field>
+          <Field label="Replace with">
+            <Input className={MONO} value={op.replacement} placeholder="$1 for a regex group" onChange={(e) => setOp({ ...op, replacement: e.target.value })} />
+          </Field>
+        </>
+      )}
+      {(op.kind === "json_set" || op.kind === "json_remove") && (
+        <Field label="JSON pointer">
+          <Input className={MONO} value={op.pointer} placeholder="/data/price" onChange={(e) => setOp({ ...op, pointer: e.target.value })} data-testid="ws-pointer" />
+        </Field>
+      )}
+      {op.kind === "json_set" && (
+        <Field label="Value (JSON)">
+          <JsonValueInput value={op.raw ?? JSON.stringify(op.value)} onChange={(raw) => setOp({ ...op, value: null, raw })} />
+        </Field>
+      )}
+    </>
+  );
 }
 
 /** Picks the rewrite or mock script a rule runs; view scripts run on their own. */
