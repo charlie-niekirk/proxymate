@@ -227,8 +227,8 @@ impl Registry {
 
 /// One entry of a direction's queue.
 enum Item {
-    /// A frame read from the peer at `at` (ms since the epoch).
-    Wire { message: Message, at: f64 },
+    /// A frame read from the peer.
+    Wire(Message),
     /// A frame Proxymate sends itself.
     Inject(Message),
     /// The peer stopped sending, with why if it broke.
@@ -374,7 +374,7 @@ async fn read(mut rx: SplitStream<Ws>, queue: mpsc::Sender<Item>, direction: WsD
                 by: direction,
             });
         }
-        if queue.send(Item::Wire { message, at: now_ms() }).await.is_err() {
+        if queue.send(Item::Wire(message)).await.is_err() {
             return;
         }
     }
@@ -419,18 +419,18 @@ async fn process(
                         by: direction,
                     });
                 }
-                conn.record(direction, &message, now_ms(), Flags::INJECTED, None);
+                conn.record(direction, &message, Flags::INJECTED, None);
                 write(&mut tx, message).await;
             }
-            Item::Wire { message, at } => match message {
+            Item::Wire(message) => match message {
                 Message::Text(_) | Message::Binary(_) => {
-                    if let Some(message) = conn.data(direction, message, at).await {
+                    if let Some(message) = conn.data(direction, message).await {
                         write(&mut tx, message).await;
                     }
                 }
                 Message::Frame(_) => {}
                 other => {
-                    conn.record(direction, &other, at, Flags::NONE, None);
+                    conn.record(direction, &other, Flags::NONE, None);
                     write(&mut tx, other).await;
                 }
             },
@@ -473,15 +473,15 @@ impl Flags {
 impl Conn {
     /// Runs the message rules on a text or binary message; `None` if it
     /// is dropped.
-    async fn data(&self, direction: WsDirection, message: Message, at: f64) -> Option<Message> {
+    async fn data(&self, direction: WsDirection, message: Message) -> Option<Message> {
         let engine = self.rules.as_ref().and_then(|r| r.engine.upgrade());
         let (Some(rules), Some(engine)) = (&self.rules, engine) else {
-            self.record(direction, &message, at, Flags::NONE, None);
+            self.record(direction, &message, Flags::NONE, None);
             return Some(message);
         };
         let matched = rules.current(&engine).await;
         if matched.is_empty() {
-            self.record(direction, &message, at, Flags::NONE, None);
+            self.record(direction, &message, Flags::NONE, None);
             return Some(message);
         }
         let (text, original) = match &message {
@@ -509,7 +509,7 @@ impl Conn {
             }
         }
         if fx.drop {
-            self.record(direction, &message, at, Flags::DROPPED, None);
+            self.record(direction, &message, Flags::DROPPED, None);
             return None;
         }
         if fx.delay_ms > 0 {
@@ -523,18 +523,18 @@ impl Conn {
                 // Refused for messages by `Engine::resolve_breakpoint`.
                 Outcome::Resolved(BreakpointResolution::Respond { .. }) => {}
                 Outcome::Resolved(BreakpointResolution::Abort) => {
-                    self.record(direction, &message, at, Flags::DROPPED, None);
+                    self.record(direction, &message, Flags::DROPPED, None);
                     return None;
                 }
             }
         }
         let changed = draft.text != text || draft.payload != original;
         if !changed {
-            self.record(direction, &message, at, Flags::NONE, None);
+            self.record(direction, &message, Flags::NONE, None);
             return Some(message);
         }
         let out = into_message(draft);
-        self.record(direction, &out, at, Flags::NONE, Some(&original));
+        self.record(direction, &out, Flags::NONE, Some(&original));
         Some(out)
     }
 
@@ -586,7 +586,9 @@ impl Conn {
         outcome
     }
 
-    fn record(&self, direction: WsDirection, message: &Message, at: f64, flags: Flags, original: Option<&[u8]>) {
+    /// Records a message as it is forwarded (or dropped), so the log's
+    /// order is the order messages went out, whatever was held.
+    fn record(&self, direction: WsDirection, message: &Message, flags: Flags, original: Option<&[u8]>) {
         let Some(ws) = &self.ws else {
             return;
         };
@@ -611,7 +613,7 @@ impl Conn {
             injected: flags.injected,
             dropped: flags.dropped,
         };
-        ws.record(entry, at);
+        ws.record(entry, now_ms());
     }
 }
 

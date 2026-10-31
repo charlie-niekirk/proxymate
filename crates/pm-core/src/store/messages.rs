@@ -117,6 +117,12 @@ impl WsLog {
             WsDirection::Received => inner.received += len,
         }
         let index = inner.dropped + inner.records.len() as u32;
+        // Both directions record from their own tasks: the clock read
+        // before the lock may trail the last message's.
+        let time_ms = inner
+            .records
+            .back()
+            .map_or(time_ms, |last| time_ms.max(last.meta.time_ms));
         if max > 0 {
             while inner.records.len() >= max {
                 inner.records.pop_front();
@@ -542,6 +548,20 @@ mod tests {
         let mut used = HashSet::new();
         log.segments_used(&mut used);
         assert_eq!(used.len(), 1);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn times_never_go_backwards_in_the_list() {
+        let (segs, root) = segments();
+        let log = WsLog::new(0);
+        log.push(&segs, WsEntry::new(WsDirection::Sent, WsOpcode::Text, b"a"), 5.0, 0);
+        // Read the clock before the other direction took the lock.
+        log.push(&segs, WsEntry::new(WsDirection::Received, WsOpcode::Text, b"b"), 4.0, 0);
+        log.push(&segs, WsEntry::new(WsDirection::Sent, WsOpcode::Text, b"c"), 6.0, 0);
+        let page = log.page(Some(&segs), &WsQuery::default(), 0, 10).unwrap();
+        let times: Vec<f64> = page.messages.iter().map(|m| m.time_ms).collect();
+        assert_eq!(times, [5.0, 5.0, 6.0]);
         let _ = std::fs::remove_dir_all(root);
     }
 

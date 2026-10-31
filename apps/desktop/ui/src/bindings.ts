@@ -3442,7 +3442,12 @@ export type WsMessage_Deserialize = {
 	opcode: WsOpcode,
 	/**  Payload size in bytes. For close frames, the reason only. */
 	len: number,
-	/**  When the proxy received it, milliseconds since the Unix epoch. */
+	/**
+	 *  When the proxy forwarded it (recorded it, for a dropped message),
+	 *  milliseconds since the Unix epoch. Messages are listed in this
+	 *  order: a message held by a rule comes after those that overtook it
+	 *  in the other direction.
+	 */
 	time_ms: number | null,
 	/**
 	 *  True if only the first part of the payload was recorded (the cap is
@@ -3481,7 +3486,12 @@ export type WsMessage_Serialize = {
 	opcode: WsOpcode,
 	/**  Payload size in bytes. For close frames, the reason only. */
 	len: number,
-	/**  When the proxy received it, milliseconds since the Unix epoch. */
+	/**
+	 *  When the proxy forwarded it (recorded it, for a dropped message),
+	 *  milliseconds since the Unix epoch. Messages are listed in this
+	 *  order: a message held by a rule comes after those that overtook it
+	 *  in the other direction.
+	 */
 	time_ms: number | null,
 	/**
 	 *  True if only the first part of the payload was recorded (the cap is
