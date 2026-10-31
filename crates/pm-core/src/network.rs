@@ -465,14 +465,14 @@ fn check(
                 has_password,
             } => {
                 let key = cert_secret_key(path);
-                match password.as_deref() {
-                    Some("") => {
+                match password.take() {
+                    Some(p) if p.is_empty() => {
                         *has_password = false;
                         secrets.push((key, None));
                     }
                     Some(p) => {
                         *has_password = true;
-                        secrets.push((key, Some(p.to_owned())));
+                        secrets.push((key, Some(p)));
                     }
                     None => {}
                 }

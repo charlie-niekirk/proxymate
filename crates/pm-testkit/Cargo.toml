@@ -35,6 +35,7 @@ prost = "0.14"
 prost-types = "0.14"
 tower = { version = "0.5", default-features = false, features = ["util"] }
 base64 = "0.23"
+p12-keystore = "0.4"
 
 [dev-dependencies]
 rmpv = "1.3"

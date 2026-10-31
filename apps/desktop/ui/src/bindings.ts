@@ -1112,10 +1112,15 @@ export type FlowDetail_Deserialize = {
 	/**  What rules did to the flow. */
 	rules?: FlowRules_Deserialize,
 	/**
-	 *  HTTP/2 response trailers (gRPC's `grpc-status` and friends). Last:
-	 *  session format 3 appended it.
+	 *  HTTP/2 response trailers (gRPC's `grpc-status` and friends).
+	 *  Session format 3 appended it.
 	 */
 	trailers?: Header[] | null,
+	/**
+	 *  The route the upstream connection took (M18). Last: session format
+	 *  5 appended it.
+	 */
+	via?: Via_Deserialize | null,
 };
 
 /**
@@ -1136,10 +1141,15 @@ export type FlowDetail_Serialize = {
 	/**  What rules did to the flow. */
 	rules: FlowRules_Serialize,
 	/**
-	 *  HTTP/2 response trailers (gRPC's `grpc-status` and friends). Last:
-	 *  session format 3 appended it.
+	 *  HTTP/2 response trailers (gRPC's `grpc-status` and friends).
+	 *  Session format 3 appended it.
 	 */
 	trailers: Header[] | null,
+	/**
+	 *  The route the upstream connection took (M18). Last: session format
+	 *  5 appended it.
+	 */
+	via: Via_Serialize | null,
 };
 
 /**
@@ -1483,6 +1493,33 @@ export type LanInterface = {
 	ip: string,
 };
 
+export type ListenerKind = 
+/**  SOCKS5 on the main port (`socks5h://`). */
+"socks5" | "reverse" | "reverse_tls";
+
+/**  A listener besides the main one, for the toolbar and `get_status`. */
+export type ListenerStatus = ListenerStatus_Serialize | ListenerStatus_Deserialize;
+
+/**  A listener besides the main one, for the toolbar and `get_status`. */
+export type ListenerStatus_Deserialize = {
+	kind: ListenerKind,
+	/**  `ip:port`, once bound. */
+	addr?: string | null,
+	/**  What it forwards to (reverse proxies). */
+	target?: string | null,
+	error?: string | null,
+};
+
+/**  A listener besides the main one, for the toolbar and `get_status`. */
+export type ListenerStatus_Serialize = {
+	kind: ListenerKind,
+	/**  `ip:port`, once bound. */
+	addr: string | null,
+	/**  What it forwards to (reverse proxies). */
+	target: string | null,
+	error: string | null,
+};
+
 /**  Traffic from local clients of one kind (the Simulator, the emulator). */
 export type LocalActivity = {
 	flows: number,
@@ -1822,6 +1859,8 @@ export type ProxyStatus_Deserialize = {
 	error?: string | null,
 	/**  False while recording is paused: traffic is forwarded but not kept. */
 	recording: boolean,
+	/**  SOCKS5 on the same port and the reverse proxy listeners (M18). */
+	listeners: ListenerStatus_Deserialize[],
 };
 
 /**  State of the proxy listener, for the toolbar. */
@@ -1832,6 +1871,8 @@ export type ProxyStatus_Serialize = {
 	error: string | null,
 	/**  False while recording is paused: traffic is forwarded but not kept. */
 	recording: boolean,
+	/**  SOCKS5 on the same port and the reverse proxy listeners (M18). */
+	listeners: ListenerStatus_Serialize[],
 };
 
 /**  How `Engine::repeat` sends a request again and again. */
@@ -2897,6 +2938,52 @@ export type UpdateSettings = {
 };
 
 export type Value = null | boolean | number | string | Value[] | { [key in string]: Value };
+
+/**
+ *  How a flow's upstream connection was made. Last field of `FlowDetail`
+ *  (session format 5).
+ */
+export type Via = Via_Serialize | Via_Deserialize;
+
+/**
+ *  How a flow's upstream connection was made. Last field of `FlowDetail`
+ *  (session format 5).
+ */
+export type Via_Deserialize = {
+	/**
+	 *  The upstream proxy, e.g. `http://proxy.corp:3128` or
+	 *  `socks5://127.0.0.1:1080`; `None` for a direct connection.
+	 */
+	proxy?: string | null,
+	/**  The address the TCP connection went to (the proxy's, when proxied). */
+	addr?: string | null,
+	/**  The DNS override that applied, as `pattern → ip`. */
+	dns_override?: string | null,
+	/**  The client certificate presented: its subject. */
+	client_cert?: string | null,
+	/**  The reverse proxy listener the request arrived on. */
+	reverse_port?: number | null,
+};
+
+/**
+ *  How a flow's upstream connection was made. Last field of `FlowDetail`
+ *  (session format 5).
+ */
+export type Via_Serialize = {
+	/**
+	 *  The upstream proxy, e.g. `http://proxy.corp:3128` or
+	 *  `socks5://127.0.0.1:1080`; `None` for a direct connection.
+	 */
+	proxy: string | null,
+	/**  The address the TCP connection went to (the proxy's, when proxied). */
+	addr: string | null,
+	/**  The DNS override that applied, as `pattern → ip`. */
+	dns_override: string | null,
+	/**  The client certificate presented: its subject. */
+	client_cert: string | null,
+	/**  The reverse proxy listener the request arrived on. */
+	reverse_port: number | null,
+};
 
 /**  Where a view script applies. Every set condition must match. */
 export type ViewConfig = ViewConfig_Serialize | ViewConfig_Deserialize;

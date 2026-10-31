@@ -4,6 +4,8 @@
 //! TLS, speaking h2 or HTTP/1.1 as ALPN decides. Its certificate is issued
 //! by [`TestCa`] (pass [`TlsUpstream::ca_der`] to the engine as an extra
 //! upstream root) or, with [`TlsUpstream::self_signed`], by nobody.
+//! [`TlsUpstream::mtls`] also requires a client certificate from its CA
+//! ([`TestCa::issue_client`], as PEM or PKCS#12 files for the engine).
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -51,6 +53,21 @@ impl TestCa {
         &self.pem
     }
 
+    /// A client certificate for `name`, signed by this CA.
+    pub fn issue_client(&self, name: &str) -> ClientIdentity {
+        let key = KeyPair::generate().expect("client key");
+        let mut params = CertificateParams::new(Vec::<String>::new()).expect("client params");
+        params.distinguished_name.push(DnType::CommonName, name);
+        params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
+        let cert = params.signed_by(&key, &self.issuer).expect("sign client cert");
+        ClientIdentity {
+            cert_pem: cert.pem(),
+            key_pem: key.serialize_pem(),
+            cert_der: cert.der().to_vec(),
+            key_der: key.serialize_der(),
+        }
+    }
+
     /// A server certificate for `localhost` and `127.0.0.1`.
     pub fn issue_localhost(&self) -> (Vec<CertificateDer<'static>>, PrivateKeyDer<'static>) {
         let key = KeyPair::generate().expect("leaf key");
@@ -62,6 +79,30 @@ impl TestCa {
             vec![cert.der().clone(), self.der.clone()],
             PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key.serialize_der())),
         )
+    }
+}
+
+/// A client certificate and its key.
+pub struct ClientIdentity {
+    pub cert_pem: String,
+    pub key_pem: String,
+    pub cert_der: Vec<u8>,
+    /// PKCS#8.
+    pub key_der: Vec<u8>,
+}
+
+impl ClientIdentity {
+    /// The identity as a PKCS#12 file protected by `password`.
+    pub fn pkcs12(&self, password: &str) -> Vec<u8> {
+        use p12_keystore::{Certificate, KeyStore, KeyStoreEntry, PrivateKey, PrivateKeyChain};
+        let cert = Certificate::from_der(&self.cert_der).expect("certificate");
+        let key = PrivateKey::from_der(&self.key_der).expect("private key");
+        let mut store = KeyStore::new();
+        store.add_entry(
+            "client",
+            KeyStoreEntry::PrivateKeyChain(PrivateKeyChain::new(b"pm-testkit".to_vec(), key, [cert])),
+        );
+        store.writer(password).write().expect("write PKCS#12")
     }
 }
 
@@ -116,19 +157,45 @@ impl TlsUpstream {
         Self::serve(vec![cert.der().clone()], key, alpn, None).await
     }
 
+    /// An upstream that requires a client certificate issued by its own CA
+    /// ([`TestCa::issue_client`] on [`TlsUpstream::ca`]).
+    pub async fn mtls(alpn: Alpn) -> TlsUpstream {
+        let ca = TestCa::new();
+        let (chain, key) = ca.issue_localhost();
+        let mut roots = rustls::RootCertStore::empty();
+        roots.add(ca.der().clone()).expect("client root");
+        let provider = Arc::new(rustls::crypto::ring::default_provider());
+        let verifier = rustls::server::WebPkiClientVerifier::builder_with_provider(Arc::new(roots), provider)
+            .build()
+            .expect("client verifier");
+        Self::serve_with(chain, key, alpn, Some(ca), Some(verifier)).await
+    }
+
     async fn serve(
         chain: Vec<CertificateDer<'static>>,
         key: PrivateKeyDer<'static>,
         alpn: Alpn,
         ca: Option<TestCa>,
     ) -> TlsUpstream {
+        Self::serve_with(chain, key, alpn, ca, None).await
+    }
+
+    async fn serve_with(
+        chain: Vec<CertificateDer<'static>>,
+        key: PrivateKeyDer<'static>,
+        alpn: Alpn,
+        ca: Option<TestCa>,
+        client_verifier: Option<Arc<dyn rustls::server::danger::ClientCertVerifier>>,
+    ) -> TlsUpstream {
         let provider = Arc::new(rustls::crypto::ring::default_provider());
-        let mut config = ServerConfig::builder_with_provider(provider)
+        let builder = ServerConfig::builder_with_provider(provider)
             .with_safe_default_protocol_versions()
-            .expect("protocol versions")
-            .with_no_client_auth()
-            .with_single_cert(chain, key)
-            .expect("server cert");
+            .expect("protocol versions");
+        let builder = match client_verifier {
+            Some(verifier) => builder.with_client_cert_verifier(verifier),
+            None => builder.with_no_client_auth(),
+        };
+        let mut config = builder.with_single_cert(chain, key).expect("server cert");
         config.alpn_protocols = alpn.protocols();
         let acceptor = TlsAcceptor::from(Arc::new(config));
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind TLS upstream");

@@ -766,11 +766,40 @@ fn certificate_required(host: &str) -> String {
     format!("{host} asks for a client certificate. Add one for {host} in Settings › Network › Client Certificates.")
 }
 
+/// Why an upstream connection's task ended, once it has. A request that
+/// finds the connection already gone reports this rather than hyper's
+/// "channel closed".
+pub(super) type Died = Arc<std::sync::OnceLock<String>>;
+
+fn spawn_conn<F>(conn: F) -> Died
+where
+    F: std::future::Future<Output = Result<(), hyper::Error>> + Send + 'static,
+{
+    let died = Died::default();
+    let slot = died.clone();
+    tokio::spawn(async move {
+        if let Err(err) = conn.await {
+            let _ = slot.set(error_chain(&err));
+        }
+    });
+    died
+}
+
 /// A failed upstream request, explained when the reason is known: with
 /// TLS 1.3 a server's demand for a client certificate only shows up once
-/// the first request is sent.
-fn request_failed(host: &str, err: &hyper::Error) -> String {
-    let chain = error_chain(err);
+/// the first request is sent, and often as the connection's own error.
+async fn request_failed(host: &str, err: hyper::Error, died: &Died) -> String {
+    let mut chain = error_chain(&err);
+    if err.is_closed() || err.is_canceled() || chain.contains("channel closed") {
+        // The connection task records its error right after it ends.
+        for _ in 0..20 {
+            if let Some(why) = died.get() {
+                chain = why.clone();
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
     if chain.contains("CertificateRequired") {
         certificate_required(host)
     } else {
@@ -792,15 +821,15 @@ fn ms(d: Duration) -> f64 {
 
 /// An upstream HTTP connection: h1 or h2, as negotiated.
 enum Sender {
-    H1(client_h1::SendRequest<UpstreamBody>),
-    H2(client_h2::SendRequest<UpstreamBody>),
+    H1(client_h1::SendRequest<UpstreamBody>, Died),
+    H2(client_h2::SendRequest<UpstreamBody>, Died),
 }
 
 impl Sender {
     fn is_closed(&self) -> bool {
         match self {
-            Sender::H1(s) => s.is_closed(),
-            Sender::H2(s) => s.is_closed(),
+            Sender::H1(s, _) => s.is_closed(),
+            Sender::H2(s, _) => s.is_closed(),
         }
     }
 }
@@ -813,8 +842,7 @@ async fn handshake(up: Upstream) -> Result<Sender, String> {
             .handshake(io)
             .await
             .map_err(|e| format!("HTTP/2 handshake with the upstream failed: {}", error_chain(&e)))?;
-        tokio::spawn(conn);
-        Ok(Sender::H2(sender))
+        Ok(Sender::H2(sender, spawn_conn(conn)))
     } else {
         let (sender, conn) = client_h1::Builder::new()
             .preserve_header_case(true)
@@ -823,8 +851,7 @@ async fn handshake(up: Upstream) -> Result<Sender, String> {
             .map_err(|e| format!("HTTP/1.1 handshake with the upstream failed: {}", error_chain(&e)))?;
         // A WebSocket handshake takes the connection over; the next request
         // dials a new one.
-        tokio::spawn(conn.with_upgrades());
-        Ok(Sender::H1(sender))
+        Ok(Sender::H1(sender, spawn_conn(conn.with_upgrades())))
     }
 }
 
@@ -975,26 +1002,32 @@ impl MitmConn {
                 recorder.via(via);
             }
         }
-        let host = self.target.host.clone();
-        let failed = |e: hyper::Error| request_failed(&host, &e);
+        let host = &self.target.host;
         match slot.sender.as_mut() {
-            Some(Sender::H1(sender)) => {
+            Some(Sender::H1(sender, died)) => {
+                let died = died.clone();
                 parts.uri = Uri::from(pq);
                 if !parts.headers.contains_key(header::HOST)
                     && let Ok(host) = HeaderValue::from_str(authority.as_str())
                 {
                     parts.headers.insert(header::HOST, host);
                 }
-                sender.ready().await.map_err(failed)?;
+                if let Err(err) = sender.ready().await {
+                    return Err(request_failed(host, err, &died).await);
+                }
                 let response = sender.send_request(Request::from_parts(parts, body));
                 drop(slot);
                 if let Some(recorder) = recorder {
                     recorder.request_sent();
                 }
-                response.await.map_err(failed)
+                match response.await {
+                    Ok(response) => Ok(response),
+                    Err(err) => Err(request_failed(host, err, &died).await),
+                }
             }
-            Some(Sender::H2(sender)) => {
+            Some(Sender::H2(sender, died)) => {
                 let mut sender = sender.clone();
+                let died = died.clone();
                 drop(slot);
                 parts.uri = Uri::builder()
                     .scheme("https")
@@ -1004,14 +1037,16 @@ impl MitmConn {
                     .map_err(|e| e.to_string())?;
                 // :authority carries it in h2.
                 parts.headers.remove(header::HOST);
-                sender.ready().await.map_err(failed)?;
+                if let Err(err) = sender.ready().await {
+                    return Err(request_failed(host, err, &died).await);
+                }
                 if let Some(recorder) = recorder {
                     recorder.request_sent();
                 }
-                sender
-                    .send_request(Request::from_parts(parts, body))
-                    .await
-                    .map_err(failed)
+                match sender.send_request(Request::from_parts(parts, body)).await {
+                    Ok(response) => Ok(response),
+                    Err(err) => Err(request_failed(host, err, &died).await),
+                }
             }
             None => Err("no upstream connection".into()),
         }
@@ -1051,7 +1086,7 @@ pub(super) async fn open_h1(
     host: &str,
     port: u16,
     recorder: Option<&FlowRecorder>,
-) -> Result<client_h1::SendRequest<UpstreamBody>, String> {
+) -> Result<(client_h1::SendRequest<UpstreamBody>, Died), String> {
     let Some(engine) = ctx.engine.upgrade() else {
         return Err("Proxymate is shutting down".into());
     };
@@ -1067,8 +1102,7 @@ pub(super) async fn open_h1(
             .handshake(TokioIo::new(dialed.stream))
             .await
             .map_err(|e| format!("HTTP/1.1 handshake with the upstream failed: {}", error_chain(&e)))?;
-        tokio::spawn(conn.with_upgrades());
-        return Ok(sender);
+        return Ok((sender, spawn_conn(conn.with_upgrades())));
     }
     let dial = Dial {
         engine: ctx.engine.clone(),
@@ -1086,14 +1120,14 @@ pub(super) async fn open_h1(
         recorder.via(&up.via);
     }
     match handshake(up).await? {
-        Sender::H1(sender) => Ok(sender),
-        Sender::H2(_) => Err("the upstream picked HTTP/2 without being offered it".into()),
+        Sender::H1(sender, died) => Ok((sender, died)),
+        Sender::H2(..) => Err("the upstream picked HTTP/2 without being offered it".into()),
     }
 }
 
 /// Sends `parts` in origin form over a connection from [`open_h1`].
 pub(super) async fn send_once(
-    sender: &mut client_h1::SendRequest<UpstreamBody>,
+    (sender, died): &mut (client_h1::SendRequest<UpstreamBody>, Died),
     host: &str,
     mut parts: http::request::Parts,
     pq: PathAndQuery,
@@ -1108,15 +1142,16 @@ pub(super) async fn send_once(
     {
         parts.headers.insert(header::HOST, value);
     }
-    let failed = |e: hyper::Error| request_failed(host, &e);
-    sender.ready().await.map_err(failed)?;
+    if let Err(err) = sender.ready().await {
+        return Err(request_failed(host, err, died).await);
+    }
     if let Some(recorder) = recorder {
         recorder.request_sent();
     }
-    sender
-        .send_request(Request::from_parts(parts, body))
-        .await
-        .map_err(failed)
+    match sender.send_request(Request::from_parts(parts, body)).await {
+        Ok(response) => Ok(response),
+        Err(err) => Err(request_failed(host, err, died).await),
+    }
 }
 
 /// Sends one request over a new TLS connection to `host:port` (HTTP/1.1),
