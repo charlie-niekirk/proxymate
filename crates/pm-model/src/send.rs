@@ -78,6 +78,8 @@ impl SendOrigin {
 pub enum SentBy {
     User,
     Agent,
+    /// One of a Repeat's requests (M17).
+    Repeat,
 }
 
 #[cfg(test)]

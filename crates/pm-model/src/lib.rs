@@ -20,6 +20,7 @@ mod stream;
 mod tls;
 mod update;
 mod view;
+mod workflow;
 
 pub use detail::{BodyInfo, BodyPart, FlowDetail, Header, HttpVersion, ProxyStatus, RequestHead, ResponseHead};
 pub use device::{
@@ -28,7 +29,7 @@ pub use device::{
 };
 pub use document::{DocumentInfo, DocumentKind, FlowSelection, LIVE_STORE, SaveProgress, StoreId};
 pub use filter::{ContentGroup, FilterSpec, ProtocolFilter, SearchScope, SortDir, SortKey, SortSpec};
-pub use flow::{ContentKind, FlowId, FlowState, FlowSummary, Scheme};
+pub use flow::{ContentKind, FlowId, FlowLabel, FlowState, FlowSummary, Scheme};
 pub use mcp::{MCP_DEFAULT_PORT, McpAuditEntry, McpAuditPage, McpCallOutcome, McpClient, McpSettings, McpStatus};
 pub use platform::{AppCount, DomainNode, HostCount, KeychainTrust, SidebarSnapshot, SystemProxyStatus, TrustStatus};
 pub use protobuf::{Badge, DecodedBody, DecodedFormat, DecodedMessage, GrpcStatus, ProtoMapping, ProtoSchema};
@@ -47,3 +48,4 @@ pub use stream::{SseEvent, SsePage, WsClose, WsDirection, WsMessage, WsOpcode, W
 pub use tls::{CaInfo, CertSummary, SslSettings, Timing, TlsInfo, TlsStatus};
 pub use update::UpdateSettings;
 pub use view::{DeepProgress, FlowRow, RowsPage, ViewDelta, ViewId, ViewInfo};
+pub use workflow::{CodeLanguage, HeaderColumn, MAX_HEADER_COLUMNS, RepeatId, RepeatOpts, RepeatProgress, StatusCount};

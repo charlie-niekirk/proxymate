@@ -1,4 +1,4 @@
-import type { ContentKind, FlowRow_Serialize, FlowState, HttpVersion, Scheme, SentBy, TlsStatus } from "@/bindings";
+import type { CodeLanguage, ContentKind, FlowLabel, FlowRow_Serialize, FlowState, HttpVersion, Scheme, SentBy, TlsStatus } from "@/bindings";
 
 /** A decoded `FlowRow` tuple. Field order mirrors `pm_model::FlowRow`. */
 export interface Row {
@@ -28,6 +28,12 @@ export interface Row {
   pinned: boolean;
   /** A gRPC call's `grpc-status` (0 is OK), once its trailers came. */
   grpcStatus: number | null;
+  /** The user's colour label (M17). */
+  label: FlowLabel | null;
+  /** The user's note (M17). */
+  comment: string | null;
+  /** Header column values, in the order of the header columns (M17). */
+  extra: (string | null)[];
 }
 
 export function decodeRow(t: FlowRow_Serialize): Row {
@@ -54,8 +60,25 @@ export function decodeRow(t: FlowRow_Serialize): Row {
     sentBy: t[19],
     pinned: t[20],
     grpcStatus: t[21],
+    label: t[22] ?? null,
+    comment: t[23] ?? null,
+    extra: t[24] ?? [],
   };
 }
+
+/** Copy as code languages, in menu order (`pm_model::CodeLanguage`). */
+export const CODE_LANGUAGES: readonly { id: CodeLanguage; label: string }[] = [
+  { id: "fetch", label: "JavaScript (fetch)" },
+  { id: "python", label: "Python (requests)" },
+  { id: "httpie", label: "HTTPie" },
+  { id: "go", label: "Go (net/http)" },
+  { id: "swift", label: "Swift (URLSession)" },
+  { id: "kotlin", label: "Kotlin (OkHttp)" },
+  { id: "powershell", label: "PowerShell" },
+];
+
+/** Label colours, in menu order (`pm_model::FlowLabel`). */
+export const FLOW_LABELS: readonly FlowLabel[] = ["red", "orange", "yellow", "green", "blue", "purple"];
 
 const DEFAULT_PORTS: Record<Scheme, number> = { http: 80, https: 443, ws: 80, wss: 443 };
 

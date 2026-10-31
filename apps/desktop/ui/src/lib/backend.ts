@@ -33,6 +33,13 @@ import {
   type DocumentInfo,
   type FilterSpec_Deserialize,
   type FlowSelection,
+  type FlowSelection_Deserialize,
+  type FlowLabel,
+  type HeaderColumn,
+  type CodeLanguage,
+  type RepeatOpts_Deserialize,
+  type RepeatProgress_Deserialize,
+  type RepeatProgress_Serialize,
   type FlowDetail_Serialize,
   type FlowSummary_Serialize,
   type McpAuditPage_Serialize,
@@ -247,8 +254,31 @@ export interface Backend {
   setStorageSettings(settings: StorageSettings_Serialize): Promise<StorageSettings_Serialize>;
   /** Flows, disk use and write errors, pushed now and whenever they change. */
   subscribeStorage(onStatus: (status: StorageStatus_Serialize) => void): Promise<void>;
-  /** Pinned flows are never evicted. */
-  pinFlows(ids: number[], pinned: boolean): Promise<void>;
+  /** Pinned live flows are never evicted; a saved session keeps its pins. */
+  pinFlows(store: number, selection: FlowSelection_Deserialize, pinned: boolean): Promise<number>;
+
+  // ---- Workflow (M17) ----
+  /** The ids a selection names, in its order. */
+  selectedIds(store: number, selection: FlowSelection_Deserialize): Promise<number[]>;
+  getFlowUrls(store: number, selection: FlowSelection_Deserialize): Promise<string[]>;
+  /** Deletes flows (in-flight ones stay); resolves to how many went. */
+  removeFlows(store: number, selection: FlowSelection_Deserialize): Promise<number>;
+  /** Null takes the label off. */
+  labelFlows(store: number, selection: FlowSelection_Deserialize, label: FlowLabel | null): Promise<number>;
+  /** An empty comment removes it. */
+  commentFlow(store: number, id: number, comment: string): Promise<void>;
+  /** The header columns every store fills (rows' `extra`, in this order). */
+  setHeaderColumns(columns: HeaderColumn[]): Promise<HeaderColumn[]>;
+  /** The request as code in `language` (Copy as code). */
+  getCode(store: number, id: number, language: CodeLanguage): Promise<string>;
+  /** Repeats a recorded request; progress streams to `onProgress`, the last with `finished`. */
+  startRepeat(
+    store: number,
+    id: number,
+    opts: RepeatOpts_Deserialize,
+    onProgress: (p: RepeatProgress_Serialize) => void,
+  ): Promise<number>;
+  cancelRepeat(id: number): Promise<boolean>;
   getProxySettings(): Promise<ProxySettings_Serialize>;
   /** Restarts the listener if the port or pool changed; rejects if the port can't be bound. */
   setProxySettings(settings: ProxySettings_Serialize): Promise<ProxySettings_Serialize>;
@@ -445,7 +475,22 @@ const tauriBackend: Backend = {
     channel.onmessage = onStatus;
     await commands.subscribeStorage(channel as unknown as Channel<StorageStatus_Deserialize>);
   },
-  pinFlows: (ids, pinned) => commands.pinFlows(ids, pinned),
+  pinFlows: (store, selection, pinned) => unwrap(commands.pinFlows(store, selection, pinned)),
+  selectedIds: (store, selection) => unwrap(commands.selectedIds(store, selection)),
+  getFlowUrls: (store, selection) => unwrap(commands.getFlowUrls(store, selection)),
+  removeFlows: (store, selection) => unwrap(commands.removeFlows(store, selection)),
+  labelFlows: (store, selection, label) => unwrap(commands.labelFlows(store, selection, label)),
+  commentFlow: async (store, id, comment) => {
+    await unwrap(commands.commentFlow(store, id, comment));
+  },
+  setHeaderColumns: (columns) => unwrap(commands.setHeaderColumns(columns)),
+  getCode: (store, id, language) => unwrap(commands.getCode(store, id, language)),
+  startRepeat: (store, id, opts, onProgress) => {
+    const channel = new Channel<RepeatProgress_Serialize>();
+    channel.onmessage = onProgress;
+    return unwrap(commands.startRepeat(store, id, opts, channel as unknown as Channel<RepeatProgress_Deserialize>));
+  },
+  cancelRepeat: (id) => commands.cancelRepeat(id),
   getProxySettings: () => commands.getProxySettings(),
   setProxySettings: (settings) => unwrap(commands.setProxySettings(settings)),
   setSidebarStore: (store) => commands.setSidebarStore(store),

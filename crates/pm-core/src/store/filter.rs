@@ -123,6 +123,9 @@ mod tests {
             sent_by: None,
             pinned: false,
             grpc_status: None,
+            label: None,
+            comment: None,
+            extra: Vec::new(),
         }
     }
 

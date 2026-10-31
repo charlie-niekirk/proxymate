@@ -15,7 +15,7 @@ use pm_model::{
     Action, BodyPart, BreakpointId, BreakpointResolution, FlowDetail, FlowId, FlowSummary, Header, MapLocalSource,
     Matcher, Pattern, Phase, PresetKind, Rule, RuleOrigin, Scheme, SearchScope, WsDirection, WsQuery,
 };
-use pm_model::{FlowSelection, LIVE_STORE, RequestSpec, SendOpts, SendOrigin, StoreId};
+use pm_model::{CodeLanguage, FlowSelection, LIVE_STORE, RepeatOpts, RequestSpec, SendOpts, SendOrigin, StoreId};
 use pm_model::{Script, ScriptKind, ScriptTestSpec, ViewConfig};
 use rmcp::handler::server::common::schema_for_type;
 use rmcp::model::{JsonObject, Tool, ToolAnnotations};
@@ -237,6 +237,12 @@ fn defs() -> Vec<Def> {
             "A curl command that sends a recorded request again (method, URL, headers and body)."
         ),
         def!(
+            "export_code",
+            Read,
+            ExportCode,
+            "A recorded request as code that sends it again: curl, fetch (JavaScript), python (requests), httpie, go (net/http), swift (URLSession), kotlin (OkHttp) or powershell."
+        ),
+        def!(
             "export_har",
             Read,
             ExportHar,
@@ -247,6 +253,12 @@ fn defs() -> Vec<Def> {
             Write,
             ReplayFlow,
             "Send a recorded request again, optionally modified (method, URL, headers, body). The new flow is recorded and marked as sent by you; with `wait` (default) the result has its response status."
+        ),
+        def!(
+            "repeat_flow",
+            Write,
+            RepeatFlow,
+            "Send a recorded request again many times (up to 10,000, up to 64 at once), e.g. to check a rate limit or a flaky endpoint. Each request is recorded as a flow. Waits until all have finished and returns the counts by status, failures and min/p50/p95/max durations."
         ),
         def!(
             "list_scripts",
@@ -453,6 +465,12 @@ pub(crate) async fn call(ctx: &Ctx<'_>, name: &str, args: JsonObject) -> ToolRes
             let p: FlowIdParam = parse(args)?;
             Ok(json!({ "id": p.id, "command": ctx.engine.curl_command(LIVE_STORE, p.id)? }))
         }
+        "export_code" => {
+            let p: ExportCode = parse(args)?;
+            let code = ctx.engine.code_snippet(LIVE_STORE, p.id, p.language)?;
+            Ok(json!({ "id": p.id, "language": p.language, "code": code }))
+        }
+        "repeat_flow" => repeat_flow(ctx, parse(args)?).await,
         "export_har" => export_har(ctx, parse(args)?),
         "replay_flow" => replay_flow(ctx, parse(args)?).await,
         "list_scripts" => list_scripts(ctx, parse(args)?),
@@ -1070,6 +1088,32 @@ struct ReplayFlow {
 }
 
 #[derive(Deserialize, JsonSchema)]
+struct ExportCode {
+    id: FlowId,
+    language: CodeLanguage,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct RepeatFlow {
+    id: FlowId,
+    /// How many times to send it, 1 to 10,000.
+    iterations: u32,
+    /// Requests in flight at once, 1 to 64 (default 1).
+    #[serde(default = "one")]
+    concurrency: u32,
+    /// Pause before each request, in milliseconds (default 0).
+    #[serde(default)]
+    delay_ms: u32,
+    /// Run each request through the rules like proxied traffic (default true).
+    #[serde(default = "yes")]
+    apply_rules: bool,
+}
+
+fn one() -> u32 {
+    1
+}
+
+#[derive(Deserialize, JsonSchema)]
 struct SendRequest {
     request: RequestSpec,
     /// Run it through the rules like proxied traffic (default true).
@@ -1115,6 +1159,9 @@ fn brief(f: &FlowSummary) -> Value {
         "edited": f.edited,
         "graphql_operation": f.graphql_op.as_deref(),
         "grpc_status": f.grpc_status,
+        "pinned": f.pinned,
+        "label": f.label,
+        "comment": f.comment.as_deref(),
     })
 }
 
@@ -1593,6 +1640,58 @@ async fn send(ctx: &Ctx<'_>, spec: RequestSpec, apply_rules: bool, wait: bool) -
     let flow = ctx.engine.get_flow(id).map(|f| brief(&f));
     let error = ctx.engine.flow_detail(id).ok().flatten().and_then(|d| d.error);
     Ok(json!({ "id": id, "flow": flow, "error": error }))
+}
+
+async fn repeat_flow(ctx: &Ctx<'_>, p: RepeatFlow) -> ToolResult {
+    let spec = ctx.engine.request_spec(LIVE_STORE, p.id, false)?;
+    let opts = RepeatOpts {
+        iterations: p.iterations,
+        concurrency: p.concurrency,
+        delay_ms: p.delay_ms,
+        apply_rules: p.apply_rules,
+    };
+    let origin = SendOrigin::Agent {
+        client: ctx.client.to_owned(),
+    };
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let mut tx = Some(tx);
+    let id = ctx.engine.repeat_as(
+        spec,
+        opts,
+        origin,
+        Box::new(move |progress| {
+            if progress.finished
+                && let Some(tx) = tx.take()
+            {
+                let _ = tx.send(progress);
+            }
+        }),
+    )?;
+    let done = tokio::select! {
+        done = rx => done.map_err(|_| ToolError("the repeat stopped without a result".into()))?,
+        () = ctx.ct.cancelled() => {
+            ctx.engine.cancel_repeat(id);
+            return Err(ToolError("cancelled".into()));
+        }
+    };
+    if let Some(error) = &done.error
+        && done.done == 0
+    {
+        return Err(ToolError(error.clone()));
+    }
+    Ok(json!({
+        "repeated": p.id,
+        "sent": done.done,
+        "failed": done.failed,
+        "statuses": done.statuses,
+        "min_ms": done.min_ms,
+        "p50_ms": done.p50_ms,
+        "p95_ms": done.p95_ms,
+        "max_ms": done.max_ms,
+        "first_flow": done.first_flow,
+        "last_flow": done.last_flow,
+        "error": done.error,
+    }))
 }
 
 async fn replay_flow(ctx: &Ctx<'_>, p: ReplayFlow) -> ToolResult {

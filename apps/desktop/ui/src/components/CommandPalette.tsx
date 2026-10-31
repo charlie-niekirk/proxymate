@@ -50,7 +50,7 @@ function PaletteBody({ commands, onRun }: { commands: AppCommand[]; onRun: (c: A
               {items.map((c) => (
                 <CommandItem key={c.id} value={c.title} keywords={c.keywords} onSelect={() => onRun(c)} data-testid={`palette-${c.id}`}>
                   {c.title}
-                  {c.key && <CommandShortcut>{shortcutLabel(c.key)}</CommandShortcut>}
+                  {c.key && <CommandShortcut>{shortcutLabel(c.key, c)}</CommandShortcut>}
                 </CommandItem>
               ))}
             </CommandGroup>

@@ -41,8 +41,13 @@ pub struct DocumentInfo {
 pub enum FlowSelection {
     /// Every flow in the store.
     All,
-    /// The rows of a view, in its order (the current filter and sort).
-    View { view: ViewId },
+    /// The rows of a view, in its order (the current filter and sort),
+    /// but for `except`: ⌘A then ⌘-click, without listing 100k ids.
+    View {
+        view: ViewId,
+        #[serde(default)]
+        except: Vec<FlowId>,
+    },
     /// These flows, in this order.
     Ids { ids: Vec<FlowId> },
 }

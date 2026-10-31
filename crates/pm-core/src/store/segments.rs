@@ -57,6 +57,17 @@ struct SegInfo {
     len: u64,
     /// The newest flow that wrote to the segment.
     max_owner: FlowId,
+    /// The oldest (M17: deleting flows frees a segment once no flow left
+    /// falls between the two).
+    min_owner: FlowId,
+}
+
+impl SegInfo {
+    const EMPTY: SegInfo = SegInfo {
+        len: 0,
+        max_owner: 0,
+        min_owner: FlowId::MAX,
+    };
 }
 
 struct Writer {
@@ -98,9 +109,10 @@ impl SegmentStore {
         };
         writer.file.write_all(bytes)?;
         writer.len += bytes.len() as u64;
-        let info = inner.segs.entry(extent.seg).or_insert(SegInfo { len: 0, max_owner: 0 });
+        let info = inner.segs.entry(extent.seg).or_insert(SegInfo::EMPTY);
         info.len += bytes.len() as u64;
         info.max_owner = info.max_owner.max(owner);
+        info.min_owner = info.min_owner.min(owner);
         inner.bytes += bytes.len() as u64;
         Ok(extent)
     }
@@ -140,6 +152,18 @@ impl SegmentStore {
         }
         inner.bytes -= freed;
         freed
+    }
+
+    /// The finished segments up to `through` that flows matching `in_use`
+    /// (given a segment's oldest and newest writer) may still need.
+    pub fn in_use_through(&self, through: FlowId, in_use: impl Fn(FlowId, FlowId) -> bool) -> HashSet<u32> {
+        let inner = self.inner.lock();
+        inner
+            .segs
+            .iter()
+            .filter(|(_, info)| info.max_owner <= through && in_use(info.min_owner, info.max_owner))
+            .map(|(seg, _)| *seg)
+            .collect()
     }
 
     /// The flow id through which eviction must go so that deleting the
@@ -234,7 +258,7 @@ impl SegmentStore {
             .write(true)
             .open(self.segment_path(seg))?;
         inner.next_seg += 1;
-        inner.segs.insert(seg, SegInfo { len: 0, max_owner: 0 });
+        inner.segs.insert(seg, SegInfo::EMPTY);
         inner.current = Some(Writer {
             seg,
             file: BufWriter::with_capacity(64 * 1024, file),

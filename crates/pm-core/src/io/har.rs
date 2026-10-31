@@ -487,12 +487,16 @@ fn entry(flow: &SavedFlow) -> Entry {
                 .collect()
         }),
         resource_type: s.scheme.is_websocket().then(|| "websocket".into()),
-        comment: s.sent_by.map(|by| {
-            match by {
-                SentBy::User => "Sent from Proxymate",
-                SentBy::Agent => "Sent by an agent through Proxymate",
-            }
-            .into()
+        // The user's note wins over where the request came from.
+        comment: s.comment.as_deref().map(str::to_owned).or_else(|| {
+            s.sent_by.map(|by| {
+                match by {
+                    SentBy::User => "Sent from Proxymate",
+                    SentBy::Agent => "Sent by an agent through Proxymate",
+                    SentBy::Repeat => "Repeated by Proxymate",
+                }
+                .into()
+            })
         }),
     }
 }
@@ -859,6 +863,20 @@ fn flow(entry: &Entry) -> Option<SavedFlow> {
         sent_by: None,
         pinned: false,
         grpc_status: None,
+        label: None,
+        // A note someone wrote; not the one Proxymate adds to what it sent.
+        comment: entry
+            .comment
+            .as_deref()
+            .filter(|c| {
+                !c.is_empty()
+                    && !matches!(
+                        *c,
+                        "Sent from Proxymate" | "Sent by an agent through Proxymate" | "Repeated by Proxymate"
+                    )
+            })
+            .map(Arc::from),
+        extra: Vec::new(),
     };
     let detail = FlowDetail {
         id: 0,
@@ -1106,6 +1124,9 @@ mod tests {
             sent_by: None,
             pinned: false,
             grpc_status: None,
+            label: None,
+            comment: None,
+            extra: Vec::new(),
         }
     }
 

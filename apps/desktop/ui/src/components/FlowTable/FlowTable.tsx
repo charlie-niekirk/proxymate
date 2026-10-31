@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { ArrowDown, ArrowUp, MoreHorizontal, PencilLine, Pin } from "lucide-react";
+import { ArrowDown, ArrowUp, MessageSquareText, MoreHorizontal, PencilLine, Pin } from "lucide-react";
 import {
   memo,
   useCallback,
@@ -29,10 +29,11 @@ import { useFlowView } from "@/hooks/useFlowView";
 import { FLOW_TABLE_ID, focusInspector } from "@/lib/focus";
 import { backend } from "@/lib/backend";
 import { formatDuration, formatSize, formatTime, versionLabel, type Row } from "@/lib/flow";
+import { isSelected, range, selectionCount } from "@/lib/selection";
 import { proxyStatusKey } from "@/lib/query";
 import { sslTitle } from "@/lib/tls";
 import { cn } from "@/lib/utils";
-import { usePrefs } from "@/store/prefs";
+import { MAX_HEADER_COLUMNS, usePrefs } from "@/store/prefs";
 import { useUi } from "@/store/ui";
 
 import { MethodPill, SslIcon, StateDot, StatusPill, UrlText } from "./cells";
@@ -40,8 +41,10 @@ import {
   COLUMNS,
   ROW_HEIGHT,
   gridTemplate,
+  headerColumnId,
   minTableWidth,
   placeColumns,
+  isHeaderColumnId,
   type ColumnId,
   type PlacedColumn,
 } from "./columns";
@@ -55,25 +58,36 @@ const HEADER_HEIGHT = 22;
  * fetched from Rust. Columns are resized, reordered, hidden and sorted from
  * the header; the layout persists (store/prefs.ts).
  *
- * Keys: ↑/↓, PgUp/PgDn, Home/End move the selection; Enter focuses the
- * inspector.
+ * Keys: ↑/↓, PgUp/PgDn, Home/End move the selection (with ⇧, extend it);
+ * Enter focuses the inspector; Escape drops back to the focused flow.
+ * ⌘-click toggles a flow, ⇧-click selects a range (M17): the selection is
+ * flow ids (`lib/selection.ts`), and the inspector follows the focused one.
  */
 export function FlowTable() {
   const { cache, version } = useFlowView();
   const len = useUi((s) => s.stats.len);
   const selectedId = useUi((s) => s.selectedId);
+  const selection = useUi((s) => s.selection);
   const select = useUi((s) => s.select);
   const autoScroll = useUi((s) => s.autoScroll);
   const layout = usePrefs((s) => s.columns);
-  const columns = useMemo(() => placeColumns(layout), [layout]);
+  const headerColumns = usePrefs((s) => s.headerColumns);
+  const columns = useMemo(() => placeColumns(layout, headerColumns), [layout, headerColumns]);
+  const multi = selectionCount(selection, len) > 1;
+  // The engine fills header column values for every store.
+  useEffect(() => {
+    backend.setHeaderColumns(headerColumns).catch((e: unknown) => console.error("header columns", e));
+  }, [headerColumns]);
   const template = useMemo(() => gridTemplate(columns), [columns]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const selectedIndex = useRef<number | null>(null);
+  // Where a ⇧-click or ⇧-arrow range starts.
+  const anchorIndex = useRef<number | null>(null);
   // A keyboard move to a row that isn't loaded yet: selected once it is.
   const pendingIndex = useRef<number | null>(null);
   // The row under a right-click: set by the row, read by the menu trigger.
   const pressedRow = useRef<Row | null>(null);
-  const [menu, setMenu] = useState<{ row: Row; column: ColumnId | null } | null>(null);
+  const [menu, setMenu] = useState<{ row: Row; column: PlacedColumn | null } | null>(null);
 
   // eslint-disable-next-line react-hooks/incompatible-library -- TanStack Virtual is not compiler-safe; it re-renders through our version state.
   const virtualizer = useVirtualizer({
@@ -108,21 +122,66 @@ export function FlowTable() {
     }
   }, [version, cache, select]);
 
+  /** The ids of rows `a..=b` (either order): from the cache, else fetched. */
+  const idsBetween = useCallback(
+    async (a: number, b: number): Promise<number[]> => {
+      const [lo, hi] = a <= b ? [a, b] : [b, a];
+      const ids: number[] = [];
+      for (let i = lo; i <= hi; i++) {
+        const row = cache?.get(i);
+        if (!row) break;
+        ids.push(row.id);
+      }
+      if (ids.length === hi - lo + 1) return ids;
+      const view = useUi.getState().view;
+      if (view === null) return ids;
+      const page = await backend.getRows(view, lo, hi - lo + 1);
+      return page.rows.map((r) => r[0]);
+    },
+    [cache],
+  );
+
+  const selectRange = useCallback(
+    (to: number, focus: number) => {
+      const from = anchorIndex.current ?? to;
+      const total = useUi.getState().stats.len;
+      // The whole view: as a view selection, not 100k ids.
+      if (Math.min(from, to) === 0 && Math.max(from, to) >= total - 1 && total > 1) {
+        useUi.getState().setSelection({ all: true, ids: new Set() }, focus);
+        return;
+      }
+      void idsBetween(from, to).then((ids) => useUi.getState().setSelection(range(ids), focus));
+    },
+    [idsBetween],
+  );
+
   // Stable, so memoised rows that stay on screen skip re-rendering while scrolling.
   const onRowClick = useCallback(
-    (index: number, row: Row | undefined) => {
-      selectedIndex.current = index;
+    (index: number, row: Row | undefined, mods: { shift: boolean; toggle: boolean }) => {
       pendingIndex.current = null;
-      select(row?.id ?? null);
+      if (!row) return;
+      selectedIndex.current = index;
+      if (mods.shift) {
+        selectRange(index, row.id);
+        return;
+      }
+      anchorIndex.current = index;
+      if (mods.toggle) useUi.getState().toggleSelected(row.id);
+      else select(row.id);
     },
-    [select],
+    [select, selectRange],
   );
 
   const onRowContextMenu = useCallback(
     (index: number, row: Row | undefined) => {
       pressedRow.current = row ?? null;
+      if (!row) return;
+      // A right-click inside a multi-selection acts on all of it.
+      const ui = useUi.getState();
+      if (selectionCount(ui.selection, ui.stats.len) > 1 && isSelected(ui.selection, row.id)) return;
       selectedIndex.current = index;
-      select(row?.id ?? null);
+      anchorIndex.current = index;
+      select(row.id);
     },
     [select],
   );
@@ -139,21 +198,32 @@ export function FlowTable() {
     }
     const cellEl = (e.target as Element).closest<HTMLElement>('[role="row"] > div');
     const at = cellEl?.parentElement ? Array.prototype.indexOf.call(cellEl.parentElement.children, cellEl) : -1;
-    setMenu({ row, column: columns[at]?.id ?? null });
+    setMenu({ row, column: columns[at] ?? null });
   };
 
-  const moveTo = (index: number) => {
+  const moveTo = (index: number, extend = false) => {
     if (len === 0) return;
     const to = Math.max(0, Math.min(len - 1, index));
     selectedIndex.current = to;
     const row = cache?.get(to);
-    pendingIndex.current = row ? null : to;
-    if (row) select(row.id);
+    pendingIndex.current = row || extend ? null : to;
+    if (extend && row) {
+      anchorIndex.current ??= to;
+      selectRange(to, row.id);
+    } else if (row) {
+      anchorIndex.current = to;
+      select(row.id);
+    }
     virtualizer.scrollToIndex(to, { align: "auto" });
   };
 
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === "Escape" && multi) {
+      e.preventDefault();
+      select(selectedId);
+      return;
+    }
     // Where the selection is now: the remembered index if it still holds
     // that flow, else wherever the flow is among the loaded rows.
     let from = selectedIndex.current;
@@ -161,24 +231,26 @@ export function FlowTable() {
       from = cache?.indexOf(selectedId) ?? null;
     }
     const page = Math.max(1, Math.floor(((scrollRef.current?.clientHeight ?? 0) - HEADER_HEIGHT) / ROW_HEIGHT) - 1);
+    const extend = e.shiftKey;
+    if (extend && anchorIndex.current === null) anchorIndex.current = from;
     switch (e.key) {
       case "ArrowDown":
-        moveTo(from === null ? first : from + 1);
+        moveTo(from === null ? first : from + 1, extend);
         break;
       case "ArrowUp":
-        moveTo(from === null ? last : from - 1);
+        moveTo(from === null ? last : from - 1, extend);
         break;
       case "PageDown":
-        moveTo((from ?? first) + page);
+        moveTo((from ?? first) + page, extend);
         break;
       case "PageUp":
-        moveTo((from ?? first) - page);
+        moveTo((from ?? first) - page, extend);
         break;
       case "Home":
-        moveTo(0);
+        moveTo(0, extend);
         break;
       case "End":
-        moveTo(len - 1);
+        moveTo(len - 1, extend);
         break;
       case "Enter":
         if (selectedId !== null) focusInspector();
@@ -199,6 +271,7 @@ export function FlowTable() {
           role="grid"
           aria-label="Flows"
           aria-rowcount={len}
+          aria-multiselectable
           onKeyDown={onKeyDown}
           className="bg-pane-table focus-visible:ring-ring/70 relative h-full overflow-auto outline-none focus-visible:ring-2 focus-visible:ring-inset"
           data-testid="flow-table"
@@ -218,7 +291,8 @@ export function FlowTable() {
                   row={row}
                   columns={columns}
                   template={template}
-                  selected={row !== undefined && row.id === selectedId}
+                  selected={row !== undefined && isSelected(selection, row.id)}
+                  focused={multi && row !== undefined && row.id === selectedId}
                   onClick={onRowClick}
                   onContextMenu={onRowContextMenu}
                 />
@@ -263,14 +337,20 @@ function Header({ columns, template }: { columns: PlacedColumn[]; template: stri
   const sort = useUi((s) => s.sort);
   const setSort = useUi((s) => s.setSort);
   const layout = usePrefs((s) => s.columns);
+  const headerColumns = usePrefs((s) => s.headerColumns);
   const setHidden = usePrefs((s) => s.setColumnHidden);
   const resetColumns = usePrefs((s) => s.resetColumns);
   const moveColumn = usePrefs((s) => s.moveColumn);
+  const removeHeaderColumn = usePrefs((s) => s.removeHeaderColumn);
   const [dropTarget, setDropTarget] = useState<ColumnId | null>(null);
+  // The header right-clicked, for "Remove column".
+  const [pressed, setPressed] = useState<PlacedColumn | null>(null);
+  const sortedBy = (col: PlacedColumn) =>
+    col.sortKey !== undefined && sort.key === col.sortKey && (col.sortKey !== "extra" || (sort.extra ?? 0) === col.header?.index);
   const onSort = (col: PlacedColumn) => {
     if (!col.sortKey) return;
-    const dir = sort.key === col.sortKey && sort.dir === "asc" ? "desc" : "asc";
-    setSort({ key: col.sortKey, dir });
+    const dir = sortedBy(col) && sort.dir === "asc" ? "desc" : "asc";
+    setSort({ key: col.sortKey, dir, extra: col.header?.index ?? 0 });
   };
   const onDrop = (e: DragEvent, target: ColumnId) => {
     e.preventDefault();
@@ -288,7 +368,7 @@ function Header({ columns, template }: { columns: PlacedColumn[]; template: stri
           data-testid="flow-table-header"
         >
           {columns.map((col) => {
-            const sorted = col.sortKey && sort.key === col.sortKey && (sort.key !== "id" || sort.dir === "desc");
+            const sorted = sortedBy(col) && (sort.key !== "id" || sort.dir === "desc");
             return (
               <div
                 key={col.id}
@@ -307,6 +387,8 @@ function Header({ columns, template }: { columns: PlacedColumn[]; template: stri
                 onDragLeave={() => setDropTarget((t) => (t === col.id ? null : t))}
                 onDrop={(e) => onDrop(e, col.id)}
                 onClick={() => onSort(col)}
+                onContextMenu={() => setPressed(col)}
+                title={col.header ? col.label : undefined}
                 className={cn(
                   "relative flex min-w-0 items-center gap-0.5 border-r border-border/60 px-1.5 last:border-r-0",
                   col.align === "right" && "justify-end",
@@ -337,7 +419,34 @@ function Header({ columns, template }: { columns: PlacedColumn[]; template: stri
             {c.label}
           </ContextMenuCheckboxItem>
         ))}
+        {headerColumns.map((h, i) => {
+          const id = headerColumnId(h);
+          return (
+            <ContextMenuCheckboxItem
+              key={id}
+              checked={!layout.hidden.includes(id)}
+              onCheckedChange={(on) => setHidden(id, on !== true)}
+              onSelect={(e) => e.preventDefault()}
+              data-testid={`column-toggle-header-${i}`}
+            >
+              <span className="truncate font-mono">{h.name}</span>
+              <span className="text-muted-foreground ml-auto pl-2 text-[11px]">{h.part === "request" ? "req" : "resp"}</span>
+            </ContextMenuCheckboxItem>
+          );
+        })}
         <ContextMenuSeparator />
+        <ContextMenuItem
+          disabled={headerColumns.length >= MAX_HEADER_COLUMNS}
+          onSelect={() => useUi.getState().setAddColumnOpen(true)}
+          data-testid="add-header-column"
+        >
+          Add header column…
+        </ContextMenuItem>
+        {pressed && isHeaderColumnId(pressed.id) && (
+          <ContextMenuItem onSelect={() => removeHeaderColumn(pressed.id)} data-testid="remove-header-column">
+            Remove “{pressed.title}” column
+          </ContextMenuItem>
+        )}
         <ContextMenuItem onSelect={resetColumns}>Reset columns</ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
@@ -388,7 +497,9 @@ interface FlowRowViewProps {
   columns: PlacedColumn[];
   template: string;
   selected: boolean;
-  onClick: (index: number, row: Row | undefined) => void;
+  /** The focused row of a multi-selection: the one the inspector shows. */
+  focused: boolean;
+  onClick: (index: number, row: Row | undefined, mods: { shift: boolean; toggle: boolean }) => void;
   onContextMenu: (index: number, row: Row | undefined) => void;
 }
 
@@ -401,6 +512,7 @@ const FlowRowView = memo(function FlowRowView({
   columns,
   template,
   selected,
+  focused,
   onClick,
   onContextMenu,
 }: FlowRowViewProps) {
@@ -410,19 +522,26 @@ const FlowRowView = memo(function FlowRowView({
       aria-rowindex={index + 1}
       aria-selected={selected}
       data-selected={selected}
+      data-focused={focused || undefined}
       data-flow-id={row?.id}
-      onMouseDown={(e) => e.button === 0 && onClick(index, row)}
+      onMouseDown={(e) => {
+        if (e.button !== 0) return;
+        // ⇧-click would also select text in the rows.
+        if (e.shiftKey) e.preventDefault();
+        onClick(index, row, { shift: e.shiftKey, toggle: e.metaKey || e.ctrlKey });
+      }}
       onContextMenu={() => onContextMenu(index, row)}
       className={cn(
         "group/row absolute top-0 left-0 grid w-full font-mono text-[11.5px] leading-none",
         index % 2 === 1 && "bg-[var(--pane-row-alt)]",
         "hover:bg-[var(--pane-row-hover)]",
         "data-[selected=true]:bg-selection data-[selected=true]:text-selection-foreground",
+        "data-[focused]:shadow-[inset_0_0_0_1px_var(--selection-fg)]",
       )}
       style={{ gridTemplateColumns: template, height: ROW_HEIGHT, transform: `translateY(${start}px)` }}
     >
       {row ? (
-        columns.map((col) => <RowCell key={col.id} id={col.id} row={row} />)
+        columns.map((col) => <RowCell key={col.id} column={col} row={row} />)
       ) : (
         <div data-placeholder className="text-muted-foreground/40 col-span-full px-2 leading-[22px]">
           …
@@ -442,8 +561,16 @@ function openRowMenu(e: React.MouseEvent<HTMLButtonElement>) {
   );
 }
 
-function RowCell({ id, row }: { id: ColumnId; row: Row }) {
-  switch (id) {
+function RowCell({ column, row }: { column: PlacedColumn; row: Row }) {
+  if (column.header) {
+    const value = row.extra[column.header.index] ?? null;
+    return (
+      <div className={cn(cell, "truncate", value === null && dim)} title={value ?? undefined}>
+        <span className="truncate">{value ?? "—"}</span>
+      </div>
+    );
+  }
+  switch (column.id) {
     case "id":
       return (
         <div className={cn(cell, "justify-end gap-1 tabular-nums", dim)}>
@@ -507,18 +634,33 @@ function RowCell({ id, row }: { id: ColumnId; row: Row }) {
           <SslIcon tls={row.tls} />
         </div>
       );
-    case "edited":
+    case "notes":
       return (
-        <div className={cn(cell, "justify-center")}>
+        <div className={cn(cell, "justify-center gap-1")} title={row.comment ?? undefined}>
+          {row.label && (
+            <span
+              aria-label={`Label: ${row.label}`}
+              className="size-2 shrink-0 rounded-full group-data-[selected=true]/row:ring-1 group-data-[selected=true]/row:ring-[var(--selection-fg)]"
+              style={{ background: `var(--label-${row.label})` }}
+              data-label={row.label}
+            />
+          )}
+          {row.comment && (
+            <MessageSquareText
+              aria-label="Commented"
+              className="text-muted-foreground size-3 shrink-0 group-data-[selected=true]/row:text-selection-foreground"
+            />
+          )}
           {row.edited && (
             <PencilLine
               aria-label="Changed by a rule"
-              className="size-3 text-[var(--rule)] group-data-[selected=true]/row:text-selection-foreground"
+              className="size-3 shrink-0 text-[var(--rule)] group-data-[selected=true]/row:text-selection-foreground"
             />
           )}
         </div>
       );
     case "tools":
+    default:
       return (
         <div className={cn(cell, "justify-center")}>
           <button

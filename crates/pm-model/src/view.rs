@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use crate::detail::HttpVersion;
-use crate::flow::{ContentKind, FlowId, FlowState, FlowSummary, Scheme};
+use crate::flow::{ContentKind, FlowId, FlowLabel, FlowState, FlowSummary, Scheme};
 use crate::send::SentBy;
 use crate::tls::TlsStatus;
 
@@ -66,7 +66,8 @@ pub struct ViewInfo {
 ///
 /// Field order: `id, state, scheme, method, host, port, path, query, status,
 /// content_kind, client, started_at_ms, duration_ms, req_size, resp_size, edited,
-/// http_version, tls, graphql_op, sent_by, pinned, grpc_status`.
+/// http_version, tls, graphql_op, sent_by, pinned, grpc_status, label, comment,
+/// extra`. `extra` holds the header columns' values (M17) and stays last.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct FlowRow(
     pub FlowId,
@@ -91,6 +92,9 @@ pub struct FlowRow(
     pub Option<SentBy>,
     pub bool,
     pub Option<u8>,
+    pub Option<FlowLabel>,
+    pub Option<Arc<str>>,
+    pub Vec<Option<Arc<str>>>,
 );
 
 impl From<&FlowSummary> for FlowRow {
@@ -118,6 +122,9 @@ impl From<&FlowSummary> for FlowRow {
             f.sent_by,
             f.pinned,
             f.grpc_status,
+            f.label,
+            f.comment.clone(),
+            f.extra.clone(),
         )
     }
 }
@@ -161,11 +168,14 @@ mod tests {
             sent_by: Some(SentBy::User),
             pinned: true,
             grpc_status: Some(5),
+            label: Some(FlowLabel::Green),
+            comment: Some("check".into()),
+            extra: vec![Some("abc".into()), None],
         };
         let json = serde_json::to_string(&FlowRow::from(&summary)).unwrap();
         assert_eq!(
             json,
-            r#"[7,"completed","https","GET","api.example.com",443,"/v1/users","page=2",200,"json","Safari",1.5,42,0,1024,false,"HTTP/2","intercepted","GetUser","user",true,5]"#
+            r#"[7,"completed","https","GET","api.example.com",443,"/v1/users","page=2",200,"json","Safari",1.5,42,0,1024,false,"HTTP/2","intercepted","GetUser","user",true,5,"green","check",["abc",null]]"#
         );
     }
 }

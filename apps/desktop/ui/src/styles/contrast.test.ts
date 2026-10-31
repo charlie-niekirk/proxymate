@@ -115,6 +115,11 @@ const PAIRS: [string, string[]][] = [
     (s): [string, string[]] => [`--s-${s}`, [...ALT_ROW, `--s-${s}-bg`]],
   ),
   ["--graphql", [...ALT_ROW, "--graphql-bg"]],
+  // M17: label dots in the Notes column, label chips in the inspector.
+  ...["red", "orange", "yellow", "green", "blue", "purple"].flatMap((l): [string, string[]][] => [
+    [`--label-${l}`, ALT_ROW],
+    [`--label-${l}`, ["--background", `--label-${l}-bg`]],
+  ]),
   ["--rule", [...TABLE, "--rule-bg"]],
   ["--rule-agent", [...TABLE, "--rule-agent-bg"]],
   // M14: a failed script's badge in the inspector.

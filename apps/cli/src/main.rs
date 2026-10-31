@@ -168,6 +168,7 @@ fn bench(flows: usize) {
             SortSpec {
                 key: SortKey::Url,
                 dir: SortDir::Asc,
+                ..Default::default()
             },
         )
         .expect("view exists");

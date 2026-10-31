@@ -24,6 +24,7 @@ pub mod synth;
 pub mod tls;
 pub mod trust;
 mod updates;
+mod workflow;
 
 pub use client::{ClientApp, ClientKind};
 pub use devices::{DevicesSink, HOLD as DEVICE_HOLD, ONBOARDING_HOST};
@@ -38,6 +39,7 @@ pub use rules::{BreakpointSink, RuleError, RulesSink};
 pub use scripts::{ConsoleSink, ScriptError, ScriptsSink};
 pub use search::{FlowPage, SearchHit, SearchMatch, SearchPage};
 pub use settings::StorageSink;
+pub use workflow::{MAX_REPEAT_CONCURRENCY, MAX_REPEAT_ITERATIONS, RepeatSink};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

@@ -434,6 +434,9 @@ fn record_request(engine: &Arc<Engine>, req: &Request<Incoming>, origin: Origin)
         sent_by: None,
         pinned: false,
         grpc_status: None,
+        label: None,
+        comment: None,
+        extra: Vec::new(),
     };
     let headers = headers(req.headers());
     let detail = FlowDetail {

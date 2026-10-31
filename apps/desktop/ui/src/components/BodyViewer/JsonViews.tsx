@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { memo, useCallback, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { BodyItems } from "@/components/menus/body";
 import { SelectionItem } from "@/components/menus/items";
@@ -20,6 +20,8 @@ import { copy } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 
 import { CodeView } from "./CodeView";
+import { Highlighted, MatchBar } from "./search";
+import { MATCH_LIMIT, searchRegExp, useBodySearch } from "./searchTerms";
 import { Centered, Note } from "./parts";
 import { jsonInWorker, objectId } from "./workers/client";
 
@@ -84,6 +86,33 @@ function flatten(roots: { label: string | null; path: PathSegment[]; value: unkn
   return rows;
 }
 
+/**
+ * Pointers of the keys and scalar values matching `re`, in document order
+ * (M17: the filter's body terms), up to [`MATCH_LIMIT`].
+ */
+function treeMatches(value: unknown, re: RegExp): string[] {
+  const out: string[] = [];
+  const test = (s: string) => {
+    re.lastIndex = 0;
+    return re.test(s);
+  };
+  const visit = (v: unknown, path: PathSegment[], key: string | null) => {
+    if (out.length >= MATCH_LIMIT) return;
+    const container = containerOf(v);
+    if ((key !== null && test(key)) || (!container && test(valueText(v)))) out.push(toPointer(path));
+    if (container === "array") (v as unknown[]).forEach((c, i) => visit(c, [...path, i], null));
+    else if (container) for (const [k, c] of Object.entries(v as Record<string, unknown>)) visit(c, [...path, k], k);
+  };
+  visit(value, [], null);
+  return out;
+}
+
+/** The containers above a pointer: `/a/0/b` → "", `/a`, `/a/0`. */
+function ancestors(ptr: string): string[] {
+  const parts = ptr.split("/").slice(1);
+  return parts.map((_, i) => (i === 0 ? "" : `/${parts.slice(0, i).join("/")}`));
+}
+
 /** Pointers of every container down to `depth`, for the initial expansion. */
 function expandedTo(value: unknown, depth: number, path: PathSegment[] = [], out = new Set<string>()): Set<string> {
   const container = containerOf(value);
@@ -132,6 +161,30 @@ export function Tree({ root, badges, testId = "json-tree" }: { root: unknown; ba
   }, [result, filter, root]);
   const rows = useMemo(() => flatten(roots, expanded), [roots, expanded]);
 
+  // The filter's body terms (M17): marked in keys and values, stepped through.
+  const terms = useBodySearch();
+  const termsKey = terms.join("\u0000");
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed by the terms' text, not the array's identity.
+  const re = useMemo(() => searchRegExp(terms), [termsKey]);
+  const hits = useMemo(() => (re ? treeMatches(root, re) : []), [re, root]);
+  const [stepped, setStepped] = useState<{ hits: string[]; index: number } | null>(null);
+  const current = stepped?.hits === hits ? stepped.index : -1;
+  const pendingScroll = useRef<string | null>(null);
+  const reveal = useCallback((ptr: string) => {
+    pendingScroll.current = ptr;
+    setExpanded((prev) => {
+      const missing = ancestors(ptr).filter((a) => !prev.has(a));
+      return missing.length === 0 ? prev : new Set([...prev, ...missing]);
+    });
+  }, []);
+  const step = (direction: 1 | -1) => {
+    if (hits.length === 0) return;
+    const next = current < 0 ? (direction === 1 ? 0 : hits.length - 1) : (current + direction + hits.length) % hits.length;
+    setStepped({ hits, index: next });
+    setFilter("");
+    reveal(hits[next]!);
+  };
+
   // eslint-disable-next-line react-hooks/incompatible-library -- TanStack Virtual is not compiler-safe; rows re-render through their props.
   const virtualizer = useVirtualizer({
     count: rows.length,
@@ -157,6 +210,17 @@ export function Tree({ root, badges, testId = "json-tree" }: { root: unknown; ba
   const menuRow = menu.target;
 
   const matchCount = "matches" in result && roots[0]?.match ? result.matches.length : null;
+  const currentPtr = current >= 0 ? hits[current] : undefined;
+  // Scroll to a revealed match once its row exists.
+  useEffect(() => {
+    const ptr = pendingScroll.current;
+    if (ptr === null) return;
+    const index = rows.findIndex((r) => r.ptr === ptr && !r.match);
+    if (index >= 0) {
+      pendingScroll.current = null;
+      virtualizer.scrollToIndex(index, { align: "center" });
+    }
+  }, [rows, virtualizer]);
   return (
     <div className="flex h-full flex-col" data-testid={testId}>
       <div className="flex h-7 shrink-0 items-center gap-2 border-b px-2">
@@ -171,6 +235,7 @@ export function Tree({ root, badges, testId = "json-tree" }: { root: unknown; ba
         <span className={cn("text-[11px]", "error" in result ? "text-[var(--s-failed)]" : "text-muted-foreground")}>
           {"error" in result ? result.error : matchCount !== null ? `${matchCount} match${matchCount === 1 ? "" : "es"}` : ""}
         </span>
+        {re && <MatchBar count={hits.length} current={current} onStep={step} className="border-0 shadow-none" />}
       </div>
       <ContextMenu>
         <ContextMenuTrigger asChild>
@@ -184,6 +249,8 @@ export function Tree({ root, badges, testId = "json-tree" }: { root: unknown; ba
                   top={item.start}
                   onToggle={toggle}
                   badges={badges?.get(rows[item.index]!.ptr)}
+                  re={re}
+                  current={currentPtr !== undefined && rows[item.index]!.ptr === currentPtr}
                 />
               ))}
             </div>
@@ -225,12 +292,16 @@ const TreeLine = memo(function TreeLine({
   top,
   onToggle,
   badges,
+  re,
+  current,
 }: {
   index: number;
   row: TreeRow;
   top: number;
   onToggle: (ptr: string, deep: boolean, value?: unknown) => void;
   badges?: readonly string[];
+  re: RegExp | null;
+  current: boolean;
 }) {
   const Caret = row.expanded ? ChevronDown : ChevronRight;
   const expandable = row.container !== null && row.size > 0;
@@ -238,7 +309,11 @@ const TreeLine = memo(function TreeLine({
     <div
       data-row={index}
       data-menu-key={index}
-      className="absolute left-0 flex w-full items-center gap-1 pr-2 whitespace-nowrap hover:bg-[var(--code-row-hover)]"
+      data-current-match={current || undefined}
+      className={cn(
+        "absolute left-0 flex w-full items-center gap-1 pr-2 whitespace-nowrap hover:bg-[var(--code-row-hover)]",
+        current && "bg-[var(--code-active-line)]",
+      )}
       style={{ top, height: ROW, paddingLeft: 6 + row.depth * 14 }}
       onClick={expandable ? (e) => onToggle(row.ptr, e.altKey, row.value) : undefined}
     >
@@ -246,12 +321,16 @@ const TreeLine = memo(function TreeLine({
       {row.label !== null && (
         <span>
           <span className={row.match ? "text-muted-foreground" : typeof row.label === "number" ? "text-[var(--syntax-punct)]" : "text-[var(--syntax-key)]"}>
-            {row.match || typeof row.label === "number" ? row.label : JSON.stringify(row.label)}
+            {row.match || typeof row.label === "number" ? (
+              row.label
+            ) : (
+              <Highlighted text={JSON.stringify(row.label)} re={re} current={current} />
+            )}
           </span>
           <span className="text-[var(--syntax-punct)]">:</span>
         </span>
       )}
-      <Value row={row} />
+      <Value row={row} re={re} current={current} />
       {badges?.map((b) => (
         <span
           key={b}
@@ -265,7 +344,7 @@ const TreeLine = memo(function TreeLine({
   );
 });
 
-function Value({ row }: { row: TreeRow }) {
+function Value({ row, re, current }: { row: TreeRow; re: RegExp | null; current: boolean }) {
   if (row.container) {
     const [open, close] = row.container === "array" ? ["[", "]"] : ["{", "}"];
     const unit = row.container === "array" ? "item" : "key";
@@ -281,7 +360,21 @@ function Value({ row }: { row: TreeRow }) {
     );
   }
   const v = row.value;
-  if (typeof v === "string") return <span className="truncate text-[var(--syntax-string)]">{JSON.stringify(v)}</span>;
-  if (typeof v === "number" || isJsonNumber(v)) return <span className="text-[var(--syntax-number)]">{numberText(v)}</span>;
-  return <span className="text-[var(--syntax-literal)]">{String(v)}</span>;
+  if (typeof v === "string")
+    return (
+      <span className="truncate text-[var(--syntax-string)]">
+        <Highlighted text={JSON.stringify(v)} re={re} current={current} />
+      </span>
+    );
+  if (typeof v === "number" || isJsonNumber(v))
+    return (
+      <span className="text-[var(--syntax-number)]">
+        <Highlighted text={numberText(v)} re={re} current={current} />
+      </span>
+    );
+  return (
+    <span className="text-[var(--syntax-literal)]">
+      <Highlighted text={String(v)} re={re} current={current} />
+    </span>
+  );
 }

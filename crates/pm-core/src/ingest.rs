@@ -10,7 +10,7 @@ use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
-use pm_model::{ContentKind, FlowId, FlowState, FlowSummary, WsDirection};
+use pm_model::{ContentKind, FlowId, FlowLabel, FlowState, FlowSummary, WsDirection};
 
 use crate::Engine;
 
@@ -18,6 +18,9 @@ use crate::Engine;
 const BATCH_WINDOW: Duration = Duration::from_millis(5);
 /// ...or once it holds this many events.
 const BATCH_MAX: usize = 50_000;
+
+/// One flow's header column values: `(column, value)` pairs (M17).
+pub(crate) type ExtraCells = (FlowId, Vec<(u8, Option<Arc<str>>)>);
 
 /// A change to the summary arena. Body bytes never travel here.
 pub(crate) enum FlowEvent {
@@ -74,6 +77,27 @@ pub(crate) enum FlowEvent {
     Pin {
         ids: Vec<FlowId>,
         pinned: bool,
+    },
+    /// The user labelled flows (M17); `None` takes the label off.
+    Label {
+        ids: Vec<FlowId>,
+        label: Option<FlowLabel>,
+    },
+    /// The user's note on a flow (M17); `None` removes it.
+    Comment {
+        id: FlowId,
+        comment: Option<Arc<str>>,
+    },
+    /// Header column values (M17): each flow's `(column, value)` pairs.
+    /// Ignored unless `generation` is the store's current column set.
+    Extra {
+        generation: u32,
+        values: Vec<ExtraCells>,
+    },
+    /// The header columns changed (M17): every flow's values are dropped
+    /// until they are filled again for `generation`.
+    Columns {
+        generation: u32,
     },
     /// Bulk append with ids already assigned (synthetic data, benches).
     Insert(Vec<FlowSummary>),

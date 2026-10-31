@@ -1,4 +1,4 @@
-import { Bot, Lock, LockOpen, Repeat2, ShieldAlert } from "lucide-react";
+import { Bot, Lock, LockOpen, Repeat, Repeat2, ShieldAlert } from "lucide-react";
 import type { CSSProperties } from "react";
 
 import type { FlowState, SentBy, TlsStatus } from "@/bindings";
@@ -79,16 +79,17 @@ export function StateDot({ state }: { state: FlowState }) {
 /** Marks a flow Proxymate sent itself: replayed or composed, or by an agent. */
 export function SentBadge({ by }: { by: SentBy }) {
   const agent = by === "agent";
-  const Icon = agent ? Bot : Repeat2;
+  const repeat = by === "repeat";
+  const Icon = agent ? Bot : repeat ? Repeat : Repeat2;
   return (
     <span
       className={cn(pillBase, "mr-1.5 gap-0.5 px-1 align-[1px] font-sans tracking-normal")}
       style={pillStyle(agent ? "sent-agent" : "sent")}
-      title={agent ? "Sent by an agent through Proxymate" : "Sent from Proxymate (Replay or Compose)"}
+      title={agent ? "Sent by an agent through Proxymate" : repeat ? "One of a Repeat's requests" : "Sent from Proxymate (Replay or Compose)"}
       data-testid="sent-badge"
     >
       <Icon className="size-2.5" />
-      {agent ? "AI" : "Replay"}
+      {agent ? "AI" : repeat ? "Repeat" : "Replay"}
     </span>
   );
 }

@@ -1,6 +1,6 @@
-import type { SortKey } from "@/bindings";
+import type { HeaderColumn, SortKey } from "@/bindings";
 
-export type ColumnId =
+export type BuiltinColumnId =
   | "id"
   | "state"
   | "url"
@@ -13,8 +13,13 @@ export type ColumnId =
   | "resp"
   | "proto"
   | "ssl"
-  | "edited"
+  | "notes"
   | "tools";
+
+/** A header column (M17): `hdr:request:x-request-id`. */
+export type HeaderColumnId = `hdr:${"request" | "response"}:${string}`;
+
+export type ColumnId = BuiltinColumnId | HeaderColumnId;
 
 export interface Column {
   id: ColumnId;
@@ -31,6 +36,8 @@ export interface Column {
   grow?: boolean;
   /** Can't be hidden. */
   required?: boolean;
+  /** A header column: which header, and its index in the rows' `extra`. */
+  header?: HeaderColumn & { index: number };
 }
 
 /** Every column, in default order. Users resize, reorder and hide them. */
@@ -47,11 +54,39 @@ export const COLUMNS: readonly Column[] = [
   { id: "resp", title: "Response", label: "Response size", width: 76, minWidth: 48, align: "right", sortKey: "resp_size" },
   { id: "proto", title: "Proto", label: "Protocol", width: 42, minWidth: 32, align: "center" },
   { id: "ssl", title: "SSL", label: "SSL", width: 34, minWidth: 28, align: "center" },
-  { id: "edited", title: "Edited", label: "Edited", width: 46, minWidth: 32, align: "center" },
+  { id: "notes", title: "Notes", label: "Notes (label, comment, edited)", width: 54, minWidth: 36, align: "center" },
   { id: "tools", title: "", label: "Tools", width: 28, minWidth: 28, align: "center" },
 ];
 
-export const COLUMN_BY_ID = Object.fromEntries(COLUMNS.map((c) => [c.id, c])) as Record<ColumnId, Column>;
+export const COLUMN_BY_ID = Object.fromEntries(COLUMNS.map((c) => [c.id, c])) as Record<BuiltinColumnId, Column>;
+
+export function headerColumnId(c: HeaderColumn): HeaderColumnId {
+  return `hdr:${c.part}:${c.name.toLowerCase()}`;
+}
+
+export function isHeaderColumnId(id: string): id is HeaderColumnId {
+  return id.startsWith("hdr:");
+}
+
+/** The column for header column number `index`. */
+export function headerColumnDef(c: HeaderColumn, index: number): Column {
+  return {
+    id: headerColumnId(c),
+    title: c.name,
+    label: `${c.part === "request" ? "Request" : "Response"} header ${c.name}`,
+    width: 140,
+    minWidth: 48,
+    sortKey: "extra",
+    header: { ...c, index },
+  };
+}
+
+/** Builtin columns plus the header columns, by id. */
+export function columnsById(headers: readonly HeaderColumn[]): Map<ColumnId, Column> {
+  const map = new Map<ColumnId, Column>(COLUMNS.map((c) => [c.id, c]));
+  headers.forEach((h, i) => map.set(headerColumnId(h), headerColumnDef(h, i)));
+  return map;
+}
 
 export const ROW_HEIGHT = 22;
 
@@ -60,18 +95,21 @@ export interface PlacedColumn extends Column {
   px: number;
 }
 
-/** The columns to draw, in order, from a saved layout. */
-export function placeColumns(layout: {
-  order: readonly ColumnId[];
-  widths: Partial<Record<ColumnId, number>>;
-  hidden: readonly ColumnId[];
-}): PlacedColumn[] {
-  return layout.order
-    .filter((id) => COLUMN_BY_ID[id] && (COLUMN_BY_ID[id].required || !layout.hidden.includes(id)))
-    .map((id) => {
-      const col = COLUMN_BY_ID[id];
-      return { ...col, px: Math.max(col.minWidth, layout.widths[id] ?? col.width) };
-    });
+/** The columns to draw, in order, from a saved layout and the header columns. */
+export function placeColumns(
+  layout: {
+    order: readonly ColumnId[];
+    widths: Partial<Record<ColumnId, number>>;
+    hidden: readonly ColumnId[];
+  },
+  headers: readonly HeaderColumn[] = [],
+): PlacedColumn[] {
+  const byId = columnsById(headers);
+  return layout.order.flatMap((id) => {
+    const col = byId.get(id);
+    if (!col || (!col.required && layout.hidden.includes(id))) return [];
+    return [{ ...col, px: Math.max(col.minWidth, layout.widths[id] ?? col.width) }];
+  });
 }
 
 /** The CSS grid track list for `columns`. */

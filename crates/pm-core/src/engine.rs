@@ -99,6 +99,8 @@ pub struct Engine {
     pub(crate) protos: Protos,
     /// `Engine::send`'s client, made on first use.
     pub(crate) sender: OnceLock<proxy::Sender>,
+    /// Header columns and running repeats (M17).
+    pub(crate) workflow: crate::workflow::Workflow,
     /// Held while the listener is moved (port change, LAN access), so two
     /// moves never both bind.
     restart: tokio::sync::Mutex<()>,
@@ -176,6 +178,7 @@ impl Engine {
             docs: Documents::default(),
             protos,
             sender: OnceLock::new(),
+            workflow: Default::default(),
             restart: tokio::sync::Mutex::new(()),
         });
         let weak = Arc::downgrade(&engine);

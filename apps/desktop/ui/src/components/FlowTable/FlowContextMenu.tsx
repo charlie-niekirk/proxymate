@@ -1,6 +1,13 @@
 import {
   ClipboardList,
+  Code2,
+  Columns2,
   Copy,
+  MessageSquareText,
+  Repeat,
+  Save,
+  Tag,
+  Trash2,
   Eye,
   FileCode2,
   FileDown,
@@ -17,7 +24,7 @@ import {
   Theater,
 } from "lucide-react";
 
-import type { BodyPart } from "@/bindings";
+import type { BodyPart, FlowLabel } from "@/bindings";
 import { FilterBySub } from "@/components/menus/filter";
 import { CopyItem } from "@/components/menus/items";
 import {
@@ -30,25 +37,38 @@ import {
   ContextMenuSubTrigger,
 } from "@/components/ui/context-menu";
 import {
+  addFilterTerm,
   addSslBypass,
+  compareSelection,
+  copyFlowCode,
   copyFlowCurl,
   copyFlowUrl,
+  copySelectionCurl,
+  copySelectionUrls,
+  currentSelection,
+  deleteSelection,
   editAndReplay,
   exportHar,
+  labelSelection,
   newScriptForFlow,
   openPreset,
   openRewrite,
   pinFlows,
+  pinSelection,
   replayFlow,
+  replaySelection,
+  reportError,
+  saveSession,
 } from "@/lib/actions";
 import { backend } from "@/lib/backend";
 import { shortcutLabel } from "@/lib/commands";
 import { headersBlock } from "@/lib/copyFormats";
-import { formatDuration, formatSize, formatTime, type Row } from "@/lib/flow";
+import { CODE_LANGUAGES, FLOW_LABELS, formatDuration, formatSize, formatTime, type Row } from "@/lib/flow";
+import { isSelected, selectionCount } from "@/lib/selection";
 import { bodyText, displayHeaderName, rawMessage } from "@/lib/http";
-import { LIVE_STORE, useUi } from "@/store/ui";
+import { useUi } from "@/store/ui";
 
-import type { ColumnId } from "./columns";
+import type { PlacedColumn } from "./columns";
 
 /**
  * The flow row menu. Replay sends the request again as recorded; Edit &
@@ -57,13 +77,17 @@ import type { ColumnId } from "./columns";
  * Rewrite dialog. They work on saved sessions and HARs too. The first item
  * copies the cell that was right-clicked; "Copy" has the flow's parts.
  */
-export function FlowContextMenu({ row, column }: { row: Row | null; column: ColumnId | null }) {
+export function FlowContextMenu({ row, column }: { row: Row | null; column: PlacedColumn | null }) {
   const store = useUi((s) => s.store);
+  const mark = useUi((s) => s.compareMark);
+  const selection = useUi((s) => s.selection);
+  const len = useUi((s) => s.stats.len);
   if (!row) return null;
+  const count = selectionCount(selection, len);
+  if (count > 1 && isSelected(selection, row.id)) return <BulkMenu count={count} row={row} />;
   const connect = row.method === "CONNECT";
   const websocket = row.scheme === "ws" || row.scheme === "wss";
   const https = row.scheme === "https" || row.scheme === "wss";
-  const live = store === LIVE_STORE;
   const sendable = !connect && !websocket;
   const cellCopy = column ? cellText(column, row) : null;
   return (
@@ -84,6 +108,19 @@ export function FlowContextMenu({ row, column }: { row: Row | null; column: Colu
         <Terminal />
         Copy as cURL
       </ContextMenuItem>
+      <ContextMenuSub>
+        <ContextMenuSubTrigger disabled={connect || websocket} data-testid="menu-copy-code">
+          <Code2 />
+          Copy as Code
+        </ContextMenuSubTrigger>
+        <ContextMenuSubContent className="w-48">
+          {CODE_LANGUAGES.map((l) => (
+            <ContextMenuItem key={l.id} onSelect={() => void copyFlowCode(store, row.id, l.id)} data-testid={`menu-code-${l.id}`}>
+              {l.label}
+            </ContextMenuItem>
+          ))}
+        </ContextMenuSubContent>
+      </ContextMenuSub>
       <ContextMenuSub>
         <ContextMenuSubTrigger data-testid="menu-copy-more">
           <ClipboardList />
@@ -118,6 +155,19 @@ export function FlowContextMenu({ row, column }: { row: Row | null; column: Colu
           </CopyItem>
         </ContextMenuSubContent>
       </ContextMenuSub>
+      {column?.header && row.extra[column.header.index] != null && (
+        <ContextMenuItem
+          onSelect={() =>
+            addFilterTerm(
+              `${column.header!.part === "request" ? "reqheader" : "resheader"}:"${column.header!.name}: ${row.extra[column.header!.index]!.replace(/"/g, "")}"`,
+            )
+          }
+          data-testid="menu-filter-header"
+        >
+          <ListFilter />
+          <span className="truncate">Filter by {column.header.name}</span>
+        </ContextMenuItem>
+      )}
       <FilterBySub facts={{ host: row.host, method: row.method, status: row.status, client: row.client }} icon={<ListFilter />} />
       <ContextMenuSeparator />
       <ContextMenuItem disabled={!sendable} onSelect={() => void replayFlow(store, row.id)} data-testid="menu-replay">
@@ -129,9 +179,41 @@ export function FlowContextMenu({ row, column }: { row: Row | null; column: Colu
         <Send />
         Edit &amp; Replay…
       </ContextMenuItem>
-      <ContextMenuItem disabled={!live} onSelect={() => void pinFlows([row.id], !row.pinned)} data-testid="menu-pin">
+      <ContextMenuItem
+        disabled={!sendable}
+        onSelect={() => useUi.getState().openRepeat(store, row.id)}
+        data-testid="menu-repeat"
+      >
+        <Repeat />
+        Repeat…
+        <ContextMenuShortcut>{shortcutLabel("r", { alt: true })}</ContextMenuShortcut>
+      </ContextMenuItem>
+      <ContextMenuSeparator />
+      <ContextMenuItem onSelect={() => void pinFlows([row.id], !row.pinned, store)} data-testid="menu-pin">
         {row.pinned ? <PinOff /> : <Pin />}
         {row.pinned ? "Unpin" : "Pin"}
+      </ContextMenuItem>
+      <LabelSub current={row.label} />
+      <ContextMenuItem onSelect={() => useUi.getState().markForCompare({ store, id: row.id })} data-testid="menu-compare-mark">
+        <Columns2 />
+        Mark for Compare
+      </ContextMenuItem>
+      {mark && !(mark.store === store && mark.id === row.id) && (
+        <ContextMenuItem
+          onSelect={() => {
+            useUi.getState().openCompare(mark, { store, id: row.id });
+            useUi.getState().markForCompare(null);
+          }}
+          data-testid="menu-compare-with"
+        >
+          <Columns2 />
+          Compare with Marked (#{mark.id + 1}
+          {mark.store !== store ? ", other tab" : ""})
+        </ContextMenuItem>
+      )}
+      <ContextMenuItem onSelect={() => useUi.getState().openComment(store, row.id)} data-testid="menu-comment">
+        <MessageSquareText />
+        {row.comment ? "Edit Comment…" : "Comment…"}
       </ContextMenuItem>
       <ContextMenuSeparator />
       <ContextMenuItem
@@ -183,13 +265,115 @@ export function FlowContextMenu({ row, column }: { row: Row | null; column: Colu
         <ShieldOff />
         Add {row.host} to SSL bypass
       </ContextMenuItem>
+      <ContextMenuSeparator />
+      <ContextMenuItem
+        variant="destructive"
+        disabled={row.state === "active" || row.state === "paused"}
+        onSelect={() => void deleteSelection({ kind: "ids", ids: [row.id] }, store).catch((e: unknown) => reportError("Delete failed", e))}
+        data-testid="menu-delete"
+      >
+        <Trash2 />
+        Delete
+        <ContextMenuShortcut>⌫</ContextMenuShortcut>
+      </ContextMenuItem>
+    </ContextMenuContent>
+  );
+}
+
+/** "Label ▸": the six colours, and None. Applies to the selection. */
+function LabelSub({ current }: { current: FlowLabel | null }) {
+  return (
+    <ContextMenuSub>
+      <ContextMenuSubTrigger data-testid="menu-label">
+        <Tag />
+        Label
+      </ContextMenuSubTrigger>
+      <ContextMenuSubContent className="w-40">
+        {FLOW_LABELS.map((label) => (
+          <ContextMenuItem
+            key={label}
+            onSelect={() => void labelSelection(label).catch((e: unknown) => reportError("Label failed", e))}
+            data-testid={`menu-label-${label}`}
+          >
+            <span className="size-2.5 rounded-full" style={{ background: `var(--label-${label})` }} />
+            <span className="capitalize">{label}</span>
+            {current === label && <span className="text-muted-foreground ml-auto">✓</span>}
+          </ContextMenuItem>
+        ))}
+        <ContextMenuSeparator />
+        <ContextMenuItem
+          disabled={current === null}
+          onSelect={() => void labelSelection(null).catch((e: unknown) => reportError("Label failed", e))}
+          data-testid="menu-label-none"
+        >
+          No label
+        </ContextMenuItem>
+      </ContextMenuSubContent>
+    </ContextMenuSub>
+  );
+}
+
+/** The menu for a right-click inside a multi-selection: bulk actions on all of it. */
+function BulkMenu({ count, row }: { count: number; row: Row }) {
+  const n = count.toLocaleString();
+  const run = (what: string, action: () => Promise<unknown>) => () => void action().catch((e: unknown) => reportError(what, e));
+  return (
+    <ContextMenuContent className="w-56" data-testid="bulk-menu">
+      <div className="text-muted-foreground px-2 py-1 text-xs">{n} flows selected</div>
+      <ContextMenuItem onSelect={run("Copy failed", () => copySelectionUrls())} data-testid="bulk-copy-urls">
+        <Copy />
+        Copy URLs
+      </ContextMenuItem>
+      <ContextMenuItem onSelect={run("Copy failed", () => copySelectionCurl())} data-testid="bulk-copy-curl">
+        <Terminal />
+        Copy as cURL
+      </ContextMenuItem>
+      <ContextMenuSeparator />
+      <ContextMenuItem onSelect={run("Replay failed", () => replaySelection())} data-testid="bulk-replay">
+        <Repeat2 />
+        Replay in Order
+      </ContextMenuItem>
+      <ContextMenuItem disabled={count !== 2} onSelect={run("Compare failed", () => compareSelection())} data-testid="bulk-compare">
+        <Columns2 />
+        Compare
+      </ContextMenuItem>
+      <ContextMenuSeparator />
+      <ContextMenuItem onSelect={run("Pin failed", () => pinSelection(true))} data-testid="bulk-pin">
+        <Pin />
+        Pin
+      </ContextMenuItem>
+      <ContextMenuItem onSelect={run("Unpin failed", () => pinSelection(false))} data-testid="bulk-unpin">
+        <PinOff />
+        Unpin
+      </ContextMenuItem>
+      <LabelSub current={null} />
+      <ContextMenuSeparator />
+      <ContextMenuItem onSelect={run("Export failed", () => exportHar(currentSelection()))} data-testid="bulk-export-har">
+        <FileDown />
+        Export HAR…
+      </ContextMenuItem>
+      <ContextMenuItem onSelect={run("Save failed", () => saveSession(currentSelection()))} data-testid="bulk-save-session">
+        <Save />
+        Save Session…
+      </ContextMenuItem>
+      <ContextMenuSeparator />
+      <ContextMenuItem variant="destructive" onSelect={run("Delete failed", () => deleteSelection())} data-testid="bulk-delete">
+        <Trash2 />
+        Delete {n} Flows
+        <ContextMenuShortcut>⌫</ContextMenuShortcut>
+      </ContextMenuItem>
+      <span hidden data-row={row.id} />
     </ContextMenuContent>
   );
 }
 
 /** The text of a flow table cell, as shown, for "Copy <column>". */
-function cellText(column: ColumnId, row: Row): { label: string; text: string } | null {
-  switch (column) {
+function cellText(col: PlacedColumn, row: Row): { label: string; text: string } | null {
+  if (col.header) {
+    const value = row.extra[col.header.index];
+    return value == null ? null : { label: col.header.name, text: value };
+  }
+  switch (col.id) {
     case "id":
       return { label: "Number", text: String(row.id + 1) };
     case "state":
@@ -211,10 +395,9 @@ function cellText(column: ColumnId, row: Row): { label: string; text: string } |
     case "proto":
       return { label: "Protocol", text: row.httpVersion };
     // The URL has its own item; the rest are icons.
-    case "url":
-    case "ssl":
-    case "edited":
-    case "tools":
+    case "notes":
+      return row.comment ? { label: "Comment", text: row.comment } : null;
+    default:
       return null;
   }
 }
