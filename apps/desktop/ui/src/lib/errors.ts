@@ -1,7 +1,7 @@
 import type { FlowDetail_Serialize, FlowSummary_Serialize } from "@/bindings";
 
 /** Something the user can do about a failed flow. */
-export type FixAction = "cert-wizard" | "bypass" | "insecure-upstream" | "timeouts" | "tls-settings";
+export type FixAction = "cert-wizard" | "bypass" | "insecure-upstream" | "timeouts" | "tls-settings" | "network-settings";
 
 export interface FailureHelp {
   /** One line on what went wrong. */
@@ -14,8 +14,9 @@ export interface FailureHelp {
 /**
  * Turns a failed flow's error into a headline and the fixes that apply:
  * a client refusing our certificate (CA not trusted, or pinning), an
- * upstream certificate we can't verify, an old TLS version, DNS and
- * connect failures, timeouts.
+ * upstream certificate we can't verify, an old TLS version, a server that
+ * wants a client certificate, an upstream proxy that refused or would
+ * loop (M18), DNS and connect failures, timeouts.
  */
 export function explainFailure(flow: FlowSummary_Serialize, detail: FlowDetail_Serialize | null): FailureHelp | null {
   const error = detail?.error;
@@ -27,6 +28,17 @@ export function explainFailure(flow: FlowSummary_Serialize, detail: FlowDetail_S
       detail: error,
       actions: ["cert-wizard", "bypass"],
     };
+  }
+  if (e.includes("asks for a client certificate")) {
+    return { title: "The server wants a client certificate", detail: error, actions: ["network-settings"] };
+  }
+  if (e.includes("upstream proxy") || e.includes("socks5 proxy")) {
+    const title = e.includes("username and password")
+      ? "The upstream proxy wants other credentials"
+      : e.includes("proxymate itself")
+        ? "The upstream proxy is Proxymate itself"
+        : "The upstream proxy couldn't connect";
+    return { title, detail: error, actions: ["network-settings"] };
   }
   if (e.includes("certificate isn't trusted") || e.includes("unknownissuer") || e.includes("self-signed")) {
     return { title: "The server's certificate isn't trusted", detail: error, actions: ["insecure-upstream", "bypass"] };

@@ -167,6 +167,17 @@ export const commands = {
 	 *  they changed. A port that can't be bound is an error; the old one stays.
 	 */
 	setProxySettings: (settings: ProxySettings_Deserialize) => typedError<ProxySettings_Serialize, string>(__TAURI_INVOKE("set_proxy_settings", { settings })),
+	/**
+	 *  Settings › Network (M18). Passwords never come back: `has_password`
+	 *  says one is saved.
+	 */
+	getNetworkSettings: () => __TAURI_INVOKE<NetworkSettings_Serialize>("get_network_settings"),
+	/**
+	 *  Saves and applies Settings › Network: passwords go to the keychain,
+	 *  client certificates are loaded and reverse proxies restarted. A bad
+	 *  setting is an error that says why; nothing is changed then.
+	 */
+	setNetworkSettings: (settings: NetworkSettings_Deserialize) => typedError<NetworkSettings_Serialize, string>(__TAURI_INVOKE("set_network_settings", { settings })),
 	/**  Makes the sidebar's Apps and Domains count the tab the UI shows. */
 	setSidebarStore: (store: number) => __TAURI_INVOKE<void>("set_sidebar_store", { store }),
 	getUpdateSettings: () => __TAURI_INVOKE<UpdateSettings>("get_update_settings"),
@@ -686,6 +697,49 @@ export type CertSummary = {
 	sha256: string,
 };
 
+/**  A client certificate presented to upstreams that ask for one. */
+export type ClientCert = ClientCert_Serialize | ClientCert_Deserialize;
+
+/**  A client certificate presented to upstreams that ask for one. */
+export type ClientCert_Deserialize = {
+	enabled: boolean,
+	/**  Host globs; the first enabled match is used. */
+	hosts: string[],
+	identity: ClientIdentity_Deserialize,
+};
+
+/**  A client certificate presented to upstreams that ask for one. */
+export type ClientCert_Serialize = {
+	enabled: boolean,
+	/**  Host globs; the first enabled match is used. */
+	hosts: string[],
+	identity: ClientIdentity_Serialize,
+};
+
+export type ClientIdentity = ClientIdentity_Serialize | ClientIdentity_Deserialize;
+
+export type ClientIdentity_Deserialize = 
+/**  A `.p12`/`.pfx` file. */
+{ kind: "pkcs12"; path: string; 
+/**  Write only, like [`ProxyServer::password`]. */
+password?: string | null; has_password?: boolean } | 
+/**
+ *  A PEM certificate chain and an unencrypted PEM key (`key_path`
+ *  empty: the key is in the certificate file).
+ */
+{ kind: "pem"; cert_path: string; key_path: string };
+
+export type ClientIdentity_Serialize = 
+/**  A `.p12`/`.pfx` file. */
+{ kind: "pkcs12"; path: string; 
+/**  Write only, like [`ProxyServer::password`]. */
+password: string | null; has_password: boolean } | 
+/**
+ *  A PEM certificate chain and an unencrypted PEM key (`key_path`
+ *  empty: the key is in the certificate file).
+ */
+{ kind: "pem"; cert_path: string; key_path: string };
+
 /**  Languages Copy as code writes (`pm-core/src/io/snippets.rs`). */
 export type CodeLanguage = "curl" | 
 /**  JavaScript `fetch`. */
@@ -1006,6 +1060,13 @@ export type DevicesSnapshot_Serialize = {
 	devices: DeviceClient_Serialize[],
 	simulator: LocalActivity,
 	emulator: LocalActivity,
+};
+
+/**  Connect to `ip` for hosts matching `host`, without changing SNI or `Host`. */
+export type DnsOverride = {
+	enabled: boolean,
+	host: string,
+	ip: string,
 };
 
 /**  An opened document, for its tab and the sidebar's Saved section. */
@@ -1732,6 +1793,25 @@ export type MessageEdits_Serialize = {
 	body: string | null,
 };
 
+/**  Everything under Settings › Network, saved as one `app.sqlite` row. */
+export type NetworkSettings = NetworkSettings_Serialize | NetworkSettings_Deserialize;
+
+/**  Everything under Settings › Network, saved as one `app.sqlite` row. */
+export type NetworkSettings_Deserialize = {
+	upstream?: UpstreamSettings_Deserialize,
+	reverse_proxies?: ReverseProxy[],
+	client_certs?: ClientCert_Deserialize[],
+	dns?: DnsOverride[],
+};
+
+/**  Everything under Settings › Network, saved as one `app.sqlite` row. */
+export type NetworkSettings_Serialize = {
+	upstream: UpstreamSettings_Serialize,
+	reverse_proxies: ReverseProxy[],
+	client_certs: ClientCert_Serialize[],
+	dns: DnsOverride[],
+};
+
 /**  A string pattern. */
 export type Pattern = Pattern_Serialize | Pattern_Deserialize;
 
@@ -1811,6 +1891,30 @@ export type ProtoSchema = {
 
 /**  Protocol chip in the filter row. */
 export type ProtocolFilter = "all" | "http" | "https" | "websocket";
+
+export type ProxyServer = ProxyServer_Serialize | ProxyServer_Deserialize;
+
+export type ProxyServer_Deserialize = {
+	host?: string,
+	port?: number,
+	/**  Basic auth (HTTP) or username/password auth (SOCKS5). */
+	username?: string | null,
+	/**  Write only. `None` keeps the saved password, `Some("")` deletes it. */
+	password?: string | null,
+	/**  A password is saved in the secret store. */
+	has_password?: boolean,
+};
+
+export type ProxyServer_Serialize = {
+	host: string,
+	port: number,
+	/**  Basic auth (HTTP) or username/password auth (SOCKS5). */
+	username: string | null,
+	/**  Write only. `None` keeps the saved password, `Some("")` deletes it. */
+	password: string | null,
+	/**  A password is saved in the secret store. */
+	has_password: boolean,
+};
 
 /**
  *  The proxy listener and its upstream client. A port or pool change
@@ -2029,6 +2133,19 @@ export type ResponseMatcher_Serialize = {
 	status: StatusRange[],
 	/**  Matched against the `Content-Type` header (with parameters). */
 	content_type: Pattern_Serialize | null,
+};
+
+/**  A local listener that forwards everything to one origin. */
+export type ReverseProxy = {
+	enabled: boolean,
+	/**  Bound on loopback. */
+	listen_port: number,
+	/**  `http://` or `https://` origin, optionally with a path prefix. */
+	target_url: string,
+	/**  Forward the client's `Host` header instead of the target's. */
+	preserve_host: boolean,
+	/**  Serve HTTPS (a Proxymate leaf for `localhost` and its addresses). */
+	tls: boolean,
 };
 
 /**  A window of rows returned by `get_rows(view, start, count)`. */
@@ -2935,6 +3052,85 @@ export type UpdateSettings = {
 	 *  is shown. "Check for Updates…" works either way.
 	 */
 	check_at_launch: boolean,
+};
+
+export type UpstreamProxy = UpstreamProxy_Serialize | UpstreamProxy_Deserialize;
+
+export type UpstreamProxy_Deserialize = { kind: "direct" } | 
+/**  `CONNECT` for TLS and WebSockets, absolute form for plain HTTP. */
+{
+	kind: "http",
+} & ProxyServer_Deserialize | 
+/**  Names are resolved by the SOCKS server. */
+{
+	kind: "socks5",
+} & ProxyServer_Deserialize;
+
+export type UpstreamProxy_Serialize = { kind: "direct" } | 
+/**  `CONNECT` for TLS and WebSockets, absolute form for plain HTTP. */
+{
+	kind: "http",
+} & ProxyServer_Serialize | 
+/**  Names are resolved by the SOCKS server. */
+{
+	kind: "socks5",
+} & ProxyServer_Serialize;
+
+export type UpstreamRule = UpstreamRule_Serialize | UpstreamRule_Deserialize;
+
+export type UpstreamRule_Deserialize = {
+	enabled: boolean,
+	/**  Host globs; empty matches nothing. */
+	hosts: string[],
+	proxy: UpstreamProxy_Deserialize,
+};
+
+export type UpstreamRule_Serialize = {
+	enabled: boolean,
+	/**  Host globs; empty matches nothing. */
+	hosts: string[],
+	proxy: UpstreamProxy_Serialize,
+};
+
+/**
+ *  Where upstream connections go: the first enabled rule whose hosts match
+ *  wins; a bypassed host or one no rule matches goes direct (or through
+ *  the proxy set before Proxymate, if asked).
+ */
+export type UpstreamSettings = UpstreamSettings_Serialize | UpstreamSettings_Deserialize;
+
+/**
+ *  Where upstream connections go: the first enabled rule whose hosts match
+ *  wins; a bypassed host or one no rule matches goes direct (or through
+ *  the proxy set before Proxymate, if asked).
+ */
+export type UpstreamSettings_Deserialize = {
+	rules?: UpstreamRule_Deserialize[],
+	/**  Hosts that always connect directly. */
+	bypass?: string[],
+	/**
+	 *  Hosts no rule matches use the proxy the system had before Proxymate
+	 *  became the system proxy (or the system proxy itself, while it isn't
+	 *  Proxymate), honouring its bypass list.
+	 */
+	use_system_previous?: boolean,
+};
+
+/**
+ *  Where upstream connections go: the first enabled rule whose hosts match
+ *  wins; a bypassed host or one no rule matches goes direct (or through
+ *  the proxy set before Proxymate, if asked).
+ */
+export type UpstreamSettings_Serialize = {
+	rules: UpstreamRule_Serialize[],
+	/**  Hosts that always connect directly. */
+	bypass: string[],
+	/**
+	 *  Hosts no rule matches use the proxy the system had before Proxymate
+	 *  became the system proxy (or the system proxy itself, while it isn't
+	 *  Proxymate), honouring its bypass list.
+	 */
+	use_system_previous: boolean,
 };
 
 export type Value = null | boolean | number | string | Value[] | { [key in string]: Value };

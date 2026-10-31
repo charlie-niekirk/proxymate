@@ -109,6 +109,8 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::cancel_repeat,
             commands::get_proxy_settings,
             commands::set_proxy_settings,
+            commands::get_network_settings,
+            commands::set_network_settings,
             commands::set_sidebar_store,
             commands::get_update_settings,
             commands::set_update_settings,

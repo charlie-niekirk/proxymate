@@ -99,6 +99,7 @@ function focusInput(id: string) {
 
 const SETTINGS_PAGES: [SettingsPage, string][] = [
   ["proxy", "Proxy"],
+  ["network", "Network"],
   ["ssl", "SSL Proxying"],
   ["clients", "Clients"],
   ["storage", "Storage"],

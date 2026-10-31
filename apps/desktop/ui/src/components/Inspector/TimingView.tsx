@@ -1,21 +1,34 @@
 import type { ReactElement } from "react";
 
-import type { FlowSummary_Serialize, Timing_Serialize } from "@/bindings";
+import type { FlowSummary_Serialize, Timing_Serialize, Via_Serialize } from "@/bindings";
 import { Placeholder } from "@/components/Inspector/KvTable";
 import { CopyItem } from "@/components/menus/items";
 import { useMenuTarget } from "@/components/menus/useMenuTarget";
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { tableText } from "@/lib/copyFormats";
 import { formatDuration, formatMs } from "@/lib/flow";
-import { timingPhases } from "@/lib/tls";
+import { routeRows, timingPhases } from "@/lib/tls";
 
-/** The Timing tab: a small waterfall of connection and transfer phases. */
-export function TimingView({ flow, timing }: { flow: FlowSummary_Serialize; timing: Timing_Serialize }) {
+/** The Timing tab: a small waterfall of connection and transfer phases, and the route the connection took. */
+export function TimingView({
+  flow,
+  timing,
+  via = null,
+}: {
+  flow: FlowSummary_Serialize;
+  timing: Timing_Serialize;
+  via?: Via_Serialize | null;
+}) {
   const phases = timingPhases(timing);
   if (phases.length === 0) return <Placeholder text={flow.state === "active" ? "Waiting for the upstream…" : "No timings recorded"} />;
   const last = phases[phases.length - 1]!;
   const total = Math.max(last.offset + last.ms, 0.001);
-  const table: [string, string][] = [...phases.map((p): [string, string] => [p.label, formatMs(p.ms)]), ["Total", formatDuration(flow.duration_ms)]];
+  const route = routeRows(via);
+  const table: [string, string][] = [
+    ...phases.map((p): [string, string] => [p.label, formatMs(p.ms)]),
+    ["Total", formatDuration(flow.duration_ms)],
+    ...route,
+  ];
   return (
     <TimingMenu table={table}>
       <div className="flex flex-col gap-1 p-2 text-xs" data-testid="timing-view">
@@ -42,6 +55,18 @@ export function TimingView({ flow, timing }: { flow: FlowSummary_Serialize; timi
           </span>
           <span className="text-right font-mono tabular-nums">{formatDuration(flow.duration_ms)}</span>
         </div>
+        {route.length > 0 && (
+          <div className="mt-1 flex flex-col gap-0.5 border-t pt-1.5" data-testid="timing-route">
+            {route.map(([label, value], i) => (
+              <div key={label} className="grid grid-cols-[110px_1fr] gap-2" data-menu-key={phases.length + 1 + i}>
+                <span className="text-muted-foreground">{label}</span>
+                <span className="min-w-0 truncate font-mono text-[11px]" title={value}>
+                  {value}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </TimingMenu>
   );
