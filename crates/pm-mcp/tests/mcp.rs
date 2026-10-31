@@ -574,6 +574,99 @@ async fn a_breakpoint_is_resolved_over_mcp_while_the_request_waits() {
     h.stop().await;
 }
 
+/// An agent holds a WebSocket message at a breakpoint, edits it, sends
+/// its own messages both ways and closes the connection.
+#[tokio::test]
+async fn agents_hold_edit_and_send_websocket_messages() {
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::Message;
+
+    let h = Harness::start().await;
+    let upstream = Upstream::start().await;
+    let (client, _events) = h.client().await;
+    ok(
+        &client,
+        "create_rule",
+        json!({
+            "name": "hold sent messages",
+            "matcher": { "path": { "kind": "exact", "value": "/ws" } },
+            "actions": [{ "type": "WsMessage", "direction": "sent", "op": { "kind": "breakpoint" } }]
+        }),
+    )
+    .await;
+    let (head, ws) = client::ws_absolute(h.proxy, &upstream.url("/ws"), &[]).await;
+    let mut ws = ws.unwrap_or_else(|| panic!("handshake answered {head}"));
+    async fn next(ws: &mut tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>) -> String {
+        let text = async {
+            loop {
+                if let Message::Text(text) = ws.next().await.expect("open").expect("valid") {
+                    return text.to_string();
+                }
+            }
+        };
+        tokio::time::timeout(WAIT, text).await.expect("a message in time")
+    }
+    ws.send(Message::text(r#"{"price":1}"#)).await.unwrap();
+
+    let id = eventually(WAIT, || h.engine.breakpoints().first().map(|b| b.id)).await;
+    let paused = ok(&client, "get_breakpoint", json!({ "id": id })).await;
+    assert_eq!(paused["message"]["direction"], "sent");
+    assert_eq!(paused["body_text"], r#"{"price":1}"#);
+    let refused = call(
+        &client,
+        "resolve_breakpoint",
+        json!({ "id": id, "resolution": { "action": "respond", "status": 200 } }),
+    )
+    .await;
+    assert_eq!(refused.is_error, Some(true));
+    ok(
+        &client,
+        "resolve_breakpoint",
+        json!({ "id": id, "resolution": { "action": "continue", "edits": { "body": "{\"price\":0}" } } }),
+    )
+    .await;
+    assert_eq!(next(&mut ws).await, r#"{"price":0}"#);
+
+    ok(
+        &client,
+        "send_websocket_message",
+        json!({ "id": 0, "direction": "received", "payload": "hello from the agent" }),
+    )
+    .await;
+    assert_eq!(next(&mut ws).await, "hello from the agent");
+
+    let page = ok(&client, "get_websocket_messages", json!({ "id": 0 })).await;
+    let messages = page["messages"].as_array().unwrap();
+    let edited = messages
+        .iter()
+        .find(|m| m["edited"] == true)
+        .expect("the edited message");
+    assert_eq!(
+        (edited["payload"].as_str(), edited["original"].as_str()),
+        (Some(r#"{"price":0}"#), Some(r#"{"price":1}"#))
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m["injected"] == true && m["payload"] == "hello from the agent")
+    );
+    assert_eq!(page["open"], true);
+
+    ok(&client, "close_websocket", json!({ "id": 0 })).await;
+    while let Ok(Some(Ok(_))) = tokio::time::timeout(WAIT, ws.next()).await {}
+    eventually(WAIT, || (!h.engine.websocket_is_open(0)).then_some(())).await;
+    let late = call(
+        &client,
+        "send_websocket_message",
+        json!({ "id": 0, "direction": "sent", "payload": "too late" }),
+    )
+    .await;
+    assert_eq!(late.is_error, Some(true));
+
+    client.cancel().await.unwrap();
+    h.stop().await;
+}
+
 /// A raw POST of `initialize` with the given headers.
 async fn post(addr: SocketAddr, headers: &[(&str, &str)]) -> u16 {
     let stream = tokio::net::TcpStream::connect(addr).await.unwrap();

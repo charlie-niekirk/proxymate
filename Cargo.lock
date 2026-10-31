@@ -3553,6 +3553,7 @@ dependencies = [
  "axum",
  "base64 0.23.1",
  "bytes",
+ "futures-util",
  "http",
  "http-body-util",
  "hyper",
@@ -3567,6 +3568,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tokio-tungstenite",
  "tokio-util",
  "uuid",
 ]
