@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { certExpiredAt, sslTitle, timingPhases } from "./tls";
+import { certExpiredAt, routeRows, sslTitle, timingPhases } from "./tls";
 
 describe("timingPhases", () => {
   it("keeps recorded phases in order with running offsets", () => {
@@ -37,5 +37,31 @@ describe("certificates and the SSL column", () => {
   it("explains each TLS status", () => {
     expect(sslTitle("none")).toBe("");
     expect(sslTitle("passthrough")).toContain("Not decrypted");
+  });
+});
+
+describe("routeRows", () => {
+  it("names the upstream proxy, the address, overrides and the reverse port", () => {
+    expect(routeRows(null)).toEqual([]);
+    expect(
+      routeRows({ proxy: null, addr: "93.184.215.14:443", dns_override: null, client_cert: null, reverse_port: null }),
+    ).toEqual([
+      ["Route", "Direct"],
+      ["Connected to", "93.184.215.14:443"],
+    ]);
+    expect(
+      routeRows({
+        proxy: "socks5://127.0.0.1:1080",
+        addr: "127.0.0.1:1080",
+        dns_override: "*.test → 127.0.0.1",
+        client_cert: "CN=me",
+        reverse_port: 8443,
+      }),
+    ).toEqual([
+      ["Route", "Through socks5://127.0.0.1:1080"],
+      ["Connected to", "127.0.0.1:1080"],
+      ["DNS override", "*.test → 127.0.0.1"],
+      ["Arrived on", "Reverse proxy :8443"],
+    ]);
   });
 });

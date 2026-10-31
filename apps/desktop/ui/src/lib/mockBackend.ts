@@ -35,6 +35,7 @@ import { GLOBAL_THROTTLE_RULE_ID, emptyMatcher, normalizeRule, type Rule } from 
 import { newId, parseDoc, toJson, type JNode } from "@/lib/json/doc";
 import { createMockDevices } from "@/lib/mockDevices";
 import { createMockMcp } from "@/lib/mockMcp";
+import { createMockNetwork } from "@/lib/mockNetwork";
 import { createMockProtos } from "@/lib/mockProtos";
 import { createMockScripts } from "@/lib/mockScripts";
 
@@ -54,7 +55,13 @@ export interface MockFlow {
  */
 export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>): Backend {
   let recording = true;
-  const status = (): ProxyStatus_Serialize => ({ listening: "127.0.0.1:9090", error: null, recording });
+  const network = createMockNetwork();
+  const status = (): ProxyStatus_Serialize => ({
+    listening: "127.0.0.1:9090",
+    error: null,
+    recording,
+    listeners: network.listeners(),
+  });
   const hosts = ["api.github.com", "www.google.com", "api.stripe.com", "slack.com", "localhost", "i.ytimg.com"];
   const kinds: ContentKind[] = ["json", "html", "javascript", "image", "css", "xml", "graphql", "none"];
   const full = new Map<number, MockFlow>();
@@ -392,6 +399,17 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
         error: f[17] === "likely_pinned" ? "The client rejected the Proxymate certificate. It sent an unknown_ca alert." : null,
         rules: mockFlowRules(f[15], id),
         trailers: null,
+        // Every fourth flow went through the corporate proxy (Settings › Network).
+        via:
+          id % 4 === 1
+            ? {
+                proxy: "http://proxy.corp.example:3128",
+                addr: "10.20.0.8:3128",
+                dns_override: null,
+                client_cert: https ? "CN=pm-client, O=Example Corp" : null,
+                reverse_port: null,
+              }
+            : null,
         tls,
         timing: {
           dns_ms: id % 4 === 0 ? 3.2 : null,
@@ -586,6 +604,8 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
     async getProxySettings() {
       return proxySettings;
     },
+    getNetworkSettings: network.getNetworkSettings,
+    setNetworkSettings: network.setNetworkSettings,
     async setProxySettings(settings) {
       if (settings.port < 1024) throw new Error("pick a port from 1024 up: lower ones need administrator rights");
       if (settings.port === 8080) throw new Error("port 8080 is in use (Charles, pid 4242). Quit the app using it, or pick another port.");

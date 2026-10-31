@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use crate::flow::{ContentKind, FlowId};
+use crate::network::{ListenerStatus, Via};
 use crate::rules::FlowRules;
 use crate::tls::{Timing, TlsInfo};
 
@@ -101,10 +102,14 @@ pub struct FlowDetail {
     /// What rules did to the flow.
     #[serde(default)]
     pub rules: FlowRules,
-    /// HTTP/2 response trailers (gRPC's `grpc-status` and friends). Last:
-    /// session format 3 appended it.
+    /// HTTP/2 response trailers (gRPC's `grpc-status` and friends).
+    /// Session format 3 appended it.
     #[serde(default)]
     pub trailers: Option<Vec<Header>>,
+    /// The route the upstream connection took (M18). Last: session format
+    /// 5 appended it.
+    #[serde(default)]
+    pub via: Option<Via>,
 }
 
 /// Which body of a flow.
@@ -124,6 +129,8 @@ pub struct ProxyStatus {
     pub error: Option<String>,
     /// False while recording is paused: traffic is forwarded but not kept.
     pub recording: bool,
+    /// SOCKS5 on the same port and the reverse proxy listeners (M18).
+    pub listeners: Vec<ListenerStatus>,
 }
 
 #[cfg(test)]

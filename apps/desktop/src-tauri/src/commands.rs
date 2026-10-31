@@ -13,7 +13,7 @@ use pm_model::{
 };
 use pm_model::{CodeLanguage, FlowLabel, HeaderColumn, RepeatId, RepeatOpts, RepeatProgress};
 use pm_model::{ConsoleEntry, Script, ScriptId, ScriptSettings, ScriptTestResult, ScriptTestSpec, ViewResult};
-use pm_model::{DecodedBody, ProtoMapping, ProtoSchema};
+use pm_model::{DecodedBody, NetworkSettings, ProtoMapping, ProtoSchema};
 use tauri::State;
 use tauri::ipc::{Channel, InvokeResponseBody, IpcResponse};
 
@@ -892,6 +892,26 @@ pub fn get_proxy_settings(engine: EngineState<'_>) -> ProxySettings {
 #[specta::specta]
 pub async fn set_proxy_settings(engine: EngineState<'_>, settings: ProxySettings) -> Result<ProxySettings, String> {
     engine.set_proxy_settings(settings).await.map_err(|e| e.to_string())
+}
+
+/// Settings › Network (M18). Passwords never come back: `has_password`
+/// says one is saved.
+#[tauri::command]
+#[specta::specta]
+pub fn get_network_settings(engine: EngineState<'_>) -> NetworkSettings {
+    engine.network_settings()
+}
+
+/// Saves and applies Settings › Network: passwords go to the keychain,
+/// client certificates are loaded and reverse proxies restarted. A bad
+/// setting is an error that says why; nothing is changed then.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_network_settings(
+    engine: EngineState<'_>,
+    settings: NetworkSettings,
+) -> Result<NetworkSettings, String> {
+    engine.set_network_settings(settings).await.map_err(|e| e.to_string())
 }
 
 /// Makes the sidebar's Apps and Domains count the tab the UI shows.

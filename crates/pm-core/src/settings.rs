@@ -1,5 +1,5 @@
-//! Storage limits and proxy settings (M10): rows of `app.sqlite`'s
-//! settings table, in memory without a data dir. Also where the limits are
+//! Storage limits and proxy settings (M10) and Settings › Network (M18):
+//! rows of `app.sqlite`'s settings table, in memory without a data dir. Also where the limits are
 //! enforced: after every ingest batch the live store evicts its oldest
 //! flows past the flow cap or the disk cap, and the segment files they
 //! alone used are deleted.
@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use parking_lot::{Mutex, RwLock};
-use pm_model::{FlowId, ProxySettings, StorageSettings, StorageStatus};
+use pm_model::{FlowId, NetworkSettings, ProxySettings, StorageSettings, StorageStatus};
 
 use crate::notify::Notifier;
 use crate::proxy::ProxyConfig;
@@ -20,6 +20,7 @@ use crate::{Engine, Error};
 
 const STORAGE_KEY: &str = "storage";
 const PROXY_KEY: &str = "proxy";
+const NETWORK_KEY: &str = "network";
 
 /// Receives storage status updates. Returning `false` unsubscribes.
 pub type StorageSink = Box<dyn FnMut(StorageStatus) -> bool + Send>;
@@ -28,6 +29,7 @@ pub(crate) struct Settings {
     db: Mutex<AppDb>,
     storage: RwLock<StorageSettings>,
     proxy: RwLock<ProxySettings>,
+    network: RwLock<NetworkSettings>,
     status: Notifier<StorageStatus>,
     last_status: Mutex<Option<StorageStatus>>,
     /// The disk cap last asked eviction to go through this id; not asked
@@ -47,14 +49,22 @@ impl Settings {
             .expect("in-memory SQLite");
         let storage = db.setting(STORAGE_KEY).unwrap_or_default();
         let proxy = db.setting(PROXY_KEY).unwrap_or_default();
+        let network = db.setting(NETWORK_KEY).unwrap_or_default();
         Settings {
             db: Mutex::new(db),
             storage: RwLock::new(storage),
             proxy: RwLock::new(proxy),
+            network: RwLock::new(network),
             status: Notifier::new(),
             last_status: Mutex::new(None),
             disk_through: AtomicU32::new(0),
         }
+    }
+}
+
+impl Settings {
+    pub fn network_row(&self) -> NetworkSettings {
+        self.network.read().clone()
     }
 }
 
@@ -221,6 +231,7 @@ impl Engine {
                 .await
                 .unwrap_or(false);
         *self.settings.proxy.write() = settings;
+        self.rebuild_pool();
         if let Err(err) = self.restart_proxy(new_port).await {
             *self.settings.proxy.write() = old;
             let _ = self.restart_proxy(true).await;
@@ -242,5 +253,32 @@ impl Engine {
             .save_setting(PROXY_KEY, &settings)
             .map_err(|e| Error::Invalid(format!("can't save the settings: {e}")))?;
         Ok(settings)
+    }
+
+    // ---- Network (M18) ----
+
+    /// Settings › Network. Passwords are never returned: `has_password`
+    /// says one is saved.
+    pub fn network_settings(&self) -> NetworkSettings {
+        self.settings.network.read().clone()
+    }
+
+    /// Saves Settings › Network and applies it straight away. Passwords
+    /// go to the secret store (the keychain in the app); an upstream that
+    /// is one of Proxymate's own listeners, or a client certificate that
+    /// doesn't load, is refused with why.
+    pub async fn set_network_settings(self: &Arc<Self>, settings: NetworkSettings) -> Result<NetworkSettings, Error> {
+        let _restart = self.restart_lock().lock().await;
+        self.apply_network_settings(settings).await
+    }
+
+    pub(crate) fn save_network_row(&self, settings: &NetworkSettings) -> Result<(), Error> {
+        self.settings
+            .db
+            .lock()
+            .save_setting(NETWORK_KEY, settings)
+            .map_err(|e| Error::Invalid(format!("can't save the settings: {e}")))?;
+        *self.settings.network.write() = settings.clone();
+        Ok(())
     }
 }

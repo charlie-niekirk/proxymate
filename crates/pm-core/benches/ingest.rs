@@ -51,6 +51,7 @@ fn detail(flow: &FlowSummary) -> FlowDetail {
         timing: Default::default(),
         rules: Default::default(),
         trailers: None,
+        via: None,
     }
 }
 

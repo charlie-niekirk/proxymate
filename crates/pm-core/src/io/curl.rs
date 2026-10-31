@@ -182,6 +182,7 @@ mod tests {
             timing: Timing::default(),
             rules: Default::default(),
             trailers: None,
+            via: None,
         }
     }
 

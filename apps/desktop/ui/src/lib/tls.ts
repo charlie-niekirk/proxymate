@@ -1,4 +1,4 @@
-import type { CertSummary, Timing_Serialize, TlsStatus } from "@/bindings";
+import type { CertSummary, Timing_Serialize, TlsStatus, Via_Serialize } from "@/bindings";
 
 const SSL_TITLE: Record<TlsStatus, string> = {
   none: "",
@@ -44,4 +44,14 @@ export function timingPhases(t: Timing_Serialize): Phase[] {
 export function certExpiredAt(cert: CertSummary, atMs: number): boolean {
   const notAfter = Date.parse(cert.not_after);
   return !Number.isNaN(notAfter) && notAfter < atMs;
+}
+
+/** How the upstream connection was made (M18), as label/value rows. */
+export function routeRows(via: Via_Serialize | null): [string, string][] {
+  if (!via) return [];
+  const rows: [string, string][] = [["Route", via.proxy ? `Through ${via.proxy}` : "Direct"]];
+  if (via.addr) rows.push(["Connected to", via.addr]);
+  if (via.dns_override) rows.push(["DNS override", via.dns_override]);
+  if (via.reverse_port != null) rows.push(["Arrived on", `Reverse proxy :${via.reverse_port}`]);
+  return rows;
 }

@@ -99,6 +99,7 @@ fn record(engine: &Arc<Engine>, n: usize) {
             timing: Timing::default(),
             rules: Default::default(),
             trailers: None,
+            via: None,
         };
         let recorder = engine.begin_flow(summary, detail).expect("recording");
         let (request, response) = body_for(i);
@@ -418,7 +419,8 @@ fn a_version_2_session_still_opens() {
             .collect::<Result<_, _>>()
             .unwrap();
         for (id, mut detail) in details {
-            // `trailers: None` is the last byte.
+            // `trailers: None` and `via: None` are the last bytes.
+            assert_eq!(detail.pop(), Some(0));
             assert_eq!(detail.pop(), Some(0));
             conn.execute(
                 "UPDATE flows SET detail = ?1 WHERE id = ?2",
@@ -438,5 +440,45 @@ fn a_version_2_session_still_opens() {
     let detail = engine.flow_detail_in(doc.store, 1).unwrap().unwrap();
     assert_eq!(detail.request.headers[0].value, "1");
     assert_eq!(detail.trailers, None);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A session saved by M17 (format version 4, before `FlowDetail.via`)
+/// still opens.
+#[test]
+fn a_version_4_session_still_opens() {
+    let dir = temp_dir();
+    let engine = engine(&dir);
+    record(&engine, 2);
+    let path = dir.join("v4.proxymate");
+    finish(|sink| {
+        engine
+            .save_session(LIVE_STORE, &FlowSelection::All, path.clone(), sink)
+            .unwrap()
+    });
+    {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        let details: Vec<(i64, Vec<u8>)> = conn
+            .prepare("SELECT id, detail FROM flows")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        for (id, mut detail) in details {
+            assert_eq!(detail.pop(), Some(0), "`via: None` is the last byte");
+            conn.execute(
+                "UPDATE flows SET detail = ?1 WHERE id = ?2",
+                rusqlite::params![detail, id],
+            )
+            .unwrap();
+        }
+        conn.execute("UPDATE meta SET value = '4' WHERE key = 'version'", [])
+            .unwrap();
+    }
+    let doc = engine.open_document(&path).expect("a v4 session opens");
+    let detail = engine.flow_detail_in(doc.store, 1).unwrap().unwrap();
+    assert_eq!(detail.request.headers[0].value, "1");
+    assert_eq!(detail.via, None);
     let _ = std::fs::remove_dir_all(dir);
 }

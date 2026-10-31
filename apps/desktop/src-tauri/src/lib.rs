@@ -109,6 +109,8 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::cancel_repeat,
             commands::get_proxy_settings,
             commands::set_proxy_settings,
+            commands::get_network_settings,
+            commands::set_network_settings,
             commands::set_sidebar_store,
             commands::get_update_settings,
             commands::set_update_settings,
@@ -286,6 +288,7 @@ fn start_engine(data_dir: Option<PathBuf>) -> Arc<Engine> {
         data_dir: data_dir.map(|dir| dir.join("Proxymate")),
         extra_upstream_roots: extra_upstream_roots(),
         guardian_exe: std::env::current_exe().ok(),
+        use_keychain: true,
     });
     // A run that died without its guardian may have left the proxy on.
     match engine.restore_stale_system_proxy() {

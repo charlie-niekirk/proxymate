@@ -20,6 +20,8 @@ pub enum Sniffed {
     OriginForm,
     /// A TLS ClientHello: a client talking HTTPS straight at the proxy port.
     Tls,
+    /// A SOCKS5 greeting (version byte `0x05`).
+    Socks5,
     /// Not HTTP.
     Garbage,
 }
@@ -45,8 +47,10 @@ pub async fn sniff(stream: &TcpStream) -> Option<Sniffed> {
 /// packets may be cut short; anything that still looks like a method is
 /// treated as HTTP and left for the parser to judge.
 pub fn classify(bytes: &[u8]) -> Sniffed {
-    if bytes.first() == Some(&0x16) {
-        return Sniffed::Tls;
+    match bytes.first() {
+        Some(0x16) => return Sniffed::Tls,
+        Some(0x05) => return Sniffed::Socks5,
+        _ => {}
     }
     let method_len = bytes.iter().take_while(|b| is_token(**b)).count();
     if method_len == 0 {
@@ -97,6 +101,8 @@ mod tests {
     #[test]
     fn rejects_tls_and_noise() {
         assert_eq!(classify(&[0x16, 0x03, 0x01, 0x02, 0x00]), Sniffed::Tls);
+        assert_eq!(classify(&[0x05, 0x01, 0x00]), Sniffed::Socks5);
+        assert!(!Sniffed::Socks5.is_http());
         assert_eq!(classify(b"\x00\x01binary"), Sniffed::Garbage);
         assert_eq!(classify(b"GET\r\n"), Sniffed::Garbage);
         assert!(!Sniffed::Tls.is_http());

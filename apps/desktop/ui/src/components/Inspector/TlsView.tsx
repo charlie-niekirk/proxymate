@@ -25,6 +25,8 @@ export function TlsView({ flow, detail }: { flow: FlowSummary_Serialize; detail:
     ["Upstream cipher", tls.cipher || "—"],
     ["Upstream certificate", verification],
   ];
+  if (detail.via?.proxy) rows.push(["Upstream proxy", detail.via.proxy]);
+  if (detail.via?.client_cert) rows.push(["Client certificate", detail.via.client_cert]);
   return (
     <div className="flex flex-col" data-testid="tls-view">
       <SectionTitle>Connection</SectionTitle>

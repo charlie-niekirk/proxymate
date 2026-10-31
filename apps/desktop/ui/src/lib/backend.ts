@@ -61,6 +61,8 @@ import {
   type SystemProxyStatus_Serialize,
   type TrustStatus_Serialize,
   type ProxySettings_Serialize,
+  type NetworkSettings_Deserialize,
+  type NetworkSettings_Serialize,
   type StorageSettings_Serialize,
   type StorageStatus_Deserialize,
   type StorageStatus_Serialize,
@@ -280,6 +282,11 @@ export interface Backend {
   ): Promise<number>;
   cancelRepeat(id: number): Promise<boolean>;
   getProxySettings(): Promise<ProxySettings_Serialize>;
+  // ---- Network (M18) ----
+  /** Settings › Network; passwords never come back (`has_password` says one is saved). */
+  getNetworkSettings(): Promise<NetworkSettings_Serialize>;
+  /** Saves and applies it (passwords to the keychain, reverse proxies restarted); rejects with why. */
+  setNetworkSettings(settings: NetworkSettings_Deserialize): Promise<NetworkSettings_Serialize>;
   /** Restarts the listener if the port or pool changed; rejects if the port can't be bound. */
   setProxySettings(settings: ProxySettings_Serialize): Promise<ProxySettings_Serialize>;
   /** Makes the sidebar count the store the table shows. */
@@ -492,6 +499,8 @@ const tauriBackend: Backend = {
   },
   cancelRepeat: (id) => commands.cancelRepeat(id),
   getProxySettings: () => commands.getProxySettings(),
+  getNetworkSettings: () => commands.getNetworkSettings(),
+  setNetworkSettings: (settings) => unwrap(commands.setNetworkSettings(settings)),
   setProxySettings: (settings) => unwrap(commands.setProxySettings(settings)),
   setSidebarStore: (store) => commands.setSidebarStore(store),
   setWindowTheme: async (theme) => {

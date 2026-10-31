@@ -190,6 +190,8 @@ function ListeningStatus({ status }: { status: ProxyStatus_Serialize | undefined
       ? [status.recording ? "var(--s-2xx)" : "var(--s-paused)", `Listening on ${status.listening}${status.recording ? "" : " · paused"}`]
       : ["var(--s-5xx)", `Proxy not running: ${status.error ?? "stopped"}`];
   const addr = status?.listening ?? null;
+  // SOCKS5 on the same port and the reverse proxies (M18).
+  const reverse = (status?.listeners ?? []).filter((l) => l.kind !== "socks5" && l.addr);
   return (
     <Tooltip>
       <CopyMenu
@@ -197,6 +199,12 @@ function ListeningStatus({ status }: { status: ProxyStatus_Serialize | undefined
         items={[
           addr && { label: "Copy address", text: addr, what: "proxy address", testId: "copy-proxy-address" },
           addr && { label: "Copy curl example", text: `curl -x http://${addr} http://example.com/`, what: "command" },
+          addr && { label: "Copy SOCKS5 address", text: `socks5h://${addr}`, what: "SOCKS5 address", testId: "copy-socks-address" },
+          ...reverse.map((l) => ({
+            label: `Copy reverse proxy ${l.addr} → ${l.target ?? ""}`,
+            text: `${l.kind === "reverse_tls" ? "https" : "http"}://${l.addr}`,
+            what: "reverse proxy address",
+          })),
           addr && { label: "Copy terminal environment", text: copyTerminalEnvText, what: "terminal environment" },
           status?.error && { label: "Copy error", text: status.error, what: "error" },
         ]}
@@ -204,6 +212,7 @@ function ListeningStatus({ status }: { status: ProxyStatus_Serialize | undefined
           <>
             <ContextMenuItem onSelect={() => openDeviceSetup(true)}>Device setup…</ContextMenuItem>
             <ContextMenuItem onSelect={() => openSettings("proxy")}>Proxy settings…</ContextMenuItem>
+            <ContextMenuItem onSelect={() => openSettings("network")}>Network settings…</ContextMenuItem>
           </>
         }
       >

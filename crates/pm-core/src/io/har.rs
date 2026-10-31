@@ -908,6 +908,7 @@ fn flow(entry: &Entry) -> Option<SavedFlow> {
         timing,
         rules: Default::default(),
         trailers: None,
+        via: None,
     };
     Some(SavedFlow {
         summary,
@@ -1165,6 +1166,7 @@ mod tests {
             },
             rules: Default::default(),
             trailers: None,
+            via: None,
         }
     }
 

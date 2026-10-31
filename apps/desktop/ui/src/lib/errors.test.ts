@@ -19,6 +19,20 @@ describe("explainFailure", () => {
     expect(help?.actions).toContain("insecure-upstream");
   });
 
+  it("points client certificate and upstream proxy failures at Settings › Network", () => {
+    const cert = explainFailure(flow("intercepted"), detail("api.example.com asks for a client certificate. Add one…"));
+    expect(cert?.title).toBe("The server wants a client certificate");
+    expect(cert?.actions).toEqual(["network-settings"]);
+    const auth = explainFailure(
+      flow("intercepted"),
+      detail("the upstream proxy http://127.0.0.1:3128 rejected the username and password (407). Check them in Settings › Network."),
+    );
+    expect(auth?.title).toBe("The upstream proxy wants other credentials");
+    const unreachable = explainFailure(flow("none"), detail("the upstream proxy http://p:1: can't reach p:1: Connection refused"));
+    expect(unreachable?.title).toBe("The upstream proxy couldn't connect");
+    expect(unreachable?.actions).toEqual(["network-settings"]);
+  });
+
   it("names DNS, refused connections and timeouts", () => {
     expect(explainFailure(flow("none"), detail("can't resolve nope.test: failed to lookup address"))?.title).toBe("Couldn't find api.example.com");
     expect(explainFailure(flow("none"), detail("can't reach api.example.com:443: Connection refused"))?.title).toMatch(/Nothing answered/);

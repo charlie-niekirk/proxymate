@@ -33,6 +33,8 @@ use crate::store::{BlobBackend, DeepJob, DetailStore, SegmentStore, Store, VIEW_
 use crate::tls::{CertAuthority, SslPolicy, TlsContext};
 
 const SSL_SETTINGS_FILE: &str = "ssl.json";
+/// Secrets when the keychain isn't used (`EngineConfig::use_keychain`).
+const SECRETS_FILE: &str = "secrets.json";
 
 /// Deltas are published at 20 Hz.
 pub const PUBLISH_INTERVAL: Duration = Duration::from_millis(50);
@@ -61,6 +63,10 @@ pub struct EngineConfig {
     /// The executable that runs `--sysproxy-guardian` (the app itself).
     /// Without it the system proxy is only restored by this process.
     pub guardian_exe: Option<PathBuf>,
+    /// Keep upstream proxy and PKCS#12 passwords in the OS keychain (the
+    /// app). Otherwise they go in a 0600 `secrets.json` in the data dir,
+    /// or in memory without one, so tests never touch the keychain.
+    pub use_keychain: bool,
 }
 
 /// A body as returned to the inspector.
@@ -101,6 +107,12 @@ pub struct Engine {
     pub(crate) sender: OnceLock<proxy::Sender>,
     /// Header columns and running repeats (M17).
     pub(crate) workflow: crate::workflow::Workflow,
+    /// Upstream proxies, DNS overrides, client certificates and the
+    /// reverse proxy listeners (M18).
+    pub(crate) network: crate::network::Network,
+    /// The plain-HTTP upstream pool every listener and `Engine::send`
+    /// share; rebuilt when the proxy or network settings change.
+    pool: arc_swap::ArcSwapOption<proxy::UpstreamClient>,
     /// Held while the listener is moved (port change, LAN access), so two
     /// moves never both bind.
     restart: tokio::sync::Mutex<()>,
@@ -131,6 +143,12 @@ impl Engine {
         let devices = DeviceRegistry::load(config.data_dir.as_deref(), devices::HOLD);
         let app_settings = Settings::load(config.data_dir.as_deref());
         let protos = Protos::load(config.data_dir.as_deref());
+        let secrets: Box<dyn pm_platform::secrets::SecretStore> = match &config.data_dir {
+            Some(dir) if config.use_keychain => pm_platform::secrets::system(&dir.join(SECRETS_FILE)),
+            Some(dir) => Box::new(pm_platform::secrets::FileSecrets::new(dir.join(SECRETS_FILE))),
+            None => Box::new(pm_platform::secrets::MemorySecrets::default()),
+        };
+        let network = crate::network::Network::new(secrets, &app_settings.network_row());
         let root = config
             .data_dir
             .unwrap_or_else(|| std::env::temp_dir().join("proxymate"));
@@ -179,6 +197,8 @@ impl Engine {
             protos,
             sender: OnceLock::new(),
             workflow: Default::default(),
+            network,
+            pool: Default::default(),
             restart: tokio::sync::Mutex::new(()),
         });
         let weak = Arc::downgrade(&engine);
@@ -440,19 +460,24 @@ impl Engine {
             Ok(listener) => proxy::spawn(Arc::downgrade(self), listener),
             Err(err) => Err(err),
         };
-        let mut state = self.proxy.lock();
-        match started {
+        let first = matches!(*self.proxy.lock(), ProxyState::Stopped) && self.network.reverse.lock().is_empty();
+        let addr = match started {
             Ok(handle) => {
                 let addr = handle.addr;
-                *state = ProxyState::Listening(handle);
-                Ok(addr)
+                *self.proxy.lock() = ProxyState::Listening(handle);
+                addr
             }
             Err(err) => {
                 let message = self.bind_error(&config, &err);
-                *state = ProxyState::Failed(message.clone());
-                Err(Error::Proxy(message))
+                *self.proxy.lock() = ProxyState::Failed(message.clone());
+                return Err(Error::Proxy(message));
             }
+        };
+        // The reverse proxies start with the first listener.
+        if first && self.network_settings().reverse_proxies.iter().any(|r| r.enabled) {
+            self.restart_reverse_proxies().await;
         }
+        Ok(addr)
     }
 
     /// Why the listener couldn't bind, and what to do about it.
@@ -487,6 +512,22 @@ impl Engine {
             }
             _ => format!("can't listen on {} {ports}: {err}", config.ip),
         }
+    }
+
+    /// The shared plain-HTTP upstream pool, built on first use.
+    pub(crate) fn pool(self: &Arc<Self>) -> Arc<proxy::UpstreamClient> {
+        if let Some(pool) = self.pool.load_full() {
+            return pool;
+        }
+        let pool = Arc::new(proxy::upstream_client(Arc::downgrade(self), &self.proxy_settings()));
+        self.pool.store(Some(pool.clone()));
+        pool
+    }
+
+    /// Drops the pool: idle connections close, and new requests dial with
+    /// the current settings.
+    pub(crate) fn rebuild_pool(&self) {
+        self.pool.store(None);
     }
 
     pub(crate) fn restart_lock(&self) -> &tokio::sync::Mutex<()> {
@@ -577,6 +618,7 @@ impl Engine {
         };
         let listening = listening.map(|addr| self.display_addr(addr).to_string());
         ProxyStatus {
+            listeners: self.extra_listeners(listening.as_deref()),
             listening,
             error,
             recording: self.is_recording(),
@@ -587,6 +629,7 @@ impl Engine {
     /// quit: the engine itself may outlive the event loop.
     pub fn shutdown(&self) {
         *self.proxy.lock() = ProxyState::Stopped;
+        self.network.reverse.lock().clear();
         self.restore_android_proxies();
         self.details.segments.remove_all();
     }

@@ -16,9 +16,13 @@
 //!
 //! cargo run -p pm-testkit --bin upstream -- --zoo [PROXY]
 //! # sends every body-viewer zoo fixture through PROXY (default 127.0.0.1:9090)
+//!
+//! cargo run -p pm-testkit --bin upstream -- --http-proxy [USER:PASSWORD]  # an HTTP proxy to chain to (M18)
+//! cargo run -p pm-testkit --bin upstream -- --socks5 [USER:PASSWORD]      # a SOCKS5 proxy to chain to (M18)
+//! # then point a rule in Settings › Network at the printed port; every request is logged
 //! ```
 
-use pm_testkit::{Alpn, GrpcUpstream, TlsUpstream, Upstream, zoo};
+use pm_testkit::{Alpn, GrpcUpstream, HttpProxy, Socks5Server, TlsUpstream, Upstream, zoo};
 
 const ROUTES: &str = "/json /version /status/{code} /chunked /gzip /br /deflate /zstd /bytes/{n} /echo /zoo/{name} /ws \
                       /sse?count=N&interval_ms=M";
@@ -58,6 +62,45 @@ async fn main() {
         println!("schema: crates/pm-testkit/proto/shop.proto");
         println!("methods: GetOrder (id \"missing\" → NOT_FOUND), ListOrders (server stream: count, interval_ms)");
         let _ = tokio::signal::ctrl_c().await;
+    } else if let Some(i) = args.iter().position(|a| a == "--http-proxy" || a == "--socks5") {
+        let credentials = args.get(i + 1).and_then(|c| c.split_once(':'));
+        if args[i] == "--http-proxy" {
+            let proxy = match credentials {
+                Some((user, password)) => HttpProxy::with_basic_auth(user, password).await,
+                None => HttpProxy::start().await,
+            };
+            println!("HTTP proxy (CONNECT and absolute form) on 127.0.0.1:{}", proxy.port());
+            let mut seen = 0;
+            loop {
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => break,
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(200)) => {
+                        for r in proxy.requests().iter().skip(seen) {
+                            println!("  {} {}{}", r.method, r.target, if r.allowed { "" } else { "  → 407" });
+                            seen += 1;
+                        }
+                    }
+                }
+            }
+        } else {
+            let server = match credentials {
+                Some((user, password)) => Socks5Server::with_auth(user, password).await,
+                None => Socks5Server::start().await,
+            };
+            println!("SOCKS5 proxy on 127.0.0.1:{}", server.port());
+            let mut seen = 0;
+            loop {
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => break,
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(200)) => {
+                        for target in server.targets().iter().skip(seen) {
+                            println!("  CONNECT {target}");
+                            seen += 1;
+                        }
+                    }
+                }
+            }
+        }
     } else if args.iter().any(|a| a == "--tls") {
         let upstream = TlsUpstream::start(Alpn::Both).await;
         let ca_path = std::env::temp_dir().join("pm-testkit-ca.pem");

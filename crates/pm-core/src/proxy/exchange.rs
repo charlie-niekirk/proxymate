@@ -58,7 +58,7 @@ const CLIENT_APP_WAIT: Duration = Duration::from_millis(300);
 
 /// Where a request goes when no rule sends it elsewhere.
 pub(super) enum Route<'a> {
-    /// The pooled plain-HTTP client.
+    /// The pooled plain-HTTP client (`Engine::pool`).
     Forward,
     /// The intercepted connection's own upstream.
     Mitm(&'a MitmConn),
@@ -695,14 +695,30 @@ impl Exchange<'_> {
         {
             parts.headers.insert(header::HOST, host);
         }
+        let Some(engine) = self.ctx.engine.upgrade() else {
+            return Err("Proxymate is shutting down".into());
+        };
+        // Through an HTTP upstream proxy the pool sends absolute form; the
+        // proxy's credentials ride along (the client's were stripped).
+        if let Some(auth) = super::dial::proxy_authorization(&engine, &target.host).await {
+            parts.headers.insert(header::PROXY_AUTHORIZATION, auth);
+        }
+        let pool = engine.pool();
+        drop(engine);
         if let Some(rec) = &self.recorder {
             rec.request_sent();
         }
-        self.ctx
-            .client
+        let response = pool
             .request(Request::from_parts(parts, body))
             .await
-            .map_err(|e| error_chain(&e))
+            .map_err(|e| error_chain(&e))?;
+        if let Some(rec) = &self.recorder
+            && let Some(info) = response.extensions().get::<super::dial::PoolInfo>()
+        {
+            rec.connection_timing(&info.timing());
+            rec.via(&info.via);
+        }
+        Ok(response)
     }
 
     /// Fails the flow with an upstream error and answers 502.

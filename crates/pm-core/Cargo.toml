@@ -56,6 +56,8 @@ prost-reflect = { version = "0.16", features = ["serde"] }
 protox = "0.10"
 rmpv = "1.3"
 ciborium = "0.2"
+p12-keystore = "0.4"
+tower-service = "0.3"
 
 [dev-dependencies]
 pm-testkit.workspace = true

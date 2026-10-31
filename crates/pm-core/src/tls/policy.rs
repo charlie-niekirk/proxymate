@@ -96,7 +96,7 @@ fn normalize(host: &str) -> String {
     host.trim_end_matches('.').to_ascii_lowercase()
 }
 
-fn globs<'a>(patterns: impl IntoIterator<Item = &'a String>) -> Result<GlobSet, PolicyError> {
+pub(crate) fn globs<'a>(patterns: impl IntoIterator<Item = &'a String>) -> Result<GlobSet, PolicyError> {
     let mut set = GlobSetBuilder::new();
     for pattern in patterns {
         let pattern = pattern.trim();

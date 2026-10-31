@@ -30,6 +30,7 @@ Run these from the repo root unless noted.
 | Run the app | `npm run tauri dev` |
 | Run the app with the perf probe | `PROXYMATE_SYNTH_FLOWS=100000 VITE_PM_PERF_PROBE=1 npm run tauri dev`. Scroll and filter timings print in the terminal as `[perf-probe]` |
 | Run the app with Auto Select on | `VITE_PM_AUTO_SELECT=1 npm run tauri dev`. New traffic is selected and inspected without a click (for verifying from a shell) |
+| SOCKS5 through the proxy (M18) | `curl --socks5-hostname 127.0.0.1:9090 --cacert ~/Library/Application\ Support/Proxymate/ca/proxymate-ca.pem https://example.com/` (same port as HTTP) |
 | Headless proxy | `cargo run -p proxymate-cli -- serve [PORT]`. Logs each finished flow. `--mcp[=PORT]` also serves MCP (prints the `claude mcp add` line) |
 | MCP Inspector against the app | `npx @modelcontextprotocol/inspector --cli http://127.0.0.1:9095/mcp --transport http --header "Authorization: Bearer $(sqlite3 ~/Library/Application\ Support/Proxymate/app.sqlite "select json from settings where key='mcp_token'" \| tr -d '"')" --method tools/list` (add `--strict` for schema portability) |
 | Stdio MCP bridge | `proxymate mcp-stdio` (app binary) or `cargo run -p proxymate-cli -- mcp-stdio [--port N] [--no-launch]` (token from `PROXYMATE_DATA_DIR`, else the app's data dir) |
@@ -70,7 +71,8 @@ Run the same checks locally before pushing.
 ```
 crates/pm-model      pure types (serde + specta): FlowSummary, FlowRow, FilterSpec, SortSpec, ViewDelta, ...
 crates/pm-core       headless Engine: proxy/ (h1 forward proxy, mitm.rs: CONNECT, MITM, h2, passthrough, ws.rs: WebSocket
-                     relay, send.rs: Engine::send), tls/ (CA, leaf cache, SSL policy, upstream verifier), recorder
+                     relay, send.rs: Engine::send, dial.rs: the one dialer, socks.rs: SOCKS5 listener, reverse.rs: reverse
+                     proxies), network.rs (M18: Settings › Network compiled, secrets, reverse listeners), tls/ (CA, leaf cache, SSL policy, upstream verifier), recorder
                      (per-flow capture), ingest (event thread), store/ (arena + views, sidebar counts, backend.rs:
                      BlobBackend, segments, sqlite.rs: session tables + SqliteBackend, bodies, details, messages: WS/SSE
                      logs), io/ (content kind, decoding, sse parser, curl, har, session), documents (opened sessions and
@@ -80,14 +82,16 @@ crates/pm-core       headless Engine: proxy/ (h1 forward proxy, mitm.rs: CONNECT
                      (schema-less protobuf), io/objects.rs (MessagePack, CBOR), io/tree.rs (ordered JSON + badges),
                      workflow.rs (M17: delete, annotations, header columns, Repeat), io/snippets.rs (Copy as code)
 crates/pm-platform   OS integration traits; macos/ impls, stub.rs elsewhere: fs (private files), sysproxy (backup +
-                     restore over a ProxyBackend; networksetup), trust (keychain), procinfo (libproc port scan, app
+                     restore over a ProxyBackend; networksetup; the previous proxy), trust (keychain), secrets (M18:
+                     SecretStore: keychain, 0600 file, memory), procinfo (libproc port scan, app
                      bundles, icons), process (kqueue exit wait), netif (if-addrs), simctl and adb (over a
                      command::Runner, faked in tests)
 crates/pm-mcp        MCP server over Arc<Engine> (rmcp, pinned): http.rs (axum endpoint, bearer token, managed start/stop),
                      handler.rs (sessions, read-only, audit, notifications), tools.rs, resources.rs, prompts.rs,
                      bridge.rs (mcp-stdio); tests/mcp.rs drives an rmcp client against a headless engine
-crates/pm-testkit    test upstreams (h1, TLS h1/h2 with a test CA, WS echo, slow SSE, grpc.rs: tonic gRPC + gRPC-web from
-                     proto/shop.proto via build.rs), the body-viewer zoo (fixtures/zoo), proxy, HTTPS, gRPC and WebSocket
+crates/pm-testkit    test upstreams (h1, TLS h1/h2 with a test CA, mTLS, WS echo, slow SSE, grpc.rs: tonic gRPC + gRPC-web
+                     from proto/shop.proto via build.rs), proxies.rs (M18: HTTP proxy with Basic auth, SOCKS5 server and
+                     client), the body-viewer zoo (fixtures/zoo), proxy, HTTPS, gRPC and WebSocket
                      clients; re-export of pm_core::synth
 apps/desktop/src-tauri   thin Tauri adapters (commands.rs), the pmbody:// scheme (body_scheme.rs), window chrome (window.rs),
                          the menu bar (menu.rs: File items reach the UI as `pm-menu` events); updater.rs (tauri-plugin-updater,
@@ -226,7 +230,7 @@ Targets:
 - `Engine::send(RequestSpec, SendOpts)` is the one way Proxymate sends a request itself (Replay, Compose, MCP). It goes through `proxy/exchange.rs` like proxied traffic; the flow's summary gets `sent_by`.
 - Flow ids are per store. The live capture is `LIVE_STORE` (0); every opened session or HAR is a document store. Flow-level Engine methods have `*_in(store, …)` forms (the live-only ones stay for existing callers); view ids already encode their store. UI code reads the active store from `useUi().store` and puts it in query keys (`flowKey(store, id)`).
 - Golden files are in `crates/pm-core/tests/golden/` (cURL, HAR and M17's `snippets/`); rewrite them with `UPDATE_GOLDEN=1 cargo test -p pm-core --lib io::`. The Chrome HAR fixture is `crates/pm-core/tests/fixtures/chrome-devtools.har`.
-- A session's postcard layouts are part of its format: bump `store/sqlite.rs` `VERSION` when `FlowDetail` or the message types change shape. Version 4 (M17: the `annotations` table) and version 3 (M16) still read versions 2 and 1 (`tests/fixtures/session-v1.proxymate`; `a_version_2_session_still_opens` makes a v2 file from a v3 one).
+- A session's postcard layouts are part of its format: bump `store/sqlite.rs` `VERSION` when `FlowDetail` or the message types change shape. Version 5 (M18: `FlowDetail.via`) still reads versions 4 (M17: the `annotations` table) to 1 (`tests/fixtures/session-v1.proxymate`; `a_version_2_session_still_opens` and `a_version_4_session_still_opens` make older files from a current one).
 - postcard can't deserialize internally tagged enums (`#[serde(tag = …)]`). Anything inside `FlowDetail` must not be one, or must serialize by hand like `RuleOrigin`.
 
 **Visual rewrite (M13)**
@@ -236,12 +240,20 @@ Targets:
 - The JSON editor handles its own keys (`[data-json-editor]` counts as editable for global shortcuts); a dialog holding it passes `keepEscapeInEditor` as `onEscapeKeyDown`.
 
 **Protobuf and gRPC (M16)**
-- `ContentKind::Cbor` is the last variant and `FlowDetail.trailers` the last field of `FlowDetail` (session format 3); `grpc_status` is `FlowRow`'s last field. New kinds or detail fields go after them, with a `VERSION` bump.
+- `ContentKind::Cbor` is the last variant and `FlowDetail.via` (M18, session format 5) the last field of `FlowDetail`; `grpc_status` is `FlowRow`'s last field. New kinds or detail fields go after them, with a `VERSION` bump.
 - All decoding is in Rust: `Engine::decode_body_in` serves the inspector's `grpc`/`decoded` viewers and MCP's `get_flow_body` `format: "decoded"` alike. Don't decode protobuf, MessagePack or CBOR in the UI; the mock backend serves the engine's output (`<fixture>.<part>.decoded.json`).
 - Decoded JSON is written by `io/tree.rs` in field order (never via serde_json's sorted `Map`) and travels as text, so 64-bit numbers stay exact. Notes on values are `Badge`s by JSON pointer.
 - Schemas live compiled in `app.sqlite` (`proto_schemas`); mappings are the `proto_mappings` settings row. Any change goes through `Protos::reload`, which bumps the generation the decode cache keys on.
 - `.proto` files compile with `protox` (no `protoc`), in the app and in pm-testkit's `build.rs`. Tests import `pm_testkit::grpc::SHOP_PROTO` with `ProtoImport::Sources`.
 - Trailers-only gRPC responses carry `grpc-status` in the response headers and have no trailers; read the status with `io::grpc::status_code` on the trailers, then the headers.
+
+**Network plumbing (M18)**
+- Every upstream TCP connection goes through `proxy/dial.rs::dial` (DNS override → hop → loop guard); never call `TcpStream::connect` or a hyper-util `HttpConnector` elsewhere in `pm-core`. TLS and client certificates are layered on top in `mitm::Dial`. The trust probe and onboarding server never dial.
+- The plain-HTTP pool is `Engine::pool()` (one per engine, `dial::Connector`); `rebuild_pool()` drops it when the proxy or network settings change. Its responses carry a `dial::PoolInfo` with the route and first-flow timing.
+- Settings › Network is one `network` row (`NetworkSettings`), applied by `Engine::set_network_settings`. Passwords never stay in it: they go to the `SecretStore` and the row keeps `has_password`. Only the app sets `EngineConfig::use_keychain`; tests and the CLI use `<data dir>/secrets.json`, so tests never touch the keychain.
+- `Via` (the route) is recorded with `FlowRecorder::via`, which keeps a reverse proxy's port. The SOCKS5 listener and CONNECT share `mitm::decide`; reverse proxies go through `forward` with `Forward { reverse_port, client_tls }`.
+- A failed upstream request reads its connection task's error (`mitm::Died`) before explaining itself: with TLS 1.3 that is where `certificate_required` shows up.
+- Integration tests are `crates/pm-core/tests/network.rs`, against `pm_testkit::{HttpProxy, Socks5Server, TlsUpstream::mtls}`. A "previous system proxy" test writes a `sysproxy-backup.json` owned by the test process into its own data dir; nothing restores it.
 
 **Workflow (M17)**
 - The table's selection is flow ids (`lib/selection.ts`: ids, or a whole view with exceptions), never positions. Bulk actions take it as a `FlowSelection` (`currentSelection()` in `lib/actions.ts`); `Engine::selected_ids` resolves one in any store.

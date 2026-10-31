@@ -15,9 +15,13 @@
 //! If the upstream handshake fails, the client still gets a handshake and a
 //! readable 502 page per request. If the client refuses our certificate,
 //! the CONNECT is recorded as "likely pinned". Plain HTTP inside a CONNECT
-//! is served as HTTP.
+//! is served as HTTP; anything else is relayed as a recorded tunnel. SOCKS5
+//! connections (`socks.rs`) take the same path after their handshake.
+//!
+//! Every upstream connection is made by `dial.rs` (DNS overrides, upstream
+//! proxies, the loop guard); this module adds TLS and the client
+//! certificate Settings › Network names for the host.
 
-use std::net::IpAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
@@ -32,6 +36,7 @@ use hyper::client::conn::{http1 as client_h1, http2 as client_h2};
 use hyper::ext::ReasonPhrase;
 use hyper::service::service_fn;
 use hyper_util::rt::{TokioExecutor, TokioIo};
+use pm_model::Via;
 use pm_model::{
     BodyInfo, BodyPart, ContentKind, FlowDetail, FlowState, FlowSummary, HttpVersion, RequestHead, ResponseHead,
     Scheme, Timing, TlsInfo, TlsStatus,
@@ -43,16 +48,24 @@ use tokio::net::TcpStream;
 use tokio_rustls::client::TlsStream as ClientTls;
 use tokio_rustls::{LazyConfigAcceptor, TlsConnector};
 
+use super::dial::{DialError, Purpose, dial};
 use super::exchange::{Exchange, Route};
 use super::io::{Counters, Counting, Prefixed};
 use super::{
-    BoxError, CONNECT_TIMEOUT, Origin, ProxyBody, ProxyCtx, Reset, RuleBody, TeeBody, UpstreamBody, content_kind,
-    error_chain, forward, headers, now_ms, record_request, response_head, strip_hop_by_hop, text_response, ws,
+    BoxError, Origin, ProxyBody, ProxyCtx, Reset, RuleBody, TeeBody, UpstreamBody, content_kind, error_chain, forward,
+    headers, now_ms, record_request, response_head, strip_hop_by_hop, text_response, ws,
 };
 use crate::Engine;
 use crate::client::PeerClient;
 use crate::recorder::FlowRecorder;
 use crate::tls::{H2, HTTP11, TlsContext, summarize};
+
+/// A SOCKS client that says nothing for this long after connecting is
+/// relayed as a raw tunnel: the protocol may be one where the server
+/// speaks first.
+const SOCKS_FIRST_BYTES_TIMEOUT: Duration = Duration::from_secs(2);
+/// Enough of a tunnel's first bytes to tell TLS, HTTP and the rest apart.
+const FIRST_PEEK: usize = 24;
 
 /// A tunnel whose client says nothing for this long is dropped.
 const FIRST_BYTES_TIMEOUT: Duration = Duration::from_secs(30);
@@ -70,10 +83,43 @@ const CLIENT_WAIT: Duration = Duration::from_millis(500);
 #[derive(Clone)]
 pub(super) struct Target {
     pub(super) host: String,
-    port: u16,
-    head: RequestHead,
+    pub(super) port: u16,
+    pub(super) head: RequestHead,
     /// The app the CONNECT came from.
-    peer: Arc<PeerClient>,
+    pub(super) peer: Arc<PeerClient>,
+}
+
+/// What a tunnel request (CONNECT or SOCKS5) gets.
+pub(super) enum Decision {
+    /// The certificate wizard's trust check.
+    Probe,
+    /// `proxy.mate` over TLS: refused, so browsers fall back to plain HTTP.
+    Onboarding,
+    Passthrough,
+    Intercept,
+}
+
+/// The SSL lists (and per-app exclusions) decide.
+pub(super) async fn decide(engine: &Engine, target: &Target) -> Decision {
+    if target.host.eq_ignore_ascii_case(crate::trust::PROBE_HOST) {
+        return Decision::Probe;
+    }
+    if target.host.eq_ignore_ascii_case(crate::devices::ONBOARDING_HOST) && target.port != 80 {
+        return Decision::Onboarding;
+    }
+    let policy = engine.ssl_policy();
+    let mut decrypt = policy.intercepts(&target.host);
+    if decrypt
+        && policy.has_app_exclusions()
+        && let Some(app) = target.peer.app(CLIENT_WAIT).await
+    {
+        decrypt = !policy.excludes_app(&app.name, app.bundle_id.as_deref());
+    }
+    if decrypt {
+        Decision::Intercept
+    } else {
+        Decision::Passthrough
+    }
 }
 
 /// Handles a CONNECT request and returns its response; the tunnel itself
@@ -100,47 +146,39 @@ pub(super) async fn connect(ctx: Arc<ProxyCtx>, peer: Arc<PeerClient>, req: Requ
         },
         peer,
     };
-    if target.host.eq_ignore_ascii_case(crate::trust::PROBE_HOST) {
-        let tls = engine.tls();
-        tokio::spawn(async move {
-            if let Ok(upgraded) = hyper::upgrade::on(req).await {
-                trust_probe(&tls, TokioIo::new(upgraded)).await;
-            }
-        });
-        return connection_established();
-    }
-    if target.host.eq_ignore_ascii_case(crate::devices::ONBOARDING_HOST) {
+    match decide(&engine, &target).await {
+        Decision::Probe => {
+            let tls = engine.tls();
+            tokio::spawn(async move {
+                if let Ok(upgraded) = hyper::upgrade::on(req).await {
+                    trust_probe(&tls, TokioIo::new(upgraded)).await;
+                }
+            });
+            connection_established()
+        }
         // Refused rather than served over TLS, so a browser that tries
         // https first falls back to the plain-HTTP setup page.
-        return text_response(
+        Decision::Onboarding => text_response(
             StatusCode::BAD_GATEWAY,
             "Proxymate: open http://proxy.mate/ (plain HTTP) for device setup.\n",
-        );
-    }
-    let policy = engine.ssl_policy();
-    let mut decrypt = policy.intercepts(&target.host);
-    if decrypt
-        && policy.has_app_exclusions()
-        && let Some(app) = target.peer.app(CLIENT_WAIT).await
-    {
-        decrypt = !policy.excludes_app(&app.name, app.bundle_id.as_deref());
-    }
-    if !decrypt {
-        return passthrough(&engine, req, target).await;
-    }
-    drop(engine);
-    tokio::spawn(async move {
-        if let Ok(upgraded) = hyper::upgrade::on(req).await {
-            intercept(ctx, TokioIo::new(upgraded), target).await;
+        ),
+        Decision::Passthrough => passthrough(&engine, req, target).await,
+        Decision::Intercept => {
+            drop(engine);
+            tokio::spawn(async move {
+                if let Ok(upgraded) = hyper::upgrade::on(req).await {
+                    intercept(ctx, TokioIo::new(upgraded), target, false).await;
+                }
+            });
+            connection_established()
         }
-    });
-    connection_established()
+    }
 }
 
 /// Answers the certificate wizard's trust check: a TLS handshake with a
 /// leaf for [`crate::trust::PROBE_HOST`], then one canned response. Nothing
 /// is dialled and nothing recorded.
-async fn trust_probe<S>(tls: &TlsContext, io: S)
+pub(super) async fn trust_probe<S>(tls: &TlsContext, io: S)
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
@@ -174,19 +212,10 @@ fn connection_established() -> Response<ProxyBody> {
 /// gets a 502.
 async fn passthrough(engine: &Arc<Engine>, req: Request<Incoming>, target: Target) -> Response<ProxyBody> {
     let recorder = record_connect(engine, &target, TlsStatus::Passthrough, None);
-    let (tcp, timing) = match dial_tcp(&target.host, target.port).await {
-        Ok(dialled) => dialled,
-        Err(message) => {
-            if let Some(recorder) = &recorder {
-                recorder.fail(message.clone());
-            }
-            return text_response(StatusCode::BAD_GATEWAY, &format!("Proxymate: {message}\n"));
-        }
+    let upstream = match open_tunnel(engine, &target, recorder.as_ref()).await {
+        Ok(upstream) => upstream,
+        Err(err) => return text_response(StatusCode::BAD_GATEWAY, &format!("Proxymate: {err}\n")),
     };
-    if let Some(recorder) = &recorder {
-        recorder.connection_timing(&timing);
-        recorder.response(connect_response_head(), ContentKind::None);
-    }
     tokio::spawn(async move {
         let Ok(upgraded) = hyper::upgrade::on(req).await else {
             if let Some(recorder) = &recorder {
@@ -194,42 +223,100 @@ async fn passthrough(engine: &Arc<Engine>, req: Request<Incoming>, target: Targe
             }
             return;
         };
-        let counters = Arc::new(Counters::default());
-        let mut client = Counting::new(TokioIo::new(upgraded), counters.clone());
-        let mut upstream = tcp;
-        let mut ticker = tokio::time::interval(TUNNEL_PROGRESS_INTERVAL);
-        let relay = tokio::io::copy_bidirectional(&mut client, &mut upstream);
-        tokio::pin!(relay);
-        loop {
-            tokio::select! {
-                _ = &mut relay => break,
-                _ = ticker.tick() => {
-                    if let Some(recorder) = &recorder {
-                        recorder.tunnel_progress(counters.read(), counters.written());
-                    }
-                }
-            }
-        }
-        if let Some(recorder) = &recorder {
-            recorder.tunnel_closed(counters.read(), counters.written());
-        }
+        relay(recorder, TokioIo::new(upgraded), upstream).await;
     });
     connection_established()
 }
 
-/// The decrypting path, run on the upgraded CONNECT stream.
-async fn intercept<S>(ctx: Arc<ProxyCtx>, mut io: S, target: Target)
+/// Dials a tunnel's upstream and records the outcome on its flow.
+pub(super) async fn open_tunnel(
+    engine: &Arc<Engine>,
+    target: &Target,
+    recorder: Option<&FlowRecorder>,
+) -> Result<TcpStream, DialError> {
+    match dial(engine, &target.host, target.port, Purpose::Tunnel).await {
+        Ok(dialed) => {
+            if let Some(recorder) = recorder {
+                recorder.connection_timing(&dialed.timing);
+                recorder.via(&dialed.via);
+                recorder.response(connect_response_head(), ContentKind::None);
+            }
+            Ok(dialed.stream)
+        }
+        Err(err) => {
+            if let Some(recorder) = recorder {
+                recorder.fail(err.message.clone());
+            }
+            Err(err)
+        }
+    }
+}
+
+/// Relays a tunnel byte for byte, reporting its progress.
+pub(super) async fn relay<C>(recorder: Option<FlowRecorder>, client: C, mut upstream: TcpStream)
+where
+    C: AsyncRead + AsyncWrite + Unpin,
+{
+    let counters = Arc::new(Counters::default());
+    let mut client = Counting::new(client, counters.clone());
+    let mut ticker = tokio::time::interval(TUNNEL_PROGRESS_INTERVAL);
+    let relay = tokio::io::copy_bidirectional(&mut client, &mut upstream);
+    tokio::pin!(relay);
+    loop {
+        tokio::select! {
+            _ = &mut relay => break,
+            _ = ticker.tick() => {
+                if let Some(recorder) = &recorder {
+                    recorder.tunnel_progress(counters.read(), counters.written());
+                }
+            }
+        }
+    }
+    if let Some(recorder) = &recorder {
+        recorder.tunnel_closed(counters.read(), counters.written());
+    }
+}
+
+/// A tunnel that turned out to be neither TLS nor HTTP: dialled now and
+/// relayed as one tunnel flow. `io` still holds the bytes read so far.
+async fn raw_tunnel<S>(ctx: &ProxyCtx, io: S, target: &Target)
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let Some(engine) = ctx.engine.upgrade() else {
+        return;
+    };
+    let recorder = record_connect(&engine, target, TlsStatus::Passthrough, None);
+    if let Ok(upstream) = open_tunnel(&engine, target, recorder.as_ref()).await {
+        drop(engine);
+        relay(recorder, io, upstream).await;
+    }
+}
+
+/// The decrypting path, run on the upgraded CONNECT stream or a SOCKS5
+/// connection after its handshake (`socks`: a silent client is relayed
+/// raw rather than dropped).
+pub(super) async fn intercept<S>(ctx: Arc<ProxyCtx>, mut io: S, target: Target, socks: bool)
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
-    let mut first = [0u8; 1];
-    let n = match tokio::time::timeout(FIRST_BYTES_TIMEOUT, io.read(&mut first)).await {
+    let mut first = [0u8; FIRST_PEEK];
+    let wait = if socks {
+        SOCKS_FIRST_BYTES_TIMEOUT
+    } else {
+        FIRST_BYTES_TIMEOUT
+    };
+    let n = match tokio::time::timeout(wait, io.read(&mut first)).await {
         Ok(Ok(n)) if n > 0 => n,
+        Err(_) if socks => return raw_tunnel(&ctx, io, &target).await,
         _ => return,
     };
     let io = Prefixed::new(Bytes::copy_from_slice(&first[..n]), io);
     if first[0] != 0x16 {
-        return serve_plain(ctx, io, target).await;
+        if super::sniff::classify(&first[..n]).is_http() {
+            return serve_plain(ctx, io, target).await;
+        }
+        return raw_tunnel(&ctx, io, &target).await;
     }
 
     let acceptor = LazyConfigAcceptor::new(rustls::server::Acceptor::default(), io);
@@ -259,6 +346,7 @@ where
     drop((engine, policy));
 
     let dial = Dial {
+        engine: ctx.engine.clone(),
         tls: tls.clone(),
         host: target.host.clone(),
         port: target.port,
@@ -313,15 +401,16 @@ where
     let handshake_done = Instant::now();
     let client_h2 = client.get_ref().1.alpn_protocol() == Some(H2);
 
-    let (sender, failure, timing) = match upstream {
+    let (sender, failure, timing, via) = match upstream {
         Ok(up) => {
             let timing = up.timing.clone();
+            let via = up.via.clone();
             match handshake(up).await {
-                Ok(sender) => (Some(sender), None, Some(timing)),
-                Err(message) => (None, Some(message), Some(timing)),
+                Ok(sender) => (Some(sender), None, Some(timing), Some(via)),
+                Err(message) => (None, Some(message), Some(timing), Some(via)),
             }
         }
-        Err(failure) => (None, Some(failure.message), Some(failure.timing)),
+        Err(failure) => (None, Some(failure.message), Some(failure.timing), failure.via),
     };
     let conn = Arc::new(MitmConn {
         ctx,
@@ -330,7 +419,7 @@ where
         info,
         failure,
         client_h2,
-        slot: tokio::sync::Mutex::new(Slot { sender, timing }),
+        slot: tokio::sync::Mutex::new(Slot { sender, timing, via }),
         requests: AtomicU32::new(0),
     });
 
@@ -425,7 +514,7 @@ fn record_pinned(ctx: &ProxyCtx, target: &Target, info: TlsInfo, reason: &str) {
 }
 
 /// Records the CONNECT itself (tunnels and connection-level failures).
-fn record_connect(
+pub(super) fn record_connect(
     engine: &Arc<Engine>,
     target: &Target,
     tls: TlsStatus,
@@ -469,6 +558,7 @@ fn record_connect(
         timing: Timing::default(),
         rules: Default::default(),
         trailers: None,
+        via: None,
     };
     target.peer.begin_flow(engine, summary, detail)
 }
@@ -502,7 +592,7 @@ where
             match format!("http://{authority}{pq}").parse::<Uri>() {
                 Ok(uri) => {
                     *req.uri_mut() = uri;
-                    forward(&ctx, &peer, req).await
+                    forward(&ctx, &peer, req, super::Forward::default()).await
                 }
                 Err(_) => Ok::<_, Reset>(text_response(
                     StatusCode::BAD_REQUEST,
@@ -528,6 +618,7 @@ fn bracket(host: &str) -> String {
 
 /// How to (re)connect to the upstream of one intercepted connection.
 struct Dial {
+    engine: std::sync::Weak<Engine>,
     tls: Arc<TlsContext>,
     host: String,
     port: u16,
@@ -543,24 +634,43 @@ struct Upstream {
     cipher: String,
     chain: Vec<pm_model::CertSummary>,
     timing: Timing,
+    via: Via,
 }
 
 struct DialFailure {
     message: String,
     chain: Vec<pm_model::CertSummary>,
     timing: Timing,
+    via: Option<Via>,
 }
 
 impl Dial {
     async fn connect(&self) -> Result<Upstream, Box<DialFailure>> {
-        let (tcp, mut timing) = dial_tcp(&self.host, self.port).await.map_err(|message| {
+        let fail = |message: String| {
             Box::new(DialFailure {
                 message,
                 chain: Vec::new(),
                 timing: Timing::default(),
+                via: None,
             })
-        })?;
-        let (config, recorder) = self.tls.client_config(self.offered.clone(), self.insecure);
+        };
+        let Some(engine) = self.engine.upgrade() else {
+            return Err(fail("Proxymate is shutting down".into()));
+        };
+        let dialed = dial(&engine, &self.host, self.port, Purpose::Tunnel)
+            .await
+            .map_err(|e| fail(e.message))?;
+        let (tcp, mut timing, mut via) = (dialed.stream, dialed.timing, dialed.via);
+        let identity =
+            engine
+                .network()
+                .compiled()
+                .identity(&self.host, engine.network().secrets(), self.tls.provider());
+        drop(engine);
+        via.client_cert = identity.as_ref().map(|i| i.subject.clone());
+        let (config, recorder) =
+            self.tls
+                .client_config(self.offered.clone(), self.insecure, identity.map(|i| i.key.clone()));
         let name = self.sni.as_deref().unwrap_or(&self.host);
         let server_name = match ServerName::try_from(name.to_owned()) {
             Ok(name) => name,
@@ -569,6 +679,7 @@ impl Dial {
                     message: format!("{name:?} is not a valid TLS server name"),
                     chain: Vec::new(),
                     timing,
+                    via: Some(via),
                 }));
             }
         };
@@ -584,6 +695,7 @@ impl Dial {
                     message: upstream_tls_error(&self.host, &err),
                     chain: chain(),
                     timing,
+                    via: Some(via),
                 }));
             }
             Err(_) => {
@@ -591,6 +703,7 @@ impl Dial {
                     message: format!("The TLS handshake with {} timed out.", self.host),
                     chain: chain(),
                     timing,
+                    via: Some(via),
                 }));
             }
         };
@@ -605,36 +718,9 @@ impl Dial {
             chain: chain(),
             stream,
             timing,
+            via,
         })
     }
-}
-
-/// DNS and TCP connect, timed separately.
-async fn dial_tcp(host: &str, port: u16) -> Result<(TcpStream, Timing), String> {
-    let mut timing = Timing::default();
-    let started = Instant::now();
-    let addrs: Vec<std::net::SocketAddr> = match host.parse::<IpAddr>() {
-        Ok(ip) => vec![(ip, port).into()],
-        Err(_) => {
-            let lookup = tokio::net::lookup_host((host, port));
-            let addrs = match tokio::time::timeout(CONNECT_TIMEOUT, lookup).await {
-                Ok(Ok(addrs)) => addrs.collect(),
-                Ok(Err(err)) => return Err(format!("can't resolve {host}: {err}")),
-                Err(_) => return Err(format!("resolving {host} timed out")),
-            };
-            timing.dns_ms = Some(ms(started.elapsed()));
-            addrs
-        }
-    };
-    let started = Instant::now();
-    let tcp = match tokio::time::timeout(CONNECT_TIMEOUT, TcpStream::connect(&addrs[..])).await {
-        Ok(Ok(tcp)) => tcp,
-        Ok(Err(err)) => return Err(format!("can't reach {host}:{port}: {err}")),
-        Err(_) => return Err(format!("connecting to {host}:{port} timed out")),
-    };
-    timing.connect_ms = Some(ms(started.elapsed()));
-    let _ = tcp.set_nodelay(true);
-    Ok((tcp, timing))
 }
 
 /// A readable reason for an upstream handshake failure.
@@ -650,6 +736,7 @@ fn upstream_tls_error(host: &str, err: &std::io::Error) -> String {
         )
     };
     match tls {
+        TlsError::AlertReceived(rustls::AlertDescription::CertificateRequired) => certificate_required(host),
         TlsError::InvalidCertificate(CertificateError::UnknownIssuer) => untrusted(""),
         TlsError::InvalidCertificate(CertificateError::Expired | CertificateError::ExpiredContext { .. }) => {
             format!("{host}'s certificate has expired.")
@@ -675,6 +762,51 @@ fn upstream_tls_error(host: &str, err: &std::io::Error) -> String {
     }
 }
 
+fn certificate_required(host: &str) -> String {
+    format!("{host} asks for a client certificate. Add one for {host} in Settings › Network › Client Certificates.")
+}
+
+/// Why an upstream connection's task ended, once it has. A request that
+/// finds the connection already gone reports this rather than hyper's
+/// "channel closed".
+pub(super) type Died = Arc<std::sync::OnceLock<String>>;
+
+fn spawn_conn<F>(conn: F) -> Died
+where
+    F: std::future::Future<Output = Result<(), hyper::Error>> + Send + 'static,
+{
+    let died = Died::default();
+    let slot = died.clone();
+    tokio::spawn(async move {
+        if let Err(err) = conn.await {
+            let _ = slot.set(error_chain(&err));
+        }
+    });
+    died
+}
+
+/// A failed upstream request, explained when the reason is known: with
+/// TLS 1.3 a server's demand for a client certificate only shows up once
+/// the first request is sent, and often as the connection's own error.
+async fn request_failed(host: &str, err: hyper::Error, died: &Died) -> String {
+    let mut chain = error_chain(&err);
+    if err.is_closed() || err.is_canceled() || chain.contains("channel closed") {
+        // The connection task records its error right after it ends.
+        for _ in 0..20 {
+            if let Some(why) = died.get() {
+                chain = why.clone();
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
+    if chain.contains("CertificateRequired") {
+        certificate_required(host)
+    } else {
+        format!("The upstream request failed: {chain}")
+    }
+}
+
 fn protocol_name(v: rustls::ProtocolVersion) -> String {
     match v {
         rustls::ProtocolVersion::TLSv1_3 => "TLSv1.3".into(),
@@ -689,15 +821,15 @@ fn ms(d: Duration) -> f64 {
 
 /// An upstream HTTP connection: h1 or h2, as negotiated.
 enum Sender {
-    H1(client_h1::SendRequest<UpstreamBody>),
-    H2(client_h2::SendRequest<UpstreamBody>),
+    H1(client_h1::SendRequest<UpstreamBody>, Died),
+    H2(client_h2::SendRequest<UpstreamBody>, Died),
 }
 
 impl Sender {
     fn is_closed(&self) -> bool {
         match self {
-            Sender::H1(s) => s.is_closed(),
-            Sender::H2(s) => s.is_closed(),
+            Sender::H1(s, _) => s.is_closed(),
+            Sender::H2(s, _) => s.is_closed(),
         }
     }
 }
@@ -710,8 +842,7 @@ async fn handshake(up: Upstream) -> Result<Sender, String> {
             .handshake(io)
             .await
             .map_err(|e| format!("HTTP/2 handshake with the upstream failed: {}", error_chain(&e)))?;
-        tokio::spawn(conn);
-        Ok(Sender::H2(sender))
+        Ok(Sender::H2(sender, spawn_conn(conn)))
     } else {
         let (sender, conn) = client_h1::Builder::new()
             .preserve_header_case(true)
@@ -720,8 +851,7 @@ async fn handshake(up: Upstream) -> Result<Sender, String> {
             .map_err(|e| format!("HTTP/1.1 handshake with the upstream failed: {}", error_chain(&e)))?;
         // A WebSocket handshake takes the connection over; the next request
         // dials a new one.
-        tokio::spawn(conn.with_upgrades());
-        Ok(Sender::H1(sender))
+        Ok(Sender::H1(sender, spawn_conn(conn.with_upgrades())))
     }
 }
 
@@ -742,6 +872,8 @@ struct Slot {
     sender: Option<Sender>,
     /// Setup timing of the current connection, until a flow claims it.
     timing: Option<Timing>,
+    /// The current connection's route, for every flow on it.
+    via: Option<Via>,
 }
 
 impl MitmConn {
@@ -841,10 +973,13 @@ impl MitmConn {
         let mut slot = self.slot.lock().await;
         if let Some(failure) = &self.failure {
             // No upstream: the flow fails with why, after the setup timing.
-            if let Some(recorder) = recorder
-                && let Some(timing) = slot.timing.take()
-            {
-                recorder.connection_timing(&timing);
+            if let Some(recorder) = recorder {
+                if let Some(timing) = slot.timing.take() {
+                    recorder.connection_timing(&timing);
+                }
+                if let Some(via) = &slot.via {
+                    recorder.via(via);
+                }
             }
             return Err(failure.clone());
         }
@@ -854,6 +989,7 @@ impl MitmConn {
                 return Err("The upstream switched HTTP versions when Proxymate reconnected.".into());
             }
             slot.timing = Some(up.timing.clone());
+            slot.via = Some(up.via.clone());
             slot.sender = Some(handshake(up).await?);
         }
         let timing = slot.timing.take().unwrap_or(Timing {
@@ -862,26 +998,36 @@ impl MitmConn {
         });
         if let Some(recorder) = recorder {
             recorder.connection_timing(&timing);
+            if let Some(via) = &slot.via {
+                recorder.via(via);
+            }
         }
-        let failed = |e: hyper::Error| format!("The upstream request failed: {}", error_chain(&e));
+        let host = &self.target.host;
         match slot.sender.as_mut() {
-            Some(Sender::H1(sender)) => {
+            Some(Sender::H1(sender, died)) => {
+                let died = died.clone();
                 parts.uri = Uri::from(pq);
                 if !parts.headers.contains_key(header::HOST)
                     && let Ok(host) = HeaderValue::from_str(authority.as_str())
                 {
                     parts.headers.insert(header::HOST, host);
                 }
-                sender.ready().await.map_err(failed)?;
+                if let Err(err) = sender.ready().await {
+                    return Err(request_failed(host, err, &died).await);
+                }
                 let response = sender.send_request(Request::from_parts(parts, body));
                 drop(slot);
                 if let Some(recorder) = recorder {
                     recorder.request_sent();
                 }
-                response.await.map_err(failed)
+                match response.await {
+                    Ok(response) => Ok(response),
+                    Err(err) => Err(request_failed(host, err, &died).await),
+                }
             }
-            Some(Sender::H2(sender)) => {
+            Some(Sender::H2(sender, died)) => {
                 let mut sender = sender.clone();
+                let died = died.clone();
                 drop(slot);
                 parts.uri = Uri::builder()
                     .scheme("https")
@@ -891,14 +1037,16 @@ impl MitmConn {
                     .map_err(|e| e.to_string())?;
                 // :authority carries it in h2.
                 parts.headers.remove(header::HOST);
-                sender.ready().await.map_err(failed)?;
+                if let Err(err) = sender.ready().await {
+                    return Err(request_failed(host, err, &died).await);
+                }
                 if let Some(recorder) = recorder {
                     recorder.request_sent();
                 }
-                sender
-                    .send_request(Request::from_parts(parts, body))
-                    .await
-                    .map_err(failed)
+                match sender.send_request(Request::from_parts(parts, body)).await {
+                    Ok(response) => Ok(response),
+                    Err(err) => Err(request_failed(host, err, &died).await),
+                }
             }
             None => Err("no upstream connection".into()),
         }
@@ -929,23 +1077,35 @@ fn request_authority(req: &Request<Incoming>, target: &Target) -> Authority {
         .unwrap_or_else(|| Authority::from_static("unknown"))
 }
 
-/// Sends one request over a new TLS connection to `host:port` (HTTP/1.1),
-/// for requests a rule or breakpoint sent to another HTTPS origin.
-#[allow(clippy::too_many_arguments)]
-pub(super) async fn send_direct(
+/// A new HTTP/1.1 connection to `host:port` (over TLS if `tls`) for one
+/// request: a WebSocket handshake, or a request a rule or breakpoint sent
+/// to another origin. Records its timing and route.
+pub(super) async fn open_h1(
     ctx: &ProxyCtx,
+    tls: bool,
     host: &str,
     port: u16,
-    mut parts: http::request::Parts,
-    pq: PathAndQuery,
-    authority: Authority,
-    body: UpstreamBody,
     recorder: Option<&FlowRecorder>,
-) -> Result<Response<Incoming>, String> {
+) -> Result<(client_h1::SendRequest<UpstreamBody>, Died), String> {
     let Some(engine) = ctx.engine.upgrade() else {
         return Err("Proxymate is shutting down".into());
     };
+    if !tls {
+        let dialed = dial(&engine, host, port, Purpose::Tunnel).await?;
+        drop(engine);
+        if let Some(recorder) = recorder {
+            recorder.connection_timing(&dialed.timing);
+            recorder.via(&dialed.via);
+        }
+        let (sender, conn) = client_h1::Builder::new()
+            .preserve_header_case(true)
+            .handshake(TokioIo::new(dialed.stream))
+            .await
+            .map_err(|e| format!("HTTP/1.1 handshake with the upstream failed: {}", error_chain(&e)))?;
+        return Ok((sender, spawn_conn(conn.with_upgrades())));
+    }
     let dial = Dial {
+        engine: ctx.engine.clone(),
         tls: engine.tls(),
         host: host.to_owned(),
         port,
@@ -957,10 +1117,24 @@ pub(super) async fn send_direct(
     let up = dial.connect().await.map_err(|f| f.message)?;
     if let Some(recorder) = recorder {
         recorder.connection_timing(&up.timing);
+        recorder.via(&up.via);
     }
-    let Sender::H1(mut sender) = handshake(up).await? else {
-        return Err("the upstream picked HTTP/2 without being offered it".into());
-    };
+    match handshake(up).await? {
+        Sender::H1(sender, died) => Ok((sender, died)),
+        Sender::H2(..) => Err("the upstream picked HTTP/2 without being offered it".into()),
+    }
+}
+
+/// Sends `parts` in origin form over a connection from [`open_h1`].
+pub(super) async fn send_once(
+    (sender, died): &mut (client_h1::SendRequest<UpstreamBody>, Died),
+    host: &str,
+    mut parts: http::request::Parts,
+    pq: PathAndQuery,
+    authority: Authority,
+    body: UpstreamBody,
+    recorder: Option<&FlowRecorder>,
+) -> Result<Response<Incoming>, String> {
     parts.uri = Uri::from(pq);
     parts.version = http::Version::HTTP_11;
     if !parts.headers.contains_key(header::HOST)
@@ -968,15 +1142,33 @@ pub(super) async fn send_direct(
     {
         parts.headers.insert(header::HOST, value);
     }
-    let failed = |e: hyper::Error| format!("The upstream request failed: {}", error_chain(&e));
-    sender.ready().await.map_err(failed)?;
+    if let Err(err) = sender.ready().await {
+        return Err(request_failed(host, err, died).await);
+    }
     if let Some(recorder) = recorder {
         recorder.request_sent();
     }
-    sender
-        .send_request(Request::from_parts(parts, body))
-        .await
-        .map_err(failed)
+    match sender.send_request(Request::from_parts(parts, body)).await {
+        Ok(response) => Ok(response),
+        Err(err) => Err(request_failed(host, err, died).await),
+    }
+}
+
+/// Sends one request over a new TLS connection to `host:port` (HTTP/1.1),
+/// for requests a rule or breakpoint sent to another HTTPS origin.
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn send_direct(
+    ctx: &ProxyCtx,
+    host: &str,
+    port: u16,
+    parts: http::request::Parts,
+    pq: PathAndQuery,
+    authority: Authority,
+    body: UpstreamBody,
+    recorder: Option<&FlowRecorder>,
+) -> Result<Response<Incoming>, String> {
+    let mut sender = open_h1(ctx, true, host, port, recorder).await?;
+    send_once(&mut sender, host, parts, pq, authority, body, recorder).await
 }
 
 /// The 502 page for an upstream that couldn't be reached securely.

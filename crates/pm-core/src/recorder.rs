@@ -139,6 +139,17 @@ impl FlowRecorder {
         t.reused_connection = timing.reused_connection;
     }
 
+    /// How the upstream connection was made (M18). A reverse proxy's port,
+    /// set when the request arrived, is kept.
+    pub fn via(&self, via: &pm_model::Via) {
+        let mut state = self.flow.state.lock();
+        let reverse_port = state.detail.via.as_ref().and_then(|v| v.reverse_port);
+        state.detail.via = Some(pm_model::Via {
+            reverse_port: via.reverse_port.or(reverse_port),
+            ..via.clone()
+        });
+    }
+
     /// Marks the request as handed to the upstream, which starts TTFB.
     pub fn request_sent(&self) {
         self.flow.state.lock().request_sent = Some(Instant::now());

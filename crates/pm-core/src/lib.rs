@@ -10,6 +10,7 @@ mod ingest;
 mod integration;
 pub mod io;
 pub mod mcp;
+mod network;
 mod notify;
 mod protos;
 pub mod proxy;

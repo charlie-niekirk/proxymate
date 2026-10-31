@@ -273,7 +273,7 @@ function ResponsePane({ flow, detail }: Inspected & { detail: FlowDetail_Seriali
         <TlsView flow={flow} detail={detail} />
       </ScrollTab>
       <ScrollTab value="Timing">
-        <TimingView flow={flow} timing={detail.timing} />
+        <TimingView flow={flow} timing={detail.timing} via={detail.via} />
       </ScrollTab>
     </MessageTabs>
   );
@@ -363,6 +363,12 @@ function FailureBanner({ help, host }: { help: FailureHelp; host: string }) {
               return (
                 <Button key={action} variant="outline" size="xs" className="text-foreground" onClick={() => openSettings("advanced")}>
                   Timeouts…
+                </Button>
+              );
+            case "network-settings":
+              return (
+                <Button key={action} variant="outline" size="xs" className="text-foreground" onClick={() => openSettings("network")}>
+                  Network settings…
                 </Button>
               );
             case "tls-settings":

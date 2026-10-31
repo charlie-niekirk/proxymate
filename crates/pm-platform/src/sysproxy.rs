@@ -210,6 +210,52 @@ impl SystemProxy {
     }
 }
 
+/// The proxy the system used before Proxymate (M18's "use the proxy that
+/// was set before Proxymate"): the web and secure web entries of the first
+/// service that had one, with its bypass list.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PreviousProxy {
+    /// For plain HTTP.
+    pub web: Option<(String, u16)>,
+    /// For HTTPS and other tunnels.
+    pub secure: Option<(String, u16)>,
+    pub bypass: Vec<String>,
+}
+
+impl PreviousProxy {
+    /// The first of `services` (in order) with a proxy that isn't `ours`.
+    pub fn from_services(services: &[ServiceSettings], ours: (&str, u16)) -> Option<PreviousProxy> {
+        let usable = |p: &ProxySetting| {
+            (p.enabled && !p.server.is_empty() && p.port != 0 && !p.points_at(ours.0, ours.1))
+                .then(|| (p.server.clone(), p.port))
+        };
+        services.iter().find_map(|s| {
+            let previous = PreviousProxy {
+                web: usable(&s.web),
+                secure: usable(&s.secure),
+                bypass: s.bypass.clone(),
+            };
+            (previous.web.is_some() || previous.secure.is_some()).then_some(previous)
+        })
+    }
+}
+
+impl SystemProxy {
+    /// What the system proxy was before we pointed it at `host:port`: the
+    /// backup while we own the setting, else what is set now (read only).
+    pub fn previous(&self, host: &str, port: u16) -> Result<Option<PreviousProxy>, PlatformError> {
+        if let Some(backup) = read_backup(&self.backup_path)? {
+            return Ok(PreviousProxy::from_services(
+                &backup.services,
+                (&backup.host, backup.port),
+            ));
+        }
+        let services = self.backend.active_services()?;
+        let settings = parallel(&services, |s| self.backend.read(s))?;
+        Ok(PreviousProxy::from_services(&settings, (host, port)))
+    }
+}
+
 pub fn read_backup(path: &Path) -> Result<Option<Backup>, PlatformError> {
     match std::fs::read(path) {
         Ok(bytes) => Ok(Some(serde_json::from_slice(&bytes)?)),
@@ -345,6 +391,42 @@ mod tests {
             server: "proxy.corp".into(),
             port: 3128,
         }
+    }
+
+    #[test]
+    fn the_previous_proxy_comes_from_the_backup_then_the_live_settings() {
+        let corp = ProxySetting {
+            enabled: true,
+            server: "proxy.corp".into(),
+            port: 3128,
+        };
+        let fake = Fake::with(&[("Wi-Fi", corp.clone())], &["Wi-Fi"]);
+        let dir = std::env::temp_dir().join(format!("pm-previous-{}", std::process::id()));
+        let proxy = SystemProxy::new(Box::new(fake.clone()), dir.join("backup.json"));
+        let expected = PreviousProxy {
+            web: Some(("proxy.corp".into(), 3128)),
+            secure: Some(("proxy.corp".into(), 3128)),
+            bypass: vec!["*.corp".into()],
+        };
+        assert_eq!(proxy.previous("127.0.0.1", 9090).unwrap(), Some(expected.clone()));
+        proxy.enable("127.0.0.1", 9090).unwrap();
+        // Now the live setting is us; the backup still knows the corporate one.
+        assert_eq!(proxy.previous("127.0.0.1", 9090).unwrap(), Some(expected));
+        proxy.restore().unwrap();
+        let ours = Fake::with(
+            &[(
+                "Wi-Fi",
+                ProxySetting {
+                    enabled: true,
+                    server: "127.0.0.1".into(),
+                    port: 9090,
+                },
+            )],
+            &["Wi-Fi"],
+        );
+        let proxy = SystemProxy::new(Box::new(ours), dir.join("none.json"));
+        assert_eq!(proxy.previous("127.0.0.1", 9090).unwrap(), None);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
