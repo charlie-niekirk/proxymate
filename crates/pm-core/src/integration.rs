@@ -28,7 +28,7 @@ pub type SidebarSink = Box<dyn FnMut(SidebarSnapshot) -> bool + Send>;
 pub(crate) struct Platform {
     pub clients: ClientResolver,
     trust: Box<dyn TrustStore>,
-    sysproxy: SystemProxy,
+    sysproxy: Arc<SystemProxy>,
     sysproxy_error: Mutex<Option<String>>,
     /// `<exe> --sysproxy-guardian <pid> --data-dir <dir>` is spawned the
     /// first time the system proxy is turned on, if set.
@@ -42,11 +42,16 @@ pub(crate) struct Platform {
 }
 
 impl Platform {
+    /// For reading the system proxy off the async threads.
+    pub fn sysproxy_handle(&self) -> Arc<SystemProxy> {
+        self.sysproxy.clone()
+    }
+
     pub fn new(root: &Path, guardian_exe: Option<PathBuf>, devices: DeviceRegistry) -> Platform {
         Platform {
             clients: ClientResolver::new(pm_platform::procinfo::system()),
             trust: pm_platform::trust::system(),
-            sysproxy: SystemProxy::system(root.join(SYSPROXY_BACKUP_FILE)),
+            sysproxy: Arc::new(SystemProxy::system(root.join(SYSPROXY_BACKUP_FILE))),
             sysproxy_error: Mutex::new(None),
             guardian_exe,
             guardian_spawned: AtomicBool::new(false),

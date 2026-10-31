@@ -8,15 +8,20 @@
 //! own address, or `proxy.mate`) get the [`onboarding`] server, which also
 //! stops them looping. WebSocket handshakes on either path switch to the
 //! [`ws`] relay; every other request goes through [`exchange`], which
-//! applies the rules.
+//! applies the rules. A leading `0x05` is a SOCKS5 client ([`socks`]),
+//! which joins the CONNECT path after its handshake. [`reverse`] runs the
+//! reverse proxy listeners. Every upstream connection is made by [`dial`].
 
 mod body;
+mod dial;
 mod exchange;
 mod io;
 mod mitm;
 pub mod onboarding;
+pub(crate) mod reverse;
 mod send;
 mod sniff;
+mod socks;
 mod tee;
 mod ws;
 
@@ -34,7 +39,6 @@ use http_body_util::{BodyExt, Full};
 use hyper::body::Incoming;
 use hyper::service::service_fn;
 use hyper_util::client::legacy::Client;
-use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use pm_model::{
     BodyInfo, BodyPart, ContentKind, FlowDetail, FlowState, FlowSummary, Header, HttpVersion, RequestHead,
@@ -62,9 +66,7 @@ type BoxError = Box<dyn StdError + Send + Sync>;
 type ProxyBody = UnsyncBoxBody<Bytes, BoxError>;
 /// A request body on its way upstream, recorded as it goes.
 type UpstreamBody = TeeBody<RuleBody>;
-type UpstreamClient = Client<HttpConnector, UpstreamBody>;
-
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+pub(crate) type UpstreamClient = Client<dial::Connector, UpstreamBody>;
 
 /// A service error: hyper closes the connection (h1) or resets the stream
 /// (h2) instead of answering. How a `Block` rule's reset and a
@@ -137,14 +139,9 @@ pub(crate) async fn bind(config: &ProxyConfig) -> std::io::Result<TcpListener> {
 /// Starts the accept loop on the current tokio runtime.
 pub(crate) fn spawn(engine: Weak<Engine>, listener: TcpListener) -> std::io::Result<ProxyHandle> {
     let addr = listener.local_addr()?;
-    let pool = engine.upgrade().map(|e| e.proxy_settings()).unwrap_or_default();
     let (stop_tx, mut stop_rx) = watch::channel(());
     let (closed_tx, closed) = oneshot::channel();
-    let ctx = Arc::new(ProxyCtx {
-        engine,
-        client: upstream_client(&pool),
-        addr,
-    });
+    let ctx = Arc::new(ProxyCtx { engine, addr });
     tokio::spawn(async move {
         loop {
             tokio::select! {
@@ -170,24 +167,18 @@ pub(crate) fn spawn(engine: Weak<Engine>, listener: TcpListener) -> std::io::Res
 
 struct ProxyCtx {
     engine: Weak<Engine>,
-    client: UpstreamClient,
     /// The listener's own address, to refuse requests that would loop.
     addr: SocketAddr,
 }
 
-/// The upstream client talks to origin servers directly. hyper-util's
-/// connector never consults `HTTP_PROXY` or the system proxy settings, which
-/// matters: once Proxymate is the system proxy (M4), using it here would
-/// send every request back to ourselves.
-fn upstream_client(settings: &pm_model::ProxySettings) -> UpstreamClient {
-    let mut connector = HttpConnector::new();
-    connector.set_nodelay(true);
-    connector.set_connect_timeout(Some(Duration::from_secs(settings.connect_timeout_secs.into())));
+/// The pooled plain-HTTP client (`Engine::pool`). Its connections are
+/// made by the dialer, so upstream proxies and DNS overrides apply.
+pub(crate) fn upstream_client(engine: Weak<Engine>, settings: &pm_model::ProxySettings) -> UpstreamClient {
     Client::builder(TokioExecutor::new())
         .http1_preserve_header_case(true)
         .pool_idle_timeout(Duration::from_secs(settings.pool_idle_secs.into()))
         .pool_max_idle_per_host(settings.pool_max_idle_per_host as usize)
-        .build(connector)
+        .build(dial::Connector { engine })
 }
 
 async fn serve_connection(ctx: Arc<ProxyCtx>, mut stream: TcpStream, peer: SocketAddr) {
@@ -202,6 +193,7 @@ async fn serve_connection(ctx: Arc<ProxyCtx>, mut stream: TcpStream, peer: Socke
     drop(engine);
     match sniff::sniff(&stream).await {
         Some(kind) if kind.is_http() => {}
+        Some(Sniffed::Socks5) => return socks::serve(ctx, client, stream).await,
         Some(Sniffed::Garbage) => {
             let _ = stream
                 .write_all(b"HTTP/1.1 400 Bad Request\r\nconnection: close\r\ncontent-length: 0\r\n\r\n")
@@ -224,8 +216,10 @@ async fn serve_connection(ctx: Arc<ProxyCtx>, mut stream: TcpStream, peer: Socke
 /// A LAN client the user denied, or didn't answer for in time. HTTP
 /// clients are told why; anything else is just closed.
 async fn refuse(mut stream: TcpStream) {
-    if !sniff::sniff(&stream).await.is_some_and(Sniffed::is_http) {
-        return;
+    match sniff::sniff(&stream).await {
+        Some(kind) if kind.is_http() => {}
+        Some(Sniffed::Socks5) => return socks::refuse(stream).await,
+        _ => return,
     }
     // Read what has arrived so closing doesn't reset the connection
     // before the client sees the answer.
@@ -249,7 +243,7 @@ async fn handle(
         return Ok(mitm::connect(ctx, client, req).await);
     }
     match req.uri().scheme_str() {
-        Some("http") if !is_onboarding(&ctx, req.uri()) => forward(&ctx, &client, req).await,
+        Some("http") if !is_onboarding(&ctx, req.uri()) => forward(&ctx, &client, req, Forward::default()).await,
         Some("http") | None => Ok(onboarding_response(&ctx, &client, &req)),
         Some(_) => Ok(text_response(
             StatusCode::NOT_IMPLEMENTED,
@@ -323,56 +317,99 @@ fn onboarding_response(ctx: &ProxyCtx, client: &PeerClient, req: &Request<Incomi
     response
 }
 
+/// How [`forward`] treats a request beyond its absolute URI.
+#[derive(Default, Clone, Copy)]
+struct Forward {
+    /// It arrived on this reverse proxy listener.
+    reverse_port: Option<u16>,
+    /// The client side was TLS (a reverse proxy with `tls`).
+    client_tls: bool,
+}
+
+/// Records and forwards an absolute-form request (`http://`, or `https://`
+/// from a reverse proxy).
 async fn forward(
     ctx: &ProxyCtx,
     client: &Arc<PeerClient>,
     mut req: Request<Incoming>,
+    how: Forward,
 ) -> Result<Response<ProxyBody>, Reset> {
     let websocket = ws::is_upgrade(&req);
+    let tls = req.uri().scheme() == Some(&http::uri::Scheme::HTTPS);
+    let default_port = if tls { 443 } else { 80 };
+    let scheme = match (tls, websocket) {
+        (false, false) => Scheme::Http,
+        (false, true) => Scheme::Ws,
+        (true, false) => Scheme::Https,
+        (true, true) => Scheme::Wss,
+    };
+    let host = req
+        .uri()
+        .host()
+        .unwrap_or_default()
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .to_owned();
+    let port = req.uri().port_u16().unwrap_or(default_port);
     let recorder = ctx.engine.upgrade().and_then(|engine| {
         let uri = req.uri();
         let origin = Origin {
-            scheme: if websocket { Scheme::Ws } else { Scheme::Http },
-            host: uri.host().unwrap_or_default().to_owned(),
-            port: uri.port_u16().unwrap_or(80),
+            scheme,
+            host: host.clone(),
+            port,
             url: uri.to_string(),
-            tls: TlsStatus::None,
+            tls: if how.client_tls {
+                TlsStatus::Intercepted
+            } else {
+                TlsStatus::None
+            },
             tls_info: None,
             client: client.clone(),
         };
         record_request(&engine, &req, origin)
     });
+    if let (Some(recorder), Some(port)) = (&recorder, how.reverse_port) {
+        recorder.via(&pm_model::Via {
+            reverse_port: Some(port),
+            ..Default::default()
+        });
+    }
     if !websocket {
-        let uri = req.uri();
         let exchange = Exchange {
             ctx,
             route: Route::Forward,
             peer: client,
             recorder,
-            scheme: Scheme::Http,
-            host: uri
-                .host()
-                .unwrap_or_default()
-                .trim_start_matches('[')
-                .trim_end_matches(']')
-                .to_owned(),
-            port: uri.port_u16().unwrap_or(80),
+            scheme: if tls { Scheme::Https } else { Scheme::Http },
+            host,
+            port,
             apply_rules: true,
         };
         return exchange.run(req).await;
     }
-    // Rules don't apply to WebSocket handshakes (yet).
+    // Rules don't apply to WebSocket handshakes (yet). Each one gets its
+    // own upstream connection, which it then takes over.
     let client_upgrade = hyper::upgrade::on(&mut req);
     let (mut parts, body) = req.into_parts();
     ws::prepare_request(&mut parts.headers);
     let body = TeeBody::new(RuleBody::stream(body), recorder.clone(), BodyPart::Request);
-    if let Some(recorder) = &recorder {
-        recorder.request_sent();
-    }
-    let upstream = match ctx.client.request(Request::from_parts(parts, body)).await {
+    let pq = parts
+        .uri
+        .path_and_query()
+        .cloned()
+        .unwrap_or_else(|| http::uri::PathAndQuery::from_static("/"));
+    let authority = parts
+        .uri
+        .authority()
+        .cloned()
+        .unwrap_or_else(|| http::uri::Authority::from_static("unknown"));
+    let sent = async {
+        let mut sender = mitm::open_h1(ctx, tls, &host, port, recorder.as_ref()).await?;
+        mitm::send_once(&mut sender, &host, parts, pq, authority, body, recorder.as_ref()).await
+    };
+    let upstream = match sent.await {
         Ok(response) => response,
-        Err(err) => {
-            let message = error_chain(&err);
+        Err(message) => {
             if let Some(recorder) = &recorder {
                 recorder.fail(message.clone());
             }
@@ -455,6 +492,7 @@ fn record_request(engine: &Arc<Engine>, req: &Request<Incoming>, origin: Origin)
         timing: Timing::default(),
         rules: Default::default(),
         trailers: None,
+        via: None,
     };
     let mut detail = detail;
     detail.request_body.encoding = content_encoding(&detail.request.headers);

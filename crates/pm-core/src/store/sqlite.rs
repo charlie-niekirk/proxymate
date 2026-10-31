@@ -36,8 +36,8 @@ pub(crate) const FORMAT: &str = "proxymate-session";
 /// (M14) appended `FlowRules.scripts`, the last field of a `FlowDetail`.
 /// Version 3 (M16) appended `FlowDetail.trailers` and the `grpc_status`
 /// column, and added content kinds after `Binary`. Version 4 (M17) added
-/// the `annotations` table.
-pub(crate) const VERSION: u32 = 4;
+/// the `annotations` table. Version 5 (M18) appended `FlowDetail.via`.
+pub(crate) const VERSION: u32 = 5;
 /// The oldest version this Proxymate still reads.
 const OLDEST: u32 = 1;
 
@@ -306,7 +306,7 @@ impl BlobBackend for SqliteBackend {
         };
         // Fields appended since: version 1 had no `FlowRules.scripts` (an
         // empty list is one 0), versions 1 and 2 no `trailers` (`None` is
-        // one 0).
+        // one 0), versions up to 4 no `via` (`None` again).
         if self.version == 1 {
             bytes.push(0);
         }
@@ -314,6 +314,9 @@ impl BlobBackend for SqliteBackend {
             bytes.push(0);
         }
         // Version 4 changed no postcard layout.
+        if self.version <= 4 {
+            bytes.push(0);
+        }
         let detail: FlowDetail = postcard::from_bytes(&bytes).map_err(io::Error::other)?;
         self.details.insert(id, Arc::new(detail.clone()));
         Ok(Some(detail))

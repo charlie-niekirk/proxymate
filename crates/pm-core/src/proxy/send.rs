@@ -4,7 +4,7 @@
 //! (unless the caller turns them off), and the flow is recorded the same
 //! way, marked with who sent it.
 //!
-//! Plain HTTP goes out on the pooled client. HTTPS dials a one-off
+//! Plain HTTP goes out on the engine's pooled client. HTTPS dials a one-off
 //! HTTP/1.1 TLS connection, as a Map Remote to another origin does: there
 //! is no pooled HTTPS client. Sends are recorded even while recording is
 //! paused, since someone asked for them.
@@ -25,7 +25,7 @@ use tokio::task::JoinHandle;
 
 use super::body::Inbound;
 use super::exchange::{Exchange, Route};
-use super::{ProxyCtx, content_kind, now_ms, upstream_client};
+use super::{ProxyCtx, content_kind, now_ms};
 use crate::client::PeerClient;
 use crate::recorder::content_encoding;
 use crate::{Engine, Error};
@@ -33,18 +33,16 @@ use crate::{Engine, Error};
 /// The client name of flows sent from the app (Replay, Compose).
 pub const APP_CLIENT: &str = "Proxymate";
 
-/// What sends share: the pooled plain-HTTP client.
+/// What sends share: a context with no listener of its own.
 pub(crate) struct Sender {
     ctx: Arc<ProxyCtx>,
 }
 
 impl Sender {
     pub fn new(engine: Weak<Engine>) -> Sender {
-        let pool = engine.upgrade().map(|e| e.proxy_settings()).unwrap_or_default();
         Sender {
             ctx: Arc::new(ProxyCtx {
                 engine,
-                client: upstream_client(&pool),
                 // Only the listener's loop check reads this; sends never loop
                 // through it.
                 addr: SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0)),
@@ -117,6 +115,7 @@ impl Sender {
             timing: Timing::default(),
             rules: Default::default(),
             trailers: None,
+            via: None,
         };
         let recorder = engine.record_flow(summary, detail);
         let id = recorder.id();

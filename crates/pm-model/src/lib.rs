@@ -10,6 +10,7 @@ mod document;
 mod filter;
 mod flow;
 mod mcp;
+mod network;
 mod platform;
 mod protobuf;
 mod rules;
@@ -31,6 +32,10 @@ pub use document::{DocumentInfo, DocumentKind, FlowSelection, LIVE_STORE, SavePr
 pub use filter::{ContentGroup, FilterSpec, ProtocolFilter, SearchScope, SortDir, SortKey, SortSpec};
 pub use flow::{ContentKind, FlowId, FlowLabel, FlowState, FlowSummary, Scheme};
 pub use mcp::{MCP_DEFAULT_PORT, McpAuditEntry, McpAuditPage, McpCallOutcome, McpClient, McpSettings, McpStatus};
+pub use network::{
+    ClientCert, ClientIdentity, DnsOverride, ListenerKind, ListenerStatus, NetworkSettings, ProxyServer, ReverseProxy,
+    UpstreamProxy, UpstreamRule, UpstreamSettings, Via,
+};
 pub use platform::{AppCount, DomainNode, HostCount, KeychainTrust, SidebarSnapshot, SystemProxyStatus, TrustStatus};
 pub use protobuf::{Badge, DecodedBody, DecodedFormat, DecodedMessage, GrpcStatus, ProtoMapping, ProtoSchema};
 pub use rules::{

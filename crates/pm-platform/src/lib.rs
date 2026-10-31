@@ -11,6 +11,7 @@
 //! - `adb`: Android emulator proxy and CA push (M9)
 //! - `command`: the process runner `simctl` and `adb` are tested through (M9)
 //! - `fs`: private files (the CA key) (M2); the app data dir (M7)
+//! - `secrets`: upstream proxy and PKCS#12 passwords (M18)
 
 pub mod adb;
 pub mod command;
@@ -18,6 +19,7 @@ pub mod fs;
 pub mod netif;
 pub mod process;
 pub mod procinfo;
+pub mod secrets;
 pub mod simctl;
 pub mod sysproxy;
 pub mod trust;

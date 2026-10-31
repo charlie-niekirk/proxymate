@@ -12,10 +12,12 @@ use parking_lot::Mutex;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::CryptoProvider;
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+use rustls::sign::CertifiedKey;
 use rustls::{ClientConfig, DigitallySignedStruct, ServerConfig, SignatureScheme};
 
 pub use ca::{CaError, CertAuthority};
 pub use cert_summary::summarize;
+pub(crate) use policy::globs;
 pub use policy::{PolicyError, SslPolicy};
 
 pub const H2: &[u8] = b"h2";
@@ -103,7 +105,15 @@ impl TlsContext {
     /// A client config for one upstream connection offering `alpn`. The
     /// returned recorder captures the upstream's chain even when it fails
     /// verification, for the TLS tab and the error message.
-    pub fn client_config(&self, alpn: Vec<Vec<u8>>, insecure: bool) -> (Arc<ClientConfig>, Arc<ChainRecorder>) {
+    ///
+    /// `identity` is the client certificate to present if the upstream asks
+    /// for one (Settings › Network).
+    pub fn client_config(
+        &self,
+        alpn: Vec<Vec<u8>>,
+        insecure: bool,
+        identity: Option<Arc<CertifiedKey>>,
+    ) -> (Arc<ClientConfig>, Arc<ChainRecorder>) {
         let recorder = Arc::new(ChainRecorder {
             inner: self.verifier.clone(),
             insecure,
@@ -112,7 +122,29 @@ impl TlsContext {
         let mut config = self.client.clone();
         config.alpn_protocols = alpn;
         config.dangerous().set_certificate_verifier(recorder.clone());
+        if let Some(key) = identity {
+            config.client_auth_cert_resolver = Arc::new(OneIdentity(key));
+        }
         (Arc::new(config), recorder)
+    }
+
+    pub(crate) fn provider(&self) -> &CryptoProvider {
+        &self.provider
+    }
+}
+
+/// Presents one certificate to every upstream that asks (the config is per
+/// connection, so per host).
+#[derive(Debug)]
+struct OneIdentity(Arc<CertifiedKey>);
+
+impl rustls::client::ResolvesClientCert for OneIdentity {
+    fn resolve(&self, _: &[&[u8]], _: &[SignatureScheme]) -> Option<Arc<CertifiedKey>> {
+        Some(self.0.clone())
+    }
+
+    fn has_certs(&self) -> bool {
+        true
     }
 }
 

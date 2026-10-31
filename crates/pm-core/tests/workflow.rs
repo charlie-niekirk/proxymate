@@ -57,6 +57,7 @@ fn record(engine: &Arc<Engine>, n: usize, body_len: usize) {
             timing: Timing::default(),
             rules: Default::default(),
             trailers: None,
+            via: None,
         };
         let recorder = engine.begin_flow(summary, detail).expect("recording");
         recorder.body_end(BodyPart::Request, BodyEnd::Complete);

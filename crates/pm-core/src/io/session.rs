@@ -152,5 +152,6 @@ pub(crate) fn fallback_detail(s: &FlowSummary) -> FlowDetail {
         timing: Timing::default(),
         rules: Default::default(),
         trailers: None,
+        via: None,
     }
 }
