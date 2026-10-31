@@ -38,6 +38,7 @@ Run these from the repo root unless noted.
 | WebSocket client through the proxy | `cargo run -p pm-testkit --bin ws-client -- ws://127.0.0.1:<port>/ws` (CONNECT; `--absolute` for absolute form) or `wss://localhost:<port>/ws` against the TLS upstream. `--count`, `--interval-ms`, `--server-close` |
 | TLS test upstream (h2 + h1) | `cargo run -p pm-testkit --bin upstream -- --tls` prints its port and CA file. Start the app with `PROXYMATE_EXTRA_UPSTREAM_CA=<that file>`, then `curl -x http://127.0.0.1:9090 --cacert ~/Library/Application\ Support/Proxymate/ca/proxymate-ca.pem https://localhost:<port>/json --http2 -v` |
 | Rewrite dialog in the browser UI | `npm run dev`, then `http://localhost:1420/?zoo&select=0&rewrite=0`. In the app with `VITE_PM_REMOTE=1`: `{"rewrite":{"flow":3}}`, then `{"rewriteEdit":{"side":"response","json":[{"set":"/a","raw":"1"}],"save":true}}` (see `src/dev/remote.ts`) |
+| WebSocket rules in the browser UI (M19) | `npm run dev`, then `http://localhost:1420/?select=13` (an open mock WebSocket: composer, Resend, Edited/Injected/Dropped badges) or `?breakpoint=ws` (a held message in the Breakpoint Editor) |
 | Open the app on a response tab | `VITE_PM_RESPONSE_TAB=TLS` (or `Timing`, …), for screenshots from a shell |
 | Drive the app from a shell | Start with `VITE_PM_REMOTE=1`, then `curl -d '{"select":3,"requestTab":"Body"}' localhost:1420/__pm_remote` (also `responseTab`, `viewer: {kind, viewer}`, `theme`; M8: `replay`, `editReplay`, `compose`, `composeSend`, `store`, `openDocument`, `saveSession`, `exportHar`, and `curl`, whose answer is at `/__pm_remote/out`; M14: `scripts`, `scriptTemplate`, `scriptSource`, `saveScript`, `testScript`; M15: `{"contextMenu":{"testid":"request-headers","row":1}}` right-clicks any element; M17: `selectIds`, `selectAll`, `label`, `comment`, `headerColumns`, `compare`, `repeat`, `code`, `deleteSelection`). See `src/dev/remote.ts` |
 | gRPC upstream (M16) | `cargo run -p pm-testkit --bin upstream -- --grpc [PORT]` (tonic, TLS, `shop.v1.Orders`; prints its CA). Start the app with `PROXYMATE_EXTRA_UPSTREAM_CA=<that file>`, then `HTTPS_PROXY=http://127.0.0.1:9090 grpcurl -cacert ~/Library/Application\ Support/Proxymate/ca/proxymate-ca.pem -import-path crates/pm-testkit/proto -proto shop.proto -d '{"id":"o1"}' localhost.:<port> shop.v1.Orders/GetOrder` (`localhost.`: Go never proxies `localhost`) |
@@ -71,7 +72,7 @@ Run the same checks locally before pushing.
 ```
 crates/pm-model      pure types (serde + specta): FlowSummary, FlowRow, FilterSpec, SortSpec, ViewDelta, ...
 crates/pm-core       headless Engine: proxy/ (h1 forward proxy, mitm.rs: CONNECT, MITM, h2, passthrough, ws.rs: WebSocket
-                     relay, send.rs: Engine::send, dial.rs: the one dialer, socks.rs: SOCKS5 listener, reverse.rs: reverse
+                     relay with message rules, breakpoints and ws_send (M19), send.rs: Engine::send, dial.rs: the one dialer, socks.rs: SOCKS5 listener, reverse.rs: reverse
                      proxies), network.rs (M18: Settings › Network compiled, secrets, reverse listeners), tls/ (CA, leaf cache, SSL policy, upstream verifier), recorder
                      (per-flow capture), ingest (event thread), store/ (arena + views, sidebar counts, backend.rs:
                      BlobBackend, segments, sqlite.rs: session tables + SqliteBackend, bodies, details, messages: WS/SSE
@@ -221,7 +222,7 @@ Targets:
 - `crates/pm-core/src/scripts/proxymate.d.ts` is the script API's source of truth. A new global or member goes in `prelude.js` (or `native.rs`), the `.d.ts`, `scripts/api_surface.txt` and the editor's `GLOBAL_COMPLETIONS` (`ui/src/lib/scripts.ts`); a Rust test and a vitest check they agree.
 - Scripts get no I/O: no network, files, module loader or timers. Never enable rquickjs's `loader`, `futures` or `parallel`, and never load bytecode.
 - `unsafe_code` has one scoped exception, `scripts/native.rs::bytes_of`: rquickjs 0.14 only exposes a typed array's bytes through `unsafe`; they are copied out before any JavaScript runs.
-- `Action::Script` is the last `Action` variant; `FlowRules.scripts` is the last field of `FlowRules`. Add fields after them only with a session `VERSION` bump.
+- `FlowRules.scripts` is the last field of `FlowRules` (M19 moved the last `Action` variant to `WsMessage`, and `ScriptPhase::WsMessage` is that enum's last). Add fields or variants after them only with a session `VERSION` bump.
 - Rule evaluation is async only for scripts: a rule set without scripts never awaits (`rules/tests.rs` drives it with `now_or_never`).
 - Templates are `.js` files in `ui/src/lib/script-templates/`, imported raw by the UI and run by `scripts::tests::templates_run`.
 - Saving a script evaluates it (top-level code runs, with the traffic timeout), so Tauri commands and MCP tools that save scripts run off the async threads.
@@ -230,7 +231,7 @@ Targets:
 - `Engine::send(RequestSpec, SendOpts)` is the one way Proxymate sends a request itself (Replay, Compose, MCP). It goes through `proxy/exchange.rs` like proxied traffic; the flow's summary gets `sent_by`.
 - Flow ids are per store. The live capture is `LIVE_STORE` (0); every opened session or HAR is a document store. Flow-level Engine methods have `*_in(store, …)` forms (the live-only ones stay for existing callers); view ids already encode their store. UI code reads the active store from `useUi().store` and puts it in query keys (`flowKey(store, id)`).
 - Golden files are in `crates/pm-core/tests/golden/` (cURL, HAR and M17's `snippets/`); rewrite them with `UPDATE_GOLDEN=1 cargo test -p pm-core --lib io::`. The Chrome HAR fixture is `crates/pm-core/tests/fixtures/chrome-devtools.har`.
-- A session's postcard layouts are part of its format: bump `store/sqlite.rs` `VERSION` when `FlowDetail` or the message types change shape. Version 5 (M18: `FlowDetail.via`) still reads versions 4 (M17: the `annotations` table) to 1 (`tests/fixtures/session-v1.proxymate`; `a_version_2_session_still_opens` and `a_version_4_session_still_opens` make older files from a current one).
+- A session's postcard layouts are part of its format: bump `store/sqlite.rs` `VERSION` when `FlowDetail` or the message types change shape. Version 6 (M19: WebSocket message flags and the `originals` table) still reads versions 5 (M18: `FlowDetail.via`, the old message layout) to 1 (`tests/fixtures/session-v1.proxymate`; `a_version_2_session_still_opens`, `a_version_4_session_still_opens` and `store::sqlite::tests::a_version_5_websocket_log_still_opens` make older files from a current one).
 - postcard can't deserialize internally tagged enums (`#[serde(tag = …)]`). Anything inside `FlowDetail` must not be one, or must serialize by hand like `RuleOrigin`.
 
 **Visual rewrite (M13)**
@@ -254,6 +255,13 @@ Targets:
 - `Via` (the route) is recorded with `FlowRecorder::via`, which keeps a reverse proxy's port. The SOCKS5 listener and CONNECT share `mitm::decide`; reverse proxies go through `forward` with `Forward { reverse_port, client_tls }`.
 - A failed upstream request reads its connection task's error (`mitm::Died`) before explaining itself: with TLS 1.3 that is where `certificate_required` shows up.
 - Integration tests are `crates/pm-core/tests/network.rs`, against `pm_testkit::{HttpProxy, Socks5Server, TlsUpstream::mtls}`. A "previous system proxy" test writes a `sysproxy-backup.json` owned by the test process into its own data dir; nothing restores it.
+
+**WebSocket rules (M19)**
+- Handshakes go through `proxy/exchange.rs` like any request (`Exchange.websocket: Some(ClientSide)`); on `101` the relay in `proxy/ws.rs` takes both connections over. Don't add a second handshake path.
+- `Action::WsMessage` is the last `Action` variant. Message rules are evaluated in `rules::eval::ws_message_phase` (unit matrix in `rules/tests.rs`, end to end in `crates/pm-core/tests/ws_rules.rs`); the relay re-matches when the rule set changes.
+- Each direction is one ordered queue: a held message (delay, breakpoint, slow script) holds the ones behind it, and messages Proxymate sends (`Engine::ws_send`, through `proxy::ws::Registry`) join the same queue. Never write to a peer from anywhere but its direction's processor.
+- Recorded messages carry `edited`, `injected` and `dropped`; an edited one keeps what arrived (`WsEntry.original`, the `originals` table, `Engine::websocket_original_in`). Every `WsLog::push` takes a `WsEntry`.
+- A held message is a `BreakpointInfo` with `message` set; `Engine::resolve_breakpoint` refuses `Respond` and head edits for it.
 
 **Workflow (M17)**
 - The table's selection is flow ids (`lib/selection.ts`: ids, or a whole view with exceptions), never positions. Bulk actions take it as a `FlowSelection` (`currentSelection()` in `lib/actions.ts`); `Engine::selected_ids` resolves one in any store.

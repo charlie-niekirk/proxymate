@@ -29,6 +29,15 @@ export const commands = {
 	getWebsocketMessages: (store: number, id: number, query: WsQuery_Deserialize, start: number, count: number) => typedError<WsPage_Serialize, string>(__TAURI_INVOKE("get_websocket_messages", { store, id, query, start, count })),
 	/**  One WebSocket message's payload as a raw `ArrayBuffer`. */
 	getWebsocketPayload: (store: number, id: number, index: number) => typedError<unknown, string>(__TAURI_INVOKE("get_websocket_payload", { store, id, index })),
+	/**
+	 *  What arrived for an edited WebSocket message (M19), as a raw
+	 *  `ArrayBuffer`.
+	 */
+	getWebsocketOriginal: (store: number, id: number, index: number) => typedError<unknown, string>(__TAURI_INVOKE("get_websocket_original", { store, id, index })),
+	/**  Sends a message into an open WebSocket of the live capture. */
+	wsSend: (id: number, message: WsSend_Deserialize) => typedError<null, string>(__TAURI_INVOKE("ws_send", { id, message })),
+	/**  Closes an open WebSocket of the live capture. */
+	wsClose: (id: number) => typedError<null, string>(__TAURI_INVOKE("ws_close", { id })),
 	getSseEvents: (store: number, id: number, text: string, start: number, count: number) => typedError<SsePage_Serialize, string>(__TAURI_INVOKE("get_sse_events", { store, id, text, start, count })),
 	clearFlows: () => __TAURI_INVOKE<void>("clear_flows"),
 	setRecording: (on: boolean) => __TAURI_INVOKE<ProxyStatus_Serialize>("set_recording", { on }),
@@ -327,9 +336,24 @@ preserve_host?: boolean } |
  *  Runs a script (M14): a rewrite script's `onRequest`/`onResponse` in
  *  its phase, or a mock script's `onMock`, which answers like Map
  *  Local (the first answer wins). A script that throws or times out is
- *  skipped and reported on the flow. Keep this the last variant.
+ *  skipped and reported on the flow. A rewrite script's
+ *  `onWsMessage` runs on the messages of a matching WebSocket.
  */
-{ type: "Script"; script_id: string };
+{ type: "Script"; script_id: string } | 
+/**
+ *  Acts on the messages of a WebSocket whose handshake the rule
+ *  matches (M19): text and binary messages, never control frames.
+ *  Keep this the last variant.
+ */
+{ type: "WsMessage"; 
+/**  `None` acts on both directions. */
+direction?: WsDirection | null; 
+/**
+ *  Only messages whose payload contains a match (exact text is a
+ *  substring, a glob must match the whole payload, a regex
+ *  anywhere). `None` matches every message.
+ */
+filter?: Pattern_Deserialize | null; op: WsOp_Deserialize };
 
 /**  One step of a rule. Actions of all matching rules run in rule order. */
 export type Action_Serialize = 
@@ -409,9 +433,24 @@ preserve_host: boolean } |
  *  Runs a script (M14): a rewrite script's `onRequest`/`onResponse` in
  *  its phase, or a mock script's `onMock`, which answers like Map
  *  Local (the first answer wins). A script that throws or times out is
- *  skipped and reported on the flow. Keep this the last variant.
+ *  skipped and reported on the flow. A rewrite script's
+ *  `onWsMessage` runs on the messages of a matching WebSocket.
  */
-{ type: "Script"; script_id: string };
+{ type: "Script"; script_id: string } | 
+/**
+ *  Acts on the messages of a WebSocket whose handshake the rule
+ *  matches (M19): text and binary messages, never control frames.
+ *  Keep this the last variant.
+ */
+{ type: "WsMessage"; 
+/**  `None` acts on both directions. */
+direction: WsDirection | null; 
+/**
+ *  Only messages whose payload contains a match (exact text is a
+ *  substring, a glob must match the whole payload, a regex
+ *  anywhere). `None` matches every message.
+ */
+filter: Pattern_Serialize | null; op: WsOp_Serialize };
 
 /**  A device or emulator `adb` sees. */
 export type AndroidDevice = AndroidDevice_Serialize | AndroidDevice_Deserialize;
@@ -626,6 +665,12 @@ export type BreakpointInfo_Deserialize = {
 	response?: ResponseHead | null,
 	/**  The paused message's body (decoded), fetched separately. */
 	body: BreakpointBody_Deserialize,
+	/**
+	 *  Set for a held WebSocket message (M19): `request` is the handshake
+	 *  and the body is the payload. `phase` is `request` for a message the
+	 *  client sent, `response` for one the server sent.
+	 */
+	message?: HeldMessage | null,
 };
 
 export type BreakpointInfo_Serialize = {
@@ -645,6 +690,12 @@ export type BreakpointInfo_Serialize = {
 	response: ResponseHead | null,
 	/**  The paused message's body (decoded), fetched separately. */
 	body: BreakpointBody_Serialize,
+	/**
+	 *  Set for a held WebSocket message (M19): `request` is the handshake
+	 *  and the body is the payload. `phase` is `request` for a message the
+	 *  client sent, `response` for one the server sent.
+	 */
+	message: HeldMessage | null,
 };
 
 /**  How to let a paused flow go on. */
@@ -654,18 +705,30 @@ export type BreakpointResolution = BreakpointResolution_Serialize | BreakpointRe
 export type BreakpointResolution_Deserialize = 
 /**  Send it on, with any edits. */
 { action: "continue"; edits?: MessageEdits_Deserialize | null } | 
-/**  Close the connection (h1) or reset the stream (h2). */
+/**
+ *  Close the connection (h1) or reset the stream (h2). A held
+ *  WebSocket message is dropped instead; the connection stays open.
+ */
 { action: "abort" } | 
-/**  Answer the client with this response instead. */
+/**
+ *  Answer the client with this response instead (not for WebSocket
+ *  messages).
+ */
 { action: "respond"; status: number; headers?: Header[]; body?: string };
 
 /**  How to let a paused flow go on. */
 export type BreakpointResolution_Serialize = 
 /**  Send it on, with any edits. */
 { action: "continue"; edits: MessageEdits_Serialize | null } | 
-/**  Close the connection (h1) or reset the stream (h2). */
+/**
+ *  Close the connection (h1) or reset the stream (h2). A held
+ *  WebSocket message is dropped instead; the connection stays open.
+ */
 { action: "abort" } | 
-/**  Answer the client with this response instead. */
+/**
+ *  Answer the client with this response instead (not for WebSocket
+ *  messages).
+ */
 { action: "respond"; status: number; headers: Header[]; body: string };
 
 /**  The Proxymate root CA, for the certificate popover and wizard. */
@@ -1506,6 +1569,13 @@ export type HeaderColumn = {
 	name: string,
 };
 
+/**  A WebSocket message held at a breakpoint. */
+export type HeldMessage = {
+	direction: WsDirection,
+	/**  `text` or `binary`. */
+	opcode: WsOpcode,
+};
+
 export type HostCount = {
 	host: string,
 	count: number,
@@ -1775,8 +1845,16 @@ export type MessageEdits_Deserialize = {
 	status?: number | null,
 	/**  Replaces every header. */
 	headers?: Header[] | null,
-	/**  Replaces the body (sent identity-encoded). */
+	/**
+	 *  Replaces the body (sent identity-encoded). A text WebSocket message
+	 *  stays text.
+	 */
 	body?: string | null,
+	/**
+	 *  WebSocket messages only: replaces the payload with these bytes
+	 *  (base64), e.g. a binary message edited as hex. Wins over `body`.
+	 */
+	body_base64?: string | null,
 };
 
 /**  Edits to a paused message. Unset fields stay as they are. */
@@ -1789,8 +1867,16 @@ export type MessageEdits_Serialize = {
 	status: number | null,
 	/**  Replaces every header. */
 	headers: Header[] | null,
-	/**  Replaces the body (sent identity-encoded). */
+	/**
+	 *  Replaces the body (sent identity-encoded). A text WebSocket message
+	 *  stays text.
+	 */
 	body: string | null,
+	/**
+	 *  WebSocket messages only: replaces the payload with these bytes
+	 *  (base64), e.g. a binary message edited as hex. Wins over `body`.
+	 */
+	body_base64: string | null,
 };
 
 /**  Everything under Settings › Network, saved as one `app.sqlite` row. */
@@ -2376,7 +2462,12 @@ export type ScriptKind =
 "view";
 
 /**  Which entry point a script problem came from. */
-export type ScriptPhase = "request" | "response" | "mock" | "view";
+export type ScriptPhase = "request" | "response" | "mock" | "view" | 
+/**
+ *  `onWsMessage` (M19). Keep this the last variant: issues are in a
+ *  session's flow details.
+ */
+"ws_message";
 
 /**  Script limits, kept in `app.sqlite` (Settings › Advanced). */
 export type ScriptSettings = ScriptSettings_Serialize | ScriptSettings_Deserialize;
@@ -3351,7 +3442,12 @@ export type WsMessage_Deserialize = {
 	opcode: WsOpcode,
 	/**  Payload size in bytes. For close frames, the reason only. */
 	len: number,
-	/**  When the proxy received it, milliseconds since the Unix epoch. */
+	/**
+	 *  When the proxy forwarded it (recorded it, for a dropped message),
+	 *  milliseconds since the Unix epoch. Messages are listed in this
+	 *  order: a message held by a rule comes after those that overtook it
+	 *  in the other direction.
+	 */
 	time_ms: number | null,
 	/**
 	 *  True if only the first part of the payload was recorded (the cap is
@@ -3362,6 +3458,21 @@ export type WsMessage_Deserialize = {
 	close_code?: number | null,
 	/**  The start of the payload for the list: text as is, binary empty. */
 	preview: string,
+	/**
+	 *  A rule, script or breakpoint changed it (M19). The payload is what
+	 *  was forwarded; `websocket_original` has what arrived.
+	 */
+	edited?: boolean,
+	/**
+	 *  Proxymate sent it itself (`Engine::ws_send`): the composer, Resend
+	 *  or an agent. It never came from the peer.
+	 */
+	injected?: boolean,
+	/**
+	 *  A rule, script or breakpoint dropped it: recorded as it arrived,
+	 *  never forwarded.
+	 */
+	dropped?: boolean,
 };
 
 /**
@@ -3375,7 +3486,12 @@ export type WsMessage_Serialize = {
 	opcode: WsOpcode,
 	/**  Payload size in bytes. For close frames, the reason only. */
 	len: number,
-	/**  When the proxy received it, milliseconds since the Unix epoch. */
+	/**
+	 *  When the proxy forwarded it (recorded it, for a dropped message),
+	 *  milliseconds since the Unix epoch. Messages are listed in this
+	 *  order: a message held by a rule comes after those that overtook it
+	 *  in the other direction.
+	 */
 	time_ms: number | null,
 	/**
 	 *  True if only the first part of the payload was recorded (the cap is
@@ -3386,7 +3502,75 @@ export type WsMessage_Serialize = {
 	close_code: number | null,
 	/**  The start of the payload for the list: text as is, binary empty. */
 	preview: string,
+	/**
+	 *  A rule, script or breakpoint changed it (M19). The payload is what
+	 *  was forwarded; `websocket_original` has what arrived.
+	 */
+	edited: boolean,
+	/**
+	 *  Proxymate sent it itself (`Engine::ws_send`): the composer, Resend
+	 *  or an agent. It never came from the peer.
+	 */
+	injected: boolean,
+	/**
+	 *  A rule, script or breakpoint dropped it: recorded as it arrived,
+	 *  never forwarded.
+	 */
+	dropped: boolean,
 };
+
+/**
+ *  What an [`Action::WsMessage`] does to a message. Ops run in rule and
+ *  action order on the message as the earlier ones left it; a drop ends
+ *  the run, and the breakpoint fires after every rewrite.
+ */
+export type WsOp = WsOp_Serialize | WsOp_Deserialize;
+
+/**
+ *  What an [`Action::WsMessage`] does to a message. Ops run in rule and
+ *  action order on the message as the earlier ones left it; a drop ends
+ *  the run, and the breakpoint fires after every rewrite.
+ */
+export type WsOp_Deserialize = 
+/**  The message is never forwarded (it is recorded as dropped). */
+{ kind: "drop" } | 
+/**  Find and replace in the payload. */
+{ kind: "replace"; pattern: Pattern_Deserialize; replacement: string } | 
+/**
+ *  Sets the value at a JSON pointer in a text message, changing only
+ *  those bytes (as `Action::JsonSet`).
+ */
+{ kind: "json_set"; pointer: string; value: Value; raw?: string | null } | { kind: "json_remove"; pointer: string } | 
+/**  Holds the message (and the ones after it in its direction). */
+{ kind: "delay"; ms: number } | 
+/**
+ *  Pauses the message for editing; later messages in its direction
+ *  wait behind it.
+ */
+{ kind: "breakpoint" };
+
+/**
+ *  What an [`Action::WsMessage`] does to a message. Ops run in rule and
+ *  action order on the message as the earlier ones left it; a drop ends
+ *  the run, and the breakpoint fires after every rewrite.
+ */
+export type WsOp_Serialize = 
+/**  The message is never forwarded (it is recorded as dropped). */
+{ kind: "drop" } | 
+/**  Find and replace in the payload. */
+{ kind: "replace"; pattern: Pattern_Serialize; replacement: string } | 
+/**
+ *  Sets the value at a JSON pointer in a text message, changing only
+ *  those bytes (as `Action::JsonSet`).
+ */
+{ kind: "json_set"; pointer: string; value: Value; raw: string | null } | { kind: "json_remove"; pointer: string } | 
+/**  Holds the message (and the ones after it in its direction). */
+{ kind: "delay"; ms: number } | 
+/**
+ *  Pauses the message for editing; later messages in its direction
+ *  wait behind it.
+ */
+{ kind: "breakpoint" };
 
 export type WsOpcode = "text" | "binary" | "ping" | "pong" | "close";
 
@@ -3444,6 +3628,44 @@ export type WsQuery_Serialize = {
 	direction: WsDirection | null,
 	/**  Case-insensitive substring of the payload; empty matches everything. */
 	text: string,
+};
+
+/**
+ *  A message to send into an open WebSocket connection
+ *  (`Engine::ws_send`).
+ */
+export type WsSend = WsSend_Serialize | WsSend_Deserialize;
+
+/**
+ *  A message to send into an open WebSocket connection
+ *  (`Engine::ws_send`).
+ */
+export type WsSend_Deserialize = {
+	/**
+	 *  `sent` goes to the server as if the client had sent it, `received`
+	 *  to the client as if the server had.
+	 */
+	direction: WsDirection,
+	/**  The payload: text as is, or base64 with `binary`. */
+	payload: string,
+	/**  True for a binary message, whose `payload` is base64. */
+	binary?: boolean,
+};
+
+/**
+ *  A message to send into an open WebSocket connection
+ *  (`Engine::ws_send`).
+ */
+export type WsSend_Serialize = {
+	/**
+	 *  `sent` goes to the server as if the client had sent it, `received`
+	 *  to the client as if the server had.
+	 */
+	direction: WsDirection,
+	/**  The payload: text as is, or base64 with `binary`. */
+	payload: string,
+	/**  True for a binary message, whose `payload` is base64. */
+	binary: boolean,
 };
 
 /* Tauri Specta runtime */

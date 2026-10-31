@@ -8,6 +8,11 @@
 //! HTTP/1.1 TLS connection, as a Map Remote to another origin does: there
 //! is no pooled HTTPS client. Sends are recorded even while recording is
 //! paused, since someone asked for them.
+//!
+//! A `ws://` or `wss://` spec is a WebSocket handshake (a replay of a
+//! WebSocket flow): it gets a fresh `Sec-WebSocket-Key`, and on `101` the
+//! connection stays open with no client. Received messages are recorded;
+//! `Engine::ws_send` sends to the server.
 
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::{Arc, Weak};
@@ -145,6 +150,7 @@ impl Sender {
                 host,
                 port,
                 apply_rules,
+                websocket: scheme.is_websocket().then_some(super::ws::ClientSide::Headless),
             };
             // A Reset (Block, Abort) has already finished the flow.
             if let Ok(response) = exchange.run(req).await {
@@ -183,8 +189,14 @@ impl Prepared {
         let scheme = match uri.scheme_str().map(str::to_ascii_lowercase).as_deref() {
             Some("http") => Scheme::Http,
             Some("https") => Scheme::Https,
-            Some("ws" | "wss") => return Err(bad("WebSocket requests can't be sent yet".into())),
-            _ => return Err(bad(format!("{:?} must start with http:// or https://", spec.url))),
+            Some("ws") => Scheme::Ws,
+            Some("wss") => Scheme::Wss,
+            _ => {
+                return Err(bad(format!(
+                    "{:?} must start with http://, https://, ws:// or wss://",
+                    spec.url
+                )));
+            }
         };
         let host = uri
             .host()
@@ -213,7 +225,12 @@ impl Prepared {
         // The body is sent whole, so its length is known.
         headers.remove(header::CONTENT_LENGTH);
         headers.remove(header::TRANSFER_ENCODING);
-        if !body.is_empty() || matches!(method, Method::POST | Method::PUT | Method::PATCH) {
+        if scheme.is_websocket() {
+            if method != Method::GET || !body.is_empty() {
+                return Err(bad("a WebSocket handshake is a GET without a body".into()));
+            }
+            handshake_headers(&mut headers);
+        } else if !body.is_empty() || matches!(method, Method::POST | Method::PUT | Method::PATCH) {
             headers.insert(header::CONTENT_LENGTH, HeaderValue::from(body.len()));
         }
         // The exchange addresses the upstream by origin; the request line
@@ -232,6 +249,20 @@ impl Prepared {
             port,
         })
     }
+}
+
+/// What a WebSocket handshake needs, whatever the spec carried: the
+/// upgrade headers, version 13, and a key of its own (a recorded key is
+/// the old connection's).
+fn handshake_headers(headers: &mut HeaderMap) {
+    headers.insert(header::UPGRADE, HeaderValue::from_static("websocket"));
+    headers.insert(header::CONNECTION, HeaderValue::from_static("Upgrade"));
+    headers.insert(header::SEC_WEBSOCKET_VERSION, HeaderValue::from_static("13"));
+    let key = base64::engine::general_purpose::STANDARD.encode(uuid::Uuid::new_v4().as_bytes());
+    if let Ok(key) = HeaderValue::from_str(&key) {
+        headers.insert(header::SEC_WEBSOCKET_KEY, key);
+    }
+    headers.remove(header::SEC_WEBSOCKET_ACCEPT);
 }
 
 fn authority(host: &str, port: u16, scheme: Scheme) -> String {

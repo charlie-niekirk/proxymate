@@ -2,11 +2,12 @@
 //! are paged through the engine (`websocket_messages`, `sse_events`), never
 //! sent whole, since a long-lived connection can carry any number of them.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
 /// Which way a WebSocket message went.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum WsDirection {
     /// Client to server.
@@ -15,7 +16,7 @@ pub enum WsDirection {
     Received,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum WsOpcode {
     Text,
@@ -35,7 +36,10 @@ pub struct WsMessage {
     pub opcode: WsOpcode,
     /// Payload size in bytes. For close frames, the reason only.
     pub len: u64,
-    /// When the proxy received it, milliseconds since the Unix epoch.
+    /// When the proxy forwarded it (recorded it, for a dropped message),
+    /// milliseconds since the Unix epoch. Messages are listed in this
+    /// order: a message held by a rule comes after those that overtook it
+    /// in the other direction.
     pub time_ms: f64,
     /// True if only the first part of the payload was recorded (the cap is
     /// 1 MB per message). Forwarding is unaffected.
@@ -44,6 +48,32 @@ pub struct WsMessage {
     pub close_code: Option<u16>,
     /// The start of the payload for the list: text as is, binary empty.
     pub preview: String,
+    /// A rule, script or breakpoint changed it (M19). The payload is what
+    /// was forwarded; `websocket_original` has what arrived.
+    #[serde(default)]
+    pub edited: bool,
+    /// Proxymate sent it itself (`Engine::ws_send`): the composer, Resend
+    /// or an agent. It never came from the peer.
+    #[serde(default)]
+    pub injected: bool,
+    /// A rule, script or breakpoint dropped it: recorded as it arrived,
+    /// never forwarded.
+    #[serde(default)]
+    pub dropped: bool,
+}
+
+/// A message to send into an open WebSocket connection
+/// (`Engine::ws_send`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, JsonSchema)]
+pub struct WsSend {
+    /// `sent` goes to the server as if the client had sent it, `received`
+    /// to the client as if the server had.
+    pub direction: WsDirection,
+    /// The payload: text as is, or base64 with `binary`.
+    pub payload: String,
+    /// True for a binary message, whose `payload` is base64.
+    #[serde(default)]
+    pub binary: bool,
 }
 
 /// How a WebSocket connection ended.

@@ -1,4 +1,5 @@
-import type { FlowDetail_Serialize, Header, WsClose, WsOpcode } from "@/bindings";
+import type { FlowDetail_Serialize, Header, WsClose, WsDirection, WsMessage_Serialize, WsOpcode, WsSend } from "@/bindings";
+import { base64 } from "@/lib/copyFormats";
 import { headerValue } from "@/lib/http";
 
 /** Which message panel a flow gets, if any. */
@@ -56,3 +57,45 @@ export const OPCODE_LABEL: Record<WsOpcode, string> = {
   pong: "Pong",
   close: "Close",
 };
+
+/** Bytes from hex text (`de ad be ef`, `0xdead`, any spacing), or null if it isn't hex. */
+export function parseHex(text: string): Uint8Array | null {
+  const digits = text.replace(/0x/gi, "").replace(/[\s,:]/g, "");
+  if (digits.length % 2 !== 0 || /[^0-9a-f]/i.test(digits)) return null;
+  const out = new Uint8Array(digits.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(digits.slice(i * 2, i * 2 + 2), 16);
+  return out;
+}
+
+/** How the composer reads what was typed. */
+export type ComposeMode = "text" | "hex";
+
+/** A message for `Engine::ws_send` from the composer; an error string if it can't be sent. */
+export function wsSendOf(direction: WsDirection, mode: ComposeMode, input: string): WsSend | string {
+  if (mode === "text") return { direction, payload: input, binary: false };
+  const bytes = parseHex(input);
+  if (bytes === null) return "That isn't hex: use pairs of digits like 0a ff 3c.";
+  return { direction, payload: base64(bytes), binary: true };
+}
+
+/** Resend: the recorded message again, its payload as it was forwarded. */
+export function resendOf(message: Pick<WsMessage_Serialize, "direction" | "opcode">, payload: Uint8Array): WsSend {
+  if (message.opcode === "text") {
+    return { direction: message.direction, payload: new TextDecoder().decode(payload), binary: false };
+  }
+  return { direction: message.direction, payload: base64(payload), binary: true };
+}
+
+/** The badges a message row shows (M19). */
+export function messageFlags(m: Pick<WsMessage_Serialize, "edited" | "injected" | "dropped">): ("Edited" | "Injected" | "Dropped")[] {
+  const out: ("Edited" | "Injected" | "Dropped")[] = [];
+  if (m.injected) out.push("Injected");
+  if (m.edited) out.push("Edited");
+  if (m.dropped) out.push("Dropped");
+  return out;
+}
+
+/** True for messages Resend can send again. */
+export function canResend(m: Pick<WsMessage_Serialize, "opcode" | "truncated">): boolean {
+  return (m.opcode === "text" || m.opcode === "binary") && !m.truncated;
+}

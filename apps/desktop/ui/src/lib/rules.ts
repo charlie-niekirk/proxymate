@@ -85,6 +85,7 @@ export const ACTION_TYPES: { type: ActionType; label: string; group: string }[] 
   { type: "Throttle", label: "Throttle", group: "Flow control" },
   { type: "Block", label: "Block", group: "Flow control" },
   { type: "Script", label: "Run script", group: "Scripts" },
+  { type: "WsMessage", label: "WebSocket message", group: "WebSocket" },
 ];
 
 export function actionLabel(type: ActionType): string {
@@ -134,8 +135,39 @@ export function defaultAction(type: ActionType): Action {
       return { type, mode: { kind: "status", status: 403 } };
     case "Script":
       return { type, script_id: "" };
+    case "WsMessage":
+      return { type, direction: null, filter: null, op: { kind: "replace", pattern: newPattern("exact"), replacement: "" } };
   }
 }
+
+export type WsOpKind = Extract<Action, { type: "WsMessage" }>["op"]["kind"];
+
+/** A message op of `kind` with defaults (the WebSocket message action's op picker). */
+export function defaultWsOp(kind: WsOpKind): Extract<Action, { type: "WsMessage" }>["op"] {
+  switch (kind) {
+    case "drop":
+      return { kind };
+    case "replace":
+      return { kind, pattern: newPattern("exact"), replacement: "" };
+    case "json_set":
+      return { kind, pointer: "/", value: null, raw: "null" };
+    case "json_remove":
+      return { kind, pointer: "/" };
+    case "delay":
+      return { kind, ms: 1000 };
+    case "breakpoint":
+      return { kind };
+  }
+}
+
+export const WS_OP_LABELS: Record<WsOpKind, string> = {
+  replace: "Replace",
+  json_set: "JSON set",
+  json_remove: "JSON remove",
+  drop: "Drop",
+  delay: "Delay",
+  breakpoint: "Breakpoint",
+};
 
 export function patternLabel(p: Pattern | null): string {
   if (!p) return "any";
@@ -206,6 +238,24 @@ export function actionSummary(a: Action, scripts?: ReadonlyMap<string, string>):
       return a.mode.kind === "status" ? `block ${a.mode.status}` : "block (reset)";
     case "Script":
       return `script ${scripts?.get(a.script_id) ?? (a.script_id || "(none)")}`;
+    case "WsMessage": {
+      const where = `${a.direction ?? "ws"}${a.filter ? ` ${patternLabel(a.filter)}` : ""}`;
+      const op = a.op;
+      switch (op.kind) {
+        case "replace":
+          return `${where} ${patternLabel(op.pattern)} → ${op.replacement}`;
+        case "json_set":
+          return `${where} ${op.pointer} = ${op.raw ?? JSON.stringify(op.value)}`;
+        case "json_remove":
+          return `${where} remove ${op.pointer}`;
+        case "delay":
+          return `${where} delay ${op.ms} ms`;
+        case "drop":
+          return `${where} drop`;
+        case "breakpoint":
+          return `${where} breakpoint`;
+      }
+    }
   }
 }
 

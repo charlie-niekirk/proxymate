@@ -9,7 +9,7 @@ use pm_model::{
     PresetKind, ProxySettings, ProxyStatus, RequestSpec, RowsPage, Rule, RuleId, RuleSettings, RuleTestResult,
     SaveProgress, SendOpts, SendOrigin, SidebarSnapshot, SimInstallResult, SimulatorStatus, SortSpec, SsePage,
     SslSettings, StorageSettings, StorageStatus, StoreId, SystemProxyStatus, TrustStatus, UpdateSettings, ViewDelta,
-    ViewId, ViewInfo, WsPage, WsQuery,
+    ViewId, ViewInfo, WsPage, WsQuery, WsSend,
 };
 use pm_model::{CodeLanguage, FlowLabel, HeaderColumn, RepeatId, RepeatOpts, RepeatProgress};
 use pm_model::{ConsoleEntry, Script, ScriptId, ScriptSettings, ScriptTestResult, ScriptTestSpec, ViewResult};
@@ -151,6 +151,37 @@ pub fn get_websocket_payload(
         .websocket_payload_in(store, id, index)
         .map(|bytes| RawBytes(tauri::ipc::Response::new(bytes)))
         .map_err(|e| e.to_string())
+}
+
+/// What arrived for an edited WebSocket message (M19), as a raw
+/// `ArrayBuffer`.
+#[tauri::command]
+#[specta::specta]
+pub fn get_websocket_original(
+    engine: EngineState<'_>,
+    store: StoreId,
+    id: FlowId,
+    index: u32,
+) -> Result<RawBytes, String> {
+    match engine.websocket_original_in(store, id, index) {
+        Ok(Some(bytes)) => Ok(RawBytes(tauri::ipc::Response::new(bytes))),
+        Ok(None) => Err(format!("message {} wasn't edited", index + 1)),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Sends a message into an open WebSocket of the live capture.
+#[tauri::command]
+#[specta::specta]
+pub fn ws_send(engine: EngineState<'_>, id: FlowId, message: WsSend) -> Result<(), String> {
+    engine.ws_send(id, &message).map_err(|e| e.to_string())
+}
+
+/// Closes an open WebSocket of the live capture.
+#[tauri::command]
+#[specta::specta]
+pub fn ws_close(engine: EngineState<'_>, id: FlowId) -> Result<(), String> {
+    engine.ws_close(id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use http::HeaderMap;
 use http::header::HeaderName;
-use pm_model::{Action, AppliedRule, KvMatch, Pattern, PatternKind, Phase, Rule, Scheme, StatusRange};
+use pm_model::{Action, AppliedRule, KvMatch, Pattern, PatternKind, Phase, Rule, Scheme, StatusRange, WsOp};
 use regex::bytes::{Regex, RegexBuilder, RegexSet, RegexSetBuilder};
 
 use super::RuleError;
@@ -158,8 +158,11 @@ impl CompiledResponse {
 /// An action with what it needs precompiled.
 pub(crate) struct CompiledAction {
     pub action: Action,
-    /// `ReplaceHeaderValue` and `ReplaceBody`'s pattern.
+    /// `ReplaceHeaderValue` and `ReplaceBody`'s pattern, and a
+    /// `WsMessage` replace's.
     pub find: Option<Regex>,
+    /// A `WsMessage` action's message filter.
+    pub filter: Option<Regex>,
     /// The header an action names.
     pub header: Option<HeaderName>,
     /// `JsonSet`'s value as JSON text (`raw`, or `value` serialised).
@@ -338,6 +341,24 @@ impl CompiledRule {
         })
     }
 
+    /// True if the rule acts on WebSocket messages: a `WsMessage` action,
+    /// or a script that exports `onWsMessage`.
+    pub fn acts_on_messages(&self) -> bool {
+        self.actions.iter().any(|a| match &a.action {
+            Action::WsMessage { .. } => true,
+            Action::Script { .. } => a.script.as_ref().is_some_and(|s| s.runs_ws()),
+            _ => false,
+        })
+    }
+
+    /// True if some action applies to HTTP exchanges (anything but a
+    /// `WsMessage`).
+    pub fn acts_on_http(&self) -> bool {
+        self.actions
+            .iter()
+            .any(|a| !matches!(a.action, Action::WsMessage { .. }))
+    }
+
     pub fn applied(&self, phase: Phase) -> AppliedRule {
         AppliedRule {
             phase,
@@ -377,6 +398,7 @@ fn compile_action(
     let mut compiled = CompiledAction {
         action: action.clone(),
         find: None,
+        filter: None,
         header: None,
         json: None,
         script: None,
@@ -458,6 +480,31 @@ fn compile_action(
                 )));
             }
             compiled.script = Some(script.clone());
+        }
+        Action::WsMessage { filter, op, .. } => {
+            compiled.filter = filter
+                .as_ref()
+                .map(|p| compile_pattern(p, Use::Find, false))
+                .transpose()
+                .map_err(|e| invalid(format!("message filter: {e}")))?;
+            match op {
+                WsOp::Replace { pattern, .. } => {
+                    compiled.find = Some(compile_pattern(pattern, Use::Find, false).map_err(invalid)?);
+                }
+                WsOp::JsonSet { pointer: p, value, raw } => {
+                    pointer(p)?;
+                    compiled.json = Some(match raw {
+                        Some(raw) => {
+                            serde_json::from_str::<serde::de::IgnoredAny>(raw)
+                                .map_err(|e| invalid(format!("the raw value isn't JSON: {e}")))?;
+                            raw.trim().to_owned()
+                        }
+                        None => value.to_string(),
+                    });
+                }
+                WsOp::JsonRemove { pointer: p } => pointer(p)?,
+                WsOp::Drop | WsOp::Delay { .. } | WsOp::Breakpoint => {}
+            }
         }
         _ => {}
     }

@@ -20,8 +20,8 @@ use rquickjs::{
 };
 
 use super::host::{
-    Call, CallInfo, Code, Exports, Job, JsRequest, JsResponse, MockOut, Output, RequestOut, ResponseOut, RunResult,
-    ViewOut,
+    Call, CallInfo, Code, Exports, Job, JsRequest, JsResponse, JsWsMessage, MockOut, Output, RequestOut, ResponseOut,
+    RunResult, ViewOut, WsScriptOut,
 };
 use super::native::{self, ConsoleBuffer, bytes_of};
 
@@ -280,6 +280,7 @@ fn exports(ns: &Object<'_>) -> Exports {
         on_response: is_fn("onResponse"),
         on_mock: is_fn("onMock"),
         on_view: is_fn("onView"),
+        on_ws_message: is_fn("onWsMessage"),
     }
 }
 
@@ -299,6 +300,7 @@ fn execute<'js>(
         Call::Response(..) => ("onResponse", ScriptPhase::Response),
         Call::Mock(_) => ("onMock", ScriptPhase::Mock),
         Call::View(..) => ("onView", ScriptPhase::View),
+        Call::WsMessage(_) => ("onWsMessage", ScriptPhase::WsMessage),
     };
     let entry: Value = ns.get(export).map_err(|e| e.to_string())?;
     if !entry.is_function() {
@@ -324,13 +326,9 @@ fn execute<'js>(
                 None => Value::new_null(ctx.clone()),
             },
         ),
+        Call::WsMessage(message) => (js(ws_message_js(ctx, message))?, Value::new_undefined(ctx.clone())),
     };
-    let phase_name = match phase {
-        ScriptPhase::Request => "request",
-        ScriptPhase::Response => "response",
-        ScriptPhase::Mock => "mock",
-        ScriptPhase::View => "view",
-    };
+    let phase_name = phase_name(phase);
     let promise: Promise = invoke
         .call((entry, phase_name, context, shared, a, b))
         .catch(ctx)
@@ -342,8 +340,20 @@ fn execute<'js>(
         Call::Response(..) => Output::Response(response_out(&result)?),
         Call::Mock(_) => Output::Mock(mock_out(&result)?),
         Call::View(..) => Output::Views(views_out(&result)?),
+        Call::WsMessage(_) => Output::WsMessage(ws_out(&result)?),
     };
     Ok(output)
+}
+
+/// What scripts see as `context.phase`.
+fn phase_name(phase: ScriptPhase) -> &'static str {
+    match phase {
+        ScriptPhase::Request => "request",
+        ScriptPhase::Response => "response",
+        ScriptPhase::Mock => "mock",
+        ScriptPhase::View => "view",
+        ScriptPhase::WsMessage => "websocket",
+    }
 }
 
 fn context_info<'js>(
@@ -356,15 +366,7 @@ fn context_info<'js>(
     obj.set("scriptId", code.id.as_str())?;
     obj.set("scriptName", code.name.as_str())?;
     obj.set("flowId", info.flow_id)?;
-    obj.set(
-        "phase",
-        match phase {
-            ScriptPhase::Request => "request",
-            ScriptPhase::Response => "response",
-            ScriptPhase::Mock => "mock",
-            ScriptPhase::View => "view",
-        },
-    )?;
+    obj.set("phase", phase_name(phase))?;
     match &info.rule {
         Some((id, name)) => {
             let rule = Object::new(ctx.clone())?;
@@ -421,6 +423,23 @@ fn response_js<'js>(ctx: &Ctx<'js>, resp: &JsResponse) -> rquickjs::Result<Value
     obj.set("status", resp.status)?;
     obj.set("headers", headers_js(ctx, &resp.headers)?)?;
     body_js(ctx, &obj, resp.body.as_deref())?;
+    Ok(obj.into_value())
+}
+
+fn ws_message_js<'js>(ctx: &Ctx<'js>, message: &JsWsMessage) -> rquickjs::Result<Value<'js>> {
+    let obj = Object::new(ctx.clone())?;
+    obj.set(
+        "direction",
+        match message.direction {
+            pm_model::WsDirection::Sent => "sent",
+            pm_model::WsDirection::Received => "received",
+        },
+    )?;
+    obj.set("type", if message.text { "text" } else { "binary" })?;
+    obj.set(
+        "body",
+        TypedArray::<u8>::new_copy(ctx.clone(), message.payload.as_slice())?,
+    )?;
     Ok(obj.into_value())
 }
 
@@ -508,6 +527,30 @@ fn mock_out(result: &Value<'_>) -> Result<Option<MockOut>, String> {
         headers: header_list(&get::<Value>(&obj, "headers")?)?,
         body: optional_bytes(&obj, "body")?.unwrap_or_default(),
     }))
+}
+
+fn ws_out(result: &Value<'_>) -> Result<WsScriptOut, String> {
+    if result.is_null() {
+        return Ok(WsScriptOut::Drop);
+    }
+    if result.is_undefined() {
+        return Ok(WsScriptOut::Keep);
+    }
+    let obj = object(result, "the message")?;
+    let kind: String = get(&obj, "type")?;
+    let text = match kind.as_str() {
+        "text" => true,
+        "binary" => false,
+        other => return Err(format!("{other:?} isn't a message type: use \"text\" or \"binary\"")),
+    };
+    let unchanged: bool = obj.get("unchanged").unwrap_or(false);
+    if unchanged {
+        return Ok(WsScriptOut::Keep);
+    }
+    Ok(WsScriptOut::Replace {
+        text,
+        payload: optional_bytes(&obj, "body")?,
+    })
 }
 
 fn views_out(result: &Value<'_>) -> Result<Vec<ViewOut>, String> {

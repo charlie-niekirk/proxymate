@@ -12,6 +12,7 @@ use specta::Type;
 
 use crate::detail::{Header, RequestHead, ResponseHead};
 use crate::flow::{FlowId, Scheme};
+use crate::stream::{WsDirection, WsOpcode};
 
 /// A rule's id: a UUID, or `builtin-…` for rules the app creates itself.
 pub type RuleId = String;
@@ -430,10 +431,58 @@ pub enum Action {
     /// Runs a script (M14): a rewrite script's `onRequest`/`onResponse` in
     /// its phase, or a mock script's `onMock`, which answers like Map
     /// Local (the first answer wins). A script that throws or times out is
-    /// skipped and reported on the flow. Keep this the last variant.
+    /// skipped and reported on the flow. A rewrite script's
+    /// `onWsMessage` runs on the messages of a matching WebSocket.
     Script {
         script_id: String,
     },
+    /// Acts on the messages of a WebSocket whose handshake the rule
+    /// matches (M19): text and binary messages, never control frames.
+    /// Keep this the last variant.
+    WsMessage {
+        /// `None` acts on both directions.
+        #[serde(default)]
+        direction: Option<WsDirection>,
+        /// Only messages whose payload contains a match (exact text is a
+        /// substring, a glob must match the whole payload, a regex
+        /// anywhere). `None` matches every message.
+        #[serde(default)]
+        filter: Option<Pattern>,
+        op: WsOp,
+    },
+}
+
+/// What an [`Action::WsMessage`] does to a message. Ops run in rule and
+/// action order on the message as the earlier ones left it; a drop ends
+/// the run, and the breakpoint fires after every rewrite.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum WsOp {
+    /// The message is never forwarded (it is recorded as dropped).
+    Drop,
+    /// Find and replace in the payload.
+    Replace {
+        pattern: Pattern,
+        replacement: String,
+    },
+    /// Sets the value at a JSON pointer in a text message, changing only
+    /// those bytes (as `Action::JsonSet`).
+    JsonSet {
+        pointer: String,
+        value: serde_json::Value,
+        #[serde(default)]
+        raw: Option<String>,
+    },
+    JsonRemove {
+        pointer: String,
+    },
+    /// Holds the message (and the ones after it in its direction).
+    Delay {
+        ms: u32,
+    },
+    /// Pauses the message for editing; later messages in its direction
+    /// wait behind it.
+    Breakpoint,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, JsonSchema)]
@@ -527,6 +576,19 @@ pub struct BreakpointInfo {
     pub response: Option<ResponseHead>,
     /// The paused message's body (decoded), fetched separately.
     pub body: BreakpointBody,
+    /// Set for a held WebSocket message (M19): `request` is the handshake
+    /// and the body is the payload. `phase` is `request` for a message the
+    /// client sent, `response` for one the server sent.
+    #[serde(default)]
+    pub message: Option<HeldMessage>,
+}
+
+/// A WebSocket message held at a breakpoint.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, JsonSchema)]
+pub struct HeldMessage {
+    pub direction: WsDirection,
+    /// `text` or `binary`.
+    pub opcode: WsOpcode,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Type, JsonSchema)]
@@ -549,9 +611,11 @@ pub enum BreakpointResolution {
         #[serde(default)]
         edits: Option<MessageEdits>,
     },
-    /// Close the connection (h1) or reset the stream (h2).
+    /// Close the connection (h1) or reset the stream (h2). A held
+    /// WebSocket message is dropped instead; the connection stays open.
     Abort,
-    /// Answer the client with this response instead.
+    /// Answer the client with this response instead (not for WebSocket
+    /// messages).
     Respond {
         status: u16,
         #[serde(default)]
@@ -576,9 +640,14 @@ pub struct MessageEdits {
     /// Replaces every header.
     #[serde(default)]
     pub headers: Option<Vec<Header>>,
-    /// Replaces the body (sent identity-encoded).
+    /// Replaces the body (sent identity-encoded). A text WebSocket message
+    /// stays text.
     #[serde(default)]
     pub body: Option<String>,
+    /// WebSocket messages only: replaces the payload with these bytes
+    /// (base64), e.g. a binary message edited as hex. Wins over `body`.
+    #[serde(default)]
+    pub body_base64: Option<String>,
 }
 
 /// The dry run of one rule against a recorded flow.

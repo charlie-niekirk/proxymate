@@ -34,7 +34,7 @@ pub(crate) use blob::Capture;
 pub use deep::DeepQuery;
 pub(crate) use detail::{DetailStore, StoredDetail};
 pub use filter::CompiledFilter;
-pub(crate) use messages::{SseLog, WsLog, page_events, sse_event};
+pub(crate) use messages::{SseLog, WsEntry, WsLog, page_events, sse_event};
 pub use query::FlowQuery;
 pub(crate) use segments::SegmentStore;
 pub use sidebar::{SidebarCounts, in_domain, registrable_domain};

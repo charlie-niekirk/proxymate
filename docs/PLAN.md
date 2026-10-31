@@ -145,6 +145,7 @@ We build our own engine and use hudsucker only as a reading reference. Its handl
 - h2c is recorded but deferred.
 - HTTPS in absolute form (`GET https://…` sent to the proxy) is refused with 501; clients must use CONNECT.
 - WebSocket messages are reassembled and re-framed, so fragmentation on the wire may differ from what the peer sent. Pings are forwarded and also answered by the proxy, so a pinging side may see two pongs.
+- (M19) A WebSocket message held by a delay or a breakpoint holds the ones behind it in its direction (up to 1,024 read ahead, then the peer is pushed back). Control frames (ping, pong, close) are never held or rewritten.
 - A compressed (`Content-Encoding`) event stream is parsed once it is complete, without per-event times.
 - The flow table's Status column shows `101` for a closed WebSocket; the close code and reason are in the WebSocket panel.
 - Clear drops pinned flows too. (Until M17 a saved session didn't keep pins; format 4 keeps them with labels and comments.)
@@ -163,13 +164,14 @@ We build our own engine and use hudsucker only as a reading reference. Its handl
   - Status: `SetStatus`.
   - Routing: `MapLocal` (an inline body, a file, or a directory root mapped by path suffix: the whole path is tried, then with leading segments dropped; `..` never leaves the root) and `MapRemote`.
   - Flow control: `Breakpoint{request,response}`, `Delay`, `Throttle` (token bucket, kbps down/up plus latency), `Block` (a status code or a connection reset: h1 closes the connection, h2 resets the stream).
-  - (M14) Scripts: `Script{script_id}`, the last variant. It names a rewrite or mock script (see "Scripting (M14)").
+  - (M14) Scripts: `Script{script_id}`. It names a rewrite or mock script (see "Scripting (M14)").
+  - (M19) WebSocket messages: `WsMessage{direction?, filter?, op}`, the last variant (see "M19").
   - Header, body and delay actions carry a `phase` (request or response).
 - **Compilation.** Rules compile to a `CompiledRuleSet`, which is swapped in atomically with ArcSwap.
   - Every pattern becomes a byte regex (globs via globset) built with `RegexBuilder::size_limit` (256 KB compiled, 4096 characters of source). Errors name the rule, the field and the reason ("rule "x", host: invalid regex: unclosed group").
   - A host `RegexSet` prefilters candidate rules.
   - Every rule is compiled on save, enabled or not, so a broken rule is never stored.
-  - Each flow snapshots the rule set when it starts.
+  - Each flow snapshots the rule set when it starts. (M19) A WebSocket's messages are matched against the current rule set, again whenever it changes, so a rule added while a connection is open applies to its next message.
 - **Persistence.** `app.sqlite` (rusqlite, bundled, WAL) in the data dir holds the rules (one JSON document per row, so new action fields need no migration) and the rule settings. An engine without a data dir keeps them in memory. The SSL lists stay in `ssl.json` for now; the device allow-list joined in M9.
 - **Evaluation order** (`pm-core/src/rules/eval.rs`, applied on the wire by `pm-core/src/proxy/exchange.rs`):
   1. **Request phase.** All matching rules run in `order`; this is not first-match.
@@ -182,7 +184,7 @@ We build our own engine and use hudsucker only as a reading reference. Its handl
      - The request breakpoint fires **last**, so the user edits exactly what will be sent.
   2. **Response phase.** Gated by the response matcher (against the response as it arrived): rewrites run (including `onResponse` scripts, given the request as it was sent), then the response breakpoint, then response delays and the throttle's latency.
   3. **Recording.** Each flow records which rules applied (`FlowDetail.rules`: applied rules with their phase, `rewrite_skipped`, `breakpoint_timeout`, `mocked`) and sets `edited`. That drives the Edited column and the inspector badges. The recorded request and response are what was sent after rules, not the originals (keeping both is a follow-up).
-  - Rules don't apply to WebSocket handshakes yet.
+  - (M19) A WebSocket handshake goes through the request phase and, on `101`, the response phase's header actions and delay; its messages run `WsMessage` actions and `onWsMessage` scripts (see "M19").
 - **Breakpoints.**
   - (M10) The Breakpoint Editor edits bodies in CodeMirror, highlighted from the Content-Type.
   - `BreakpointManager` keeps a `DashMap<BpId, Pending{snapshot, oneshot::Sender<Resolution>}>`.
@@ -283,7 +285,8 @@ JavaScript on an embedded QuickJS (rquickjs 0.14, QuickJS-NG). Scripts get no ne
 - **Write tools:**
   - `create_rule`, `update_rule`, `set_rule_enabled`, `delete_rule`, `delete_agent_rules`. Rules agents create get `origin: Agent{client, session, created_at_ms}`.
   - Sugar tools: `create_map_local`, `create_breakpoint`, `create_rewrite`, targeting a URL pattern (`https://api.example.com/v1/*`) or a recorded flow (`flow_id`).
-  - `resolve_breakpoint{id, resolution}`, `set_recording`, `clear_flows`.
+  - `resolve_breakpoint{id, resolution}` (M19: a held WebSocket message is continued with `body`/`body_base64` edits or aborted, which drops it), `set_recording`, `clear_flows`.
+  - (M19) `send_websocket_message{id, direction, payload, binary}` and `close_websocket{id}`; `get_websocket_messages` reports each message's `edited`, `injected` and `dropped` flags and an edited one's `original`.
   - `replay_flow{id, modify?, apply_rules, wait}`, `send_request`. Both wrap `Engine::send(RequestSpec, SendOpts) -> FlowId` (M8): `request_spec(store, id, editable)` gives the recorded request to modify, `SendOpts{apply_rules, wait, origin: User | Agent{client}}` the rest; `har_json` and `curl_command` back `export_har` and `export_curl`.
 - **Resources:**
   - `proxymate://status`, `proxymate://rules` (updated when rules change).
@@ -487,7 +490,7 @@ The user asked for two features beyond v1:
 **Facts that shaped the designs:**
 - **No serde_json feature changes.** `arbitrary_precision` breaks numeric fields inside internally tagged enums (`Action`, `RuleOrigin`, `BreakpointResolution`) and leaks into Tauri and rmcp; `preserve_order` reorders keys on remove. Exact JSON edits go through a byte splicer and `JsonSet.raw` instead.
 - Re-serialising a body (the pre-M13 `JsonSet`) sorts keys and rewrites numbers; a JS object reorders integer-like keys (`parseLossless` alone isn't enough for editing).
-- Saved sessions are versioned (`store/sqlite.rs`, `VERSION = 1`, strict); M13 changes no postcard layout. (Now version 5: see M14, M16, M17 and M18.)
+- Saved sessions are versioned (`store/sqlite.rs`, `VERSION = 1`, strict); M13 changes no postcard layout. (Now version 6: see M14, M16, M17, M18 and M19.)
 
 ### M13: Visual rewrite (`m13-visual-rewrite`)
 
@@ -629,6 +632,18 @@ After v0.3.0 the user asked for a feature audit against Proxyman, Charles, HTTP 
 - **Sending.** `Engine::ws_send(flow, direction, payload)` injects a text or binary message into an open connection (the relay re-frames anyway). The WebSocket panel gets a composer and "Resend" on any recorded message. Replaying a WebSocket flow reconnects with the recorded handshake. MCP gets `send_websocket_message`.
 - **Recording.** Messages carry `edited`, `injected` and `dropped` flags (the message types change shape, so the session `VERSION` bumps) and show as badges. The original of an edited message is kept alongside it.
 - **Tests.** Against the testkit echo: a handshake header rule, a JSON field rewrite, drop, delay, a breakpoint edit and timeout, injection from the Engine and MCP, and order under load.
+
+**As built (M19).** Where it differs from the above, or adds detail:
+- **Model.** `Action::WsMessage { direction: Option<WsDirection>, filter: Option<Pattern>, op: WsOp }` is the last `Action` variant (`None` direction: both ways). `WsOp` is `Drop | Replace { pattern, replacement } | JsonSet { pointer, value, raw } | JsonRemove { pointer } | Delay { ms } | Breakpoint`, internally tagged by `kind` (`pattern`/`replacement` as `ReplaceBody` has them, rather than the plan's `find`/`replace`). The filter is a find pattern: exact text is a substring, a glob matches the whole payload, a regex anywhere. `Action` isn't stored in `FlowDetail` (only `AppliedRule` is), so the action alone wouldn't have needed a session bump; the message flags do. `WsMessage` (the recorded message) appends `edited`, `injected`, `dropped`; `BreakpointInfo` gains `message: Option<HeldMessage { direction, opcode }>`; `MessageEdits` gains `body_base64` (messages only; it wins over `body`); `ScriptPhase` gains `WsMessage` (last). `WsSend { direction, payload, binary }` is what `Engine::ws_send` takes.
+- **Session format 6.** Each message in the `ws` column carries the three flags, and a new `originals(flow, idx, data)` table keeps what arrived for edited messages. Versions 1–5 still open (their `ws` column decodes with the old message layout; there is no `originals` table). HAR export leaves dropped messages out (they never went over the wire).
+- **Handshakes.** `forward` and the MITM send WebSocket handshakes through `Exchange::run` with `websocket: Some(ClientSide)`. The request phase runs without body buffering; Map Local and mock answers are ignored (a handshake is answered by the upstream or not at all), Block and Respond answer the client with a non-`101`, and a Map Remote or an edited URL naming `http(s)` becomes `ws(s)`. Each handshake dials its own connection (`mitm::open_h1`) except on the MITM's own origin. On `101`, `switch_with_rules` runs the gated response phase on the head only (header actions, `onResponse` without a body, delays; no status change or breakpoint) and records the head as sent.
+- **Relay (`proxy/ws.rs`).** Per direction, a reader task queues frames (1,024 ahead) and a processor relays them in order: control frames as they are, data messages through `rules::eval::ws_message_phase` (ops and `onWsMessage` in rule and action order, a drop ends the run, delays add up, the first breakpoint fires after the rewrites). The relay keeps the handshake as the client sent it and re-matches when `Engine::rule_set()` changes (an `Arc` pointer check per message). Rules with only `WsMessage` actions are skipped for plain HTTP requests, so they never send traffic down the rules path. JSON ops skip binary and non-JSON text with a `rewrite_skipped` note; a text message whose bytes stop being UTF-8 goes as binary. Messages are recorded as they are forwarded (or dropped), and `time_ms` is that time, kept non-decreasing in the log, so the list is in the order messages went out. Applied rules are recorded once per rule and direction (`Phase::Request` for sent, `Response` for received); script issues are capped at 20 per connection.
+- **Breakpoints.** A held message is a `BreakpointInfo` with `message` set, `request` the handshake as sent, and the payload as the body (editable up to 16 MB). `Engine::resolve_breakpoint` refuses `Respond` and head edits for messages and checks `body_base64`; `Abort` drops the message and the connection stays open. Dropping the relay (a side closed for good) removes the pending entry.
+- **Sending.** `Engine::ws_send(flow, &WsSend)` and `Engine::ws_close(flow)` go through a registry of open connections (`proxy::ws::Registry`, by live flow id); an injected message joins its direction's queue, so it keeps its place behind a held one, and skips the rules. Closing injects a 1000 close frame each way and counts as the side it speaks for. `Engine::websocket_is_open` and `websocket_original_in` round it out. Replay of a WebSocket flow (`Engine::send` with a `ws(s)://` spec; `request_spec` turns a recorded `http(s)` absolute-form URL back into `ws(s)`) sends a GET with a fresh `Sec-WebSocket-Key` and runs the relay with no client (`ClientSide::Headless`): received messages are recorded, only `sent` can be injected.
+- **Scripts.** Rewrite scripts may export only `onWsMessage`. It gets `(context, message)` with `context.phase === "websocket"`; the message has `direction`, a settable `type` and the payload as `body`/`text`/`rawBody` (parsed like a body without headers). Returning the message (or nothing) keeps it with any changes, `null` drops it, a string, bytes or another object replaces it. Payloads over 16 MB pass untouched. No new globals, so `api_surface.txt` is unchanged; the `.d.ts`, prelude, `ENTRY_POINTS`, `MESSAGE_FIELDS` and a "Rewrite WebSocket messages" template are new. The dry run (`test_rule`) applies a rule's message actions to a WebSocket flow's first 50 recorded messages and notes what each would do.
+- **MCP.** `send_websocket_message` (Write), `close_websocket` (Destructive); `get_breakpoint` adds `body_base64` for a binary held message; `get_websocket_messages` adds `original`.
+- **UI.** The rule editor's "WebSocket message" action (direction, filter, op). The Breakpoint Editor shows a held message with Text, Tree (JSON) and Hex modes and Send or Drop. The WebSocket panel shows Edited, Injected and Dropped badges, a Forwarded/Original toggle for edited messages, and, while a live connection is open, a composer (to server or client, text or hex), Resend (row menu and detail) and Close. The flow menu's Replay reconnects a WebSocket flow. The mock backend keeps odd WebSocket flows open and `?breakpoint=ws` seeds a held message; `e2e/websocket.spec.ts` covers them.
+- **Not done (follow-ups).** Running `onWsMessage` in the Scripts window's dry run (`test_script`); per-message rule badges in the panel; editing a message's opcode in the Breakpoint Editor; replaying a WebSocket's recorded client messages after reconnecting; WebSockets over HTTP/2 (extended CONNECT) remain out of scope.
 
 ### M20: Offline mocking (`m20-offline-mocking`)
 - **Serve from a recording.** A new action, after `Script`: `ServeFrom{source, key, on_miss, pick}`.

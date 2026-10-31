@@ -72,6 +72,7 @@ import {
   type ViewInfo_Serialize,
   type WsPage_Serialize,
   type WsQuery_Deserialize,
+  type WsSend,
 } from "@/bindings";
 import { createMockBackend } from "@/lib/mockBackend";
 
@@ -112,6 +113,12 @@ export interface Backend {
   ): Promise<WsPage_Serialize>;
   /** One message's recorded payload (at most 1 MB). */
   getWebsocketPayload(store: number, id: number, index: number): Promise<ArrayBuffer>;
+  /** What arrived for an edited message (M19). */
+  getWebsocketOriginal(store: number, id: number, index: number): Promise<ArrayBuffer>;
+  /** Sends a message into an open WebSocket of the live capture. */
+  wsSend(id: number, message: WsSend): Promise<void>;
+  /** Closes an open WebSocket of the live capture. */
+  wsClose(id: number): Promise<void>;
   /** A window of an event-stream response's events matching `text`. */
   getSseEvents(store: number, id: number, text: string, start: number, count: number): Promise<SsePage_Serialize>;
   clearFlows(): Promise<void>;
@@ -379,6 +386,14 @@ const tauriBackend: Backend = {
     unwrap(commands.getWebsocketMessages(store, id, query, start, count)),
   getWebsocketPayload: async (store, id, index) =>
     (await unwrap(commands.getWebsocketPayload(store, id, index))) as ArrayBuffer,
+  getWebsocketOriginal: async (store, id, index) =>
+    (await unwrap(commands.getWebsocketOriginal(store, id, index))) as ArrayBuffer,
+  wsSend: async (id, message) => {
+    await unwrap(commands.wsSend(id, message));
+  },
+  wsClose: async (id) => {
+    await unwrap(commands.wsClose(id));
+  },
   getSseEvents: (store, id, text, start, count) => unwrap(commands.getSseEvents(store, id, text, start, count)),
   clearFlows: () => commands.clearFlows(),
   setRecording: (on) => commands.setRecording(on),

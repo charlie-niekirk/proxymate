@@ -2,11 +2,11 @@
 // entry points of its kind. Scripts run in an embedded QuickJS with no
 // network, files, `require`, `import` of other modules or timers.
 //
-//   Rewrite scripts: onRequest and/or onResponse (run by a rule's Script action)
+//   Rewrite scripts: onRequest, onResponse and/or onWsMessage (run by a rule's Script action)
 //   Mock scripts:    onMock (run by a rule's Script action)
 //   View scripts:    onView (run when the inspector shows a matching body)
 //
-// Limits: onRequest, onResponse and onMock get 1 s, onView 3 s (Settings ›
+// Limits: onRequest, onResponse, onWsMessage and onMock get 1 s, onView 3 s (Settings ›
 // Advanced); 256 MB of memory per worker. A script that throws or runs out
 // of time is skipped: the flow goes on unchanged and the error shows in the
 // inspector and the script console.
@@ -61,7 +61,7 @@ interface ProxymateContext {
   readonly scriptName: string;
   /** The flow, when it is recorded. */
   readonly flowId: number | null;
-  readonly phase: "request" | "response" | "mock" | "view";
+  readonly phase: "request" | "response" | "mock" | "view" | "websocket";
   /** The rule whose action runs the script (rewrite and mock scripts). */
   readonly rule: { readonly id: string; readonly name: string } | null;
   /** View scripts: which body is being viewed. */
@@ -81,6 +81,24 @@ interface ProxymateFlow {
   readonly request: Readonly<ProxymateRequest>;
   /** Read-only; null before the response arrives. */
   readonly response: Readonly<ProxymateResponse> | null;
+}
+
+/** A WebSocket text or binary message (control frames never reach scripts). */
+interface ProxymateWsMessage {
+  /** `"sent"`: from the client to the server; `"received"`: the other way. */
+  readonly direction: "sent" | "received";
+  /** Set it to change the frame type. A text message must be UTF-8. */
+  type: "text" | "binary";
+  /**
+   * The payload, parsed on first read: JSON text (starting with `{` or `[`)
+   * as objects with BigInt for big integers, other UTF-8 as a string,
+   * anything else as `null`. Change it in place or assign a new value.
+   */
+  body: Body;
+  /** The payload as UTF-8 text. */
+  text: string | null;
+  /** The payload's bytes. */
+  rawBody: Uint8Array | null;
 }
 
 /** A mock answer. `body` objects are sent as JSON. */
@@ -119,6 +137,16 @@ declare function onResponse(
   request: Readonly<ProxymateRequest>,
   response: ProxymateResponse,
 ): ProxymateResponse | void | Promise<ProxymateResponse | void>;
+
+/** Rewrite scripts: change, replace or drop a message of a WebSocket whose
+ * handshake the rule matches, in either direction. Change `message` in place
+ * (or return nothing); return a string for a text message, bytes for a
+ * binary one, another object (`{ type, text | rawBody | body }`) to replace
+ * it, or null to drop it. Messages wait for the script in order. */
+declare function onWsMessage(
+  context: ProxymateContext,
+  message: ProxymateWsMessage,
+): ProxymateWsMessage | string | Uint8Array | object | null | void | Promise<any>;
 
 /** Mock scripts: answer without contacting the upstream. Return null (or
  * nothing) to let the request go on. A string is sent as text, bytes as

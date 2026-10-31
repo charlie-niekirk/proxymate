@@ -141,7 +141,19 @@ fn defs() -> Vec<Def> {
             "get_websocket_messages",
             Read,
             GetWsMessages,
-            "Messages of a WebSocket flow, oldest first, optionally filtered by direction or text, with payloads (text, or base64 for binary) up to payload_max_bytes each."
+            "Messages of a WebSocket flow, oldest first, optionally filtered by direction or text, with payloads (text, or base64 for binary) up to payload_max_bytes each. Flags: edited (a rule, script or breakpoint changed it; `original` has what arrived), injected (sent by Proxymate) and dropped (never forwarded)."
+        ),
+        def!(
+            "send_websocket_message",
+            Write,
+            SendWsMessage,
+            "Send a message into an open WebSocket flow (see get_websocket_messages' `open`): direction `sent` goes to the server as if the client sent it, `received` to the client as if the server did. It is recorded as injected and goes out after any message held ahead of it in that direction. A replayed WebSocket (replay_flow on one) has no client, so only `sent` works there."
+        ),
+        def!(
+            "close_websocket",
+            Destructive,
+            FlowIdParam,
+            "Close an open WebSocket flow: a normal close frame (1000) to each side."
         ),
         def!(
             "wait_for_flow",
@@ -166,13 +178,13 @@ fn defs() -> Vec<Def> {
             "get_breakpoint",
             Read,
             GetBreakpoint,
-            "One paused flow: the request (and response, in the response phase) as it will be sent, and its body."
+            "One paused flow: the request (and response, in the response phase) as it will be sent, and its body. A held WebSocket message has `message` set (direction and opcode); its payload is the body (also as body_base64 when binary) and `request` is the handshake."
         ),
         def!(
             "create_rule",
             Write,
             CreateRule,
-            "Create a rule: a matcher plus ordered actions (SetHeader, AddHeader, RemoveHeader, ReplaceHeaderValue, SetQuery, RemoveQuery, ReplaceBody, SetBody, JsonSet, JsonRemove, FormSet, FormRemove, SetStatus, MapLocal, MapRemote, Breakpoint, Delay, Throttle, Block, Script). It is added last, enabled, and tagged as yours. Prefer create_map_local, create_rewrite or create_breakpoint for the common cases."
+            "Create a rule: a matcher plus ordered actions (SetHeader, AddHeader, RemoveHeader, ReplaceHeaderValue, SetQuery, RemoveQuery, ReplaceBody, SetBody, JsonSet, JsonRemove, FormSet, FormRemove, SetStatus, MapLocal, MapRemote, Breakpoint, Delay, Throttle, Block, Script, WsMessage). It is added last, enabled, and tagged as yours. Prefer create_map_local, create_rewrite or create_breakpoint for the common cases. A WebSocket's handshake goes through the rules like a request (header and query actions, Map Remote, Block, request breakpoints; response header actions on the 101); WsMessage {direction?, filter?, op: Drop | Replace | JsonSet | JsonRemove | Delay | Breakpoint} acts on its text and binary messages."
         ),
         def!(
             "update_rule",
@@ -216,7 +228,7 @@ fn defs() -> Vec<Def> {
             "resolve_breakpoint",
             Destructive,
             ResolveBreakpoint,
-            "Let a paused flow go on: continue (optionally with edits to method, URL, status, headers or body), abort (reset the connection) or respond with your own response. The first resolution wins."
+            "Let a paused flow go on: continue (optionally with edits to method, URL, status, headers or body), abort (reset the connection) or respond with your own response. The first resolution wins. A held WebSocket message: continue (edit `body`, or `body_base64` for bytes) or abort to drop it; it can't be answered."
         ),
         def!(
             "set_recording",
@@ -418,6 +430,21 @@ pub(crate) async fn call(ctx: &Ctx<'_>, name: &str, args: JsonObject) -> ToolRes
             "mappings": ctx.engine.proto_mappings(),
         })),
         "get_websocket_messages" => get_ws_messages(ctx, parse(args)?),
+        "send_websocket_message" => {
+            let p: SendWsMessage = parse(args)?;
+            let message = pm_model::WsSend {
+                direction: ws_direction(p.direction),
+                payload: p.payload,
+                binary: p.binary,
+            };
+            ctx.engine.ws_send(p.id, &message)?;
+            Ok(json!({ "queued": true, "id": p.id }))
+        }
+        "close_websocket" => {
+            let p: FlowIdParam = parse(args)?;
+            ctx.engine.ws_close(p.id)?;
+            Ok(json!({ "closing": p.id }))
+        }
         "wait_for_flow" => wait_for_flow(ctx, parse(args)?).await,
         "list_rules" => list_rules(ctx, parse(args)?),
         "get_rule" => {
@@ -649,6 +676,18 @@ enum Direction {
     Sent,
     /// Server to client.
     Received,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct SendWsMessage {
+    /// An open WebSocket flow.
+    id: FlowId,
+    direction: Direction,
+    /// Text as is, or base64 with `binary`.
+    payload: String,
+    /// Send a binary message; `payload` is base64.
+    #[serde(default)]
+    binary: bool,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -1490,10 +1529,7 @@ async fn decoded_body(ctx: &Ctx<'_>, p: GetFlowBody) -> ToolResult {
 
 fn get_ws_messages(ctx: &Ctx<'_>, p: GetWsMessages) -> ToolResult {
     let query = WsQuery {
-        direction: p.direction.map(|d| match d {
-            Direction::Sent => WsDirection::Sent,
-            Direction::Received => WsDirection::Received,
-        }),
+        direction: p.direction.map(ws_direction),
         text: p.text,
     };
     let start = cursor_offset(&p.cursor)? as u32;
@@ -1507,14 +1543,17 @@ fn get_ws_messages(ctx: &Ctx<'_>, p: GetWsMessages) -> ToolResult {
             let mut v = json!(m);
             if payload_max > 0 {
                 if let Ok(payload) = ctx.engine.websocket_payload(p.id, m.index) {
-                    let cut = &payload[..payload.len().min(payload_max)];
-                    let (text, encoding) = match std::str::from_utf8(cut) {
-                        Ok(s) if m.opcode != pm_model::WsOpcode::Binary => (s.to_owned(), "utf8"),
-                        _ => (base64::engine::general_purpose::STANDARD.encode(cut), "base64"),
-                    };
+                    let (text, encoding, cut) = payload_json(&payload, m.opcode, payload_max);
                     v["payload"] = json!(text);
                     v["payload_encoding"] = json!(encoding);
-                    v["payload_cut"] = json!(payload.len() > payload_max);
+                    v["payload_cut"] = json!(cut);
+                }
+                if m.edited
+                    && let Ok(Some(original)) = ctx.engine.websocket_original_in(LIVE_STORE, p.id, m.index)
+                {
+                    let (text, encoding, _) = payload_json(&original, m.opcode, payload_max);
+                    v["original"] = json!(text);
+                    v["original_encoding"] = json!(encoding);
                 }
                 if let Some(obj) = v.as_object_mut() {
                     obj.remove("preview");
@@ -1532,6 +1571,24 @@ fn get_ws_messages(ctx: &Ctx<'_>, p: GetWsMessages) -> ToolResult {
         "close": page.close,
         "next_cursor": (end < page.len).then(|| end.to_string()),
     }))
+}
+
+fn ws_direction(direction: Direction) -> WsDirection {
+    match direction {
+        Direction::Sent => WsDirection::Sent,
+        Direction::Received => WsDirection::Received,
+    }
+}
+
+/// A payload cut at `max`: UTF-8 text, or base64 for binary; and whether
+/// it was cut.
+fn payload_json(payload: &[u8], opcode: pm_model::WsOpcode, max: usize) -> (String, &'static str, bool) {
+    let cut = &payload[..payload.len().min(max)];
+    let (text, encoding) = match std::str::from_utf8(cut) {
+        Ok(s) if opcode != pm_model::WsOpcode::Binary => (s.to_owned(), "utf8"),
+        _ => (base64::engine::general_purpose::STANDARD.encode(cut), "base64"),
+    };
+    (text, encoding, payload.len() > max)
 }
 
 async fn wait_for_flow(ctx: &Ctx<'_>, p: WaitForFlow) -> ToolResult {
@@ -1593,6 +1650,13 @@ fn get_breakpoint(ctx: &Ctx<'_>, p: GetBreakpoint) -> ToolResult {
         let cut = &body[..body.len().min(max)];
         out["body_text"] = json!(String::from_utf8_lossy(cut));
         out["body_cut"] = json!(body.len() > max);
+        if info
+            .message
+            .as_ref()
+            .is_some_and(|m| m.opcode == pm_model::WsOpcode::Binary)
+        {
+            out["body_base64"] = json!(base64::engine::general_purpose::STANDARD.encode(cut));
+        }
     }
     Ok(out)
 }

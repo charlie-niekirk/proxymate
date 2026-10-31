@@ -38,8 +38,8 @@ use hyper::service::service_fn;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use pm_model::Via;
 use pm_model::{
-    BodyInfo, BodyPart, ContentKind, FlowDetail, FlowState, FlowSummary, HttpVersion, RequestHead, ResponseHead,
-    Scheme, Timing, TlsInfo, TlsStatus,
+    BodyInfo, ContentKind, FlowDetail, FlowState, FlowSummary, HttpVersion, RequestHead, ResponseHead, Scheme, Timing,
+    TlsInfo, TlsStatus,
 };
 use rustls::AlertDescription;
 use rustls::pki_types::ServerName;
@@ -52,8 +52,8 @@ use super::dial::{DialError, Purpose, dial};
 use super::exchange::{Exchange, Route};
 use super::io::{Counters, Counting, Prefixed};
 use super::{
-    BoxError, Origin, ProxyBody, ProxyCtx, Reset, RuleBody, TeeBody, UpstreamBody, content_kind, error_chain, forward,
-    headers, now_ms, record_request, response_head, strip_hop_by_hop, text_response, ws,
+    Origin, ProxyBody, ProxyCtx, Reset, UpstreamBody, error_chain, forward, headers, now_ms, record_request,
+    text_response, ws,
 };
 use crate::Engine;
 use crate::client::PeerClient;
@@ -900,64 +900,22 @@ impl MitmConn {
             };
             record_request(&engine, &req, origin)
         });
-        if !websocket {
-            let exchange = Exchange {
-                ctx: &self.ctx,
-                route: Route::Mitm(&self),
-                peer: &self.target.peer,
-                recorder,
-                scheme: Scheme::Https,
-                host: authority
-                    .host()
-                    .trim_start_matches('[')
-                    .trim_end_matches(']')
-                    .to_owned(),
-                port: authority.port_u16().unwrap_or(443),
-                apply_rules: true,
-            };
-            return exchange.run(req).await;
-        }
-        if let Some(failure) = &self.failure {
-            if let Some(recorder) = &recorder {
-                let mut slot = self.slot.lock().await;
-                if let Some(timing) = slot.timing.take() {
-                    recorder.connection_timing(&timing);
-                }
-                drop(slot);
-                recorder.fail(failure.clone());
-            }
-            return Ok(error_page(&self.target.host, failure));
-        }
-
-        // Rules don't apply to WebSocket handshakes (yet).
-        let client_upgrade = hyper::upgrade::on(&mut req);
-        let (mut parts, body) = req.into_parts();
-        ws::prepare_request(&mut parts.headers);
-        let pq = parts
-            .uri
-            .path_and_query()
-            .cloned()
-            .unwrap_or_else(|| PathAndQuery::from_static("/"));
-        let body = TeeBody::new(RuleBody::stream(body), recorder.clone(), BodyPart::Request);
-        let upstream = match self.send(parts, pq, authority, body, recorder.as_ref()).await {
-            Ok(response) => response,
-            Err(message) => {
-                if let Some(recorder) = &recorder {
-                    recorder.fail(message.clone());
-                }
-                return Ok(error_page(&self.target.host, &message));
-            }
+        let exchange = Exchange {
+            ctx: &self.ctx,
+            route: Route::Mitm(&self),
+            peer: &self.target.peer,
+            recorder,
+            scheme: if websocket { Scheme::Wss } else { Scheme::Https },
+            host: authority
+                .host()
+                .trim_start_matches('[')
+                .trim_end_matches(']')
+                .to_owned(),
+            port: authority.port_u16().unwrap_or(443),
+            apply_rules: true,
+            websocket: websocket.then(|| ws::ClientSide::Upgrade(hyper::upgrade::on(&mut req))),
         };
-        if let Some(recorder) = &recorder {
-            recorder.response(response_head(&upstream), content_kind(upstream.headers()));
-        }
-        if upstream.status() == StatusCode::SWITCHING_PROTOCOLS {
-            return Ok(ws::switch(recorder, client_upgrade, upstream));
-        }
-        let (mut parts, body) = upstream.into_parts();
-        strip_hop_by_hop(&mut parts.headers);
-        let body = TeeBody::new(body, recorder, BodyPart::Response);
-        Ok(Response::from_parts(parts, body.map_err(BoxError::from).boxed_unsync()))
+        exchange.run(req).await
     }
 
     /// Sends one request upstream, reconnecting if the upstream closed the

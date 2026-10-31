@@ -7,7 +7,7 @@ use http::HeaderMap;
 use http::header::HeaderValue;
 use pm_model::{
     Action, BlockMode, KvMatch, MapLocalSource, Matcher, Pattern, PatternKind, Phase, ResponseMatcher, Rule,
-    RuleOrigin, Scheme, StatusRange,
+    RuleOrigin, Scheme, StatusRange, WsDirection, WsOp,
 };
 use serde_json::json;
 
@@ -882,4 +882,147 @@ fn new_actions_compile_and_evaluate() {
     );
     assert!(fx.body_changed);
     assert_eq!(req.body.as_deref(), Some(&b"b=2&c=x%20y"[..]));
+}
+
+// ---- WebSocket messages (M19) ----
+
+fn ws(direction: Option<WsDirection>, filter: Option<Pattern>, op: WsOp) -> Action {
+    Action::WsMessage { direction, filter, op }
+}
+
+fn run_message(rules: Vec<Rule>, draft: &mut eval::WsDraft) -> eval::WsEffects {
+    let set = set(rules);
+    let matched: Vec<_> = set
+        .matching(&request("http://a.test/socket").info(None))
+        .into_iter()
+        .filter(|r| r.acts_on_messages())
+        .collect();
+    eval::ws_message_phase(&matched, draft, ScriptRun::none())
+        .now_or_never()
+        .expect("message rules without scripts never await")
+}
+
+fn message(direction: WsDirection, payload: &str) -> eval::WsDraft {
+    eval::WsDraft {
+        direction,
+        text: true,
+        payload: payload.as_bytes().to_vec(),
+    }
+}
+
+#[test]
+fn message_rewrites_run_in_order_on_their_direction() {
+    let rules = vec![
+        any(vec![
+            ws(
+                Some(WsDirection::Received),
+                None,
+                WsOp::JsonSet {
+                    pointer: "/price".into(),
+                    value: json!(0),
+                    raw: Some("12345678901234567890".into()),
+                },
+            ),
+            ws(
+                None,
+                None,
+                WsOp::Replace {
+                    pattern: Pattern::exact("tick"),
+                    replacement: "tock".into(),
+                },
+            ),
+        ]),
+        rule(
+            "later",
+            Matcher::default(),
+            vec![ws(
+                None,
+                None,
+                WsOp::JsonRemove {
+                    pointer: "/debug".into(),
+                },
+            )],
+        ),
+    ];
+    let mut received = message(WsDirection::Received, r#"{"type":"tick", "price": 1.50, "debug":true}"#);
+    let fx = run_message(rules.clone(), &mut received);
+    assert!(fx.changed && !fx.drop);
+    assert_eq!(received.payload, br#"{"type":"tock", "price": 12345678901234567890}"#);
+    assert_eq!(
+        fx.applied.iter().map(|a| a.rule_id.as_str()).collect::<Vec<_>>(),
+        ["any", "later"]
+    );
+    assert_eq!(fx.applied[0].phase, Phase::Response);
+
+    // The JSON set is for received messages only.
+    let mut sent = message(WsDirection::Sent, r#"{"type":"tick","price":2}"#);
+    let fx = run_message(rules, &mut sent);
+    assert_eq!(sent.payload, br#"{"type":"tock","price":2}"#);
+    assert_eq!(fx.applied[0].phase, Phase::Request);
+}
+
+#[test]
+fn a_drop_ends_the_run_and_filters_pick_messages() {
+    let rules = vec![
+        any(vec![
+            ws(None, Some(Pattern::regex(r#""type":\s*"ping""#)), WsOp::Drop),
+            ws(None, None, WsOp::Delay { ms: 30 }),
+        ]),
+        rule("after", Matcher::default(), vec![ws(None, None, WsOp::Breakpoint)]),
+    ];
+    let mut ping = message(WsDirection::Sent, r#"{"type": "ping"}"#);
+    let fx = run_message(rules.clone(), &mut ping);
+    assert!(fx.drop);
+    assert_eq!((fx.delay_ms, fx.breakpoint.is_some()), (0, false));
+
+    let mut other = message(WsDirection::Sent, r#"{"type":"data"}"#);
+    let fx = run_message(rules, &mut other);
+    assert!(!fx.drop && !fx.changed);
+    assert_eq!(fx.delay_ms, 30);
+    assert_eq!(fx.breakpoint.unwrap().applied.rule_id, "after");
+}
+
+#[test]
+fn json_ops_skip_binary_and_non_json_messages() {
+    let rules = vec![any(vec![ws(None, None, WsOp::JsonRemove { pointer: "/a".into() })])];
+    let mut binary = eval::WsDraft {
+        direction: WsDirection::Received,
+        text: false,
+        payload: br#"{"a":1}"#.to_vec(),
+    };
+    let fx = run_message(rules.clone(), &mut binary);
+    assert!(!fx.changed);
+    assert_eq!(fx.skipped.len(), 1, "{:?}", fx.skipped);
+    let mut text = message(WsDirection::Received, "not json");
+    let fx = run_message(rules, &mut text);
+    assert!(!fx.changed && fx.skipped.len() == 1);
+}
+
+#[test]
+fn message_actions_compile_their_patterns() {
+    let bad = rule(
+        "bad",
+        Matcher::default(),
+        vec![ws(None, Some(Pattern::regex("(")), WsOp::Drop)],
+    );
+    let err = CompiledRuleSet::compile(&[bad], &ScriptMap::new()).err().unwrap();
+    assert!(err.to_string().contains("message filter"), "{err}");
+    let bad = rule(
+        "bad",
+        Matcher::default(),
+        vec![ws(
+            None,
+            None,
+            WsOp::JsonSet {
+                pointer: "a".into(),
+                value: json!(1),
+                raw: None,
+            },
+        )],
+    );
+    assert!(CompiledRuleSet::compile(&[bad], &ScriptMap::new()).is_err());
+    // A rule with only message actions leaves plain requests alone.
+    let only = set(vec![any(vec![ws(None, None, WsOp::Drop)])]);
+    let matched = only.matching(&request("http://a.test/").info(None));
+    assert!(matched[0].acts_on_messages() && !matched[0].acts_on_http());
 }

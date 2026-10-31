@@ -20,7 +20,7 @@ use crate::ingest::FlowEvent;
 use crate::io::content::{self, GRAPHQL_MAX, SNIFF_LEN};
 use crate::io::{decode, grpc};
 use crate::proxy::now_ms;
-use crate::store::{Capture, SegmentStore, SseLog, StoredDetail, WsLog};
+use crate::store::{Capture, SegmentStore, SseLog, StoredDetail, WsEntry, WsLog};
 
 /// gRPC-web bodies up to this size are read at the end for their trailer
 /// frame.
@@ -126,6 +126,11 @@ impl FlowRecorder {
 
     pub fn id(&self) -> FlowId {
         self.flow.id
+    }
+
+    /// The engine, unless it is shutting down.
+    pub(crate) fn engine(&self) -> Option<Arc<Engine>> {
+        self.flow.engine.upgrade()
     }
 
     /// Records how the upstream connection was set up: DNS, connect and TLS
@@ -506,6 +511,15 @@ impl WsRecorder {
     /// Records one message as it is relayed. `payload` is the whole message
     /// (the close reason, for a close frame); only the first 1 MB is kept.
     pub fn message(&self, direction: WsDirection, opcode: WsOpcode, payload: &[u8], close_code: Option<u16>) {
+        let entry = WsEntry {
+            close_code,
+            ..WsEntry::new(direction, opcode, payload)
+        };
+        self.record(entry, now_ms());
+    }
+
+    /// Records one message with its flags (M19), stamped `time_ms`.
+    pub(crate) fn record(&self, entry: WsEntry<'_>, time_ms: f64) {
         let Some(engine) = self.flow.flow.engine.upgrade() else {
             return;
         };
@@ -515,13 +529,17 @@ impl WsRecorder {
             return;
         }
         let max = engine.storage_settings().max_ws_messages as usize;
-        self.log
-            .push(&details.segments, direction, opcode, payload, close_code, now_ms(), max);
+        self.log.push(&details.segments, entry, time_ms, max);
         engine.ingest().send(FlowEvent::WsMsg {
             id,
-            direction,
-            len: payload.len() as u64,
+            direction: entry.direction,
+            len: entry.payload.len() as u64,
         });
+    }
+
+    /// The flow these messages belong to.
+    pub(crate) fn flow(&self) -> &FlowRecorder {
+        &self.flow
     }
 
     /// Finishes the flow: completed with how it closed, or failed with

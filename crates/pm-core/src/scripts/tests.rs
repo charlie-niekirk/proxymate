@@ -82,6 +82,93 @@ async fn on_view(source: &str, resp: JsResponse) -> Vec<ViewOut> {
     }
 }
 
+async fn on_ws(source: &str, text: bool, payload: &[u8]) -> WsScriptOut {
+    let message = JsWsMessage {
+        direction: pm_model::WsDirection::Received,
+        text,
+        payload: Arc::new(payload.to_vec()),
+    };
+    match run(source, Call::WsMessage(message)).await.output {
+        Ok(Output::WsMessage(out)) => out,
+        other => panic!("{other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn ws_messages_are_kept_changed_replaced_or_dropped() {
+    let json = br#"{"type":"tick", "n": 12345678901234567890}"#;
+    for keep in [
+        "export function onWsMessage(c, m) { return m; }",
+        "export function onWsMessage(c, m) { m.body.n; m.text; }",
+    ] {
+        assert_eq!(on_ws(keep, true, json).await, WsScriptOut::Keep, "{keep}");
+    }
+    let drop = "export function onWsMessage(c, m) { return m.body.type === 'tick' ? null : m; }";
+    assert_eq!(on_ws(drop, true, json).await, WsScriptOut::Drop);
+    let edited = on_ws(
+        "export function onWsMessage(c, m) { if (m.direction === 'received') m.body.seen = true; return m; }",
+        true,
+        json,
+    )
+    .await;
+    assert_eq!(
+        edited,
+        WsScriptOut::Replace {
+            text: true,
+            payload: Some(br#"{"type":"tick","n":12345678901234567890,"seen":true}"#.to_vec()),
+        }
+    );
+    assert_eq!(
+        on_ws("export function onWsMessage() { return 'hi'; }", true, json).await,
+        WsScriptOut::Replace {
+            text: true,
+            payload: Some(b"hi".to_vec()),
+        }
+    );
+    assert_eq!(
+        on_ws(
+            "export function onWsMessage() { return new Uint8Array([1, 2]); }",
+            true,
+            json
+        )
+        .await,
+        WsScriptOut::Replace {
+            text: false,
+            payload: Some(vec![1, 2]),
+        }
+    );
+    // Only the frame type changes.
+    assert_eq!(
+        on_ws("export function onWsMessage(c, m) { m.type = 'binary'; }", true, b"x").await,
+        WsScriptOut::Replace {
+            text: false,
+            payload: None,
+        }
+    );
+    assert_eq!(
+        on_ws(
+            "export function onWsMessage(c, m) { return { ok: c.phase }; }",
+            false,
+            b"\x00"
+        )
+        .await,
+        WsScriptOut::Replace {
+            text: true,
+            payload: Some(br#"{"ok":"websocket"}"#.to_vec()),
+        }
+    );
+    let bad = run(
+        "export function onWsMessage(c, m) { m.type = 'video'; }",
+        Call::WsMessage(JsWsMessage {
+            direction: pm_model::WsDirection::Sent,
+            text: true,
+            payload: Arc::new(b"x".to_vec()),
+        }),
+    )
+    .await;
+    assert!(bad.output.unwrap_err().contains("isn't a message type"));
+}
+
 /// Evaluates `expr` in a view and returns it as text.
 async fn eval(expr: &str) -> String {
     let source =
@@ -632,6 +719,21 @@ async fn templates_run() {
 
     let out = on_response(template!("modify-json"), response("application/json", br#"{"a":1}"#)).await;
     assert_eq!(out.body.unwrap(), br#"{"a":1,"debug":true}"#);
+
+    let heartbeat = JsWsMessage {
+        direction: pm_model::WsDirection::Sent,
+        text: true,
+        payload: Arc::new(br#"{"type":"ping"}"#.to_vec()),
+    };
+    let out = run(template!("websocket-messages"), Call::WsMessage(heartbeat)).await;
+    assert!(matches!(out.output, Ok(Output::WsMessage(WsScriptOut::Drop))));
+    assert_eq!(
+        on_ws(template!("websocket-messages"), true, br#"{"a":1}"#).await,
+        WsScriptOut::Replace {
+            text: true,
+            payload: Some(br#"{"a":1,"viaProxymate":true}"#.to_vec()),
+        }
+    );
 
     let out = on_mock(template!("mock-json")).await.unwrap();
     assert_eq!(out.status, 200);

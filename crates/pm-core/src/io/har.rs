@@ -469,8 +469,10 @@ fn entry(flow: &SavedFlow) -> Entry {
         server_ip_address: None,
         connection: None,
         web_socket_messages: flow.ws.as_ref().map(|ws| {
+            // What went over the wire: a dropped message never did.
             ws.messages
                 .iter()
+                .filter(|(m, _)| !m.dropped)
                 .map(|(m, payload)| WebSocketMessage {
                     kind: match m.direction {
                         WsDirection::Sent => "send",
@@ -1003,11 +1005,18 @@ fn ws_messages(messages: &[WebSocketMessage]) -> SavedWs {
                 truncated: false,
                 close_code: None,
                 preview,
+                edited: false,
+                injected: false,
+                dropped: false,
             },
             payload,
         ));
     }
-    SavedWs { messages: out, close }
+    SavedWs {
+        messages: out,
+        originals: Vec::new(),
+        close,
+    }
 }
 
 fn parse_version(v: &str) -> HttpVersion {
@@ -1214,6 +1223,7 @@ mod tests {
                 ),
                 (ws_message(2, WsDirection::Sent, WsOpcode::Close, 3), b"bye".to_vec()),
             ],
+            originals: Vec::new(),
             close: Some(WsClose {
                 code: 1000,
                 reason: "bye".into(),
@@ -1275,6 +1285,9 @@ mod tests {
             truncated: false,
             close_code: None,
             preview: String::new(),
+            edited: false,
+            injected: false,
+            dropped: false,
         }
     }
 

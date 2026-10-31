@@ -3,7 +3,8 @@
 //! with many messages never makes loading its detail slow. Logs are in
 //! memory; WebSocket payloads above a small size spill to the segment files.
 //! A saved session's logs are rebuilt in memory, payloads inline, when a
-//! flow is first inspected.
+//! flow is first inspected. An edited message (M19) keeps what arrived
+//! beside what was forwarded.
 
 use std::collections::{HashSet, VecDeque};
 use std::io;
@@ -44,6 +45,37 @@ struct WsInner {
 struct WsRecord {
     meta: WsMessage,
     payload: BlobRef,
+    /// What arrived, for an edited message.
+    original: Option<BlobRef>,
+}
+
+/// One message to record.
+#[derive(Clone, Copy)]
+pub(crate) struct WsEntry<'a> {
+    pub direction: WsDirection,
+    pub opcode: WsOpcode,
+    /// The whole message as forwarded (as it arrived, for a dropped one);
+    /// the close reason for a close frame.
+    pub payload: &'a [u8],
+    pub close_code: Option<u16>,
+    /// What arrived, when a rule, script or breakpoint changed it.
+    pub original: Option<&'a [u8]>,
+    pub injected: bool,
+    pub dropped: bool,
+}
+
+impl<'a> WsEntry<'a> {
+    pub fn new(direction: WsDirection, opcode: WsOpcode, payload: &'a [u8]) -> WsEntry<'a> {
+        WsEntry {
+            direction,
+            opcode,
+            payload,
+            close_code: None,
+            original: None,
+            injected: false,
+            dropped: false,
+        }
+    }
 }
 
 impl WsLog {
@@ -58,44 +90,39 @@ impl WsLog {
     }
 
     /// Appends one message, dropping the oldest past `max` (0 keeps all).
-    /// `payload` is cut at [`PAYLOAD_MAX`]; `len` is its full size.
-    #[allow(clippy::too_many_arguments)]
-    pub fn push(
-        &self,
-        segments: &SegmentStore,
-        direction: WsDirection,
-        opcode: WsOpcode,
-        payload: &[u8],
-        close_code: Option<u16>,
-        time_ms: f64,
-        max: usize,
-    ) {
+    /// Payloads are cut at [`PAYLOAD_MAX`]; `len` is the full size.
+    pub fn push(&self, segments: &SegmentStore, entry: WsEntry<'_>, time_ms: f64, max: usize) {
+        let payload = entry.payload;
         let len = payload.len() as u64;
         let kept = &payload[..payload.len().min(PAYLOAD_MAX)];
-        let preview = match opcode {
+        let preview = match entry.opcode {
             WsOpcode::Binary => String::new(),
             _ => preview(kept),
         };
         let mut truncated = kept.len() < payload.len();
-        let stored = if kept.is_empty() {
-            BlobRef::Empty
-        } else if kept.len() <= PAYLOAD_INLINE {
-            BlobRef::Inline(kept.to_vec())
-        } else {
-            match segments.append(self.owner, kept) {
-                Ok(extent) => BlobRef::Segments(vec![extent]),
-                Err(_) => {
-                    truncated = true;
-                    BlobRef::Empty
-                }
+        let stored = match self.store(segments, kept) {
+            Some(blob) => blob,
+            None => {
+                truncated = true;
+                BlobRef::Empty
             }
         };
+        let original = entry.original.map(|o| {
+            self.store(segments, &o[..o.len().min(PAYLOAD_MAX)])
+                .unwrap_or(BlobRef::Empty)
+        });
         let mut inner = self.inner.write();
-        match direction {
+        match entry.direction {
             WsDirection::Sent => inner.sent += len,
             WsDirection::Received => inner.received += len,
         }
         let index = inner.dropped + inner.records.len() as u32;
+        // Both directions record from their own tasks: the clock read
+        // before the lock may trail the last message's.
+        let time_ms = inner
+            .records
+            .back()
+            .map_or(time_ms, |last| time_ms.max(last.meta.time_ms));
         if max > 0 {
             while inner.records.len() >= max {
                 inner.records.pop_front();
@@ -105,20 +132,44 @@ impl WsLog {
         inner.records.push_back(WsRecord {
             meta: WsMessage {
                 index,
-                direction,
-                opcode,
+                direction: entry.direction,
+                opcode: entry.opcode,
                 len,
                 time_ms,
                 truncated,
-                close_code,
+                close_code: entry.close_code,
                 preview,
+                edited: original.is_some(),
+                injected: entry.injected,
+                dropped: entry.dropped,
             },
             payload: stored,
+            original,
         });
     }
 
-    /// A finished log rebuilt from saved messages and their payloads.
-    pub fn restore(messages: Vec<(WsMessage, Vec<u8>)>, close: Option<WsClose>) -> Self {
+    /// Keeps `bytes` inline or in the segment files; `None` if writing
+    /// them failed.
+    fn store(&self, segments: &SegmentStore, bytes: &[u8]) -> Option<BlobRef> {
+        if bytes.is_empty() {
+            Some(BlobRef::Empty)
+        } else if bytes.len() <= PAYLOAD_INLINE {
+            Some(BlobRef::Inline(bytes.to_vec()))
+        } else {
+            segments
+                .append(self.owner, bytes)
+                .ok()
+                .map(|extent| BlobRef::Segments(vec![extent]))
+        }
+    }
+
+    /// A finished log rebuilt from saved messages and their payloads, and
+    /// the originals of edited messages by index.
+    pub fn restore(
+        messages: Vec<(WsMessage, Vec<u8>)>,
+        mut originals: std::collections::HashMap<u32, Vec<u8>>,
+        close: Option<WsClose>,
+    ) -> Self {
         let mut inner = WsInner {
             open: false,
             close,
@@ -131,12 +182,19 @@ impl WsLog {
                 WsDirection::Sent => inner.sent += meta.len,
                 WsDirection::Received => inner.received += meta.len,
             }
-            let payload = if payload.is_empty() {
-                BlobRef::Empty
-            } else {
-                BlobRef::Inline(payload)
+            let inline = |bytes: Vec<u8>| {
+                if bytes.is_empty() {
+                    BlobRef::Empty
+                } else {
+                    BlobRef::Inline(bytes)
+                }
             };
-            inner.records.push_back(WsRecord { meta, payload });
+            let original = originals.remove(&meta.index).map(inline);
+            inner.records.push_back(WsRecord {
+                meta,
+                payload: inline(payload),
+                original,
+            });
         }
         WsLog {
             owner: 0,
@@ -217,10 +275,26 @@ impl WsLog {
         }
     }
 
+    /// What arrived for message `index`, if a rule, script or breakpoint
+    /// edited it.
+    pub fn original(&self, segments: Option<&SegmentStore>, index: u32) -> io::Result<Option<Vec<u8>>> {
+        let inner = self.inner.read();
+        let Some(pos) = index.checked_sub(inner.dropped) else {
+            return Ok(None);
+        };
+        match inner.records.get(pos as usize).and_then(|r| r.original.as_ref()) {
+            Some(blob) => blob.read_from(segments).map(Some),
+            None => Ok(None),
+        }
+    }
+
     /// Adds the segment files the kept payloads live in.
     pub fn segments_used(&self, out: &mut HashSet<u32>) {
         for record in &self.inner.read().records {
             record.payload.segments_used(out);
+            if let Some(original) = &record.original {
+                original.segments_used(out);
+            }
         }
     }
 }
@@ -357,19 +431,25 @@ mod tests {
     fn ws_pages_filter_by_direction_and_text() {
         let (segs, root) = segments();
         let log = WsLog::new(0);
-        log.push(&segs, WsDirection::Sent, WsOpcode::Text, b"hello", None, 1.0, 0);
+        log.push(&segs, WsEntry::new(WsDirection::Sent, WsOpcode::Text, b"hello"), 1.0, 0);
         log.push(
             &segs,
-            WsDirection::Received,
-            WsOpcode::Text,
-            b"HELLO back",
-            None,
+            WsEntry::new(WsDirection::Received, WsOpcode::Text, b"HELLO back"),
             2.0,
             0,
         );
         let big: Vec<u8> = b"needle ".iter().copied().cycle().take(5_000).collect();
-        log.push(&segs, WsDirection::Received, WsOpcode::Binary, &big, None, 3.0, 0);
-        log.push(&segs, WsDirection::Sent, WsOpcode::Close, b"bye", Some(1000), 4.0, 0);
+        log.push(
+            &segs,
+            WsEntry::new(WsDirection::Received, WsOpcode::Binary, &big),
+            3.0,
+            0,
+        );
+        let close = WsEntry {
+            close_code: Some(1000),
+            ..WsEntry::new(WsDirection::Sent, WsOpcode::Close, b"bye")
+        };
+        log.push(&segs, close, 4.0, 0);
 
         let all = log.page(Some(&segs), &WsQuery::default(), 1, 2).unwrap();
         assert_eq!((all.total, all.len), (4, 4));
@@ -398,15 +478,8 @@ mod tests {
     fn payloads_are_capped() {
         let (segs, root) = segments();
         let log = WsLog::new(0);
-        log.push(
-            &segs,
-            WsDirection::Sent,
-            WsOpcode::Binary,
-            &vec![1u8; PAYLOAD_MAX + 1],
-            None,
-            1.0,
-            0,
-        );
+        let big = vec![1u8; PAYLOAD_MAX + 1];
+        log.push(&segs, WsEntry::new(WsDirection::Sent, WsOpcode::Binary, &big), 1.0, 0);
         let page = log.page(Some(&segs), &WsQuery::default(), 0, 1).unwrap();
         assert!(page.messages[0].truncated);
         assert_eq!(page.messages[0].len, PAYLOAD_MAX as u64 + 1);
@@ -419,7 +492,12 @@ mod tests {
         let (segs, root) = segments();
         let log = WsLog::new(0);
         for i in 0..10u8 {
-            log.push(&segs, WsDirection::Sent, WsOpcode::Text, &[b'a' + i], None, 1.0, 4);
+            log.push(
+                &segs,
+                WsEntry::new(WsDirection::Sent, WsOpcode::Text, &[b'a' + i]),
+                1.0,
+                4,
+            );
         }
         let page = log.page(Some(&segs), &WsQuery::default(), 0, 10).unwrap();
         assert_eq!((page.total, page.len, page.dropped), (4, 4, 6));
@@ -431,6 +509,59 @@ mod tests {
         assert_eq!(log.payload(Some(&segs), 2).unwrap(), None);
         // Totals still count every message.
         assert_eq!(log.totals(), (10, 0));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn edited_messages_keep_their_original() {
+        let (segs, root) = segments();
+        let log = WsLog::new(0);
+        let big = vec![b'x'; 4_000];
+        let edited = WsEntry {
+            original: Some(&big),
+            ..WsEntry::new(WsDirection::Sent, WsOpcode::Text, b"short")
+        };
+        log.push(&segs, edited, 1.0, 0);
+        let dropped = WsEntry {
+            dropped: true,
+            ..WsEntry::new(WsDirection::Received, WsOpcode::Text, b"gone")
+        };
+        log.push(&segs, dropped, 2.0, 0);
+        let injected = WsEntry {
+            injected: true,
+            ..WsEntry::new(WsDirection::Received, WsOpcode::Binary, b"\x01")
+        };
+        log.push(&segs, injected, 3.0, 0);
+        let page = log.page(Some(&segs), &WsQuery::default(), 0, 10).unwrap();
+        let flags: Vec<_> = page
+            .messages
+            .iter()
+            .map(|m| (m.edited, m.dropped, m.injected))
+            .collect();
+        assert_eq!(
+            flags,
+            vec![(true, false, false), (false, true, false), (false, false, true)]
+        );
+        assert_eq!(log.payload(Some(&segs), 0).unwrap().unwrap(), b"short");
+        assert_eq!(log.original(Some(&segs), 0).unwrap().unwrap(), big);
+        assert_eq!(log.original(Some(&segs), 1).unwrap(), None);
+        let mut used = HashSet::new();
+        log.segments_used(&mut used);
+        assert_eq!(used.len(), 1);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn times_never_go_backwards_in_the_list() {
+        let (segs, root) = segments();
+        let log = WsLog::new(0);
+        log.push(&segs, WsEntry::new(WsDirection::Sent, WsOpcode::Text, b"a"), 5.0, 0);
+        // Read the clock before the other direction took the lock.
+        log.push(&segs, WsEntry::new(WsDirection::Received, WsOpcode::Text, b"b"), 4.0, 0);
+        log.push(&segs, WsEntry::new(WsDirection::Sent, WsOpcode::Text, b"c"), 6.0, 0);
+        let page = log.page(Some(&segs), &WsQuery::default(), 0, 10).unwrap();
+        let times: Vec<f64> = page.messages.iter().map(|m| m.time_ms).collect();
+        assert_eq!(times, [5.0, 5.0, 6.0]);
         let _ = std::fs::remove_dir_all(root);
     }
 

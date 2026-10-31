@@ -10,9 +10,11 @@ use http::header::{self, HeaderMap, HeaderName, HeaderValue};
 use pm_model::{FlowId, Scheme, ScriptIssue, ScriptPhase};
 
 use super::host::{MockOut, RequestOut, ResponseOut};
-use super::{Call, CallInfo, CompiledScript, JsRequest, JsResponse, Output, SCRIPT_BODY_MAX, Scripts};
+use super::{
+    Call, CallInfo, CompiledScript, JsRequest, JsResponse, JsWsMessage, Output, SCRIPT_BODY_MAX, Scripts, WsScriptOut,
+};
 use crate::rules::compile::CompiledRule;
-use crate::rules::eval::{RequestDraft, ResponseDraft};
+use crate::rules::eval::{RequestDraft, ResponseDraft, WsDraft};
 
 /// A mock script's answer.
 pub(crate) type MockAnswer = ResponseDraft;
@@ -106,6 +108,28 @@ impl<'a> ScriptRun<'a> {
         match self.call(script, rule, Call::Mock(js_request(draft))).await? {
             Output::Mock(answer) => Ok(answer),
             _ => Ok(None),
+        }
+    }
+
+    /// `onWsMessage` on one WebSocket message (M19). A payload over the
+    /// script cap is passed on untouched.
+    pub async fn ws_message(
+        &self,
+        script: &CompiledScript,
+        rule: &CompiledRule,
+        draft: &WsDraft,
+    ) -> Result<WsScriptOut, ScriptIssue> {
+        if draft.payload.len() > SCRIPT_BODY_MAX {
+            return Ok(WsScriptOut::Keep);
+        }
+        let message = JsWsMessage {
+            direction: draft.direction,
+            text: draft.text,
+            payload: Arc::new(draft.payload.clone()),
+        };
+        match self.call(script, rule, Call::WsMessage(message)).await? {
+            Output::WsMessage(out) => Ok(out),
+            _ => Ok(WsScriptOut::Keep),
         }
     }
 
