@@ -20,6 +20,13 @@
 //! `Block` still runs first and the breakpoints last. A script that throws
 //! or times out is skipped and reported in the effects' `script_issues`.
 //!
+//! **WebSocket messages (M19).** Each text or binary message of a
+//! WebSocket runs [`ws_message_phase`] with the rules that matched its
+//! handshake: `WsMessage` actions and `onWsMessage` scripts in rule and
+//! action order, each on the message as the earlier ones left it. A drop
+//! ends the run; delays add up; the first breakpoint fires after the
+//! rewrites.
+//!
 //! Everything here works on drafts: the proxy fills a draft from the wire
 //! (buffering and decoding the body first when a body action, script or
 //! breakpoint needs it), evaluates, and sends what's left. The phases are
@@ -29,12 +36,14 @@
 use std::sync::Arc;
 
 use http::header::{self, HeaderMap, HeaderName, HeaderValue};
-use pm_model::{Action, AppliedRule, BlockMode, MapLocalSource, Phase, Scheme, ScriptIssue, ScriptPhase};
+use pm_model::{
+    Action, AppliedRule, BlockMode, MapLocalSource, Phase, Scheme, ScriptIssue, ScriptPhase, WsDirection, WsOp,
+};
 
 use super::compile::{CompiledAction, CompiledRule, RequestInfo, percent_encode, query_pairs};
 use super::json_edit::{self, Edit};
 use crate::scripts::traffic::{apply_request, apply_response, mock_answer};
-use crate::scripts::{JsRequest, MockAnswer, ScriptRun};
+use crate::scripts::{JsRequest, MockAnswer, ScriptRun, WsScriptOut};
 
 /// A request as rules see and change it.
 #[derive(Debug, Clone)]
@@ -528,6 +537,145 @@ pub(crate) async fn response_phase(
         }
         if applied {
             fx.applied.push(rule.applied(Phase::Response));
+        }
+    }
+    fx
+}
+
+/// A WebSocket message as rules see and change it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct WsDraft {
+    pub direction: WsDirection,
+    /// A text message (else binary).
+    pub text: bool,
+    pub payload: Vec<u8>,
+}
+
+impl WsDraft {
+    /// The phase a message counts as: what the client sent is the
+    /// request side.
+    pub fn phase(&self) -> Phase {
+        match self.direction {
+            WsDirection::Sent => Phase::Request,
+            WsDirection::Received => Phase::Response,
+        }
+    }
+}
+
+/// What the message rules decided, beyond the edits made to the draft.
+#[derive(Default)]
+pub(crate) struct WsEffects {
+    pub drop: bool,
+    pub delay_ms: u64,
+    pub breakpoint: Option<Arc<CompiledRule>>,
+    pub changed: bool,
+    /// Ops that couldn't run (JSON edits on binary or non-JSON text…).
+    pub skipped: Vec<String>,
+    pub applied: Vec<AppliedRule>,
+    pub script_issues: Vec<ScriptIssue>,
+}
+
+/// Runs the message actions and `onWsMessage` scripts of `rules` (those
+/// that matched the handshake, in order) on one message.
+pub(crate) async fn ws_message_phase(
+    rules: &[Arc<CompiledRule>],
+    draft: &mut WsDraft,
+    run: ScriptRun<'_>,
+) -> WsEffects {
+    let mut fx = WsEffects::default();
+    let phase = draft.phase();
+    'rules: for rule in rules {
+        let mut applied = false;
+        for ca in &rule.actions {
+            match &ca.action {
+                Action::WsMessage { direction, op, .. } => {
+                    if direction.is_some_and(|d| d != draft.direction) {
+                        continue;
+                    }
+                    if let Some(filter) = &ca.filter
+                        && !filter.is_match(&draft.payload)
+                    {
+                        continue;
+                    }
+                    match op {
+                        WsOp::Drop => {
+                            fx.drop = true;
+                            fx.applied.push(rule.applied(phase));
+                            break 'rules;
+                        }
+                        WsOp::Replace { replacement, .. } => {
+                            let Some(find) = &ca.find else { continue };
+                            let new = find.replace_all(&draft.payload, replacement.as_bytes());
+                            if new.as_ref() != draft.payload.as_slice() {
+                                draft.payload = new.into_owned();
+                                fx.changed = true;
+                                applied = true;
+                            }
+                        }
+                        WsOp::JsonSet { pointer, .. } | WsOp::JsonRemove { pointer } => {
+                            if !draft.text {
+                                fx.skipped
+                                    .push(format!("{}: a binary message isn't JSON", rule.applied.name));
+                                continue;
+                            }
+                            let edit = match op {
+                                WsOp::JsonSet { .. } => Edit::Set {
+                                    pointer,
+                                    raw: ca.json.as_deref().unwrap_or("null"),
+                                },
+                                _ => Edit::Remove { pointer },
+                            };
+                            for result in json_edit::apply(&mut draft.payload, &[edit]) {
+                                match result {
+                                    Ok(true) => {
+                                        fx.changed = true;
+                                        applied = true;
+                                    }
+                                    Ok(false) => {}
+                                    Err(reason) => fx.skipped.push(format!("{}: {reason}", rule.applied.name)),
+                                }
+                            }
+                        }
+                        WsOp::Delay { ms } => {
+                            fx.delay_ms += u64::from(*ms);
+                            applied = true;
+                        }
+                        WsOp::Breakpoint => {
+                            fx.breakpoint.get_or_insert_with(|| rule.clone());
+                            applied = true;
+                        }
+                    }
+                }
+                Action::Script { .. } => {
+                    let Some(script) = ca.script.as_ref().filter(|s| s.runs_ws()) else {
+                        continue;
+                    };
+                    match run.ws_message(script, rule, draft).await {
+                        Ok(WsScriptOut::Keep) => {}
+                        Ok(WsScriptOut::Drop) => {
+                            fx.drop = true;
+                            fx.applied.push(rule.applied(phase));
+                            break 'rules;
+                        }
+                        Ok(WsScriptOut::Replace { text, payload }) => {
+                            let payload = payload.unwrap_or_else(|| draft.payload.clone());
+                            // A text frame must be UTF-8.
+                            let text = text && std::str::from_utf8(&payload).is_ok();
+                            if text != draft.text || payload != draft.payload {
+                                draft.text = text;
+                                draft.payload = payload;
+                                fx.changed = true;
+                                applied = true;
+                            }
+                        }
+                        Err(issue) => fx.script_issues.push(issue),
+                    }
+                }
+                _ => {}
+            }
+        }
+        if applied {
+            fx.applied.push(rule.applied(phase));
         }
     }
     fx

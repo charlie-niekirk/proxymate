@@ -23,7 +23,7 @@ mod send;
 mod sniff;
 mod socks;
 mod tee;
-mod ws;
+pub(crate) mod ws;
 
 use std::error::Error as StdError;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -41,8 +41,8 @@ use hyper::service::service_fn;
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use pm_model::{
-    BodyInfo, BodyPart, ContentKind, FlowDetail, FlowState, FlowSummary, Header, HttpVersion, RequestHead,
-    ResponseHead, Scheme, Timing, TlsInfo, TlsStatus,
+    BodyInfo, ContentKind, FlowDetail, FlowState, FlowSummary, Header, HttpVersion, RequestHead, ResponseHead, Scheme,
+    Timing, TlsInfo, TlsStatus,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -374,62 +374,18 @@ async fn forward(
             ..Default::default()
         });
     }
-    if !websocket {
-        let exchange = Exchange {
-            ctx,
-            route: Route::Forward,
-            peer: client,
-            recorder,
-            scheme: if tls { Scheme::Https } else { Scheme::Http },
-            host,
-            port,
-            apply_rules: true,
-        };
-        return exchange.run(req).await;
-    }
-    // Rules don't apply to WebSocket handshakes (yet). Each one gets its
-    // own upstream connection, which it then takes over.
-    let client_upgrade = hyper::upgrade::on(&mut req);
-    let (mut parts, body) = req.into_parts();
-    ws::prepare_request(&mut parts.headers);
-    let body = TeeBody::new(RuleBody::stream(body), recorder.clone(), BodyPart::Request);
-    let pq = parts
-        .uri
-        .path_and_query()
-        .cloned()
-        .unwrap_or_else(|| http::uri::PathAndQuery::from_static("/"));
-    let authority = parts
-        .uri
-        .authority()
-        .cloned()
-        .unwrap_or_else(|| http::uri::Authority::from_static("unknown"));
-    let sent = async {
-        let mut sender = mitm::open_h1(ctx, tls, &host, port, recorder.as_ref()).await?;
-        mitm::send_once(&mut sender, &host, parts, pq, authority, body, recorder.as_ref()).await
+    let exchange = Exchange {
+        ctx,
+        route: Route::Forward,
+        peer: client,
+        recorder,
+        scheme,
+        host,
+        port,
+        apply_rules: true,
+        websocket: websocket.then(|| ws::ClientSide::Upgrade(hyper::upgrade::on(&mut req))),
     };
-    let upstream = match sent.await {
-        Ok(response) => response,
-        Err(message) => {
-            if let Some(recorder) = &recorder {
-                recorder.fail(message.clone());
-            }
-            return Ok(text_response(
-                StatusCode::BAD_GATEWAY,
-                &format!("Proxymate: upstream error: {message}\n"),
-            ));
-        }
-    };
-    if let Some(recorder) = &recorder {
-        let content_kind = content_kind(upstream.headers());
-        recorder.response(response_head(&upstream), content_kind);
-    }
-    if upstream.status() == StatusCode::SWITCHING_PROTOCOLS {
-        return Ok(ws::switch(recorder, client_upgrade, upstream));
-    }
-    let (mut parts, body) = upstream.into_parts();
-    strip_hop_by_hop(&mut parts.headers);
-    let body = TeeBody::new(body, recorder, BodyPart::Response);
-    Ok(Response::from_parts(parts, body.map_err(BoxError::from).boxed_unsync()))
+    exchange.run(req).await
 }
 
 /// Where a recorded request went, beyond what its head says.

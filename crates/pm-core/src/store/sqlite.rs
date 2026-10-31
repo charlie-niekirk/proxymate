@@ -14,6 +14,8 @@
 //! - `messages(flow, idx, data)`: WebSocket payloads, zstd-compressed.
 //! - `annotations(flow, pinned, label, comment)` (version 4, M17): what
 //!   the user added to a flow. Flows without any have no row.
+//! - `originals(flow, idx, data)` (version 6, M19): what arrived for a
+//!   WebSocket message a rule, script or breakpoint edited, zstd'd.
 
 use std::collections::HashMap;
 use std::io;
@@ -37,7 +39,9 @@ pub(crate) const FORMAT: &str = "proxymate-session";
 /// Version 3 (M16) appended `FlowDetail.trailers` and the `grpc_status`
 /// column, and added content kinds after `Binary`. Version 4 (M17) added
 /// the `annotations` table. Version 5 (M18) appended `FlowDetail.via`.
-pub(crate) const VERSION: u32 = 5;
+/// Version 6 (M19) appended `edited`, `injected` and `dropped` to each
+/// `WsMessage` and added the `originals` table.
+pub(crate) const VERSION: u32 = 6;
 /// The oldest version this Proxymate still reads.
 const OLDEST: u32 = 1;
 
@@ -75,6 +79,7 @@ CREATE TABLE flows (
 CREATE TABLE bodies (flow INTEGER NOT NULL, part INTEGER NOT NULL, data BLOB NOT NULL, PRIMARY KEY (flow, part)) WITHOUT ROWID;
 CREATE TABLE messages (flow INTEGER NOT NULL, idx INTEGER NOT NULL, data BLOB NOT NULL, PRIMARY KEY (flow, idx)) WITHOUT ROWID;
 CREATE TABLE annotations (flow INTEGER PRIMARY KEY, pinned INTEGER NOT NULL, label TEXT, comment TEXT);
+CREATE TABLE originals (flow INTEGER NOT NULL, idx INTEGER NOT NULL, data BLOB NOT NULL, PRIMARY KEY (flow, idx)) WITHOUT ROWID;
 ";
 
 /// One flow to write, whatever store it comes from.
@@ -87,9 +92,11 @@ pub(crate) struct SavedFlow {
     pub sse: Option<Vec<SseEvent>>,
 }
 
-/// A WebSocket flow's messages with their payloads, and how it closed.
+/// A WebSocket flow's messages with their payloads, what arrived for
+/// the edited ones (by index), and how it closed.
 pub(crate) struct SavedWs {
     pub messages: Vec<(WsMessage, Vec<u8>)>,
+    pub originals: Vec<(u32, Vec<u8>)>,
     pub close: Option<WsClose>,
 }
 
@@ -98,6 +105,44 @@ pub(crate) struct SavedWs {
 struct WsColumn {
     messages: Vec<WsMessage>,
     close: Option<WsClose>,
+}
+
+/// The `ws` column up to version 5, before the message flags.
+#[derive(Serialize, Deserialize)]
+struct WsColumnV5 {
+    messages: Vec<WsMessageV5>,
+    close: Option<WsClose>,
+}
+
+/// A [`WsMessage`] as versions 1 to 5 wrote it.
+#[derive(Serialize, Deserialize)]
+struct WsMessageV5 {
+    index: u32,
+    direction: pm_model::WsDirection,
+    opcode: pm_model::WsOpcode,
+    len: u64,
+    time_ms: f64,
+    truncated: bool,
+    close_code: Option<u16>,
+    preview: String,
+}
+
+impl From<WsMessageV5> for WsMessage {
+    fn from(m: WsMessageV5) -> WsMessage {
+        WsMessage {
+            index: m.index,
+            direction: m.direction,
+            opcode: m.opcode,
+            len: m.len,
+            time_ms: m.time_ms,
+            truncated: m.truncated,
+            close_code: m.close_code,
+            preview: m.preview,
+            edited: false,
+            injected: false,
+            dropped: false,
+        }
+    }
 }
 
 /// Appends flows to a new session database inside one transaction.
@@ -201,6 +246,13 @@ impl SessionWriter {
                 self.conn
                     .prepare_cached("INSERT INTO messages (flow, idx, data) VALUES (?1, ?2, ?3)")
                     .and_then(|mut insert| insert.execute(params![id, meta.index, data]))
+                    .map_err(io::Error::other)?;
+            }
+            for (index, original) in &ws.originals {
+                let data = zstd::bulk::compress(original, ZSTD_LEVEL)?;
+                self.conn
+                    .prepare_cached("INSERT INTO originals (flow, idx, data) VALUES (?1, ?2, ?3)")
+                    .and_then(|mut insert| insert.execute(params![id, index, data]))
                     .map_err(io::Error::other)?;
             }
         }
@@ -342,16 +394,24 @@ impl BlobBackend for SqliteBackend {
         }
         let log = match self.blob("SELECT ws FROM flows WHERE id = ?1", [id])? {
             Some(packed) => {
-                let column: WsColumn = unpack(&packed)?;
-                let mut payloads: HashMap<u32, Vec<u8>> = self
-                    .conn
-                    .lock()
-                    .prepare_cached("SELECT idx, data FROM messages WHERE flow = ?1")
-                    .and_then(|mut stmt| {
-                        stmt.query_map([id], |row| Ok((row.get::<_, u32>(0)?, row.get::<_, Vec<u8>>(1)?)))?
-                            .collect::<rusqlite::Result<_>>()
-                    })
-                    .map_err(io::Error::other)?;
+                let column: WsColumn = if self.version >= 6 {
+                    unpack(&packed)?
+                } else {
+                    let old: WsColumnV5 = unpack(&packed)?;
+                    WsColumn {
+                        messages: old.messages.into_iter().map(WsMessage::from).collect(),
+                        close: old.close,
+                    }
+                };
+                let mut payloads = self.payloads("messages", id)?;
+                let originals = match self.version >= 6 {
+                    true => self
+                        .payloads("originals", id)?
+                        .into_iter()
+                        .map(|(index, data)| Ok((index, zstd::stream::decode_all(&data[..])?)))
+                        .collect::<io::Result<_>>()?,
+                    false => HashMap::new(),
+                };
                 let mut messages = Vec::with_capacity(column.messages.len());
                 for meta in column.messages {
                     let payload = match payloads.remove(&meta.index) {
@@ -360,7 +420,7 @@ impl BlobBackend for SqliteBackend {
                     };
                     messages.push((meta, payload));
                 }
-                Some(Arc::new(WsLog::restore(messages, column.close)))
+                Some(Arc::new(WsLog::restore(messages, originals, column.close)))
             }
             None => None,
         };
@@ -386,6 +446,18 @@ impl BlobBackend for SqliteBackend {
 }
 
 impl SqliteBackend {
+    /// A flow's rows of `messages` or `originals`, still compressed.
+    fn payloads(&self, table: &str, id: FlowId) -> io::Result<HashMap<u32, Vec<u8>>> {
+        self.conn
+            .lock()
+            .prepare_cached(&format!("SELECT idx, data FROM {table} WHERE flow = ?1"))
+            .and_then(|mut stmt| {
+                stmt.query_map([id], |row| Ok((row.get::<_, u32>(0)?, row.get::<_, Vec<u8>>(1)?)))?
+                    .collect::<rusqlite::Result<_>>()
+            })
+            .map_err(io::Error::other)
+    }
+
     fn exists(&self, id: FlowId) -> io::Result<bool> {
         self.conn
             .lock()
@@ -518,9 +590,13 @@ mod tests {
                         truncated: false,
                         close_code: None,
                         preview: "hello".into(),
+                        edited: true,
+                        injected: false,
+                        dropped: false,
                     },
                     b"hello".to_vec(),
                 )],
+                originals: vec![(0, b"HELLO".to_vec())],
                 close: None,
             });
             originals.push(summary.clone());
@@ -551,7 +627,60 @@ mod tests {
         let page = log.page(None, &WsQuery::default(), 0, 10).unwrap();
         assert_eq!((page.total, page.open), (1, false));
         assert_eq!(log.payload(None, 0).unwrap().unwrap(), b"hello");
+        assert_eq!(log.original(None, 0).unwrap().unwrap(), b"HELLO");
+        assert!(page.messages[0].edited);
         assert!(backend.ws(1).unwrap().is_none());
+    }
+
+    /// A version 5 session (M18: messages without flags, no `originals`
+    /// table) still opens. Made by rewriting a current one.
+    #[test]
+    fn a_version_5_websocket_log_still_opens() {
+        let mut generator = Generator::new(1);
+        let mut writer = SessionWriter::create(Connection::open_in_memory().unwrap(), &[]).unwrap();
+        let summary = generator.completed_flow();
+        let detail = crate::io::session::fallback_detail(&summary);
+        writer
+            .add(SavedFlow {
+                summary,
+                detail,
+                request_body: Vec::new(),
+                response_body: Vec::new(),
+                ws: None,
+                sse: None,
+            })
+            .unwrap();
+        let conn = writer.finish().unwrap();
+        let old = WsColumnV5 {
+            messages: vec![WsMessageV5 {
+                index: 0,
+                direction: WsDirection::Received,
+                opcode: WsOpcode::Text,
+                len: 2,
+                time_ms: 3.0,
+                truncated: false,
+                close_code: None,
+                preview: "hi".into(),
+            }],
+            close: None,
+        };
+        conn.execute("UPDATE flows SET ws = ?1", [pack(&old).unwrap()]).unwrap();
+        conn.execute(
+            "INSERT INTO messages (flow, idx, data) VALUES (0, 0, ?1)",
+            [zstd::bulk::compress(b"hi", ZSTD_LEVEL).unwrap()],
+        )
+        .unwrap();
+        conn.execute_batch("DROP TABLE originals; UPDATE meta SET value = '5' WHERE key = 'version';")
+            .unwrap();
+        let backend = SqliteBackend::open(conn).unwrap().backend;
+        let log = backend.ws(0).unwrap().unwrap();
+        let page = log.page(None, &WsQuery::default(), 0, 10).unwrap();
+        let m = &page.messages[0];
+        assert_eq!(
+            (m.preview.as_str(), m.edited, m.injected, m.dropped),
+            ("hi", false, false, false)
+        );
+        assert_eq!(log.payload(None, 0).unwrap().unwrap(), b"hi");
     }
 
     /// Every origin survives postcard (it can't read serde's internally

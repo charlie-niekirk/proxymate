@@ -110,6 +110,8 @@ pub struct Engine {
     /// Upstream proxies, DNS overrides, client certificates and the
     /// reverse proxy listeners (M18).
     pub(crate) network: crate::network::Network,
+    /// Open WebSocket connections, for `Engine::ws_send` (M19).
+    pub(crate) websockets: proxy::ws::Registry,
     /// The plain-HTTP upstream pool every listener and `Engine::send`
     /// share; rebuilt when the proxy or network settings change.
     pool: arc_swap::ArcSwapOption<proxy::UpstreamClient>,
@@ -198,6 +200,7 @@ impl Engine {
             sender: OnceLock::new(),
             workflow: Default::default(),
             network,
+            websockets: Default::default(),
             pool: Default::default(),
             restart: tokio::sync::Mutex::new(()),
         });
@@ -390,6 +393,60 @@ impl Engine {
             let log = backend.ws(id)?.ok_or(Error::UnknownFlow(id))?;
             log.payload(backend.segments(), index)?
                 .ok_or(Error::UnknownMessage(id, index))
+        })
+    }
+
+    /// Sends a message into an open WebSocket of the live capture (M19):
+    /// `sent` to the server as if the client had sent it, `received` to the
+    /// client as if the server had. It is recorded as injected and goes
+    /// out after any message held ahead of it in that direction (rules and
+    /// breakpoints don't apply to it). Returns once it is queued.
+    pub fn ws_send(&self, id: FlowId, message: &pm_model::WsSend) -> Result<(), Error> {
+        use base64::Engine as _;
+        let payload = match message.binary {
+            true => base64::engine::general_purpose::STANDARD
+                .decode(message.payload.trim())
+                .map_err(|e| Error::WebSocket(format!("the payload isn't valid base64: {e}")))?,
+            false => message.payload.clone().into_bytes(),
+        };
+        let frame = proxy::ws::message_of(payload, message.binary).map_err(Error::WebSocket)?;
+        self.open_websocket(id)?;
+        self.websockets
+            .send(id, message.direction, frame)
+            .map_err(Error::WebSocket)
+    }
+
+    /// Closes an open WebSocket of the live capture: a normal close frame
+    /// to each side.
+    pub fn ws_close(&self, id: FlowId) -> Result<(), Error> {
+        self.open_websocket(id)?;
+        self.websockets.close(id).map_err(Error::WebSocket)
+    }
+
+    /// True while a live WebSocket flow's connection is open and can take
+    /// [`Engine::ws_send`].
+    pub fn websocket_is_open(&self, id: FlowId) -> bool {
+        self.websockets.is_open(id)
+    }
+
+    fn open_websocket(&self, id: FlowId) -> Result<(), Error> {
+        if self.websockets.is_open(id) {
+            return Ok(());
+        }
+        match self.get_flow(id) {
+            None => Err(Error::UnknownFlow(id)),
+            Some(flow) if !flow.scheme.is_websocket() => Err(Error::WebSocket(format!("flow {id} isn't a WebSocket"))),
+            Some(_) => Err(Error::WebSocket(format!("flow {id}'s WebSocket isn't open"))),
+        }
+    }
+
+    /// What arrived for WebSocket message `index`, if a rule, script or
+    /// breakpoint edited it (M19); `None` for a message that went as it
+    /// came.
+    pub fn websocket_original_in(&self, store: StoreId, id: FlowId, index: u32) -> Result<Option<Vec<u8>>, Error> {
+        self.with_backend(store, |backend| {
+            let log = backend.ws(id)?.ok_or(Error::UnknownFlow(id))?;
+            Ok(log.original(backend.segments(), index)?)
         })
     }
 

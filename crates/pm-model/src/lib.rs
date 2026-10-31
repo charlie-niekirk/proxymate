@@ -40,8 +40,8 @@ pub use platform::{AppCount, DomainNode, HostCount, KeychainTrust, SidebarSnapsh
 pub use protobuf::{Badge, DecodedBody, DecodedFormat, DecodedMessage, GrpcStatus, ProtoMapping, ProtoSchema};
 pub use rules::{
     Action, AppliedRule, BlockMode, BreakpointBody, BreakpointId, BreakpointInfo, BreakpointResolution, FlowRules,
-    GLOBAL_THROTTLE_RULE_ID, KvMatch, MapLocalSource, Matcher, MessageEdits, Pattern, PatternKind, Phase, PresetKind,
-    ResponseMatcher, Rule, RuleId, RuleOrigin, RuleSettings, RuleTestResult, StatusRange,
+    GLOBAL_THROTTLE_RULE_ID, HeldMessage, KvMatch, MapLocalSource, Matcher, MessageEdits, Pattern, PatternKind, Phase,
+    PresetKind, ResponseMatcher, Rule, RuleId, RuleOrigin, RuleSettings, RuleTestResult, StatusRange, WsOp,
 };
 pub use scripts::{
     ConsoleEntry, ConsoleLevel, Script, ScriptId, ScriptIssue, ScriptKind, ScriptPhase, ScriptSettings,
@@ -49,7 +49,7 @@ pub use scripts::{
 };
 pub use send::{RequestSpec, SendOpts, SendOrigin, SentBy};
 pub use settings::{ProxySettings, StorageSettings, StorageStatus};
-pub use stream::{SseEvent, SsePage, WsClose, WsDirection, WsMessage, WsOpcode, WsPage, WsQuery};
+pub use stream::{SseEvent, SsePage, WsClose, WsDirection, WsMessage, WsOpcode, WsPage, WsQuery, WsSend};
 pub use tls::{CaInfo, CertSummary, SslSettings, Timing, TlsInfo, TlsStatus};
 pub use update::UpdateSettings;
 pub use view::{DeepProgress, FlowRow, RowsPage, ViewDelta, ViewId, ViewInfo};

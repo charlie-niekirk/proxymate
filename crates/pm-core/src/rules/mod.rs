@@ -23,7 +23,7 @@ use parking_lot::{Mutex, RwLock};
 use pm_model::{
     Action, BodyPart, BreakpointId, BreakpointInfo, BreakpointResolution, FlowId, GLOBAL_THROTTLE_RULE_ID,
     MapLocalSource, Matcher, Pattern, PresetKind, RequestHead, ResponseHead, Rule, RuleId, RuleOrigin, RuleSettings,
-    RuleTestResult, StoreId,
+    RuleTestResult, StoreId, WsDirection, WsOpcode,
 };
 
 pub use breakpoints::BreakpointSink;
@@ -528,6 +528,9 @@ impl Engine {
                     }
                 }
             }
+            if compiled.acts_on_messages() {
+                notes.extend(self.test_messages(store, flow, &compiled, run).await);
+            }
         }
         let text = |b: &Option<Vec<u8>>| {
             b.as_ref().map(|b| {
@@ -563,6 +566,71 @@ impl Engine {
             request_body_truncated: cut(request.body.as_ref()),
             response_body_truncated: cut(response.as_ref().and_then(|r| r.body.as_ref())),
         })
+    }
+
+    /// What `rule`'s message actions would do to a WebSocket flow's first
+    /// recorded messages, one note per message they touch.
+    async fn test_messages(
+        &self,
+        store: StoreId,
+        flow: FlowId,
+        rule: &Arc<CompiledRule>,
+        run: ScriptRun<'_>,
+    ) -> Vec<String> {
+        const MESSAGES: u32 = 50;
+        let page = match self.websocket_messages_in(store, flow, &Default::default(), 0, MESSAGES) {
+            Ok(page) if page.total > 0 => page,
+            _ => return vec!["Acts on WebSocket messages; this flow has none recorded.".into()],
+        };
+        let rules = [rule.clone()];
+        let mut notes = Vec::new();
+        for m in &page.messages {
+            let text = match m.opcode {
+                WsOpcode::Text => true,
+                WsOpcode::Binary => false,
+                _ => continue,
+            };
+            let Ok(payload) = self.websocket_payload_in(store, flow, m.index) else {
+                continue;
+            };
+            let mut draft = eval::WsDraft {
+                direction: m.direction,
+                text,
+                payload,
+            };
+            let fx = eval::ws_message_phase(&rules, &mut draft, run).await;
+            let which = format!(
+                "Message {} ({})",
+                m.index + 1,
+                match m.direction {
+                    WsDirection::Sent => "sent",
+                    WsDirection::Received => "received",
+                }
+            );
+            notes.extend(fx.skipped.iter().map(|s| format!("{which}: skipped {s}")));
+            notes.extend(fx.script_issues.iter().map(script_note));
+            if fx.drop {
+                notes.push(format!("{which} is dropped."));
+                continue;
+            }
+            if fx.changed {
+                let preview: String = String::from_utf8_lossy(&draft.payload).chars().take(200).collect();
+                notes.push(format!("{which} becomes {preview}"));
+            }
+            if fx.delay_ms > 0 {
+                notes.push(format!("{which} is delayed by {} ms.", fx.delay_ms));
+            }
+            if fx.breakpoint.is_some() {
+                notes.push(format!("{which} pauses at a breakpoint."));
+            }
+        }
+        if notes.is_empty() {
+            notes.push(format!(
+                "Acts on WebSocket messages; none of the first {} would change.",
+                page.messages.len()
+            ));
+        }
+        notes
     }
 
     /// Up to `limit` flows of `store` (newest first) that `rule`'s matcher
@@ -669,6 +737,11 @@ impl Engine {
     /// Lets a paused flow go on. The first resolution wins; later ones get
     /// an "already resolved" error.
     pub fn resolve_breakpoint(&self, id: BreakpointId, resolution: BreakpointResolution) -> Result<(), Error> {
+        if let Some(info) = self.rules.breakpoints.get(id)
+            && info.message.is_some()
+        {
+            check_message_resolution(&resolution)?;
+        }
         Ok(self.rules.breakpoints.resolve(id, resolution)?)
     }
 
@@ -681,5 +754,30 @@ impl Engine {
 
     pub(crate) fn breakpoint_manager(&self) -> &BreakpointManager {
         &self.rules.breakpoints
+    }
+}
+
+/// A held WebSocket message is sent on (maybe edited) or dropped; it
+/// can't be answered, and its edits are only the payload.
+fn check_message_resolution(resolution: &BreakpointResolution) -> Result<(), Error> {
+    use base64::Engine as _;
+    match resolution {
+        BreakpointResolution::Respond { .. } => Err(Error::Invalid(
+            "a held WebSocket message can't be answered: continue (with edits) or abort to drop it".into(),
+        )),
+        BreakpointResolution::Continue { edits: Some(edits) } => {
+            if edits.method.is_some() || edits.url.is_some() || edits.status.is_some() || edits.headers.is_some() {
+                return Err(Error::Invalid(
+                    "a held WebSocket message has only a payload: edit body or body_base64".into(),
+                ));
+            }
+            if let Some(data) = &edits.body_base64 {
+                base64::engine::general_purpose::STANDARD
+                    .decode(data.trim())
+                    .map_err(|e| Error::Invalid(format!("body_base64 isn't valid base64: {e}")))?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
     }
 }

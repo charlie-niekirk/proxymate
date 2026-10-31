@@ -96,6 +96,12 @@ impl Engine {
             body = decode::decode(encoding, &body)?;
             decoded = true;
         }
+        // A WebSocket sent in absolute form was recorded with its http URL.
+        let websocket = detail
+            .request
+            .headers
+            .iter()
+            .any(|h| h.name.eq_ignore_ascii_case("upgrade") && h.value.eq_ignore_ascii_case("websocket"));
         let headers: Vec<Header> = detail
             .request
             .headers
@@ -113,9 +119,17 @@ impl Engine {
                 true,
             ),
         };
+        let mut url = detail.request.url;
+        if websocket {
+            for (from, to) in [("http://", "ws://"), ("https://", "wss://")] {
+                if url.len() > from.len() && url[..from.len()].eq_ignore_ascii_case(from) {
+                    url = format!("{to}{}", &url[from.len()..]);
+                }
+            }
+        }
         Ok(RequestSpec {
             method: detail.request.method,
-            url: detail.request.url,
+            url,
             headers,
             body,
             body_base64,

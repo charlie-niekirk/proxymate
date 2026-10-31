@@ -33,6 +33,7 @@ pub(crate) struct Exports {
     pub on_response: bool,
     pub on_mock: bool,
     pub on_view: bool,
+    pub on_ws_message: bool,
 }
 
 /// The code a job runs.
@@ -80,6 +81,26 @@ pub(crate) struct JsResponse {
     pub body: Option<Arc<Vec<u8>>>,
 }
 
+/// A WebSocket message as a script sees it.
+#[derive(Debug, Clone)]
+pub(crate) struct JsWsMessage {
+    pub direction: pm_model::WsDirection,
+    pub text: bool,
+    pub payload: Arc<Vec<u8>>,
+}
+
+/// What `onWsMessage` did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum WsScriptOut {
+    /// Returned nothing or the message untouched.
+    Keep,
+    /// Returned `null`.
+    Drop,
+    /// A changed or replacement message: its type, and its payload
+    /// (`None`: the payload is as it came).
+    Replace { text: bool, payload: Option<Vec<u8>> },
+}
+
 /// What a request script left. `None` fields are unchanged.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RequestOut {
@@ -124,6 +145,7 @@ pub(crate) enum Call {
     Response(JsRequest, JsResponse),
     Mock(JsRequest),
     View(JsRequest, Option<JsResponse>),
+    WsMessage(JsWsMessage),
 }
 
 impl Call {
@@ -134,6 +156,7 @@ impl Call {
             Call::Response(..) => Some(ScriptPhase::Response),
             Call::Mock(_) => Some(ScriptPhase::Mock),
             Call::View(..) => Some(ScriptPhase::View),
+            Call::WsMessage(_) => Some(ScriptPhase::WsMessage),
         }
     }
 }
@@ -147,6 +170,7 @@ pub(crate) enum Output {
     Response(ResponseOut),
     Mock(Option<MockOut>),
     Views(Vec<ViewOut>),
+    WsMessage(WsScriptOut),
 }
 
 /// `context` minus `shared`.

@@ -213,7 +213,8 @@ async fn bad_specs_are_errors() {
     for (method, url) in [
         ("GE T", "http://localhost/"),
         ("GET", "ftp://localhost/"),
-        ("GET", "ws://localhost/socket"),
+        // A WebSocket handshake is a GET.
+        ("POST", "ws://localhost/socket"),
         ("GET", "/relative"),
         ("CONNECT", "http://localhost:443/"),
     ] {

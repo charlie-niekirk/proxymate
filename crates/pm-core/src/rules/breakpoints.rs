@@ -174,6 +174,7 @@ mod tests {
             },
             response: None,
             body: BreakpointBody::default(),
+            message: None,
         }
     }
 

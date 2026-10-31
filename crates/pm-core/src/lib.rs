@@ -86,4 +86,7 @@ pub enum Error {
     /// A protobuf schema that doesn't compile or load, or a bad mapping.
     #[error("protobuf: {0}")]
     Proto(String),
+    /// Sending into or closing a WebSocket that can't take it.
+    #[error("{0}")]
+    WebSocket(String),
 }

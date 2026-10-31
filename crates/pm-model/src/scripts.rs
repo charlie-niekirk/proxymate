@@ -114,6 +114,9 @@ pub enum ScriptPhase {
     Response,
     Mock,
     View,
+    /// `onWsMessage` (M19). Keep this the last variant: issues are in a
+    /// session's flow details.
+    WsMessage,
 }
 
 impl From<Phase> for ScriptPhase {

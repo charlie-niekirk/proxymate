@@ -516,6 +516,62 @@
     return msg;
   }
 
+  // A WebSocket message (M19): `direction`, `type` and the payload as
+  // `body`, `text` and `rawBody`, parsed like a body without headers.
+  function makeWsMessage(raw) {
+    const msg = {};
+    const s = {
+      source: raw,
+      bytes: raw.body || new Uint8Array(0),
+      tooLarge: false,
+      originalHeaders: {},
+      headerList: [],
+      set: null,
+      parsed: null,
+      raw: null,
+    };
+    Object.defineProperty(msg, "direction", { value: raw.direction, enumerable: true });
+    msg.type = raw.type;
+    bodyAccessors(msg, s, false);
+    state.set(msg, s);
+    return msg;
+  }
+
+  function wsType(value) {
+    const type = String(value);
+    if (type !== "text" && type !== "binary") throw new TypeError(`${value} isn't a message type: use "text" or "binary"`);
+    return type;
+  }
+
+  // What onWsMessage left: null drops the message; the message itself (or
+  // nothing) keeps it with any changes; a string, bytes or another object
+  // replaces it.
+  function finishWs(msg, value) {
+    if (value === null) return null;
+    if (value === undefined || value === msg) {
+      const s = state.get(msg);
+      const type = wsType(msg.type);
+      const body = finishBody(msg, s);
+      if (body === null && type === s.source.type) return { type, unchanged: true };
+      return { type, body };
+    }
+    if (typeof value === "string") return { type: "text", body: N.utf8Encode(value) };
+    if (value instanceof Uint8Array || ArrayBuffer.isView(value) || value instanceof ArrayBuffer) {
+      return { type: "binary", body: new Uint8Array(toBytes(value)) };
+    }
+    if (typeof value !== "object") throw new TypeError("onWsMessage must return the message, a replacement or null");
+    if (state.has(value)) return finishWs(value, undefined);
+    const known = ["type", "body", "text", "rawBody"].some((k) => k in value);
+    if (!known) return { type: "text", body: N.utf8Encode(stringifyJson(value)) };
+    let body;
+    if ("rawBody" in value) body = bodyBytes(value.rawBody, "");
+    else if ("text" in value) body = N.utf8Encode(String(value.text ?? ""));
+    else if ("body" in value) body = bodyBytes(value.body, "application/json");
+    else body = null;
+    const binary = "rawBody" in value && !("type" in value);
+    return { type: "type" in value ? wsType(value.type) : binary ? "binary" : "text", body };
+  }
+
   // Copies the fields of an object a script returned instead of the
   // message it was given.
   function adopt(msg, value) {
@@ -666,6 +722,10 @@
           response: b ? makeMessage(b, false, true) : null,
         });
         return views(await fn(context, flow));
+      }
+      case "websocket": {
+        const message = makeWsMessage(a);
+        return finishWs(message, await fn(context, message));
       }
       default:
         throw new Error(`unknown phase ${phase}`);

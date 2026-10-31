@@ -36,7 +36,9 @@ use pm_model::{
     ViewConfig,
 };
 
-pub(crate) use host::{Call, CallInfo, Code, Exports, JsRequest, JsResponse, Output, RunResult, ScriptHost};
+pub(crate) use host::{
+    Call, CallInfo, Code, Exports, JsRequest, JsResponse, JsWsMessage, Output, RunResult, ScriptHost, WsScriptOut,
+};
 pub(crate) use traffic::{MockAnswer, ScriptRun};
 
 use crate::notify::Notifier;
@@ -110,6 +112,11 @@ impl CompiledScript {
             }
             Phase::Response => self.enabled && self.kind == ScriptKind::Rewrite && self.exports.on_response,
         }
+    }
+
+    /// Runs `onWsMessage` on the messages of a matching WebSocket (M19).
+    pub fn runs_ws(&self) -> bool {
+        self.enabled && self.kind == ScriptKind::Rewrite && self.exports.on_ws_message
     }
 }
 
@@ -262,7 +269,7 @@ impl Scripts {
             Err(message) => return Err(invalid(script, message)),
         };
         let ok = match script.kind {
-            ScriptKind::Rewrite => exports.on_request || exports.on_response,
+            ScriptKind::Rewrite => exports.on_request || exports.on_response || exports.on_ws_message,
             ScriptKind::Mock => exports.on_mock,
             ScriptKind::View => exports.on_view,
         };
@@ -270,7 +277,7 @@ impl Scripts {
             return Err(invalid(
                 script,
                 match script.kind {
-                    ScriptKind::Rewrite => "a rewrite script must export onRequest or onResponse",
+                    ScriptKind::Rewrite => "a rewrite script must export onRequest, onResponse or onWsMessage",
                     ScriptKind::Mock => "a mock script must export onMock",
                     ScriptKind::View => "a view script must export onView",
                 },

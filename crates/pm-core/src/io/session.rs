@@ -28,12 +28,19 @@ pub(crate) fn collect(source: &dyn BlobBackend, summary: FlowSummary) -> io::Res
         Some(log) => {
             let page = log.page(source.segments(), &WsQuery::default(), 0, u32::MAX)?;
             let mut messages = Vec::with_capacity(page.messages.len());
+            let mut originals = Vec::new();
             for meta in page.messages {
                 let payload = log.payload(source.segments(), meta.index)?.unwrap_or_default();
+                if meta.edited
+                    && let Some(original) = log.original(source.segments(), meta.index)?
+                {
+                    originals.push((meta.index, original));
+                }
                 messages.push((meta, payload));
             }
             Some(SavedWs {
                 messages,
+                originals,
                 close: page.close,
             })
         }

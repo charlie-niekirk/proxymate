@@ -16,6 +16,7 @@ import decodeJwt from "./script-templates/decode-jwt.js?raw";
 import addHeader from "./script-templates/add-header.js?raw";
 import modifyJson from "./script-templates/modify-json.js?raw";
 import mockJson from "./script-templates/mock-json.js?raw";
+import websocketMessages from "./script-templates/websocket-messages.js?raw";
 
 /**
  * Scripts (M14) on the UI side: templates, editor completions, and how the
@@ -38,7 +39,8 @@ export const KIND_ORDER: ScriptKind[] = ["view", "rewrite", "mock"];
 
 export const KIND_HELP: Record<ScriptKind, string> = {
   view: "Adds views of matching bodies to the inspector's viewer menu (onView).",
-  rewrite: "Changes requests (onRequest) and responses (onResponse) when a rule runs it.",
+  rewrite:
+    "Changes requests (onRequest), responses (onResponse) and WebSocket messages (onWsMessage) when a rule runs it.",
   mock: "Answers requests without the upstream (onMock) when a rule runs it.",
 };
 
@@ -82,6 +84,13 @@ export const TEMPLATES: Template[] = [
     kind: "rewrite",
     description: "Changes a field of a JSON response.",
     source: modifyJson,
+  },
+  {
+    id: "websocket-messages",
+    name: "Rewrite WebSocket messages",
+    kind: "rewrite",
+    description: "Changes JSON messages from the server and drops the client's heartbeats.",
+    source: websocketMessages,
   },
   {
     id: "mock-json",
@@ -176,6 +185,7 @@ export const ENTRY_POINTS: Record<ScriptKind, { label: string; snippet: string }
       label: "onResponse",
       snippet: "export function onResponse(context, url, request, response) {\n  ${}\n  return response;\n}",
     },
+    { label: "onWsMessage", snippet: "export function onWsMessage(context, message) {\n  ${}\n  return message;\n}" },
   ],
   mock: [{ label: "onMock", snippet: "export function onMock(context, url, request) {\n  ${}\n  return null;\n}" }],
   view: [{ label: "onView", snippet: "export function onView(context, flow) {\n  ${}\n  return [];\n}" }],
@@ -191,6 +201,8 @@ export const MESSAGE_FIELDS: Completion[] = [
   { label: "path", detail: "request: without the query" },
   { label: "query", detail: "request: decoded parameters" },
   { label: "status", detail: "response" },
+  { label: "direction", detail: "WebSocket message: sent or received" },
+  { label: "type", detail: "WebSocket message: text or binary" },
   { label: "headers", detail: "lower-case names; repeated → string[]" },
   { label: "body", detail: "parsed JSON, form fields, text, or null" },
   { label: "text", detail: "the body as UTF-8" },

@@ -1,7 +1,7 @@
 //! One request and its response, with rules applied. Both the forward
 //! proxy (`http://` in absolute form, or plain HTTP in a CONNECT) and the
-//! MITM (decrypted h1 and h2) send every non-WebSocket request through
-//! [`Exchange::run`].
+//! MITM (decrypted h1 and h2) send every request through
+//! [`Exchange::run`], WebSocket handshakes included (M19).
 //!
 //! Without a matching rule the bodies stream through untouched, exactly as
 //! before rules existed. With one, the order of `rules::eval` applies, and
@@ -23,6 +23,12 @@
 //!
 //! A breakpoint parks only its own exchange: other h2 streams on the same
 //! connection keep flowing.
+//!
+//! A WebSocket handshake gets the request phase (header and query actions,
+//! Map Remote, Block, the request breakpoint) and, on `101`, the response
+//! phase's header actions and delay; body actions, Map Local and mocks
+//! don't apply. Each handshake dials its own upstream connection, which
+//! the relay (`ws.rs`) then takes over along with the client's.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -39,6 +45,7 @@ use pm_model::{
 
 use super::body::{Buffered, Inbound, RuleBody, buffer};
 use super::mitm::{self, MitmConn};
+use super::ws::{self, ClientSide, MessageRules, Upgrade};
 use super::{
     BoxError, ProxyBody, ProxyCtx, Reset, TeeBody, content_kind, error_chain, headers_of, now_ms, response_head,
     strip_hop_by_hop, text_response,
@@ -75,6 +82,8 @@ pub(super) struct Exchange<'a> {
     pub port: u16,
     /// False for `Engine::send` without rules: straight to the upstream.
     pub apply_rules: bool,
+    /// Set for a WebSocket handshake: who takes the connection over.
+    pub websocket: Option<ClientSide>,
 }
 
 type Reply = Result<Response<ProxyBody>, Reset>;
@@ -143,31 +152,48 @@ enum Answer {
 }
 
 impl Exchange<'_> {
-    pub async fn run(self, req: Request<impl Into<Inbound>>) -> Reply {
+    pub async fn run(mut self, req: Request<impl Into<Inbound>>) -> Reply {
         let (mut parts, body) = req.into_parts();
         let body = body.into();
-        strip_hop_by_hop(&mut parts.headers);
-        let Some(engine) = self.ctx.engine.upgrade().filter(|_| self.apply_rules) else {
-            return self.plain(parts, body).await;
+        let client = self.websocket.take();
+        match client {
+            Some(_) => ws::prepare_request(&mut parts.headers),
+            None => strip_hop_by_hop(&mut parts.headers),
+        }
+        let engine = self.ctx.engine.upgrade().filter(|_| self.apply_rules);
+        // A WebSocket keeps its handshake for the message rules, matched
+        // when its messages arrive (rules may be added meanwhile).
+        let upgrade = client.map(|client| Upgrade {
+            client,
+            rules: engine
+                .as_ref()
+                .map(|_| MessageRules::new(self.ctx.engine.clone(), self.draft(&parts), self.peer.clone())),
+        });
+        let Some(engine) = engine else {
+            return self.plain(parts, body, upgrade).await;
         };
         let rules = engine.rule_set();
         if rules.is_empty() {
-            return self.plain(parts, body).await;
+            return self.plain(parts, body, upgrade).await;
         }
         let draft = self.draft(&parts);
         let app = match rules.needs_client_app() {
             true => self.peer.app(CLIENT_APP_WAIT).await.map(|a| a.name.clone()),
             false => None,
         };
-        let matched = rules.matching(&draft.info(app.as_deref()));
-        if matched.is_empty() {
-            return self.plain(parts, body).await;
+        let mut matched = rules.matching(&draft.info(app.as_deref()));
+        if upgrade.is_none() {
+            // Message rules don't touch plain requests.
+            matched.retain(|r| r.acts_on_http());
         }
-        self.with_rules(&engine, parts, body, draft, matched).await
+        if matched.is_empty() {
+            return self.plain(parts, body, upgrade).await;
+        }
+        self.with_rules(&engine, parts, body, draft, matched, upgrade).await
     }
 
     /// No rule applies: stream both ways.
-    async fn plain(&self, parts: request::Parts, body: Inbound) -> Reply {
+    async fn plain(&self, parts: request::Parts, body: Inbound, upgrade: Option<Upgrade>) -> Reply {
         let pq = parts
             .uri
             .path_and_query()
@@ -175,15 +201,36 @@ impl Exchange<'_> {
             .unwrap_or_else(|| PathAndQuery::from_static("/"));
         let body = TeeBody::new(RuleBody::stream(body), self.recorder.clone(), BodyPart::Request);
         let target = Target::new(self.scheme, &self.host, self.port);
-        let upstream = match self.send(parts, pq, &target, body).await {
+        let mut upstream = match self.send(parts, pq, &target, body, upgrade.is_some()).await {
             Ok(response) => response,
             Err(message) => return Ok(self.fail(message)),
         };
         // The recorded head is what the upstream sent, before hop-by-hop stripping.
         let head = response_head(&upstream);
+        if let Some(upgrade) = upgrade
+            && upstream.status() == StatusCode::SWITCHING_PROTOCOLS
+        {
+            let io = hyper::upgrade::on(&mut upstream);
+            let headers = upstream.headers().clone();
+            return Ok(self.switch(upgrade, io, headers, head));
+        }
         let (mut parts, body) = upstream.into_parts();
         strip_hop_by_hop(&mut parts.headers);
         Ok(self.reply(Response::from_parts(parts, RuleBody::stream(body)), Some(head)))
+    }
+
+    /// Records the `101` and hands both connections to the relay.
+    fn switch(
+        &self,
+        upgrade: Upgrade,
+        upstream: hyper::upgrade::OnUpgrade,
+        headers: HeaderMap,
+        head: pm_model::ResponseHead,
+    ) -> Response<ProxyBody> {
+        if let Some(rec) = &self.recorder {
+            rec.response(head, content_kind(&headers));
+        }
+        ws::switch(self.recorder.clone(), upgrade, upstream, headers)
     }
 
     async fn with_rules(
@@ -193,15 +240,17 @@ impl Exchange<'_> {
         body: Inbound,
         mut draft: RequestDraft,
         matched: Vec<Arc<CompiledRule>>,
+        upgrade: Option<Upgrade>,
     ) -> Reply {
         let rec = self.recorder.clone();
+        let websocket = upgrade.is_some();
         let blocks = matched.iter().any(|r| {
             r.actions
                 .iter()
                 .any(|a| matches!(a.action, pm_model::Action::Block { .. }))
         });
         let mut held = Held::Stream(body);
-        if !blocks && eval::needs_body(&matched, Phase::Request) {
+        if !blocks && !websocket && eval::needs_body(&matched, Phase::Request) {
             let Held::Stream(body) = held else { unreachable!() };
             held = match self.hold(body, &draft.headers, BodyPart::Request).await {
                 Ok((held, decoded)) => {
@@ -220,6 +269,12 @@ impl Exchange<'_> {
 
         let run = ScriptRun::new(engine.scripts_state(), rec.as_ref().map(FlowRecorder::id));
         let mut fx = eval::request_phase(&matched, &mut draft, run).await;
+        if websocket {
+            // A handshake is answered by the upstream or not at all.
+            fx.map_local = None;
+            fx.mock = None;
+            fx.body_changed = false;
+        }
         if let Some(rec) = &rec {
             rec.rules_applied(std::mem::take(&mut fx.applied));
             for reason in &fx.body_skipped {
@@ -299,6 +354,7 @@ impl Exchange<'_> {
                     editable,
                     note,
                 },
+                message: None,
             };
             let outcome = self.pause(engine, info, draft.body.clone().unwrap_or_default()).await;
             match outcome {
@@ -331,6 +387,14 @@ impl Exchange<'_> {
             }
         }
 
+        if websocket {
+            // A Map Remote or an edited URL may name http(s).
+            draft.scheme = match draft.scheme {
+                Scheme::Http => Scheme::Ws,
+                Scheme::Https => Scheme::Wss,
+                scheme => scheme,
+            };
+        }
         let request = self.request_for_response(&matched, &draft);
         let body = match draft.body.take().filter(|_| body_changed) {
             Some(bytes) => {
@@ -355,12 +419,59 @@ impl Exchange<'_> {
         parts.headers = std::mem::take(&mut draft.headers);
         let target = Target::new(draft.scheme, &draft.host, draft.port);
         let body = TeeBody::new(body, rec.clone(), BodyPart::Request);
-        let upstream = match self.send(parts, pq, &target, body).await {
+        let upstream = match self.send(parts, pq, &target, body, websocket).await {
             Ok(response) => response,
             Err(message) => return Ok(self.fail(message)),
         };
+        if let Some(upgrade) = upgrade
+            && upstream.status() == StatusCode::SWITCHING_PROTOCOLS
+        {
+            return Ok(self
+                .switch_with_rules(engine, &matched, upstream, upgrade, request)
+                .await);
+        }
         self.respond(engine, &matched, Answer::Upstream(upstream), fx.throttle, request)
             .await
+    }
+
+    /// The response phase of a `101`: header actions, scripts and delays
+    /// (no body, status or breakpoint), then the switch.
+    async fn switch_with_rules(
+        &self,
+        engine: &Arc<Engine>,
+        matched: &[Arc<CompiledRule>],
+        mut upstream: Response<Incoming>,
+        upgrade: Upgrade,
+        request: Option<JsRequest>,
+    ) -> Response<ProxyBody> {
+        let rec = self.recorder.clone();
+        let head = response_head(&upstream);
+        let io = hyper::upgrade::on(&mut upstream);
+        let version = upstream.version();
+        let mut headers = upstream.headers().clone();
+        strip_hop_by_hop(&mut headers);
+        let gated = eval::response_rules(matched, StatusCode::SWITCHING_PROTOCOLS.as_u16(), &headers);
+        let mut draft = ResponseDraft {
+            status: StatusCode::SWITCHING_PROTOCOLS.as_u16(),
+            headers,
+            body: None,
+        };
+        let run = ScriptRun::new(engine.scripts_state(), rec.as_ref().map(FlowRecorder::id));
+        let mut fx = eval::response_phase(&gated, &mut draft, run, request.as_ref()).await;
+        if let Some(rec) = &rec {
+            rec.rules_applied(std::mem::take(&mut fx.applied));
+            for issue in fx.script_issues.drain(..) {
+                rec.script_issue(issue);
+            }
+        }
+        if fx.delay_ms > 0 {
+            tokio::time::sleep(Duration::from_millis(fx.delay_ms)).await;
+        }
+        let head = match fx.head_changed {
+            true => super::head_of(StatusCode::SWITCHING_PROTOCOLS.as_u16(), &draft.headers, version),
+            false => head,
+        };
+        self.switch(upgrade, io, draft.headers, head)
     }
 
     /// The request as sent, for `onResponse` scripts; `None` when no
@@ -466,6 +577,7 @@ impl Exchange<'_> {
                     editable,
                     note,
                 },
+                message: None,
             };
             match self.pause(engine, info, draft.body.clone().unwrap_or_default()).await {
                 Outcome::TimedOut => {}
@@ -661,6 +773,7 @@ impl Exchange<'_> {
         pq: PathAndQuery,
         target: &Target,
         body: super::UpstreamBody,
+        websocket: bool,
     ) -> Result<Response<Incoming>, String> {
         let original = target.scheme == self.scheme && target.host == self.host && target.port == self.port;
         let authority: Authority = target
@@ -669,6 +782,12 @@ impl Exchange<'_> {
             .map_err(|_| format!("{:?} isn't a valid authority", target.authority()))?;
         if let (Route::Mitm(conn), true) = (&self.route, original) {
             return conn.send(parts, pq, authority, body, self.recorder.as_ref()).await;
+        }
+        if websocket {
+            // Its own connection, taken over on `101` (never the pool).
+            let rec = self.recorder.as_ref();
+            let mut sender = mitm::open_h1(self.ctx, target.scheme.is_tls(), &target.host, target.port, rec).await?;
+            return mitm::send_once(&mut sender, &target.host, parts, pq, authority, body, rec).await;
         }
         if target.scheme.is_tls() {
             return mitm::send_direct(
@@ -787,10 +906,11 @@ fn edit_request(draft: &mut RequestDraft, edits: MessageEdits, editable: bool) -
         && let Ok(uri) = url.trim().parse::<http::Uri>()
         && let (Some(scheme), Some(host)) = (uri.scheme_str(), uri.host())
     {
-        let scheme = if scheme.eq_ignore_ascii_case("https") {
-            Scheme::Https
-        } else {
-            Scheme::Http
+        let scheme = match scheme.to_ascii_lowercase().as_str() {
+            "https" => Scheme::Https,
+            "wss" => Scheme::Wss,
+            "ws" => Scheme::Ws,
+            _ => Scheme::Http,
         };
         let old_authority = draft.authority();
         draft.scheme = scheme;
