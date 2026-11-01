@@ -40,7 +40,7 @@ export function StoragePage() {
               <dd className="tabular-nums">{nf.format(status.evicted)} flows</dd>
               <dt className="text-muted-foreground">Not recorded since launch</dt>
               <dd className="tabular-nums" data-testid="storage-unrecorded">
-                {nf.format(status.unrecorded)} flows
+                {nf.format(status.unrecorded)} {status.unrecorded === 1 ? "flow" : "flows"}
               </dd>
               <dt className="text-muted-foreground">Location</dt>
               <dd className="truncate font-mono text-[11px]" title={status.dir}>

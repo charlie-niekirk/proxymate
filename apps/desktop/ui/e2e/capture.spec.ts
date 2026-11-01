@@ -52,7 +52,7 @@ test("Never record this host adds it to Settings › Storage and the footer coun
   await page.getByTestId("unrecorded-count").click();
   const storage = page.getByTestId("settings-storage");
   await expect(storage.getByTestId("recording-never")).toContainText("api.github.com");
-  await expect(storage.getByTestId("storage-unrecorded")).toContainText("1 flows");
+  await expect(storage.getByTestId("storage-unrecorded")).toContainText("1 flow");
 
   // Pasted URLs keep only their host.
   const only = storage.getByTestId("recording-only");
