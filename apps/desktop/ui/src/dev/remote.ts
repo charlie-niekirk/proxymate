@@ -1,10 +1,13 @@
 import type {
+  AutoSaveSettings_Deserialize,
   CodeLanguage,
   ContentKind,
   FlowLabel,
   HeaderColumn,
+  InterceptTarget,
   MessageEdits_Deserialize,
   PresetKind,
+  RecordingSettings_Deserialize,
   RequestSpec_Serialize,
   WsSend,
 } from "@/bindings";
@@ -21,6 +24,10 @@ import {
   exportHar,
   generateOpenApiMocks,
   importOpenApiSpec,
+  intercept,
+  neverRecordHost,
+  autosaveNow,
+  setBuiltinRule,
   mockFromFile,
   mockFromStore,
   openDocument,
@@ -32,8 +39,16 @@ import {
   saveSession,
   setThrottle,
 } from "@/lib/actions";
-import { decodedRootKey, mockSourcesKey, protoSchemasKey, protoTypesKey, queryClient } from "@/lib/query";
-import { normalizeRule, THROTTLE_PRESETS } from "@/lib/rules";
+import {
+  autosaveSettingsKey,
+  decodedRootKey,
+  mockSourcesKey,
+  protoSchemasKey,
+  protoTypesKey,
+  queryClient,
+  recordingSettingsKey,
+} from "@/lib/query";
+import { NO_CACHE_RULE_ID, NO_COOKIES_RULE_ID, normalizeRule, THROTTLE_PRESETS } from "@/lib/rules";
 import { range } from "@/lib/selection";
 import type { PointerEdit } from "@/components/Rewrite/RewriteDialog";
 import { TEMPLATES, newScript } from "@/lib/scripts";
@@ -193,6 +208,14 @@ interface Command {
   removeOpenApi?: number;
   deleteRule?: string;
   rules?: boolean;
+  // M21. `intercept` really starts the app: only with the user's OK.
+  intercept?: InterceptTarget;
+  neverRecord?: string;
+  recordingLists?: RecordingSettings_Deserialize;
+  autosave?: AutoSaveSettings_Deserialize;
+  autosaveNow?: boolean;
+  noCache?: boolean;
+  noCookies?: boolean;
 }
 
 async function apply(cmd: Command) {
@@ -305,12 +328,31 @@ async function apply(cmd: Command) {
   }
   const m20 = [cmd.mockFrom, cmd.mockFromFile, cmd.importOpenApi, cmd.generateMocks, cmd.removeMockSource, cmd.removeOpenApi, cmd.deleteRule];
   if (m20.some((v) => v !== undefined)) await mocking(cmd);
+  const m21 = [cmd.intercept, cmd.neverRecord, cmd.recordingLists, cmd.autosave, cmd.autosaveNow, cmd.noCache, cmd.noCookies];
+  if (m21.some((v) => v !== undefined)) await capture(cmd);
   if (cmd.importProto || cmd.removeProto !== undefined) {
     if (cmd.importProto) await backend.importProtoSchema(cmd.importProto);
     if (cmd.removeProto !== undefined) await backend.removeProtoSchema(cmd.removeProto);
     for (const queryKey of [protoSchemasKey, protoTypesKey, decodedRootKey]) await queryClient.invalidateQueries({ queryKey });
     await post("/__pm_remote/out", JSON.stringify(await backend.listProtoSchemas()));
   }
+}
+
+/** M21's commands, then the lists, auto-save settings and running launches. */
+async function capture(cmd: Command) {
+  if (cmd.intercept) await intercept(cmd.intercept);
+  if (cmd.neverRecord) await neverRecordHost(cmd.neverRecord);
+  if (cmd.recordingLists) queryClient.setQueryData(recordingSettingsKey, await backend.setRecordingSettings(cmd.recordingLists));
+  if (cmd.autosave) queryClient.setQueryData(autosaveSettingsKey, await backend.setAutosaveSettings(cmd.autosave));
+  if (cmd.autosaveNow) await autosaveNow();
+  if (cmd.noCache !== undefined) await setBuiltinRule(NO_CACHE_RULE_ID, cmd.noCache);
+  if (cmd.noCookies !== undefined) await setBuiltinRule(NO_COOKIES_RULE_ID, cmd.noCookies);
+  const out = {
+    recording: await backend.getRecordingSettings(),
+    autosave: await backend.getAutosaveSettings(),
+    intercepts: await backend.listIntercepts(),
+  };
+  await post("/__pm_remote/out", JSON.stringify(out));
 }
 
 /** M20's commands, then what the library, specs and rules hold. */
