@@ -375,6 +375,7 @@ async fn flows_from_an_intercepted_process_tree_are_labelled() {
 /// A GET through the proxy whose connection stays open: the client scan
 /// only finds live sockets, and on a busy machine it can run after a
 /// closed connection is gone.
+#[cfg(target_os = "macos")]
 async fn held_get(proxy: SocketAddr, url: &str) -> tokio::net::TcpStream {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let host = url.split('/').nth(2).expect("absolute url");
