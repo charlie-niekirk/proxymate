@@ -22,8 +22,8 @@ use arc_swap::ArcSwap;
 use parking_lot::{Mutex, RwLock};
 use pm_model::{
     Action, BodyPart, BreakpointId, BreakpointInfo, BreakpointResolution, FlowId, GLOBAL_THROTTLE_RULE_ID,
-    MapLocalSource, Matcher, Pattern, PresetKind, RequestHead, ResponseHead, Rule, RuleId, RuleOrigin, RuleSettings,
-    RuleTestResult, StoreId, WsDirection, WsOpcode,
+    MapLocalSource, Matcher, NO_CACHE_RULE_ID, NO_COOKIES_RULE_ID, Pattern, Phase, PresetKind, RequestHead,
+    ResponseHead, Rule, RuleId, RuleOrigin, RuleSettings, RuleTestResult, StoreId, WsDirection, WsOpcode,
 };
 
 pub use breakpoints::BreakpointSink;
@@ -125,8 +125,10 @@ impl Rules {
             eprintln!("proxymate: can't read rules: {err}");
             Vec::new()
         });
-        if !rules.iter().any(|r| r.id == GLOBAL_THROTTLE_RULE_ID) {
-            rules.push(global_throttle_rule());
+        for builtin in [global_throttle_rule(), no_cache_rule(), no_cookies_rule()] {
+            if !rules.iter().any(|r| r.id == builtin.id) {
+                rules.push(builtin);
+            }
         }
         // One broken rule must not take the others down: drop it from the
         // compiled set (it stays listed, disabled).
@@ -174,6 +176,63 @@ fn global_throttle_rule() -> Rule {
             upload_kbps: 330,
             latency_ms: 100,
         }],
+    }
+}
+
+/// The toolbar's No Caching (M21): every request asks for a fresh answer
+/// and every response says not to keep it. The write preconditions
+/// (`If-Match`, `If-Unmodified-Since`) stay: they guard against lost
+/// updates, not stale caches.
+fn no_cache_rule() -> Rule {
+    let remove = |phase, name: &str| Action::RemoveHeader {
+        phase,
+        name: name.into(),
+    };
+    let set = |phase, name: &str, value: &str| Action::SetHeader {
+        phase,
+        name: name.into(),
+        value: value.into(),
+    };
+    Rule {
+        id: NO_CACHE_RULE_ID.into(),
+        name: "No Caching".into(),
+        enabled: false,
+        order: i64::MIN / 2 + 1,
+        origin: RuleOrigin::User,
+        matcher: Matcher::default(),
+        actions: vec![
+            remove(Phase::Request, "If-None-Match"),
+            remove(Phase::Request, "If-Modified-Since"),
+            remove(Phase::Request, "If-Range"),
+            set(Phase::Request, "Cache-Control", "no-cache"),
+            set(Phase::Request, "Pragma", "no-cache"),
+            set(Phase::Response, "Cache-Control", "no-store"),
+            remove(Phase::Response, "ETag"),
+            remove(Phase::Response, "Last-Modified"),
+            remove(Phase::Response, "Expires"),
+        ],
+    }
+}
+
+/// The toolbar's Block Cookies (M21).
+fn no_cookies_rule() -> Rule {
+    Rule {
+        id: NO_COOKIES_RULE_ID.into(),
+        name: "Block Cookies".into(),
+        enabled: false,
+        order: i64::MIN / 2 + 2,
+        origin: RuleOrigin::User,
+        matcher: Matcher::default(),
+        actions: vec![
+            Action::RemoveHeader {
+                phase: Phase::Request,
+                name: "Cookie".into(),
+            },
+            Action::RemoveHeader {
+                phase: Phase::Response,
+                name: "Set-Cookie".into(),
+            },
+        ],
     }
 }
 

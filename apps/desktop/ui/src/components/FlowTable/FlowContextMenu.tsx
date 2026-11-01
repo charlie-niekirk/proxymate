@@ -9,6 +9,7 @@ import {
   Tag,
   Trash2,
   Eye,
+  EyeOff,
   FileCode2,
   FileDown,
   FileInput,
@@ -39,6 +40,7 @@ import {
 import {
   addFilterTerm,
   addSslBypass,
+  neverRecordHost,
   compareSelection,
   copyFlowCode,
   copyFlowCurl,
@@ -264,6 +266,10 @@ export function FlowContextMenu({ row, column }: { row: Row | null; column: Plac
       <ContextMenuItem disabled={!https} onSelect={() => void addSslBypass(row.host)}>
         <ShieldOff />
         Add {row.host} to SSL bypass
+      </ContextMenuItem>
+      <ContextMenuItem onSelect={() => void neverRecordHost(row.host)} data-testid="menu-never-record">
+        <EyeOff />
+        Never record {row.host}
       </ContextMenuItem>
       <ContextMenuSeparator />
       <ContextMenuItem

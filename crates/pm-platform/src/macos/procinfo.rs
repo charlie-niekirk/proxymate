@@ -57,6 +57,10 @@ impl ProcessInfo for LibProc {
         })
     }
 
+    fn parent_pid(&self, pid: u32) -> Option<u32> {
+        parent_pid(pid)
+    }
+
     fn app_for_pid(&self, pid: u32) -> Option<AppInfo> {
         let path = pid_path(pid)?;
         let simulator = is_simulator(&path);
@@ -217,6 +221,24 @@ fn pid_path(pid: u32) -> Option<PathBuf> {
     Some(PathBuf::from(String::from_utf8_lossy(&buf).into_owned()))
 }
 
+#[allow(unsafe_code)] // libproc FFI into a struct owned here.
+fn parent_pid(pid: u32) -> Option<u32> {
+    let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+    // SAFETY: proc_bsdinfo is plain old data; all zeroes is a valid value.
+    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    // SAFETY: the kernel writes at most `size` bytes into `info`.
+    let n = unsafe {
+        libc::proc_pidinfo(
+            pid as libc::c_int,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            (&raw mut info).cast(),
+            size,
+        )
+    };
+    (n == size).then_some(info.pbi_ppid).filter(|&p| p > 0)
+}
+
 /// The process macOS holds responsible for `pid` (what Activity Monitor
 /// groups it under): Safari for its WebKit network process. A private but
 /// long-stable libsystem call, looked up at runtime so a missing symbol
@@ -245,6 +267,13 @@ fn responsible_pid(pid: u32) -> Option<u32> {
 mod tests {
     use super::*;
     use std::net::{TcpListener, TcpStream};
+
+    #[test]
+    fn knows_its_own_parent() {
+        let me = std::process::id();
+        assert_eq!(LibProc.parent_pid(me), Some(std::os::unix::process::parent_id()));
+        assert_eq!(LibProc.parent_pid(1), None);
+    }
 
     #[test]
     fn finds_its_own_connection() {

@@ -252,7 +252,7 @@ impl Engine {
         serde_json::to_string_pretty(&har::export(flows)).map_err(|e| Error::Document(e.to_string()))
     }
 
-    fn spawn_save(
+    pub(crate) fn spawn_save(
         &self,
         path: PathBuf,
         total: u32,

@@ -35,6 +35,11 @@ pub trait ProcessInfo: Send + Sync {
     fn listener_pid(&self, _port: u16) -> Option<u32> {
         None
     }
+    /// The parent of `pid`, to tell whether it descends from an
+    /// intercepted launch (M21).
+    fn parent_pid(&self, _pid: u32) -> Option<u32> {
+        None
+    }
 }
 
 /// This OS's implementation.
