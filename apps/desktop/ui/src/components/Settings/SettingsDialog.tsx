@@ -1,5 +1,6 @@
 import {
   Bot,
+  Boxes,
   Braces,
   HardDrive,
   Laptop,
@@ -21,6 +22,7 @@ import { AdvancedPage } from "./AdvancedPage";
 import { AppearancePage } from "./AppearancePage";
 import { ClientsPage } from "./ClientsPage";
 import { McpPage } from "./McpPage";
+import { MockingPage } from "./MockingPage";
 import { NetworkPage } from "./NetworkPage";
 import { ProtobufPage } from "./ProtobufPage";
 import { ProxyPage } from "./ProxyPage";
@@ -35,6 +37,7 @@ const PAGES: { id: SettingsPage; label: string; icon: LucideIcon; page: () => Re
   { id: "clients", label: "Clients", icon: Laptop, page: () => <ClientsPage /> },
   { id: "storage", label: "Storage", icon: HardDrive, page: () => <StoragePage /> },
   { id: "protobuf", label: "Protobuf", icon: Braces, page: () => <ProtobufPage /> },
+  { id: "mocking", label: "Mocking", icon: Boxes, page: () => <MockingPage /> },
   { id: "appearance", label: "Appearance", icon: Palette, page: () => <AppearancePage /> },
   { id: "advanced", label: "Advanced", icon: SlidersHorizontal, page: () => <AdvancedPage /> },
   { id: "mcp", label: "MCP", icon: Bot, page: () => <McpPage /> },

@@ -36,6 +36,7 @@ import { newId, parseDoc, toJson, type JNode } from "@/lib/json/doc";
 import { createMockDevices } from "@/lib/mockDevices";
 import { createMockMcp } from "@/lib/mockMcp";
 import { createMockNetwork } from "@/lib/mockNetwork";
+import { createMockMocking } from "@/lib/mockMocking";
 import { createMockProtos } from "@/lib/mockProtos";
 import { createMockScripts } from "@/lib/mockScripts";
 
@@ -935,6 +936,21 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
     },
     ...createMockMcp(now),
     ...createMockProtos((store, id) => (store === 0 ? full.get(id)?.decodedBodies : undefined)),
+    ...createMockMocking({
+      documentName: (store) => documents.find((d) => d.store === store)?.name,
+      hostsOf: (store) => [...new Set(storeFlows(store).map((f) => f[4]))].sort().slice(0, 8),
+      flowOf: (_store, id) => {
+        const f = flows[id];
+        return f && { method: f[3], path: f[6] };
+      },
+      saveRules: async (drafts) => {
+        let order = Math.max(0, ...rules.map((r) => r.order));
+        const created = drafts.map((d) => normalizeRule({ ...(d as Rule), id: crypto.randomUUID(), order: ++order }));
+        rules = [...rules, ...created];
+        return created;
+      },
+      usedBy: (source) => rules.filter((r) => r.actions.some((a) => a.type === "ServeFrom" && a.source === source)).map((r) => r.name),
+    }),
     async appVersion() {
       return "0.1.0";
     },

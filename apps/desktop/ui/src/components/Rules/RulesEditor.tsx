@@ -26,6 +26,7 @@ import { queryClient, ruleSettingsKey, rulesKey } from "@/lib/query";
 import { isVisual } from "@/lib/rewrite/diff";
 import { actionSummary, isBuiltin, matcherSummary, newRule, normalizeRule, type Rule } from "@/lib/rules";
 import { cn } from "@/lib/utils";
+import { useMockSourceNames } from "@/hooks/useMocking";
 import { useScriptNames } from "@/hooks/useScripts";
 import { useUi } from "@/store/ui";
 
@@ -148,6 +149,7 @@ function RuleList({ rules, selected, hasDraft }: { rules: Rule[]; selected: stri
   const [over, setOver] = useState<string | null>(null);
   const agentRules = rules.filter((r) => r.origin.kind === "agent").length;
   const scriptNames = useScriptNames();
+  const mockNames = useMockSourceNames();
 
   const menu = useMenuTarget((key) => rules.find((r) => r.id === key));
   const onDrop = (target: string) => {
@@ -238,7 +240,7 @@ function RuleList({ rules, selected, hasDraft }: { rules: Rule[]; selected: stri
                     </div>
                     <div className="truncate font-mono text-2xs opacity-70">{matcherSummary(rule.matcher)}</div>
                     <div className="truncate text-2xs opacity-70">
-                      {rule.actions.map((a) => actionSummary(a, scriptNames)).join(" · ") || "no actions"}
+                      {rule.actions.map((a) => actionSummary(a, scriptNames, mockNames)).join(" · ") || "no actions"}
                     </div>
                   </div>
                 </div>

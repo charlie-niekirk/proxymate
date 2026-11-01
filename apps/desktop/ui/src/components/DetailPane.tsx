@@ -24,9 +24,37 @@ import { backend } from "@/lib/backend";
 import { explainFailure, type FailureHelp } from "@/lib/errors";
 import { flowUrl, formatDuration, formatSize } from "@/lib/flow";
 import { displayHeaderName, queryPairs } from "@/lib/http";
-import { flowKey, sslSettingsKey } from "@/lib/query";
+import { flowKey, operationKey, sslSettingsKey } from "@/lib/query";
 import { streamKind } from "@/lib/stream";
 import { useUi } from "@/store/ui";
+
+/**
+ * The imported OpenAPI operation the flow's method and path match (M20):
+ * its `operationId` and summary, and the spec it comes from.
+ */
+function OperationLine({ store, flow }: { store: number; flow: FlowSummary_Serialize }) {
+  const { data: op } = useQuery({
+    queryKey: operationKey(store, flow.id),
+    queryFn: () => backend.flowOperation(store, flow.id),
+    enabled: flow.method !== "CONNECT",
+  });
+  if (!op) return null;
+  return (
+    <div
+      className="flex h-6 shrink-0 items-center gap-2 border-b px-2 text-xs"
+      title={`${op.method} ${op.path} in ${op.spec_name}`}
+      data-selectable
+      data-testid="flow-operation"
+    >
+      <span className="text-muted-foreground rounded-sm border px-1 text-2xs leading-4">OpenAPI</span>
+      {op.operation_id && <span className="font-mono font-medium">{op.operation_id}</span>}
+      {op.summary && <span className="text-muted-foreground min-w-0 truncate">{op.summary}</span>}
+      <span className="text-muted-foreground ml-auto shrink-0 font-mono text-2xs">
+        {op.path} · {op.spec_name}
+      </span>
+    </div>
+  );
+}
 
 interface Inspected {
   flow: FlowSummary_Serialize;
@@ -124,6 +152,7 @@ export function DetailPane() {
           {flow.comment && <span className="text-muted-foreground min-w-0 truncate">{flow.comment}</span>}
         </button>
       )}
+      <OperationLine store={store} flow={flow} />
       {detail && <RuleBadges rules={detail.rules} />}
       {flow.tls === "likely_pinned" && (
         <div

@@ -130,7 +130,7 @@ async fn a_recording_answers_byte_identically_after_the_upstream_stops() {
 
     // Record.
     let (recorder, addr) = proxy(&dir.join("recorder")).await;
-    let originals = vec![
+    let originals = [
         send(addr, "GET", &upstream.url("/json"), "").await,
         send(addr, "GET", &upstream.url("/gzip"), "").await,
         send(addr, "GET", &upstream.url("/status/418?b=2&a=1"), "").await,

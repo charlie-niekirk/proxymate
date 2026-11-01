@@ -42,6 +42,7 @@ export const DSL_KEYS: Key[] = [
   { key: "is", detail: "edited, pinned, labelled, commented or a state" },
   { key: "label", detail: "red, orange, yellow, green, blue, purple or any" },
   { key: "comment", detail: "the flow's comment contains…" },
+  { key: "op", detail: "OpenAPI operationId (glob); op:* any operation of an imported spec" },
   { key: "header", detail: "any header line contains… (deep search)" },
   { key: "reqheader", detail: "a request header contains… (deep search)" },
   { key: "resheader", detail: "a response header contains… (deep search)" },
@@ -74,6 +75,7 @@ const ALIASES: Record<string, string> = {
   respbody: "resbody",
   respheader: "resheader",
   note: "comment",
+  operation: "op",
 };
 
 /** DSL keys whose values aren't body text (so a bare word after them isn't a body search). */

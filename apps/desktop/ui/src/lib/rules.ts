@@ -80,6 +80,7 @@ export const ACTION_TYPES: { type: ActionType; label: string; group: string }[] 
   { type: "SetStatus", label: "Set status", group: "Status" },
   { type: "MapLocal", label: "Map Local", group: "Routing" },
   { type: "MapRemote", label: "Map Remote", group: "Routing" },
+  { type: "ServeFrom", label: "Serve from recording", group: "Routing" },
   { type: "Breakpoint", label: "Breakpoint", group: "Flow control" },
   { type: "Delay", label: "Delay", group: "Flow control" },
   { type: "Throttle", label: "Throttle", group: "Flow control" },
@@ -137,8 +138,25 @@ export function defaultAction(type: ActionType): Action {
       return { type, script_id: "" };
     case "WsMessage":
       return { type, direction: null, filter: null, op: { kind: "replace", pattern: newPattern("exact"), replacement: "" } };
+    case "ServeFrom":
+      return { type, source: "", key: { query: true, body: false }, on_miss: "pass_through", pick: "first" };
   }
 }
+
+export type ServeMiss = Extract<Action, { type: "ServeFrom" }>["on_miss"];
+export type ServePick = Extract<Action, { type: "ServeFrom" }>["pick"];
+
+export const SERVE_MISS_LABELS: Record<ServeMiss, string> = {
+  pass_through: "Pass through",
+  not_found: "Answer 404",
+  bad_gateway: "Answer 502",
+};
+
+export const SERVE_PICK_LABELS: Record<ServePick, string> = {
+  first: "The first recorded",
+  last: "The last recorded",
+  round_robin: "Each in turn",
+};
 
 export type WsOpKind = Extract<Action, { type: "WsMessage" }>["op"]["kind"];
 
@@ -195,8 +213,11 @@ export function matcherSummary(m: Matcher): string {
   return parts.join(" ");
 }
 
-/** A short description of an action, for the rules list. `scripts` names scripts by id. */
-export function actionSummary(a: Action, scripts?: ReadonlyMap<string, string>): string {
+/**
+ * A short description of an action, for the rules list. `scripts` names
+ * scripts by id, `mocks` mock library entries.
+ */
+export function actionSummary(a: Action, scripts?: ReadonlyMap<string, string>, mocks?: ReadonlyMap<string, string>): string {
   switch (a.type) {
     case "SetHeader":
       return `${a.phase} ${a.name}: ${a.value}`;
@@ -238,6 +259,11 @@ export function actionSummary(a: Action, scripts?: ReadonlyMap<string, string>):
       return a.mode.kind === "status" ? `block ${a.mode.status}` : "block (reset)";
     case "Script":
       return `script ${scripts?.get(a.script_id) ?? (a.script_id || "(none)")}`;
+    case "ServeFrom": {
+      const name = mocks?.get(a.source) ?? (a.source ? "(missing recording)" : "(none)");
+      const miss = a.on_miss === "pass_through" ? "" : `, else ${a.on_miss === "not_found" ? 404 : 502}`;
+      return `serve from ${name}${a.pick === "first" ? "" : ` (${a.pick.replace("_", "-")})`}${miss}`;
+    }
     case "WsMessage": {
       const where = `${a.direction ?? "ws"}${a.filter ? ` ${patternLabel(a.filter)}` : ""}`;
       const op = a.op;
@@ -283,6 +309,8 @@ export const PRESET_LABELS: Record<PresetKind, string> = {
   map_remote: "Map Remote",
   block: "Block",
   throttle: "Throttle",
+  serve_from: "Serve from",
+  open_api: "OpenAPI",
 };
 
 /** Network conditions offered by the toolbar's throttle menu. */

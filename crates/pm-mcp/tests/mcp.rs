@@ -276,6 +276,54 @@ async fn agents_mock_endpoints_with_tagged_rules() {
     h.stop().await;
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn agents_serve_offline_from_a_recording() {
+    let h = Harness::start().await;
+    let upstream = Upstream::start().await;
+    let url = upstream.url("/json");
+    let (status, recorded) = client::get(h.proxy, &url).await;
+    assert_eq!(status, 200);
+    h.engine.flush();
+    drop(upstream);
+
+    let (client, _) = h.client().await;
+    let made = ok(
+        &client,
+        "create_serve_from",
+        json!({ "store": 0, "name": "capture", "on_miss": "not_found" }),
+    )
+    .await;
+    assert_eq!(made["rule"]["origin"]["kind"], "agent");
+    assert_eq!(made["rule"]["actions"][0]["type"], "ServeFrom");
+    assert_eq!(made["rule"]["actions"][0]["on_miss"], "not_found");
+    assert_eq!(made["source"]["name"], "capture");
+    let (status, body) = client::get(h.proxy, &url).await;
+    assert_eq!((status, body), (200, recorded));
+    let missing = url.replace("/json", "/missing");
+    assert_eq!(client::get(h.proxy, &missing).await.0, 404);
+    let sources = ok(&client, "list_mock_sources", json!({})).await;
+    assert_eq!(sources["sources"].as_array().unwrap().len(), 1);
+    let both = call(&client, "create_serve_from", json!({ "store": 0, "source": "x" })).await;
+    assert_eq!(both.is_error, Some(true));
+
+    // `op:` filters bind to the imported specs over MCP too.
+    h.engine
+        .import_openapi(
+            "local",
+            r#"{"openapi":"3.1.0","info":{"title":"Local","version":"1"},"paths":{"/json":{"get":{"operationId":"getJson","summary":"The JSON"}}}}"#,
+        )
+        .unwrap();
+    h.engine.flush();
+    let flows = ok(&client, "list_flows", json!({ "filter": "op:getJson" })).await;
+    let flows = flows["flows"].as_array().unwrap();
+    assert!(!flows.is_empty());
+    let flow = ok(&client, "get_flow", json!({ "id": flows[0]["id"] })).await;
+    assert_eq!(flow["operation"]["operation_id"], "getJson");
+
+    client.cancel().await.unwrap();
+    h.stop().await;
+}
+
 #[tokio::test]
 async fn agents_write_test_and_run_scripts() {
     let h = Harness::start().await;

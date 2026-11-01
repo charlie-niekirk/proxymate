@@ -164,7 +164,7 @@ fn build(db: &AppDb) -> rusqlite::Result<OpIndex> {
             Err(err) => eprintln!("proxymate: skipping OpenAPI spec {name:?}: {err}"),
         }
     }
-    index.ops.sort_by(|a, b| b.literal.cmp(&a.literal));
+    index.ops.sort_by_key(|o| std::cmp::Reverse(o.literal));
     Ok(index)
 }
 
@@ -680,7 +680,7 @@ mod tests {
     fn index_of(source: &str) -> OpIndex {
         let mut index = OpIndex::default();
         add(&mut index, 1, "spec", 0.0, parse(source).unwrap());
-        index.ops.sort_by(|a, b| b.literal.cmp(&a.literal));
+        index.ops.sort_by_key(|o| std::cmp::Reverse(o.literal));
         index
     }
 

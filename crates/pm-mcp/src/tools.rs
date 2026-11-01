@@ -9,14 +9,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use base64::Engine as _;
-use pm_core::store::FlowQuery;
 use pm_core::{Engine, FlowPage};
 use pm_model::{
     Action, BodyPart, BreakpointId, BreakpointResolution, FlowDetail, FlowId, FlowSummary, Header, MapLocalSource,
     Matcher, Pattern, Phase, PresetKind, Rule, RuleOrigin, Scheme, SearchScope, WsDirection, WsQuery,
 };
 use pm_model::{CodeLanguage, FlowSelection, LIVE_STORE, RepeatOpts, RequestSpec, SendOpts, SendOrigin, StoreId};
-use pm_model::{Script, ScriptKind, ScriptTestSpec, ViewConfig};
+use pm_model::{Script, ScriptKind, ScriptTestSpec, ServeKey, ServeMiss, ServePick, ViewConfig};
 use rmcp::handler::server::common::schema_for_type;
 use rmcp::model::{JsonObject, Tool, ToolAnnotations};
 use schemars::JsonSchema;
@@ -95,7 +94,7 @@ const FILTER_HELP: &str = "Filter DSL: space-separated terms, all must match; `-
 path:/api/* method:POST,PUT status:4xx|404|400-499 ct:json|form|xml|js|css|graphql|document|media|html|image \
 grpc:0|not_found|!0 (gRPC status; !0 = failed calls) ct:grpc|protobuf|msgpack|cbor \
 app:Safari state:active|completed|failed|blocked|paused|tunnel is:edited is:pinned dur>500 dur<2s size>1mb \
-reqsize>10kb id>120. Bare words (or \"quoted phrases\") search the URL. Header and body terms read each flow's \
+reqsize>10kb id>120 op:listPets|op:get*|op:* (an imported OpenAPI operationId). Bare words (or \"quoted phrases\") search the URL. Header and body terms read each flow's \
 detail, so they are slower: header:x-request-id (any header line; reqheader:/resheader: for one side), \
 body:\"order_id\" (decoded body, first 4 MB; reqbody:/resbody:).";
 
@@ -184,7 +183,7 @@ fn defs() -> Vec<Def> {
             "create_rule",
             Write,
             CreateRule,
-            "Create a rule: a matcher plus ordered actions (SetHeader, AddHeader, RemoveHeader, ReplaceHeaderValue, SetQuery, RemoveQuery, ReplaceBody, SetBody, JsonSet, JsonRemove, FormSet, FormRemove, SetStatus, MapLocal, MapRemote, Breakpoint, Delay, Throttle, Block, Script, WsMessage). It is added last, enabled, and tagged as yours. Prefer create_map_local, create_rewrite or create_breakpoint for the common cases. A WebSocket's handshake goes through the rules like a request (header and query actions, Map Remote, Block, request breakpoints; response header actions on the 101); WsMessage {direction?, filter?, op: Drop | Replace | JsonSet | JsonRemove | Delay | Breakpoint} acts on its text and binary messages."
+            "Create a rule: a matcher plus ordered actions (SetHeader, AddHeader, RemoveHeader, ReplaceHeaderValue, SetQuery, RemoveQuery, ReplaceBody, SetBody, JsonSet, JsonRemove, FormSet, FormRemove, SetStatus, MapLocal, MapRemote, Breakpoint, Delay, Throttle, Block, Script, WsMessage, ServeFrom). It is added last, enabled, and tagged as yours. Prefer create_map_local, create_rewrite or create_breakpoint for the common cases. A WebSocket's handshake goes through the rules like a request (header and query actions, Map Remote, Block, request breakpoints; response header actions on the 101); WsMessage {direction?, filter?, op: Drop | Replace | JsonSet | JsonRemove | Delay | Breakpoint} acts on its text and binary messages."
         ),
         def!(
             "update_rule",
@@ -205,6 +204,18 @@ fn defs() -> Vec<Def> {
             Write,
             CreateMapLocal,
             "Mock an endpoint: requests matching `url` (or the same method, host and path as flow `flow_id`) are answered locally with this status, body and headers, without contacting the server."
+        ),
+        def!(
+            "create_serve_from",
+            Write,
+            CreateServeFrom,
+            "Serve offline from a recording: copies a session, HAR or Charles file (`path`), an open document or the live capture (`store`), or reuses a mock library entry (`source`), then creates one ServeFrom rule over the recording's hosts. Matching requests (same method, scheme, host, path and query in any order; optionally the body) get the recorded response byte for byte, without contacting the server; a miss passes through (default), or answers 404 or 502."
+        ),
+        def!(
+            "list_mock_sources",
+            Read,
+            NoParams,
+            "The mock library: recordings ServeFrom rules answer from, with their hosts and flow counts."
         ),
         def!(
             "create_breakpoint",
@@ -470,6 +481,8 @@ pub(crate) async fn call(ctx: &Ctx<'_>, name: &str, args: JsonObject) -> ToolRes
         }
         "delete_agent_rules" => Ok(json!({ "deleted": ctx.engine.delete_agent_rules()? })),
         "create_map_local" => create_map_local(ctx, parse(args)?),
+        "create_serve_from" => create_serve_from(ctx, parse(args)?),
+        "list_mock_sources" => Ok(json!({ "sources": ctx.engine.mock_sources() })),
         "create_breakpoint" => create_breakpoint(ctx, parse(args)?),
         "create_rewrite" => create_rewrite(ctx, parse(args)?),
         "test_rule" => test_rule(ctx, parse(args)?).await,
@@ -914,6 +927,31 @@ struct CreateMapLocal {
 }
 
 #[derive(Deserialize, JsonSchema)]
+struct CreateServeFrom {
+    /// A `.proxymate` session, HAR, or Charles `.chlsj`/`.chlsx` file to copy into the mock library.
+    #[serde(default)]
+    path: Option<String>,
+    /// Or an open document's store id (0 is the live capture).
+    #[serde(default)]
+    store: Option<StoreId>,
+    /// Or the id of a mock library entry (list_mock_sources).
+    #[serde(default)]
+    source: Option<String>,
+    /// The library entry's name (default: the file or document name).
+    #[serde(default)]
+    name: Option<String>,
+    /// What a request must share with a recorded one (default: the query counts, the body doesn't).
+    #[serde(default)]
+    key: Option<ServeKey>,
+    /// pass_through (default), not_found (404) or bad_gateway (502).
+    #[serde(default)]
+    on_miss: Option<ServeMiss>,
+    /// first (default), last or round_robin, when several recorded responses match.
+    #[serde(default)]
+    pick: Option<ServePick>,
+}
+
+#[derive(Deserialize, JsonSchema)]
 struct CreateBreakpoint {
     #[serde(flatten)]
     target: Target,
@@ -1336,6 +1374,9 @@ fn get_flow(ctx: &Ctx<'_>, p: GetFlow) -> ToolResult {
         })),
         "error": detail.error,
     });
+    if let Ok(Some(op)) = ctx.engine.flow_operation_in(LIVE_STORE, p.id) {
+        out["operation"] = json!(op);
+    }
     if has(Include::Timing) {
         out["timing"] = json!(detail.timing);
     }
@@ -1592,7 +1633,10 @@ fn payload_json(payload: &[u8], opcode: pm_model::WsOpcode, max: usize) -> (Stri
 }
 
 async fn wait_for_flow(ctx: &Ctx<'_>, p: WaitForFlow) -> ToolResult {
-    let query = FlowQuery::parse(&p.filter).map_err(|e| ToolError(format!("filter: {e}")))?;
+    let query = ctx
+        .engine
+        .parse_query(&p.filter)
+        .map_err(|e| ToolError(e.to_string()))?;
     let after = p.after_id.or_else(|| {
         // Flows that start after this call: everything up to the newest now.
         let newest = ctx.engine.find_flows("", None, None, 1, true).ok()?;
@@ -2063,6 +2107,31 @@ fn create_map_local(ctx: &Ctx<'_>, p: CreateMapLocal) -> ToolResult {
         content_type,
     };
     save(ctx, name, matcher, vec![action])
+}
+
+fn create_serve_from(ctx: &Ctx<'_>, p: CreateServeFrom) -> ToolResult {
+    let source = match (p.path, p.store, p.source) {
+        (Some(path), None, None) => ctx
+            .engine
+            .create_mock_source_from_file(std::path::Path::new(&path), p.name)?,
+        (None, Some(store), None) => ctx.engine.create_mock_source(store, p.name)?,
+        (None, None, Some(id)) => ctx
+            .engine
+            .mock_sources()
+            .into_iter()
+            .find(|s| s.id == id)
+            .ok_or_else(|| ToolError(format!("there is no mock source {id}; see list_mock_sources")))?,
+        _ => return Err(ToolError("give exactly one of path, store or source".into())),
+    };
+    let mut draft = ctx.engine.draft_serve_from_rule(&source.id)?;
+    draft.actions = vec![Action::ServeFrom {
+        source: source.id.clone(),
+        key: p.key.unwrap_or_default(),
+        on_miss: p.on_miss.unwrap_or_default(),
+        pick: p.pick.unwrap_or_default(),
+    }];
+    let rule = save(ctx, draft.name, draft.matcher, draft.actions)?;
+    Ok(json!({ "rule": rule, "source": source }))
 }
 
 fn create_breakpoint(ctx: &Ctx<'_>, p: CreateBreakpoint) -> ToolResult {

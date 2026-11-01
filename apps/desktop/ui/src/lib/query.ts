@@ -51,3 +51,9 @@ export const protoMappingsKey = ["proto-mappings"] as const;
 export const decodedRootKey = ["decoded"] as const;
 export const decodedKey = (store: number, id: number, part: string, size: number, finished: boolean) =>
   [...decodedRootKey, store, id, part, size, finished] as const;
+/** The mock library and imported OpenAPI specs (M20). */
+export const mockSourcesKey = ["mock-sources"] as const;
+export const openApiSpecsKey = ["openapi-specs"] as const;
+/** Every flow's OpenAPI operation; invalidated when specs change. */
+export const operationRootKey = ["operation"] as const;
+export const operationKey = (store: number, id: number) => [...operationRootKey, store, id] as const;

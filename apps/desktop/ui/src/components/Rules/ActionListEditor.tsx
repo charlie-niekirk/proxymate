@@ -9,16 +9,21 @@ import {
   ACTION_TYPES,
   actionLabel,
   WS_OP_LABELS,
+  SERVE_MISS_LABELS,
+  SERVE_PICK_LABELS,
   defaultAction,
   defaultWsOp,
   jsonSetText,
   moveItem,
   type Action,
   type ActionType,
+  type ServeMiss,
+  type ServePick,
   type WsOpKind,
 } from "@/lib/rules";
 
 import { parseLossless } from "@/lib/body/losslessJson";
+import { useMockSources } from "@/hooks/useMocking";
 import { useScripts } from "@/hooks/useScripts";
 import { useUi } from "@/store/ui";
 
@@ -323,7 +328,80 @@ function ActionForm({ action, onChange }: { action: Action; onChange: (action: A
       return <ScriptActionForm action={action} onChange={onChange} />;
     case "WsMessage":
       return <WsMessageForm action={action} onChange={onChange} />;
+    case "ServeFrom":
+      return <ServeFromForm action={action} onChange={onChange} />;
   }
+}
+
+/**
+ * Answers from a recording in the mock library (M20): the recorded
+ * response whose request has the same method, scheme, host and path (and,
+ * as chosen, query and body).
+ */
+function ServeFromForm({ action, onChange }: { action: Extract<Action, { type: "ServeFrom" }>; onChange: (a: Action) => void }) {
+  const sources = useMockSources();
+  const openSettings = useUi((s) => s.openSettings);
+  const current = sources.find((s) => s.id === action.source);
+  const options = [
+    ...(current ? [] : [{ value: NO_SCRIPT, label: action.source ? "(missing recording)" : "Choose a recording…" }]),
+    ...sources.map((s) => ({ value: s.id, label: `${s.name} · ${s.flows} flow${s.flows === 1 ? "" : "s"}` })),
+  ];
+  return (
+    <>
+      <Field label="Recording">
+        <Choice
+          value={current ? action.source : NO_SCRIPT}
+          options={options}
+          onChange={(id) => id !== NO_SCRIPT && onChange({ ...action, source: id })}
+          className="w-64"
+          testId="serve-source"
+        />
+        <Button variant="ghost" size="xs" onClick={() => openSettings("mocking")} title="The mock library, in Settings">
+          Library…
+        </Button>
+      </Field>
+      {current && current.hosts.length > 0 && (
+        <div className="text-muted-foreground truncate pl-26 text-2xs" title={current.hosts.join("\n")}>
+          Recorded from {current.hosts.join(", ")}
+        </div>
+      )}
+      <Field label="Also compare">
+        <Checkbox
+          checked={action.key.query}
+          onChange={(query) => onChange({ ...action, key: { ...action.key, query } })}
+          label="Query (any order)"
+          testId="serve-key-query"
+        />
+        <Checkbox
+          checked={action.key.body}
+          onChange={(body) => onChange({ ...action, key: { ...action.key, body } })}
+          label="Request body"
+          testId="serve-key-body"
+        />
+      </Field>
+      <Field label="Several match">
+        <Choice
+          value={action.pick}
+          options={(Object.keys(SERVE_PICK_LABELS) as ServePick[]).map((k) => ({ value: k, label: SERVE_PICK_LABELS[k] }))}
+          onChange={(pick) => onChange({ ...action, pick })}
+          className="w-40"
+          testId="serve-pick"
+        />
+      </Field>
+      <Field label="None match">
+        <Choice
+          value={action.on_miss}
+          options={(Object.keys(SERVE_MISS_LABELS) as ServeMiss[]).map((k) => ({ value: k, label: SERVE_MISS_LABELS[k] }))}
+          onChange={(on_miss) => onChange({ ...action, on_miss })}
+          className="w-40"
+          testId="serve-miss"
+        />
+        <span className="text-muted-foreground text-xs">
+          {action.on_miss === "pass_through" ? "the request goes to the server" : "without contacting the server"}
+        </span>
+      </Field>
+    </>
+  );
 }
 
 const BOTH = "both";
