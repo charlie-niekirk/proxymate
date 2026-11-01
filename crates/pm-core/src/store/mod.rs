@@ -62,6 +62,8 @@ pub struct Store {
     evict_retry_at: u32,
     /// The header column set the flows' `extra` values belong to.
     extra_generation: u32,
+    /// The OpenAPI operations new filters' `op:` terms bind to (M20).
+    operations: Option<Arc<crate::openapi::OpIndex>>,
 }
 
 /// Flows dropped by one eviction, for the engine to forget their details.
@@ -486,17 +488,24 @@ impl Store {
         &mut self.sidebar
     }
 
+    /// The OpenAPI operations later filters bind to.
+    pub fn set_operations(&mut self, operations: Option<Arc<crate::openapi::OpIndex>>) {
+        self.operations = operations;
+    }
+
     pub fn create_view(&mut self, spec: FilterSpec, sort: SortSpec) -> ViewInfo {
         self.next_view += 1;
         let id = self.next_view;
-        let (view, elapsed_us) = timed(|| View::new(id, spec, sort, &self.flows));
+        let ops = self.operations.as_ref();
+        let (view, elapsed_us) = timed(|| View::new(id, spec, sort, &self.flows, ops));
         self.views.insert(id, view);
         self.info(id, elapsed_us)
     }
 
     pub fn set_filter(&mut self, id: ViewId, spec: FilterSpec) -> Result<ViewInfo, Error> {
         let view = self.views.get_mut(&id).ok_or(Error::UnknownView(id))?;
-        let ((), elapsed_us) = timed(|| view.set_filter(spec, &self.flows));
+        let ops = self.operations.as_ref();
+        let ((), elapsed_us) = timed(|| view.set_filter(spec, &self.flows, ops));
         Ok(self.info(id, elapsed_us))
     }
 

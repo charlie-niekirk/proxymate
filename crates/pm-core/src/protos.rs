@@ -32,6 +32,7 @@ use rusqlite::params;
 use crate::io::content::kind_from_content_type;
 use crate::io::grpc::{self, Flavor};
 use crate::io::{objects, wire};
+use crate::mocks::MockMap;
 use crate::rules::compile::{CompiledRule, RequestInfo};
 use crate::rules::db::AppDb;
 use crate::rules::eval::header_map;
@@ -173,7 +174,7 @@ fn compile(stored: &[Stored], mappings: Vec<ProtoMapping>, generation: u64) -> R
     let mappings = mappings
         .into_iter()
         .filter_map(|m| {
-            CompiledRule::compile(&mapping_rule(&m), &ScriptMap::new())
+            CompiledRule::compile(&mapping_rule(&m), &ScriptMap::new(), &MockMap::new())
                 .ok()
                 .map(|c| (m, c))
         })
@@ -396,7 +397,7 @@ impl Engine {
             if state.pool.get_message_by_name(&m.message_type).is_none() {
                 return Err(Error::Proto(format!("no imported schema defines {}", m.message_type)));
             }
-            CompiledRule::compile(&mapping_rule(m), &ScriptMap::new())?;
+            CompiledRule::compile(&mapping_rule(m), &ScriptMap::new(), &MockMap::new())?;
         }
         drop(state);
         let db = self.protos.db.lock();

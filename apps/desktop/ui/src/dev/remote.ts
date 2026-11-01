@@ -19,14 +19,20 @@ import {
   labelSelection,
   editAndReplay,
   exportHar,
+  generateOpenApiMocks,
+  importOpenApiSpec,
+  mockFromFile,
+  mockFromStore,
   openDocument,
+  refreshRules,
+  removeOpenApiSpec,
   openPreset,
   openRewrite,
   replayFlow,
   saveSession,
   setThrottle,
 } from "@/lib/actions";
-import { decodedRootKey, protoSchemasKey, protoTypesKey, queryClient } from "@/lib/query";
+import { decodedRootKey, mockSourcesKey, protoSchemasKey, protoTypesKey, queryClient } from "@/lib/query";
 import { normalizeRule, THROTTLE_PRESETS } from "@/lib/rules";
 import { range } from "@/lib/selection";
 import type { PointerEdit } from "@/components/Rewrite/RewriteDialog";
@@ -96,6 +102,13 @@ import { useUi, type DeviceTab, type RequestTab, type ResponseTab, type Settings
  *   template; `{"scriptSource": "…"}` replaces the open draft's source (and
  *   remounts the editor); `{"saveScript": true}` presses Save;
  *   `{"testScript": "response"}` presses Test (view scripts: that body).
+ * - M20: `{"mockFrom": 1}` is "Mock from session…" on store 1 (0 is the
+ *   live capture), `{"mockFromFile": "/path/x.chlsj"}` the same for a file;
+ *   both open the unsaved Serve from rule. `{"importOpenApi": "/path/x.yaml"}`,
+ *   `{"generateMocks": 1}` (spec id), `{"removeMockSource": "<id>"}`,
+ *   `{"removeOpenApi": 1}` and `{"deleteRule": "<id>"}` (for cleaning up).
+ *   Each posts `{sources, specs, rules}` to the outbox. `{"rules": false}`
+ *   closes the Rules Editor (`true` opens it).
  * - M19: `{"wsSend": {"flow": 3, "direction": "received", "payload": "hi",
  *   "binary": false}}` sends into an open WebSocket as the composer does;
  *   `{"wsClose": 3}` closes it. A held message takes
@@ -172,6 +185,14 @@ interface Command {
   removeProto?: number;
   wsSend?: WsSend & { flow: number };
   wsClose?: number;
+  mockFrom?: number;
+  mockFromFile?: string;
+  importOpenApi?: string;
+  generateMocks?: number;
+  removeMockSource?: string;
+  removeOpenApi?: number;
+  deleteRule?: string;
+  rules?: boolean;
 }
 
 async function apply(cmd: Command) {
@@ -278,12 +299,37 @@ async function apply(cmd: Command) {
   if (cmd.repeat !== undefined) ui.openRepeat(store, cmd.repeat);
   if (cmd.code) await post("/__pm_remote/out", await backend.getCode(store, cmd.code.flow, cmd.code.language));
   if (cmd.deleteSelection) await deleteSelection();
+  if (cmd.rules !== undefined) {
+    if (cmd.rules) ui.openRulesEditor();
+    else ui.closeRulesEditor();
+  }
+  const m20 = [cmd.mockFrom, cmd.mockFromFile, cmd.importOpenApi, cmd.generateMocks, cmd.removeMockSource, cmd.removeOpenApi, cmd.deleteRule];
+  if (m20.some((v) => v !== undefined)) await mocking(cmd);
   if (cmd.importProto || cmd.removeProto !== undefined) {
     if (cmd.importProto) await backend.importProtoSchema(cmd.importProto);
     if (cmd.removeProto !== undefined) await backend.removeProtoSchema(cmd.removeProto);
     for (const queryKey of [protoSchemasKey, protoTypesKey, decodedRootKey]) await queryClient.invalidateQueries({ queryKey });
     await post("/__pm_remote/out", JSON.stringify(await backend.listProtoSchemas()));
   }
+}
+
+/** M20's commands, then what the library, specs and rules hold. */
+async function mocking(cmd: Command) {
+  if (cmd.mockFrom !== undefined) await mockFromStore(cmd.mockFrom);
+  if (cmd.mockFromFile) await mockFromFile(cmd.mockFromFile);
+  if (cmd.importOpenApi) await importOpenApiSpec(cmd.importOpenApi);
+  if (cmd.generateMocks !== undefined) await generateOpenApiMocks(cmd.generateMocks);
+  if (cmd.removeMockSource) {
+    await backend.removeMockSource(cmd.removeMockSource);
+    await queryClient.invalidateQueries({ queryKey: mockSourcesKey });
+  }
+  if (cmd.removeOpenApi !== undefined) await removeOpenApiSpec(cmd.removeOpenApi);
+  if (cmd.deleteRule) {
+    await backend.deleteRule(cmd.deleteRule);
+    await refreshRules();
+  }
+  const [sources, specs, rules] = await Promise.all([backend.listMockSources(), backend.listOpenApiSpecs(), backend.listRules()]);
+  await post("/__pm_remote/out", JSON.stringify({ sources, specs, rules }));
 }
 
 async function savedRule(id: string) {

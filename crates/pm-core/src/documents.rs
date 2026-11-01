@@ -1,4 +1,4 @@
-//! Documents: saved sessions and imported HAR files, each opened as its
+//! Documents: saved sessions and imported HAR and Charles files, each opened as its
 //! own store beside the live capture (a [`Store`] for summaries and views,
 //! a [`SqliteBackend`] for everything else), and the background writers
 //! that save any store as a session or export it as HAR.
@@ -13,8 +13,8 @@ use parking_lot::RwLock;
 use pm_model::{DocumentInfo, DocumentKind, FlowId, FlowSelection, FlowSummary, LIVE_STORE, SaveProgress, StoreId};
 use rusqlite::Connection;
 
-use crate::io::{har, session};
-use crate::store::{Opened, SessionWriter, SqliteBackend, Store, VIEW_STORE_SHIFT};
+use crate::io::{charles, har, session};
+use crate::store::{Opened, SavedFlow, SessionWriter, SqliteBackend, Store, VIEW_STORE_SHIFT};
 use crate::{Engine, Error};
 
 /// Receives a save's progress; the last update has `finished` set.
@@ -41,7 +41,13 @@ impl Documents {
         self.open.read().get(&store).cloned().ok_or(Error::UnknownStore(store))
     }
 
-    fn add(&self, kind: DocumentKind, path: &Path, opened: Opened) -> Result<DocumentInfo, Error> {
+    fn add(
+        &self,
+        kind: DocumentKind,
+        path: &Path,
+        opened: Opened,
+        operations: Arc<crate::openapi::OpIndex>,
+    ) -> Result<DocumentInfo, Error> {
         let store = self.last.fetch_add(1, Ordering::Relaxed) + 1;
         if store > MAX_DOCUMENTS {
             return Err(Error::Document(format!(
@@ -57,9 +63,11 @@ impl Documents {
             path: path.display().to_string(),
             flows: opened.summaries.len() as u32,
         };
+        let mut flows = Store::document(store, opened.summaries);
+        flows.set_operations(Some(operations));
         let doc = Document {
             info: info.clone(),
-            store: RwLock::new(Store::document(store, opened.summaries)),
+            store: RwLock::new(flows),
             backend: opened.backend,
         };
         self.open.write().insert(store, Arc::new(doc));
@@ -67,21 +75,47 @@ impl Documents {
     }
 }
 
+/// True if `path` starts like an SQLite database (a saved session).
+pub(crate) fn is_sqlite(path: &Path) -> bool {
+    let mut magic = [0u8; 16];
+    std::fs::File::open(path)
+        .and_then(|mut f| io::Read::read_exact(&mut f, &mut magic))
+        .is_ok_and(|()| &magic == b"SQLite format 3\0")
+}
+
+/// The flows of a HAR or Charles file, told apart by their contents: a
+/// Charles JSON session is a top-level array, XML starts with `<`, HAR is
+/// an object. Charles's binary `.chls` (Java serialisation) is refused
+/// with how to export a readable one.
+pub(crate) fn import_file(path: &Path) -> Result<(DocumentKind, Vec<SavedFlow>), Error> {
+    let bytes = std::fs::read(path)?;
+    let named = |e: &dyn std::fmt::Display| Error::Document(format!("{}: {e}", path.display()));
+    match charles::sniff(&bytes) {
+        charles::Sniffed::Json => Ok((
+            DocumentKind::Charles,
+            charles::import_json(&bytes).map_err(|e| named(&e))?,
+        )),
+        charles::Sniffed::Xml => Ok((
+            DocumentKind::Charles,
+            charles::import_xml(&bytes).map_err(|e| named(&e))?,
+        )),
+        charles::Sniffed::Binary => Err(Error::Document(charles::BINARY_UNSUPPORTED.into())),
+        charles::Sniffed::Other => Ok((DocumentKind::Har, har::import(&bytes).map_err(|e| named(&e))?)),
+    }
+}
+
 impl Engine {
-    /// Opens a saved session (`.proxymate`) or imports a HAR file as a new
-    /// document, by its contents rather than its extension.
+    /// Opens a saved session (`.proxymate`) or imports a HAR or Charles
+    /// file as a new document, by its contents rather than its extension.
     pub fn open_document(self: &Arc<Self>, path: &Path) -> Result<DocumentInfo, Error> {
-        let mut magic = [0u8; 16];
-        let is_sqlite = std::fs::File::open(path)
-            .and_then(|mut f| io::Read::read_exact(&mut f, &mut magic))
-            .is_ok_and(|()| &magic == b"SQLite format 3\0");
-        if is_sqlite {
+        if is_sqlite(path) {
             let opened = session::open(path).map_err(|e| Error::Document(e.to_string()))?;
-            let info = self.docs.add(DocumentKind::Session, path, opened)?;
+            let info = self.docs.add(DocumentKind::Session, path, opened, self.operations())?;
             self.columns_for_document(info.store);
             Ok(info)
         } else {
-            self.import_har(path)
+            let (kind, flows) = import_file(path)?;
+            self.add_imported(kind, path, flows)
         }
     }
 
@@ -90,6 +124,15 @@ impl Engine {
     pub fn import_har(self: &Arc<Self>, path: &Path) -> Result<DocumentInfo, Error> {
         let bytes = std::fs::read(path)?;
         let flows = har::import(&bytes).map_err(|e| Error::Document(format!("{}: {e}", path.display())))?;
+        self.add_imported(DocumentKind::Har, path, flows)
+    }
+
+    fn add_imported(
+        self: &Arc<Self>,
+        kind: DocumentKind,
+        path: &Path,
+        flows: Vec<SavedFlow>,
+    ) -> Result<DocumentInfo, Error> {
         let conn = Connection::open_in_memory().map_err(|e| Error::Document(e.to_string()))?;
         let meta = [("source", path.display().to_string())];
         let mut writer = SessionWriter::create(conn, &meta).map_err(|e| Error::Document(e.to_string()))?;
@@ -98,7 +141,7 @@ impl Engine {
         }
         let conn = writer.finish().map_err(|e| Error::Document(e.to_string()))?;
         let opened = SqliteBackend::open(conn)?;
-        let info = self.docs.add(DocumentKind::Har, path, opened)?;
+        let info = self.docs.add(kind, path, opened, self.operations())?;
         self.columns_for_document(info.store);
         Ok(info)
     }
@@ -113,6 +156,14 @@ impl Engine {
             .ok_or(Error::UnknownStore(store))?;
         self.sinks_retain(|view| view >> VIEW_STORE_SHIFT != doc.info.store);
         Ok(())
+    }
+
+    /// Points every store's later filters at a new set of OpenAPI specs.
+    pub(crate) fn set_store_operations(&self, operations: Arc<crate::openapi::OpIndex>) {
+        self.store.write().set_operations(Some(operations.clone()));
+        for doc in self.docs.open.read().values() {
+            doc.store.write().set_operations(Some(operations.clone()));
+        }
     }
 
     /// The opened documents, in the order they were opened.

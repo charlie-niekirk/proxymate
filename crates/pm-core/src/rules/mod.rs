@@ -31,6 +31,7 @@ pub(crate) use breakpoints::{BreakpointManager, Outcome};
 pub use compile::{CompiledRuleSet, PATTERN_MAX_LEN, REGEX_SIZE_LIMIT};
 pub use db::APP_DB_FILE;
 
+use crate::mocks::Mocks;
 use crate::notify::Notifier;
 use crate::scripts::{ScriptMap, ScriptRun};
 use crate::{Engine, Error};
@@ -111,7 +112,7 @@ impl Rules {
 
     /// Loads `<dir>/app.sqlite`, or an in-memory database without a
     /// directory. A database that can't be opened falls back to memory.
-    pub fn load(dir: Option<&Path>, scripts: &ScriptMap) -> Rules {
+    pub fn load(dir: Option<&Path>, scripts: &ScriptMap, mocks: &Mocks) -> Rules {
         let db = dir
             .map(AppDb::open)
             .unwrap_or_else(AppDb::in_memory)
@@ -129,14 +130,15 @@ impl Rules {
         }
         // One broken rule must not take the others down: drop it from the
         // compiled set (it stays listed, disabled).
-        let compiled = CompiledRuleSet::compile(&rules, scripts).unwrap_or_else(|err| {
+        let map = mocks.map_for(rules.iter().filter(|r| r.enabled));
+        let compiled = CompiledRuleSet::compile(&rules, scripts, &map).unwrap_or_else(|err| {
             eprintln!("proxymate: {err}; disabling rules that don't compile");
             for rule in &mut rules {
-                if CompiledRule::compile(rule, scripts).is_err() {
+                if CompiledRule::compile(rule, scripts, &map).is_err() {
                     rule.enabled = false;
                 }
             }
-            CompiledRuleSet::compile(&rules, scripts).unwrap_or_else(|_| CompiledRuleSet::empty())
+            CompiledRuleSet::compile(&rules, scripts, &map).unwrap_or_else(|_| CompiledRuleSet::empty())
         });
         let settings = db.rule_settings().unwrap_or_default();
         Rules {
@@ -198,7 +200,7 @@ impl Engine {
 
     /// Checks that `rule` compiles, without saving it.
     pub fn validate_rule(&self, rule: &Rule) -> Result<(), Error> {
-        CompiledRule::compile(rule, &self.script_map())?;
+        CompiledRule::compile(rule, &self.script_map(), &self.mock_map([]))?;
         Ok(())
     }
 
@@ -210,6 +212,21 @@ impl Engine {
             rule.order = rules.iter().map(|r| r.order).max().unwrap_or(0).max(0) + 1;
             rules.push(rule.clone());
             Ok(rule)
+        })
+    }
+
+    /// Saves several new rules at the end of the list in one change (so
+    /// either all are saved or none). Ids and orders are assigned.
+    pub fn create_rules(&self, mut new: Vec<Rule>) -> Result<Vec<Rule>, Error> {
+        self.change_rules(|rules| {
+            let mut order = rules.iter().map(|r| r.order).max().unwrap_or(0).max(0);
+            for rule in &mut new {
+                order += 1;
+                rule.id = uuid::Uuid::new_v4().to_string();
+                rule.order = order;
+                rules.push(rule.clone());
+            }
+            Ok(new)
         })
     }
 
@@ -303,7 +320,8 @@ impl Engine {
         let mut list = self.rules.list.write();
         let mut next = list.clone();
         let out = change(&mut next)?;
-        let compiled = CompiledRuleSet::compile(&next, &self.script_map())?;
+        let mocks = self.mock_map(next.iter().filter(|r| r.enabled));
+        let compiled = CompiledRuleSet::compile(&next, &self.script_map(), &mocks)?;
         self.rules.db.lock().save_rules(&next).map_err(RuleError::from)?;
         *list = next;
         self.rules.compiled.store(Arc::new(compiled));
@@ -320,7 +338,8 @@ impl Engine {
     /// Recompiles the rules against the current scripts, so they run the
     /// new versions.
     pub(crate) fn recompile_rules(&self, list: parking_lot::RwLockWriteGuard<'_, Vec<Rule>>) {
-        match CompiledRuleSet::compile(&list, &self.script_map()) {
+        let mocks = self.mock_map(list.iter().filter(|r| r.enabled));
+        match CompiledRuleSet::compile(&list, &self.script_map(), &mocks) {
             Ok(compiled) => self.rules.compiled.store(Arc::new(compiled)),
             Err(err) => eprintln!("proxymate: rules no longer compile after a script change: {err}"),
         }
@@ -412,6 +431,11 @@ impl Engine {
                     latency_ms: 100,
                 }],
             ),
+            PresetKind::ServeFrom | PresetKind::OpenApi => {
+                return Err(Error::Invalid(
+                    "that preset drafts from a mock source or an OpenAPI spec, not from a flow".into(),
+                ));
+            }
         };
         Ok(Rule {
             id: String::new(),
@@ -443,7 +467,7 @@ impl Engine {
     ) -> Result<RuleTestResult, Error> {
         let summary = self.get_flow_in(store, flow).ok_or(Error::UnknownFlow(flow))?;
         let detail = self.flow_detail_in(store, flow)?.ok_or(Error::UnknownFlow(flow))?;
-        let compiled = Arc::new(CompiledRule::compile(rule, &self.script_map())?);
+        let compiled = Arc::new(CompiledRule::compile(rule, &self.script_map(), &self.mock_map([rule]))?);
         // The console names live flows only: a document's ids are its own.
         let run = ScriptRun::new(self.scripts_state(), (store == pm_model::LIVE_STORE).then_some(flow));
         let limit = body_limit.unwrap_or(TEST_BODY_MAX);
@@ -489,6 +513,27 @@ impl Engine {
                 } else if let Some(mock) = &fx.mock {
                     notes.push("Answered by a mock script; the upstream isn't contacted.".into());
                     response = Some(mock.clone());
+                } else if let Some(served) = &fx.served {
+                    match served {
+                        eval::Served::Hit { index, flow } => {
+                            notes.push(format!(
+                                "Answered from the recording {:?} (its flow {}); the upstream isn't contacted.",
+                                index.name,
+                                flow + 1
+                            ));
+                            match index.draft(*flow) {
+                                Ok(draft) => response = Some(draft),
+                                Err(err) => notes.push(format!("The recording can't be read: {err}")),
+                            }
+                        }
+                        eval::Served::Miss(answer) => {
+                            notes.push(format!(
+                                "Nothing recorded matches; answered with status {}.",
+                                answer.status
+                            ));
+                            response = Some(answer.clone());
+                        }
+                    }
                 } else if let Some(remap) = &fx.map_remote {
                     let path = remap.path.as_deref().unwrap_or(&request.path);
                     notes.push(format!(
@@ -496,6 +541,11 @@ impl Engine {
                         remap.scheme.as_str(),
                         remap.host,
                         remap.port
+                    ));
+                }
+                for source in &fx.serve_misses {
+                    notes.push(format!(
+                        "Nothing recorded in {source:?} matches; the request goes to the upstream."
                     ));
                 }
                 if fx.breakpoint.is_some() {
@@ -637,7 +687,8 @@ impl Engine {
     /// matches, for reopening a saved rule on a flow it applies to.
     pub fn flows_matching_rule(&self, store: StoreId, rule: &Rule, limit: usize) -> Result<Vec<FlowId>, Error> {
         let scripts = self.script_map();
-        let compiled = CompiledRule::compile(rule, &scripts)?;
+        let mocks = self.mock_map([]);
+        let compiled = CompiledRule::compile(rule, &scripts, &mocks)?;
         // Header and response conditions need each flow's detail: narrow by
         // the summary first, under the lock, then check those outside it.
         let summary_only = CompiledRule::compile(
@@ -651,6 +702,7 @@ impl Engine {
                 ..rule.clone()
             },
             &scripts,
+            &mocks,
         )?;
         let needs_detail = !rule.matcher.headers.is_empty() || rule.matcher.response.is_some();
         let no_headers = http::HeaderMap::new();

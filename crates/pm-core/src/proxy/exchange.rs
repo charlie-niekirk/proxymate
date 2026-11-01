@@ -24,10 +24,14 @@
 //! A breakpoint parks only its own exchange: other h2 streams on the same
 //! connection keep flowing.
 //!
+//! A recording's answer (ServeFrom, M20) is read off the async threads
+//! and then goes through the response phase like an upstream response:
+//! untouched, its recorded bytes reach the client as they were recorded.
+//!
 //! A WebSocket handshake gets the request phase (header and query actions,
 //! Map Remote, Block, the request breakpoint) and, on `101`, the response
-//! phase's header actions and delay; body actions, Map Local and mocks
-//! don't apply. Each handshake dials its own upstream connection, which
+//! phase's header actions and delay; body actions, Map Local, mocks and
+//! recordings don't apply. Each handshake dials its own upstream connection, which
 //! the relay (`ws.rs`) then takes over along with the client's.
 
 use std::sync::Arc;
@@ -146,7 +150,9 @@ impl Held {
 
 /// What a response phase starts from.
 enum Answer {
-    Upstream(Response<Incoming>),
+    /// The upstream's response, or (ServeFrom) a recorded one, which goes
+    /// through the response phase exactly like it.
+    Upstream(Response<Inbound>),
     /// Map Local's answer.
     Local(ResponseDraft),
 }
@@ -273,6 +279,7 @@ impl Exchange<'_> {
             // A handshake is answered by the upstream or not at all.
             fx.map_local = None;
             fx.mock = None;
+            fx.served = None;
             fx.body_changed = false;
         }
         if let Some(rec) = &rec {
@@ -335,6 +342,30 @@ impl Exchange<'_> {
             return self
                 .respond(engine, &matched, Answer::Local(answer), fx.throttle, request)
                 .await;
+        }
+
+        if let Some(served) = fx.served.take() {
+            if let Some(rec) = &rec {
+                rec.mocked();
+                if changed {
+                    rec.request_head(self.request_head(&draft, parts.version));
+                }
+            }
+            held.drain(rec.clone(), BodyPart::Request);
+            let answer = match served {
+                eval::Served::Hit { index, flow } => {
+                    let method = draft.method.clone();
+                    let read = tokio::task::spawn_blocking(move || index.response(flow, &method)).await;
+                    match read {
+                        Ok(Ok(response)) => Answer::Upstream(response),
+                        Ok(Err(err)) => Answer::Local(unreadable_recording(&err.to_string())),
+                        Err(err) => Answer::Local(unreadable_recording(&err.to_string())),
+                    }
+                }
+                eval::Served::Miss(answer) => Answer::Local(answer),
+            };
+            let request = self.request_for_response(&matched, &draft);
+            return self.respond(engine, &matched, answer, fx.throttle, request).await;
         }
 
         if let Some(rule) = fx.breakpoint.take() {
@@ -430,8 +461,14 @@ impl Exchange<'_> {
                 .switch_with_rules(engine, &matched, upstream, upgrade, request)
                 .await);
         }
-        self.respond(engine, &matched, Answer::Upstream(upstream), fx.throttle, request)
-            .await
+        self.respond(
+            engine,
+            &matched,
+            Answer::Upstream(upstream.map(Inbound::from)),
+            fx.throttle,
+            request,
+        )
+        .await
     }
 
     /// The response phase of a `101`: header actions, scripts and delays
@@ -497,7 +534,7 @@ impl Exchange<'_> {
                 upstream_head = Some(response_head(&response));
                 let (mut parts, body) = response.into_parts();
                 strip_hop_by_hop(&mut parts.headers);
-                (parts, Held::Stream(body.into()), None)
+                (parts, Held::Stream(body), None)
             }
             Answer::Local(draft) => {
                 let (mut parts, ()) = Response::new(()).into_parts();
@@ -891,6 +928,20 @@ impl Drop for ClientGone {
 }
 
 /// Applies a breakpoint's edits to a request; true if anything changed.
+/// The answer when a recording that matched can't be read back.
+fn unreadable_recording(err: &str) -> ResponseDraft {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/plain; charset=utf-8"),
+    );
+    ResponseDraft {
+        status: 502,
+        headers,
+        body: Some(format!("Proxymate: the recorded response can't be read: {err}\n").into_bytes()),
+    }
+}
+
 fn edit_request(draft: &mut RequestDraft, edits: MessageEdits, editable: bool) -> bool {
     let mut changed = false;
     if let Some(method) = edits.method.map(|m| m.trim().to_ascii_uppercase())

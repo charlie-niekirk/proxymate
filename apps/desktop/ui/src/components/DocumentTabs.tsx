@@ -3,13 +3,14 @@ import type { ComponentProps, ReactElement } from "react";
 
 import { CopyMenu } from "@/components/menus/items";
 import { ContextMenuItem, ContextMenuSeparator } from "@/components/ui/context-menu";
-import { closeDocument, exportHar, saveSession } from "@/lib/actions";
+import { closeDocument, exportHar, mockFromStore, reportError, saveSession } from "@/lib/actions";
 import { formatCount } from "@/lib/flow";
 import { cn } from "@/lib/utils";
 import { LIVE_STORE, useUi } from "@/store/ui";
 
 /**
- * Document tabs: the live capture, then each opened session or HAR. Shown
+ * Document tabs: the live capture, then each opened session, HAR or
+ * Charles file. Shown
  * only while a document is open; the table and inspector follow the tab.
  */
 export function DocumentTabs() {
@@ -28,7 +29,7 @@ export function DocumentTabs() {
       {documents.map((doc) => (
         <TabMenu key={doc.store} store={doc.store} name={doc.name} path={doc.path}>
           <Tab active={store === doc.store} onClick={() => setStore(doc.store)} title={doc.path} testId={`tab-${doc.store}`}>
-            {doc.kind === "har" ? <FileJson className="size-3" /> : <Archive className="size-3" />}
+            {doc.kind === "session" ? <Archive className="size-3" /> : <FileJson className="size-3" />}
             <span className="max-w-48 truncate">{doc.name}</span>
             <span className="text-muted-foreground text-2xs tabular-nums">{formatCount(doc.flows)}</span>
             <span
@@ -67,6 +68,12 @@ function TabMenu({ store, name, path, children }: { store: number; name?: string
         <>
           <ContextMenuItem onSelect={() => run(() => saveSession())}>Save session…</ContextMenuItem>
           <ContextMenuItem onSelect={() => run(() => exportHar({ kind: "all" }))}>Export HAR…</ContextMenuItem>
+          <ContextMenuItem
+            onSelect={() => void mockFromStore(store).catch((e) => reportError("Couldn't mock from this session", e))}
+            data-testid="tab-mock-from"
+          >
+            Mock from session…
+          </ContextMenuItem>
           {store !== LIVE_STORE && (
             <>
               <ContextMenuSeparator />

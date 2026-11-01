@@ -20,6 +20,11 @@
 //! `Block` still runs first and the breakpoints last. A script that throws
 //! or times out is skipped and reported in the effects' `script_issues`.
 //!
+//! **Recordings (M20).** A `ServeFrom` action answers with the recorded
+//! response whose request has the same key, terminal like Map Local: the
+//! first answer (Map Local, a mock script or a recording) wins. A miss
+//! either passes through (the action did nothing) or answers 404/502.
+//!
 //! **WebSocket messages (M19).** Each text or binary message of a
 //! WebSocket runs [`ws_message_phase`] with the rules that matched its
 //! handshake: `WsMessage` actions and `onWsMessage` scripts in rule and
@@ -42,6 +47,7 @@ use pm_model::{
 
 use super::compile::{CompiledAction, CompiledRule, RequestInfo, percent_encode, query_pairs};
 use super::json_edit::{self, Edit};
+use crate::mocks::{MockIndex, miss_answer};
 use crate::scripts::traffic::{apply_request, apply_response, mock_answer};
 use crate::scripts::{JsRequest, MockAnswer, ScriptRun, WsScriptOut};
 
@@ -146,6 +152,17 @@ pub(crate) struct ThrottleSpec {
     pub latency_ms: u32,
 }
 
+/// A `ServeFrom` answer.
+pub(crate) enum Served {
+    /// This recorded flow's response.
+    Hit {
+        index: Arc<MockIndex>,
+        flow: pm_model::FlowId,
+    },
+    /// Nothing recorded matched, and the action answers anyway (404/502).
+    Miss(ResponseDraft),
+}
+
 /// What the request phase decided, beyond the edits made to the draft.
 #[derive(Default)]
 pub(crate) struct RequestEffects {
@@ -153,6 +170,11 @@ pub(crate) struct RequestEffects {
     pub map_local: Option<LocalAnswer>,
     /// A mock script's answer.
     pub mock: Option<MockAnswer>,
+    /// A recording's answer.
+    pub served: Option<Served>,
+    /// Sources that had nothing for the request and let it pass (for the
+    /// dry run's notes).
+    pub serve_misses: Vec<String>,
     pub map_remote: Option<Remap>,
     pub delay_ms: u64,
     pub throttle: Option<ThrottleSpec>,
@@ -305,7 +327,7 @@ pub(crate) async fn request_phase(
                     headers,
                     content_type,
                 } => {
-                    if fx.map_local.is_none() && fx.mock.is_none() {
+                    if !fx.answered() {
                         fx.map_local = Some(LocalAnswer {
                             source: source.clone(),
                             status: *status,
@@ -365,7 +387,7 @@ pub(crate) async fn request_phase(
                 Action::Script { .. } => match &ca.script {
                     // After a terminal answer nothing more is sent, so no
                     // later script runs.
-                    Some(script) if fx.map_local.is_some() || fx.mock.is_some() || !script.enabled => false,
+                    Some(script) if fx.answered() || !script.enabled => false,
                     Some(script) if script.runs_mock() => match run.mock(script, rule, draft).await {
                         Ok(Some(out)) => match mock_answer(out) {
                             Ok(answer) => {
@@ -405,6 +427,40 @@ pub(crate) async fn request_phase(
                     },
                     _ => false,
                 },
+                Action::ServeFrom {
+                    source,
+                    key,
+                    on_miss,
+                    pick,
+                } => match &ca.serve {
+                    Some(serve) if !fx.answered() => {
+                        let index = serve.index.as_ref();
+                        let hit = index.and_then(|i| Some((i, i.lookup(draft, *key, *pick, &serve.turns)?)));
+                        match hit {
+                            Some((index, flow)) => {
+                                fx.served = Some(Served::Hit {
+                                    index: index.clone(),
+                                    flow,
+                                });
+                                true
+                            }
+                            None => {
+                                let name = index.map_or(source.as_str(), |i| i.name.as_str());
+                                match miss_answer(*on_miss, name, draft) {
+                                    Some(answer) => {
+                                        fx.served = Some(Served::Miss(answer));
+                                        true
+                                    }
+                                    None => {
+                                        fx.serve_misses.push(name.to_owned());
+                                        false
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    _ => false,
+                },
                 _ => false,
             };
         }
@@ -412,10 +468,17 @@ pub(crate) async fn request_phase(
             fx.applied.push(rule.applied(Phase::Request));
         }
     }
-    if fx.map_local.is_some() || fx.mock.is_some() {
+    if fx.answered() {
         fx.map_remote = None;
     }
     fx
+}
+
+impl RequestEffects {
+    /// Map Local, a mock script or a recording answered: nothing is sent.
+    pub fn answered(&self) -> bool {
+        self.map_local.is_some() || self.mock.is_some() || self.served.is_some()
+    }
 }
 
 /// The rules (of those that matched the request) whose response matcher

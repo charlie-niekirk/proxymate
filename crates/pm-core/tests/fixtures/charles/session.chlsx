@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?charles serialisation-version='2.0' ?>
+<charles-session>
+  <transaction status="COMPLETE" method="GET" protocolVersion="HTTP/1.1" protocol="https" host="api.example.com" port="443" actualPort="443" path="/v1/users" query="page=2&amp;sort=name" remoteAddress="api.example.com/93.184.216.34" clientAddress="/127.0.0.1" clientPort="51234" startTime="2024-05-01T10:00:00.000+00:00" startTimeMillis="1714557600000" responseTime="2024-05-01T10:00:00.090+00:00" responseTimeMillis="1714557600090" endTime="2024-05-01T10:00:00.120+00:00" endTimeMillis="1714557600120" dnsDuration="4" connectDuration="12" sslDuration="30" requestDuration="1" responseDuration="30" latency="79" speed="1000" requestSpeed="0" responseSpeed="2000" totalSize="512" tunnel="false" keptAlive="true" webSocket="false">
+    <request headers="true" body="false">
+      <headers>
+        <first-line><![CDATA[GET /v1/users?page=2&sort=name HTTP/1.1]]></first-line>
+        <header>
+          <name>Host</name>
+          <value>api.example.com</value>
+        </header>
+        <header>
+          <name>Accept</name>
+          <value>application/json</value>
+        </header>
+        <header>
+          <name>Accept-Encoding</name>
+          <value>gzip</value>
+        </header>
+      </headers>
+    </request>
+    <response status="200" headers="true" body="true" mime-type="application/json" charset="utf-8" content-encoding="gzip">
+      <headers>
+        <first-line><![CDATA[HTTP/1.1 200 OK]]></first-line>
+        <header>
+          <name>Content-Type</name>
+          <value>application/json; charset=utf-8</value>
+        </header>
+        <header>
+          <name>Content-Encoding</name>
+          <value>gzip</value>
+        </header>
+        <header>
+          <name>Content-Length</name>
+          <value>65</value>
+        </header>
+        <header>
+          <name>X-Request-Id</name>
+          <value>r-1</value>
+        </header>
+      </headers>
+      <body encoding="base64">H4sIAAAAAAAA/6tWKi1OLSpWsoquVspMUbIy1FHKS8xNVbJSckxJVKrVgYgawUXdixKTU5VqY2sB9n/GGzkAAAA=</body>
+    </response>
+  </transaction>
+  <transaction status="COMPLETE" method="POST" protocolVersion="HTTP/1.1" protocol="https" host="api.example.com" port="443" actualPort="443" path="/v1/users" startTime="2024-05-01T10:00:01.000+00:00" startTimeMillis="1714557601000" endTime="2024-05-01T10:00:01.040+00:00" endTimeMillis="1714557601040" dnsDuration="-1" connectDuration="-1" sslDuration="-1" latency="35" responseDuration="3" tunnel="false">
+    <request headers="true" body="true" mime-type="application/json" charset="UTF-8">
+      <headers>
+        <first-line><![CDATA[POST /v1/users HTTP/1.1]]></first-line>
+        <header>
+          <name>Host</name>
+          <value>api.example.com</value>
+        </header>
+        <header>
+          <name>Content-Type</name>
+          <value>application/json</value>
+        </header>
+        <header>
+          <name>Content-Length</name>
+          <value>15</value>
+        </header>
+      </headers>
+      <body><![CDATA[{"name":"Alan"}]]></body>
+    </request>
+    <response status="201" headers="true" body="true" mime-type="application/json" charset="UTF-8">
+      <headers>
+        <first-line><![CDATA[HTTP/1.1 201 Created]]></first-line>
+        <header>
+          <name>Content-Type</name>
+          <value>application/json</value>
+        </header>
+        <header>
+          <name>Location</name>
+          <value>/v1/users/3</value>
+        </header>
+      </headers>
+      <body><![CDATA[{"id":3,"name":"Alan"}]]></body>
+    </response>
+  </transaction>
+  <transaction status="COMPLETE" method="GET" protocolVersion="HTTP/1.1" protocol="http" host="cdn.example.com" port="8080" actualPort="8080" path="/pixel.png" startTime="2024-05-01T10:00:02.000+00:00" startTimeMillis="1714557602000" endTime="2024-05-01T10:00:02.005+00:00" endTimeMillis="1714557602005">
+    <request headers="true" body="false">
+      <headers>
+        <first-line><![CDATA[GET /pixel.png HTTP/1.1]]></first-line>
+        <header>
+          <name>Host</name>
+          <value>cdn.example.com:8080</value>
+        </header>
+      </headers>
+    </request>
+    <response status="200" headers="true" body="true" mime-type="image/png">
+      <headers>
+        <first-line><![CDATA[HTTP/1.1 200 OK]]></first-line>
+        <header>
+          <name>Content-Type</name>
+          <value>image/png</value>
+        </header>
+      </headers>
+      <body encoding="base64">iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP4//8/AAX+Av6n1qRRAAAAAElFTkSuQmCC</body>
+    </response>
+  </transaction>
+  <transaction status="FAILED" method="GET" protocolVersion="HTTP/1.1" protocol="https" host="down.example.com" port="443" actualPort="443" path="/health" startTime="2024-05-01T10:00:03.000+00:00" startTimeMillis="1714557603000" endTime="2024-05-01T10:00:03.001+00:00" endTimeMillis="1714557603001" errorMessage="Connection refused: down.example.com/10.0.0.9:443">
+    <request headers="true" body="false">
+      <headers>
+        <first-line><![CDATA[GET /health HTTP/1.1]]></first-line>
+        <header>
+          <name>Host</name>
+          <value>down.example.com</value>
+        </header>
+      </headers>
+    </request>
+  </transaction>
+  <transaction status="COMPLETE" method="CONNECT" protocolVersion="HTTP/1.1" protocol="https" host="pinned.example.com" port="443" actualPort="443" startTime="2024-05-01T10:00:04.000+00:00" startTimeMillis="1714557604000" endTime="2024-05-01T10:00:04.900+00:00" endTimeMillis="1714557604900" tunnel="true">
+    <request headers="true" body="false">
+      <headers>
+        <first-line><![CDATA[CONNECT pinned.example.com:443 HTTP/1.1]]></first-line>
+        <header>
+          <name>Host</name>
+          <value>pinned.example.com:443</value>
+        </header>
+      </headers>
+    </request>
+    <response status="200" headers="true" body="false">
+      <headers>
+        <first-line><![CDATA[HTTP/1.1 200 Connection established]]></first-line>
+      </headers>
+    </response>
+  </transaction>
+</charles-session>

@@ -134,8 +134,10 @@ export const commands = {
 	getCurl: (store: number, id: number) => typedError<string, string>(__TAURI_INVOKE("get_curl", { store, id })),
 	listDocuments: () => __TAURI_INVOKE<DocumentInfo[]>("list_documents"),
 	/**
-	 *  Opens a session or HAR file as a document; without `path`, asks for
-	 *  one (only HAR files with `har`). `None` if the user cancelled.
+	 *  Opens a session, HAR or Charles file as a document; without `path`,
+	 *  asks for one (only HAR files with `har`). `None` if the user cancelled.
+	 *  A binary Charles session (`.chls`) can be picked, so its error says how
+	 *  to export a readable one.
 	 */
 	openDocument: (path: string | null, har: boolean) => typedError<DocumentInfo | null, string>(__TAURI_INVOKE("open_document", { path, har })),
 	closeDocument: (store: number) => typedError<null, string>(__TAURI_INVOKE("close_document", { store })),
@@ -227,6 +229,31 @@ export const commands = {
 	 */
 	importProtoSchema: (paths: string[] | null) => typedError<ProtoSchema | null, string>(__TAURI_INVOKE("import_proto_schema", { paths })),
 	removeProtoSchema: (id: number) => typedError<null, string>(__TAURI_INVOKE("remove_proto_schema", { id })),
+	listMockSources: () => __TAURI_INVOKE<MockSource[]>("list_mock_sources"),
+	/**
+	 *  "Mock from session…" on a document tab (or the live capture): copies
+	 *  the store into the mock library.
+	 */
+	createMockSource: (store: number, name: string | null) => typedError<MockSource, string>(__TAURI_INVOKE("create_mock_source", { store, name })),
+	/**
+	 *  "Mock from session…" for a file that isn't open; without `path`, asks
+	 *  for one. `None` if the dialog was cancelled.
+	 */
+	createMockSourceFromFile: (path: string | null) => typedError<MockSource | null, string>(__TAURI_INVOKE("create_mock_source_from_file", { path })),
+	removeMockSource: (id: string) => typedError<null, string>(__TAURI_INVOKE("remove_mock_source", { id })),
+	/**  The "Serve from" preset for a mock source (unsaved). */
+	draftServeFromRule: (source: string) => typedError<Rule_Serialize, string>(__TAURI_INVOKE("draft_serve_from_rule", { source })),
+	listOpenapiSpecs: () => __TAURI_INVOKE<OpenApiSpec[]>("list_openapi_specs"),
+	/**
+	 *  Imports an OpenAPI 3.0/3.1 file; without `path`, asks for one. `None`
+	 *  if the dialog was cancelled.
+	 */
+	importOpenapiSpec: (path: string | null) => typedError<OpenApiSpec | null, string>(__TAURI_INVOKE("import_openapi_spec", { path })),
+	removeOpenapiSpec: (id: number) => typedError<null, string>(__TAURI_INVOKE("remove_openapi_spec", { id })),
+	/**  "Generate mocks": one disabled Map Local rule per operation, saved. */
+	generateOpenapiMocks: (id: number) => typedError<Rule_Serialize[], string>(__TAURI_INVOKE("generate_openapi_mocks", { id })),
+	/**  The OpenAPI operation a flow is, for the inspector. */
+	flowOperation: (store: number, flow: number) => typedError<OperationMatch_Serialize | null, string>(__TAURI_INVOKE("flow_operation", { store, flow })),
 	/**  Every message type the schemas define, for "Decode as…". */
 	listProtoMessageTypes: () => __TAURI_INVOKE<string[]>("list_proto_message_types"),
 	listProtoMappings: () => __TAURI_INVOKE<ProtoMapping_Serialize[]>("list_proto_mappings"),
@@ -343,7 +370,6 @@ preserve_host?: boolean } |
 /**
  *  Acts on the messages of a WebSocket whose handshake the rule
  *  matches (M19): text and binary messages, never control frames.
- *  Keep this the last variant.
  */
 { type: "WsMessage"; 
 /**  `None` acts on both directions. */
@@ -353,7 +379,16 @@ direction?: WsDirection | null;
  *  substring, a glob must match the whole payload, a regex
  *  anywhere). `None` matches every message.
  */
-filter?: Pattern_Deserialize | null; op: WsOp_Deserialize };
+filter?: Pattern_Deserialize | null; op: WsOp_Deserialize } | 
+/**
+ *  Answers from a recorded session in the mock library (M20): the
+ *  recorded response whose request has the same key. Terminal like
+ *  `MapLocal` (the first answer wins); response-phase actions still
+ *  run on it. Keep this the last variant.
+ */
+{ type: "ServeFrom"; 
+/**  A mock library entry's id (`MockSource::id`). */
+source: string; key?: ServeKey_Deserialize; on_miss?: ServeMiss; pick?: ServePick };
 
 /**  One step of a rule. Actions of all matching rules run in rule order. */
 export type Action_Serialize = 
@@ -440,7 +475,6 @@ preserve_host: boolean } |
 /**
  *  Acts on the messages of a WebSocket whose handshake the rule
  *  matches (M19): text and binary messages, never control frames.
- *  Keep this the last variant.
  */
 { type: "WsMessage"; 
 /**  `None` acts on both directions. */
@@ -450,7 +484,16 @@ direction: WsDirection | null;
  *  substring, a glob must match the whole payload, a regex
  *  anywhere). `None` matches every message.
  */
-filter: Pattern_Serialize | null; op: WsOp_Serialize };
+filter: Pattern_Serialize | null; op: WsOp_Serialize } | 
+/**
+ *  Answers from a recorded session in the mock library (M20): the
+ *  recorded response whose request has the same key. Terminal like
+ *  `MapLocal` (the first answer wins); response-phase actions still
+ *  run on it. Keep this the last variant.
+ */
+{ type: "ServeFrom"; 
+/**  A mock library entry's id (`MockSource::id`). */
+source: string; key: ServeKey_Serialize; on_miss: ServeMiss; pick: ServePick };
 
 /**  A device or emulator `adb` sees. */
 export type AndroidDevice = AndroidDevice_Serialize | AndroidDevice_Deserialize;
@@ -1147,7 +1190,9 @@ export type DocumentKind =
 /**  A saved `.proxymate` session. */
 "session" | 
 /**  An imported HAR file. */
-"har";
+"har" | 
+/**  An imported Charles session (`.chlsj` JSON or `.chlsx` XML, M20). */
+"charles";
 
 /**  A registrable domain (`example.com`) and the hosts under it. */
 export type DomainNode = {
@@ -1332,8 +1377,8 @@ export type FlowRules_Deserialize = {
 	/**  A breakpoint timed out and the flow continued unmodified. */
 	breakpoint_timeout: boolean,
 	/**
-	 *  The response came from Map Local, a mock script or a breakpoint,
-	 *  not the upstream.
+	 *  The response came from Map Local, a mock script, a recording
+	 *  (ServeFrom) or a breakpoint, not the upstream.
 	 */
 	mocked: boolean,
 	/**
@@ -1357,8 +1402,8 @@ export type FlowRules_Serialize = {
 	/**  A breakpoint timed out and the flow continued unmodified. */
 	breakpoint_timeout: boolean,
 	/**
-	 *  The response came from Map Local, a mock script or a breakpoint,
-	 *  not the upstream.
+	 *  The response came from Map Local, a mock script, a recording
+	 *  (ServeFrom) or a breakpoint, not the upstream.
 	 */
 	mocked: boolean,
 	/**
@@ -1879,6 +1924,29 @@ export type MessageEdits_Serialize = {
 	body_base64: string | null,
 };
 
+/**
+ *  A recorded session copied into the mock library
+ *  (`<data dir>/mocks/<id>.proxymate`), so a rule serving from it keeps
+ *  working when the original file moves.
+ */
+export type MockSource = {
+	id: string,
+	name: string,
+	/**
+	 *  The session, HAR or Charles file (or the live capture) it was
+	 *  copied from.
+	 */
+	origin: string,
+	/**  Flows with a recorded response, which are the ones served. */
+	flows: number,
+	/**  The hosts of those flows, sorted. */
+	hosts: string[],
+	/**  Milliseconds since the Unix epoch. */
+	created_at_ms: number | null,
+	/**  The library file's size in bytes. */
+	size: number,
+};
+
 /**  Everything under Settings › Network, saved as one `app.sqlite` row. */
 export type NetworkSettings = NetworkSettings_Serialize | NetworkSettings_Deserialize;
 
@@ -1896,6 +1964,49 @@ export type NetworkSettings_Serialize = {
 	reverse_proxies: ReverseProxy[],
 	client_certs: ClientCert_Serialize[],
 	dns: DnsOverride[],
+};
+
+/**  An imported OpenAPI 3.0 or 3.1 spec, stored in `app.sqlite`. */
+export type OpenApiSpec = {
+	id: number,
+	/**  `info.title`, or the file name. */
+	name: string,
+	/**  `info.version`. */
+	version: string,
+	/**  The `openapi` field, e.g. `3.0.3`. */
+	openapi: string,
+	operations: number,
+	/**  `servers[].url`, as written. */
+	servers: string[],
+	/**  Milliseconds since the Unix epoch. */
+	added_at_ms: number | null,
+};
+
+/**  The spec operation a flow's method and path match. */
+export type OperationMatch = OperationMatch_Serialize | OperationMatch_Deserialize;
+
+/**  The spec operation a flow's method and path match. */
+export type OperationMatch_Deserialize = {
+	spec_id: number,
+	spec_name: string,
+	operation_id?: string | null,
+	summary?: string | null,
+	/**  Upper case. */
+	method: string,
+	/**  The path template, e.g. `/pets/{petId}`. */
+	path: string,
+};
+
+/**  The spec operation a flow's method and path match. */
+export type OperationMatch_Serialize = {
+	spec_id: number,
+	spec_name: string,
+	operation_id: string | null,
+	summary: string | null,
+	/**  Upper case. */
+	method: string,
+	/**  The path template, e.g. `/pets/{petId}`. */
+	path: string,
 };
 
 /**  A string pattern. */
@@ -1924,7 +2035,14 @@ export type Pattern_Serialize = {
 /**  Which message an action changes. */
 export type Phase = "request" | "response";
 
-export type PresetKind = "map_local" | "breakpoint" | "rewrite" | "map_remote" | "block" | "throttle";
+export type PresetKind = "map_local" | "breakpoint" | "rewrite" | "map_remote" | "block" | "throttle" | 
+/**
+ *  "Mock from session…" (M20): one `ServeFrom` rule over a mock
+ *  source's hosts.
+ */
+"serve_from" | 
+/**  "Generate mocks" from an OpenAPI spec (M20). */
+"open_api";
 
 /**
  *  "Decode as…": protobuf bodies matching `matcher` (and `part`, when set)
@@ -2644,6 +2762,55 @@ export type Script_Serialize = {
 export type SentBy = "user" | "agent" | 
 /**  One of a Repeat's requests (M17). */
 "repeat";
+
+/**
+ *  What a request and a recorded one must share for [`Action::ServeFrom`]
+ *  to answer with it. Method, scheme, host and path always count; the
+ *  port doesn't.
+ */
+export type ServeKey = ServeKey_Serialize | ServeKey_Deserialize;
+
+/**
+ *  What a request and a recorded one must share for [`Action::ServeFrom`]
+ *  to answer with it. Method, scheme, host and path always count; the
+ *  port doesn't.
+ */
+export type ServeKey_Deserialize = {
+	/**  The query, compared as decoded pairs in any order. */
+	query?: boolean,
+	/**  The decoded request body, compared by hash. */
+	body?: boolean,
+};
+
+/**
+ *  What a request and a recorded one must share for [`Action::ServeFrom`]
+ *  to answer with it. Method, scheme, host and path always count; the
+ *  port doesn't.
+ */
+export type ServeKey_Serialize = {
+	/**  The query, compared as decoded pairs in any order. */
+	query: boolean,
+	/**  The decoded request body, compared by hash. */
+	body: boolean,
+};
+
+/**  What [`Action::ServeFrom`] does when nothing recorded has the key. */
+export type ServeMiss = 
+/**  The request goes on as if the action weren't there. */
+"pass_through" | 
+/**  Answers 404 with a short text body. */
+"not_found" | 
+/**  Answers 502 with a short text body. */
+"bad_gateway";
+
+/**  Which recorded response answers when several have the key. */
+export type ServePick = 
+/**  The earliest recorded. */
+"first" | 
+/**  The latest recorded. */
+"last" | 
+/**  Each in turn, in recording order, starting over at the end. */
+"round_robin";
 
 /**
  *  The sidebar's Apps and Domains, aggregated over every flow in the store.

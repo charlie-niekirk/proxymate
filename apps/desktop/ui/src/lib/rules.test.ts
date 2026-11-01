@@ -41,6 +41,17 @@ describe("rules helpers", () => {
     expect(actionSummary(drop)).toBe("ws = ping drop");
   });
 
+  it("summarises a ServeFrom with its recording's name", () => {
+    const serve = { ...defaultAction("ServeFrom"), source: "s1" } as Extract<ReturnType<typeof defaultAction>, { type: "ServeFrom" }>;
+    const names = new Map([["s1", "checkout"]]);
+    expect(actionSummary(serve, undefined, names)).toBe("serve from checkout");
+    expect(actionSummary({ ...serve, pick: "round_robin", on_miss: "not_found" }, undefined, names)).toBe(
+      "serve from checkout (round-robin), else 404",
+    );
+    expect(actionSummary({ ...serve, on_miss: "bad_gateway" })).toBe("serve from (missing recording), else 502");
+    expect(defaultAction("ServeFrom")).toMatchObject({ key: { query: true, body: false }, on_miss: "pass_through", pick: "first" });
+  });
+
   it("labels patterns and summarises matchers", () => {
     expect(patternLabel(null)).toBe("any");
     expect(patternLabel({ kind: "regex", value: "^/a", case_insensitive: true })).toBe("/^/a/i");

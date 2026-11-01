@@ -22,6 +22,10 @@
 //! - `is:pinned`.
 //! - M17: `label:red` (a list, or `any`), `is:labelled`, `is:commented`,
 //!   and `comment:` (a case-insensitive substring of the flow's note).
+//! - M20: `op:` an OpenAPI `operationId` (a case-insensitive glob; `op:*`
+//!   is any operation), for flows whose method and path match an imported
+//!   spec. The query must be bound to the specs
+//!   ([`FlowQuery::bind_operations`]); unbound, it matches nothing.
 //! - Deep terms, which need the flow's detail or bodies: `header:` (a
 //!   substring of any `name: value` line; `reqheader:`/`resheader:` for one
 //!   side) and `body:` (a substring of the decoded body; `reqbody:`,
@@ -33,11 +37,14 @@
 //! In lenient mode (the search box) a term that doesn't parse is searched
 //! as text; in strict mode (MCP) it is an error, so agents learn about typos.
 
+use std::sync::Arc;
+
 use globset::{GlobBuilder, GlobMatcher};
 use pm_model::{ContentGroup, ContentKind, FlowId, FlowLabel, FlowState, FlowSummary, Scheme};
 
 use super::deep::{DeepQuery, DeepTerm, Side};
 use super::filter::contains_ignore_ascii_case;
+use crate::openapi::OpIndex;
 
 #[derive(Debug, Clone, Default)]
 pub struct FlowQuery {
@@ -69,6 +76,22 @@ enum Term {
     Num(Field, Cmp, f64),
     /// Needs the detail or a body: judged by a deep search.
     Deep(DeepTerm),
+    Op(OpTerm),
+}
+
+/// An `op:` term and the specs it was bound to.
+#[derive(Clone)]
+struct OpTerm {
+    glob: GlobMatcher,
+    index: Option<Arc<OpIndex>>,
+    /// Operations whose id the glob matches (indexes into the index).
+    wanted: Vec<usize>,
+}
+
+impl std::fmt::Debug for OpTerm {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Op({:?}, {} wanted)", self.glob.glob().glob(), self.wanted.len())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -95,7 +118,7 @@ enum Cmp {
     Eq,
 }
 
-const KEYS: &str = "host, path, method, scheme, status, ct, grpc, app, state, is, label, comment, dur, size, reqsize, id, header, reqheader, resheader, body, reqbody, resbody";
+const KEYS: &str = "host, path, method, scheme, status, ct, grpc, app, state, is, label, comment, op, dur, size, reqsize, id, header, reqheader, resheader, body, reqbody, resbody";
 
 impl FlowQuery {
     /// Parses a query; a term that doesn't parse is an error naming it.
@@ -121,6 +144,22 @@ impl FlowQuery {
 
     pub fn is_empty(&self) -> bool {
         self.terms.is_empty()
+    }
+
+    /// Binds `op:` terms to `index` (the imported OpenAPI specs).
+    pub fn bind_operations(&mut self, index: &Arc<OpIndex>) {
+        for (_, term) in &mut self.terms {
+            if let Term::Op(op) = term {
+                op.wanted = index.ops_where(|id| op.glob.is_match(id.unwrap_or_default()));
+                op.index = Some(index.clone());
+            }
+        }
+    }
+
+    /// Chained [`FlowQuery::bind_operations`].
+    pub fn with_operations(mut self, index: &Arc<OpIndex>) -> FlowQuery {
+        self.bind_operations(index);
+        self
     }
 
     /// Judges every term a summary can; deep terms pass.
@@ -297,6 +336,11 @@ fn parse_term(token: &Token) -> Result<(bool, Term), String> {
             }
         }
         "comment" | "note" => Term::Comment(value.to_ascii_lowercase().into_bytes()),
+        "op" | "operation" => Term::Op(OpTerm {
+            glob: glob(value).map_err(|e| bad(&e))?,
+            index: None,
+            wanted: Vec::new(),
+        }),
         "header" | "headers" => Term::Deep(DeepTerm::header(Side::Both, value)),
         "reqheader" | "req.header" => Term::Deep(DeepTerm::header(Side::Request, value)),
         "resheader" | "respheader" | "res.header" => Term::Deep(DeepTerm::header(Side::Response, value)),
@@ -481,6 +525,14 @@ impl Term {
                 .as_deref()
                 .is_some_and(|c| contains_ignore_ascii_case(c.as_bytes(), needle)),
             Term::Deep(_) => true,
+            Term::Op(op) => {
+                let Some(index) = &op.index else { return false };
+                // Cheap first: could it be one of the wanted operations at all?
+                op.wanted.iter().any(|&i| index.op_matches(i, &f.method, &f.path))
+                    && index
+                        .find(&f.method, &f.path)
+                        .is_some_and(|found| op.glob.is_match(found.operation_id.as_deref().unwrap_or_default()))
+            }
             Term::Num(field, cmp, value) => {
                 let actual = match field {
                     Field::Duration => match f.duration_ms {

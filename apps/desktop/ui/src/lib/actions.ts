@@ -20,6 +20,9 @@ import {
   caInfoKey,
   deviceAccessKey,
   documentsKey,
+  mockSourcesKey,
+  openApiSpecsKey,
+  operationRootKey,
   proxyStatusKey,
   queryClient,
   rulesKey,
@@ -391,6 +394,56 @@ async function runSave(label: string, start: (onProgress: (p: SaveProgress_Seria
       progress: { done: 0, total: 0, finished: true, error: err instanceof Error ? err.message : String(err), path: "" },
     });
   }
+}
+
+// ---- Offline mocking (M20) ----
+
+/**
+ * "Mock from session…": copies `store` (a document tab, or the live
+ * capture) into the mock library and opens its "Serve from" rule, unsaved,
+ * in the Rules Editor.
+ */
+export async function mockFromStore(store: number) {
+  const source = await backend.createMockSource(store, null);
+  await queryClient.invalidateQueries({ queryKey: mockSourcesKey });
+  await openServeFrom(source.id);
+}
+
+/** "Mock from file…": the same for a session, HAR or Charles file that isn't open. */
+export async function mockFromFile(path: string | null = null) {
+  const source = await backend.createMockSourceFromFile(path);
+  if (!source) return;
+  await queryClient.invalidateQueries({ queryKey: mockSourcesKey });
+  await openServeFrom(source.id);
+}
+
+async function openServeFrom(source: string) {
+  const draft = normalizeRule(await backend.draftServeFromRule(source));
+  useUi.getState().openRulesEditor({ draft });
+}
+
+/** Imports an OpenAPI spec (asking for the file without `path`). */
+export async function importOpenApiSpec(path: string | null = null) {
+  const spec = await backend.importOpenApiSpec(path);
+  await refreshOpenApi();
+  return spec;
+}
+
+export async function removeOpenApiSpec(id: number) {
+  await backend.removeOpenApiSpec(id);
+  await refreshOpenApi();
+}
+
+/** "Generate mocks": the spec's rules are saved disabled; the Rules Editor opens on the first. */
+export async function generateOpenApiMocks(id: number) {
+  const rules = await backend.generateOpenApiMocks(id);
+  await refreshRules();
+  toast.success(`${rules.length} mock rule${rules.length === 1 ? "" : "s"} added, turned off until you review them`);
+  if (rules[0]) useUi.getState().openRulesEditor({ ruleId: rules[0].id });
+}
+
+async function refreshOpenApi() {
+  await Promise.all([openApiSpecsKey, operationRootKey].map((queryKey) => queryClient.invalidateQueries({ queryKey })));
 }
 
 // ---- Breakpoints ----

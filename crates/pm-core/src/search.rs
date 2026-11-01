@@ -70,6 +70,14 @@ fn visit<'a>(
 }
 
 impl Engine {
+    /// Parses a filter DSL query strictly (as MCP does), with `op:` terms
+    /// bound to the imported OpenAPI specs.
+    pub fn parse_query(&self, query: &str) -> Result<FlowQuery, Error> {
+        Ok(FlowQuery::parse(query)
+            .map_err(Error::Query)?
+            .with_operations(&self.operations()))
+    }
+
     /// Flows matching `query` (the filter DSL; empty matches all) with ids
     /// above `since`, `limit` at a time. `cursor` is the previous page's
     /// `next`. Header and body terms are checked flow by flow, only until
@@ -82,7 +90,7 @@ impl Engine {
         limit: usize,
         newest_first: bool,
     ) -> Result<FlowPage, Error> {
-        let query = FlowQuery::parse(query).map_err(Error::Query)?;
+        let query = self.parse_query(query)?;
         let deep = query.deep();
         let mut flows = Vec::new();
         let mut matched = 0u32;
@@ -137,7 +145,7 @@ impl Engine {
         cursor: Option<FlowId>,
         limit: usize,
     ) -> Result<SearchPage, Error> {
-        let query = FlowQuery::parse(filter).map_err(Error::Query)?;
+        let query = self.parse_query(filter)?;
         let pattern = Pattern {
             kind: if regex { PatternKind::Regex } else { PatternKind::Exact },
             value: pattern.to_owned(),

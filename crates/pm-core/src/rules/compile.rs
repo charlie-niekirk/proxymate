@@ -10,6 +10,7 @@ use pm_model::{Action, AppliedRule, KvMatch, Pattern, PatternKind, Phase, Rule, 
 use regex::bytes::{Regex, RegexBuilder, RegexSet, RegexSetBuilder};
 
 use super::RuleError;
+use crate::mocks::{MockIndex, MockMap};
 use crate::scripts::{CompiledScript, ScriptMap};
 
 /// Compiled program size allowed per pattern. Generous for real patterns,
@@ -170,6 +171,17 @@ pub(crate) struct CompiledAction {
     /// The script an `Action::Script` runs, as it was when the rule set
     /// was compiled.
     pub script: Option<Arc<CompiledScript>>,
+    /// The recording an `Action::ServeFrom` answers from.
+    pub serve: Option<CompiledServe>,
+}
+
+/// A `ServeFrom`'s source, indexed when the rule set compiled.
+pub(crate) struct CompiledServe {
+    /// `None` for a rule that wasn't compiled to run (disabled, or only
+    /// checked).
+    pub index: Option<Arc<MockIndex>>,
+    /// A round-robin's place, by the first flow of each candidate set.
+    pub turns: parking_lot::Mutex<std::collections::HashMap<pm_model::FlowId, usize>>,
 }
 
 /// One enabled rule, ready to run.
@@ -201,8 +213,9 @@ pub(crate) struct RequestInfo<'a> {
 }
 
 impl CompiledRule {
-    /// Compiles `rule`, resolving its script actions against `scripts`.
-    pub fn compile(rule: &Rule, scripts: &ScriptMap) -> Result<CompiledRule, RuleError> {
+    /// Compiles `rule`, resolving its script actions against `scripts` and
+    /// its `ServeFrom` sources against `mocks`.
+    pub fn compile(rule: &Rule, scripts: &ScriptMap, mocks: &MockMap) -> Result<CompiledRule, RuleError> {
         let m = &rule.matcher;
         let pattern = |p: &Option<Pattern>, field: &str, host: bool| {
             p.as_ref()
@@ -232,7 +245,7 @@ impl CompiledRule {
             .actions
             .iter()
             .enumerate()
-            .map(|(i, action)| compile_action(rule, i, action, scripts))
+            .map(|(i, action)| compile_action(rule, i, action, scripts, mocks))
             .collect::<Result<_, _>>()?;
         Ok(CompiledRule {
             applied: AppliedRule {
@@ -337,6 +350,7 @@ impl CompiledRule {
                 Phase::Response => *response,
             },
             Action::Script { .. } => a.script.as_ref().is_some_and(|s| s.runs_in(phase)),
+            Action::ServeFrom { key, .. } => phase == Phase::Request && key.body,
             _ => false,
         })
     }
@@ -372,6 +386,7 @@ fn compile_action(
     index: usize,
     action: &Action,
     scripts: &ScriptMap,
+    mocks: &MockMap,
 ) -> Result<CompiledAction, RuleError> {
     let field = format!("action {}", index + 1);
     let invalid = |message: String| RuleError::invalid(rule, &field, message);
@@ -402,6 +417,7 @@ fn compile_action(
         header: None,
         json: None,
         script: None,
+        serve: None,
     };
     match action {
         Action::SetHeader { name, value, .. } | Action::AddHeader { name, value, .. } => {
@@ -506,6 +522,12 @@ fn compile_action(
                 WsOp::Drop | WsOp::Delay { .. } | WsOp::Breakpoint => {}
             }
         }
+        Action::ServeFrom { source, .. } => {
+            compiled.serve = Some(CompiledServe {
+                index: mocks.resolve(source).map_err(invalid)?,
+                turns: Default::default(),
+            });
+        }
         _ => {}
     }
     Ok(compiled)
@@ -535,7 +557,7 @@ impl CompiledRuleSet {
 
     /// Compiles every rule (so a broken one is reported even if disabled)
     /// and keeps the enabled ones.
-    pub(crate) fn compile(rules: &[Rule], scripts: &ScriptMap) -> Result<CompiledRuleSet, RuleError> {
+    pub(crate) fn compile(rules: &[Rule], scripts: &ScriptMap, mocks: &MockMap) -> Result<CompiledRuleSet, RuleError> {
         let mut sorted: Vec<&Rule> = rules.iter().collect();
         sorted.sort_by(|a, b| a.order.cmp(&b.order).then_with(|| a.id.cmp(&b.id)));
         let mut compiled = Vec::new();
@@ -543,7 +565,7 @@ impl CompiledRuleSet {
         let mut host_rules = Vec::new();
         let mut any_host = Vec::new();
         for rule in sorted {
-            let c = CompiledRule::compile(rule, scripts)?;
+            let c = CompiledRule::compile(rule, scripts, mocks)?;
             if !rule.enabled {
                 continue;
             }

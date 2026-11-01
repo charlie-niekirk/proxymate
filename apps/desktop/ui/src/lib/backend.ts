@@ -17,6 +17,9 @@ import {
   type ProtoMapping_Deserialize,
   type ProtoMapping_Serialize,
   type ProtoSchema,
+  type MockSource,
+  type OpenApiSpec,
+  type OperationMatch_Serialize,
   type BodyPart,
   type BreakpointInfo_Deserialize,
   type BreakpointInfo_Serialize,
@@ -333,6 +336,23 @@ export interface Backend {
   listProtoMessageTypes(): Promise<string[]>;
   listProtoMappings(): Promise<ProtoMapping_Serialize[]>;
   setProtoMappings(mappings: ProtoMapping_Deserialize[]): Promise<void>;
+  /** The mock library ServeFrom rules answer from (M20). */
+  listMockSources(): Promise<MockSource[]>;
+  /** "Mock from session…": copies a store (a document, or the live capture) into the library. */
+  createMockSource(store: number, name: string | null): Promise<MockSource>;
+  /** Copies a session, HAR or Charles file; asks for one without `path`. Null if cancelled. */
+  createMockSourceFromFile(path: string | null): Promise<MockSource | null>;
+  removeMockSource(id: string): Promise<void>;
+  /** The "Serve from" rule for a library entry, unsaved. */
+  draftServeFromRule(source: string): Promise<Rule_Serialize>;
+  listOpenApiSpecs(): Promise<OpenApiSpec[]>;
+  /** An OpenAPI 3.0/3.1 file (JSON or YAML); asks for one without `path`. Null if cancelled. */
+  importOpenApiSpec(path: string | null): Promise<OpenApiSpec | null>;
+  removeOpenApiSpec(id: number): Promise<void>;
+  /** "Generate mocks": saves one disabled Map Local rule per operation. */
+  generateOpenApiMocks(id: number): Promise<Rule_Serialize[]>;
+  /** The OpenAPI operation a flow's method and path match, if any. */
+  flowOperation(store: number, flow: number): Promise<OperationMatch_Serialize | null>;
   /** Console entries newer than `since`, oldest first, at most `limit`. */
   getScriptConsole(since: number | null, limit: number): Promise<ConsoleEntry_Serialize[]>;
   clearScriptConsole(): Promise<void>;
@@ -547,6 +567,20 @@ const tauriBackend: Backend = {
   setProtoMappings: async (mappings) => {
     await unwrap(commands.setProtoMappings(mappings));
   },
+  listMockSources: () => commands.listMockSources(),
+  createMockSource: (store, name) => unwrap(commands.createMockSource(store, name)),
+  createMockSourceFromFile: (path) => unwrap(commands.createMockSourceFromFile(path)),
+  removeMockSource: async (id) => {
+    await unwrap(commands.removeMockSource(id));
+  },
+  draftServeFromRule: (source) => unwrap(commands.draftServeFromRule(source)),
+  listOpenApiSpecs: () => commands.listOpenapiSpecs(),
+  importOpenApiSpec: (path) => unwrap(commands.importOpenapiSpec(path)),
+  removeOpenApiSpec: async (id) => {
+    await unwrap(commands.removeOpenapiSpec(id));
+  },
+  generateOpenApiMocks: (id) => unwrap(commands.generateOpenapiMocks(id)),
+  flowOperation: (store, flow) => unwrap(commands.flowOperation(store, flow)),
   getScriptConsole: (since, limit) => commands.getScriptConsole(since, limit),
   clearScriptConsole: () => commands.clearScriptConsole(),
   subscribeScriptConsole: async (onSeq) => {
