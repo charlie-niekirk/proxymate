@@ -351,8 +351,7 @@ async fn auto_save_writes_a_session_that_opens_and_keeps_the_newest() {
 async fn flows_from_an_intercepted_process_tree_are_labelled() {
     let upstream = Upstream::start().await;
     let proxy = Proxy::start(None).await;
-    let (status, _) = client::get(proxy.addr, &upstream.url("/json")).await;
-    assert_eq!(status, 200);
+    let _first = held_get(proxy.addr, &upstream.url("/json")).await;
     let plain = eventually(WAIT, || {
         proxy.engine.flush();
         proxy.engine.get_flow(0)?.client
@@ -364,14 +363,28 @@ async fn flows_from_an_intercepted_process_tree_are_labelled() {
         .engine
         .track_intercept(InterceptTarget::Chrome, std::process::id());
     assert_eq!(proxy.engine.intercepts(), [session]);
-    let (status, _) = client::get(proxy.addr, &upstream.url("/json")).await;
-    assert_eq!(status, 200);
+    let _second = held_get(proxy.addr, &upstream.url("/json")).await;
     let labelled = eventually(WAIT, || {
         proxy.engine.flush();
         proxy.engine.get_flow(1)?.client
     })
     .await;
     assert_eq!(labelled.as_ref(), format!("{plain} (Intercepted)"));
+}
+
+/// A GET through the proxy whose connection stays open: the client scan
+/// only finds live sockets, and on a busy machine it can run after a
+/// closed connection is gone.
+async fn held_get(proxy: SocketAddr, url: &str) -> tokio::net::TcpStream {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let host = url.split('/').nth(2).expect("absolute url");
+    let mut stream = tokio::net::TcpStream::connect(proxy).await.expect("connect to proxy");
+    let request = format!("GET {url} HTTP/1.1\r\nHost: {host}\r\n\r\n");
+    stream.write_all(request.as_bytes()).await.expect("write request");
+    let mut status = [0u8; 12];
+    stream.read_exact(&mut status).await.expect("read status");
+    assert_eq!(&status, b"HTTP/1.1 200");
+    stream
 }
 
 #[test]
