@@ -446,6 +446,29 @@ fn a_version_2_session_still_opens() {
 /// A session saved by M17 (format version 4, before `FlowDetail.via`)
 /// still opens.
 #[test]
+fn a_version_6_session_still_opens() {
+    let dir = temp_dir();
+    let engine = engine(&dir);
+    record(&engine, 2);
+    let path = dir.join("v6.proxymate");
+    finish(|sink| {
+        engine
+            .save_session(LIVE_STORE, &FlowSelection::All, path.clone(), sink)
+            .unwrap()
+    });
+    {
+        // Version 7 only added preset kinds: a version 6 file is the same bytes.
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute("UPDATE meta SET value = '6' WHERE key = 'version'", [])
+            .unwrap();
+    }
+    let doc = engine.open_document(&path).expect("a v6 session opens");
+    let detail = engine.flow_detail_in(doc.store, 1).unwrap().unwrap();
+    assert_eq!(detail.request.headers[0].value, "1");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn a_version_4_session_still_opens() {
     let dir = temp_dir();
     let engine = engine(&dir);

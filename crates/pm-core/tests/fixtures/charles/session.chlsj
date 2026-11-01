@@ -1,0 +1,318 @@
+[
+  {
+    "status": "COMPLETE",
+    "method": "GET",
+    "protocolVersion": "HTTP/1.1",
+    "scheme": "https",
+    "host": "api.example.com",
+    "actualPort": 443,
+    "path": "/v1/users",
+    "query": "page=2&sort=name",
+    "tunnel": false,
+    "keptAlive": true,
+    "webSocket": false,
+    "remoteAddress": "api.example.com/93.184.216.34",
+    "clientAddress": "/127.0.0.1",
+    "clientPort": 51234,
+    "times": {
+      "start": "2024-05-01T10:00:00.000+00:00",
+      "requestBegin": "2024-05-01T10:00:00.010+00:00",
+      "requestComplete": "2024-05-01T10:00:00.011+00:00",
+      "responseBegin": "2024-05-01T10:00:00.090+00:00",
+      "end": "2024-05-01T10:00:00.120+00:00"
+    },
+    "durations": {
+      "total": 120,
+      "dns": 4,
+      "connect": 12,
+      "ssl": 30,
+      "request": 1,
+      "response": 30,
+      "latency": 79
+    },
+    "speeds": {
+      "overall": 1000,
+      "request": 0,
+      "response": 2000
+    },
+    "totalSize": 512,
+    "ssl": {
+      "protocol": "TLSv1.3",
+      "cipherSuite": "TLS_AES_128_GCM_SHA256"
+    },
+    "alpn": {
+      "protocol": "http/1.1"
+    },
+    "request": {
+      "sizes": {
+        "headers": 120,
+        "body": 0
+      },
+      "mimeType": null,
+      "charset": null,
+      "contentEncoding": null,
+      "header": {
+        "firstLine": "GET /v1/users?page=2&sort=name HTTP/1.1",
+        "headers": [
+          {
+            "name": "Host",
+            "value": "api.example.com"
+          },
+          {
+            "name": "Accept",
+            "value": "application/json"
+          },
+          {
+            "name": "Accept-Encoding",
+            "value": "gzip"
+          }
+        ]
+      }
+    },
+    "response": {
+      "status": 200,
+      "sizes": {
+        "headers": 150,
+        "body": 65
+      },
+      "mimeType": "application/json",
+      "charset": "utf-8",
+      "contentEncoding": "gzip",
+      "header": {
+        "firstLine": "HTTP/1.1 200 OK",
+        "headers": [
+          {
+            "name": "Content-Type",
+            "value": "application/json; charset=utf-8"
+          },
+          {
+            "name": "Content-Encoding",
+            "value": "gzip"
+          },
+          {
+            "name": "Content-Length",
+            "value": "65"
+          },
+          {
+            "name": "X-Request-Id",
+            "value": "r-1"
+          }
+        ]
+      },
+      "body": {
+        "encoded": "H4sIAAAAAAAA/6tWKi1OLSpWsoquVspMUbIy1FHKS8xNVbJSckxJVKrVgYgawUXdixKTU5VqY2sB9n/GGzkAAAA="
+      }
+    }
+  },
+  {
+    "status": "COMPLETE",
+    "method": "POST",
+    "protocolVersion": "HTTP/1.1",
+    "scheme": "https",
+    "host": "api.example.com",
+    "actualPort": 443,
+    "path": "/v1/users",
+    "query": null,
+    "tunnel": false,
+    "keptAlive": true,
+    "webSocket": false,
+    "times": {
+      "start": "2024-05-01T10:00:01.000+00:00"
+    },
+    "durations": {
+      "total": 40,
+      "dns": null,
+      "connect": null,
+      "ssl": null,
+      "request": 2,
+      "response": 3,
+      "latency": 35
+    },
+    "request": {
+      "sizes": {
+        "headers": 140,
+        "body": 15
+      },
+      "mimeType": "application/json",
+      "charset": "UTF-8",
+      "contentEncoding": null,
+      "header": {
+        "firstLine": "POST /v1/users HTTP/1.1",
+        "headers": [
+          {
+            "name": "Host",
+            "value": "api.example.com"
+          },
+          {
+            "name": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "name": "Content-Length",
+            "value": "15"
+          }
+        ]
+      },
+      "body": {
+        "text": "{\"name\":\"Alan\"}",
+        "charset": "UTF-8"
+      }
+    },
+    "response": {
+      "status": 201,
+      "sizes": {
+        "headers": 90,
+        "body": 22
+      },
+      "mimeType": "application/json",
+      "charset": "UTF-8",
+      "contentEncoding": null,
+      "header": {
+        "firstLine": "HTTP/1.1 201 Created",
+        "headers": [
+          {
+            "name": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "name": "Location",
+            "value": "/v1/users/3"
+          }
+        ]
+      },
+      "body": {
+        "text": "{\"id\":3,\"name\":\"Alan\"}",
+        "charset": "UTF-8",
+        "decoded": true
+      }
+    }
+  },
+  {
+    "status": "COMPLETE",
+    "method": "GET",
+    "protocolVersion": "HTTP/1.1",
+    "scheme": "http",
+    "host": "cdn.example.com",
+    "actualPort": 8080,
+    "path": "/pixel.png",
+    "query": "",
+    "tunnel": false,
+    "times": {
+      "start": "2024-05-01T10:00:02.000+00:00"
+    },
+    "durations": {
+      "total": 5
+    },
+    "request": {
+      "sizes": {
+        "headers": 60,
+        "body": 0
+      },
+      "header": {
+        "firstLine": "GET /pixel.png HTTP/1.1",
+        "headers": [
+          {
+            "name": "Host",
+            "value": "cdn.example.com:8080"
+          }
+        ]
+      }
+    },
+    "response": {
+      "status": 200,
+      "sizes": {
+        "headers": 60,
+        "body": 70
+      },
+      "mimeType": "image/png",
+      "header": {
+        "firstLine": "HTTP/1.1 200 OK",
+        "headers": [
+          {
+            "name": "Content-Type",
+            "value": "image/png"
+          }
+        ]
+      },
+      "body": {
+        "encoded": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP4//8/AAX+Av6n1qRRAAAAAElFTkSuQmCC"
+      }
+    }
+  },
+  {
+    "status": "FAILED",
+    "method": "GET",
+    "protocolVersion": "HTTP/1.1",
+    "scheme": "https",
+    "host": "down.example.com",
+    "actualPort": 443,
+    "path": "/health",
+    "query": null,
+    "tunnel": false,
+    "errorMessage": "Connection refused: down.example.com/10.0.0.9:443",
+    "times": {
+      "start": "2024-05-01T10:00:03.000+00:00"
+    },
+    "durations": {
+      "total": 1
+    },
+    "request": {
+      "sizes": {
+        "headers": 50,
+        "body": 0
+      },
+      "header": {
+        "firstLine": "GET /health HTTP/1.1",
+        "headers": [
+          {
+            "name": "Host",
+            "value": "down.example.com"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "status": "COMPLETE",
+    "method": "CONNECT",
+    "protocolVersion": "HTTP/1.1",
+    "scheme": "https",
+    "host": "pinned.example.com",
+    "actualPort": 443,
+    "path": null,
+    "query": null,
+    "tunnel": true,
+    "times": {
+      "start": "2024-05-01T10:00:04.000+00:00"
+    },
+    "durations": {
+      "total": 900
+    },
+    "request": {
+      "sizes": {
+        "headers": 70,
+        "body": 0
+      },
+      "header": {
+        "firstLine": "CONNECT pinned.example.com:443 HTTP/1.1",
+        "headers": [
+          {
+            "name": "Host",
+            "value": "pinned.example.com:443"
+          }
+        ]
+      }
+    },
+    "response": {
+      "status": 200,
+      "sizes": {
+        "headers": 40,
+        "body": 0
+      },
+      "header": {
+        "firstLine": "HTTP/1.1 200 Connection established",
+        "headers": []
+      }
+    }
+  }
+]

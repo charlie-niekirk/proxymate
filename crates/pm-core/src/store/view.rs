@@ -24,6 +24,7 @@ use rayon::prelude::*;
 
 use super::deep::DeepQuery;
 use super::filter::CompiledFilter;
+use crate::openapi::OpIndex;
 
 /// Above this many flows a full refilter or sort runs on the rayon pool.
 const PARALLEL_THRESHOLD: usize = 50_000;
@@ -101,10 +102,16 @@ pub struct View {
 }
 
 impl View {
-    pub fn new(id: ViewId, spec: FilterSpec, sort: SortSpec, flows: &[FlowSummary]) -> Self {
+    pub fn new(
+        id: ViewId,
+        spec: FilterSpec,
+        sort: SortSpec,
+        flows: &[FlowSummary],
+        operations: Option<&Arc<OpIndex>>,
+    ) -> Self {
         let mut view = View {
             id,
-            filter: CompiledFilter::compile(&spec),
+            filter: CompiledFilter::compile_with(&spec, operations),
             spec,
             sort,
             indices: Vec::new(),
@@ -244,8 +251,8 @@ impl View {
         &self.spec
     }
 
-    pub fn set_filter(&mut self, spec: FilterSpec, flows: &[FlowSummary]) {
-        self.filter = CompiledFilter::compile(&spec);
+    pub fn set_filter(&mut self, spec: FilterSpec, flows: &[FlowSummary], operations: Option<&Arc<OpIndex>>) {
+        self.filter = CompiledFilter::compile_with(&spec, operations);
         self.spec = spec;
         self.start_deep(flows);
         self.rebuild(flows);

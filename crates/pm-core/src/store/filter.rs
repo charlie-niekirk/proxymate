@@ -7,6 +7,7 @@ use pm_model::{ContentGroup, FilterSpec, FlowSummary, ProtocolFilter};
 
 use super::deep::DeepQuery;
 use super::query::FlowQuery;
+use crate::openapi::OpIndex;
 
 #[derive(Debug, Clone, Default)]
 pub struct CompiledFilter {
@@ -22,8 +23,16 @@ pub struct CompiledFilter {
 
 impl CompiledFilter {
     pub fn compile(spec: &FilterSpec) -> Self {
+        Self::compile_with(spec, None)
+    }
+
+    /// Compiles `spec` with its `op:` terms bound to `operations`.
+    pub fn compile_with(spec: &FilterSpec, operations: Option<&Arc<OpIndex>>) -> Self {
         let content_mask = spec.content.iter().fold(0u16, |mask, group| mask | group_bit(*group));
-        let query = FlowQuery::parse_lenient(&spec.text);
+        let mut query = FlowQuery::parse_lenient(&spec.text);
+        if let Some(ops) = operations {
+            query.bind_operations(ops);
+        }
         CompiledFilter {
             deep: query.deep().map(Arc::new),
             query,

@@ -12,7 +12,7 @@
 //! which joins the CONNECT path after its handshake. [`reverse`] runs the
 //! reverse proxy listeners. Every upstream connection is made by [`dial`].
 
-mod body;
+pub(crate) mod body;
 mod dial;
 mod exchange;
 mod io;
@@ -512,7 +512,7 @@ fn version(v: Version) -> HttpVersion {
 
 /// Removes headers that apply to one hop only (RFC 9110 §7.6.1), including
 /// any named in `Connection`. hyper frames each side itself.
-fn strip_hop_by_hop(headers: &mut HeaderMap) {
+pub(crate) fn strip_hop_by_hop(headers: &mut HeaderMap) {
     let listed: Vec<HeaderName> = headers
         .get_all(header::CONNECTION)
         .iter()

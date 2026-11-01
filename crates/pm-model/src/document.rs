@@ -1,5 +1,6 @@
-//! Flow stores beside the live capture: saved sessions (`.proxymate`) and
-//! imported HAR files, opened as documents in their own tabs.
+//! Flow stores beside the live capture: saved sessions (`.proxymate`),
+//! imported HAR files and (M20) Charles sessions, opened as documents in
+//! their own tabs.
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -21,6 +22,8 @@ pub enum DocumentKind {
     Session,
     /// An imported HAR file.
     Har,
+    /// An imported Charles session (`.chlsj` JSON or `.chlsx` XML, M20).
+    Charles,
 }
 
 /// An opened document, for its tab and the sidebar's Saved section.

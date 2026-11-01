@@ -178,6 +178,11 @@ pub enum PresetKind {
     MapRemote,
     Block,
     Throttle,
+    /// "Mock from session…" (M20): one `ServeFrom` rule over a mock
+    /// source's hosts.
+    ServeFrom,
+    /// "Generate mocks" from an OpenAPI spec (M20).
+    OpenApi,
 }
 
 /// What a rule applies to. Every field that is set must match; empty lists
@@ -438,7 +443,6 @@ pub enum Action {
     },
     /// Acts on the messages of a WebSocket whose handshake the rule
     /// matches (M19): text and binary messages, never control frames.
-    /// Keep this the last variant.
     WsMessage {
         /// `None` acts on both directions.
         #[serde(default)]
@@ -450,6 +454,72 @@ pub enum Action {
         filter: Option<Pattern>,
         op: WsOp,
     },
+    /// Answers from a recorded session in the mock library (M20): the
+    /// recorded response whose request has the same key. Terminal like
+    /// `MapLocal` (the first answer wins); response-phase actions still
+    /// run on it. Keep this the last variant.
+    ServeFrom {
+        /// A mock library entry's id (`MockSource::id`).
+        source: String,
+        #[serde(default)]
+        key: ServeKey,
+        #[serde(default)]
+        on_miss: ServeMiss,
+        #[serde(default)]
+        pick: ServePick,
+    },
+}
+
+/// What a request and a recorded one must share for [`Action::ServeFrom`]
+/// to answer with it. Method, scheme, host and path always count; the
+/// port doesn't.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type, JsonSchema)]
+pub struct ServeKey {
+    /// The query, compared as decoded pairs in any order.
+    #[serde(default = "yes")]
+    pub query: bool,
+    /// The decoded request body, compared by hash.
+    #[serde(default)]
+    pub body: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+impl Default for ServeKey {
+    fn default() -> Self {
+        ServeKey {
+            query: true,
+            body: false,
+        }
+    }
+}
+
+/// What [`Action::ServeFrom`] does when nothing recorded has the key.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, Type, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ServeMiss {
+    /// The request goes on as if the action weren't there.
+    #[default]
+    PassThrough,
+    /// Answers 404 with a short text body.
+    NotFound,
+    /// Answers 502 with a short text body.
+    BadGateway,
+}
+
+/// Which recorded response answers when several have the key.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, Type, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ServePick {
+    /// The earliest recorded.
+    #[default]
+    First,
+    /// The latest recorded.
+    Last,
+    /// Each in turn, in recording order, starting over at the end.
+    RoundRobin,
 }
 
 /// What an [`Action::WsMessage`] does to a message. Ops run in rule and
@@ -530,8 +600,8 @@ pub struct FlowRules {
     pub rewrite_skipped: Option<String>,
     /// A breakpoint timed out and the flow continued unmodified.
     pub breakpoint_timeout: bool,
-    /// The response came from Map Local, a mock script or a breakpoint,
-    /// not the upstream.
+    /// The response came from Map Local, a mock script, a recording
+    /// (ServeFrom) or a breakpoint, not the upstream.
     pub mocked: bool,
     /// Scripts that failed on this flow (M14). Keep this the last field:
     /// a session written before it decodes with one `0` byte appended.

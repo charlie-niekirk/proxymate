@@ -41,6 +41,7 @@ pub(crate) use host::{
 };
 pub(crate) use traffic::{MockAnswer, ScriptRun};
 
+use crate::mocks::MockMap;
 use crate::notify::Notifier;
 use crate::rules::compile::CompiledRule;
 use crate::rules::db::AppDb;
@@ -284,7 +285,7 @@ impl Scripts {
             ));
         }
         if script.kind == ScriptKind::View {
-            CompiledRule::compile(&matcher_rule(script), &ScriptMap::new())
+            CompiledRule::compile(&matcher_rule(script), &ScriptMap::new(), &MockMap::new())
                 .map_err(|e| invalid(script, e.to_string()))?;
         }
         Ok(Arc::new(CompiledScript {
@@ -313,7 +314,7 @@ fn view_script(script: &Script, compiled: &Arc<CompiledScript>) -> Option<ViewSc
     if script.kind != ScriptKind::View || !compiled.enabled {
         return None;
     }
-    let matcher = CompiledRule::compile(&matcher_rule(script), &ScriptMap::new()).ok()?;
+    let matcher = CompiledRule::compile(&matcher_rule(script), &ScriptMap::new(), &MockMap::new()).ok()?;
     Some(ViewScript {
         script: compiled.clone(),
         matcher,

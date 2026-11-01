@@ -110,6 +110,10 @@ pub struct Engine {
     /// Upstream proxies, DNS overrides, client certificates and the
     /// reverse proxy listeners (M18).
     pub(crate) network: crate::network::Network,
+    /// The mock library `ServeFrom` answers from (M20).
+    pub(crate) mocks: crate::mocks::Mocks,
+    /// Imported OpenAPI specs (M20).
+    pub(crate) openapi: crate::openapi::OpenApi,
     /// Open WebSocket connections, for `Engine::ws_send` (M19).
     pub(crate) websockets: proxy::ws::Registry,
     /// The plain-HTTP upstream pool every listener and `Engine::send`
@@ -140,20 +144,25 @@ impl Engine {
         // Without a data directory (tests, throwaway engines) rules live
         // in memory, so engines never share them through the temp dir.
         let scripts = Scripts::load(config.data_dir.as_deref());
-        let rules = Rules::load(config.data_dir.as_deref(), &scripts.map());
+        let root = config
+            .data_dir
+            .clone()
+            .unwrap_or_else(|| std::env::temp_dir().join("proxymate"));
+        let mocks = crate::mocks::Mocks::load(config.data_dir.as_deref(), &root);
+        let rules = Rules::load(config.data_dir.as_deref(), &scripts.map(), &mocks);
         let mcp = McpState::load(config.data_dir.as_deref());
         let devices = DeviceRegistry::load(config.data_dir.as_deref(), devices::HOLD);
         let app_settings = Settings::load(config.data_dir.as_deref());
         let protos = Protos::load(config.data_dir.as_deref());
+        let openapi = crate::openapi::OpenApi::load(config.data_dir.as_deref());
+        let mut live = Store::default();
+        live.set_operations(Some(openapi.snapshot()));
         let secrets: Box<dyn pm_platform::secrets::SecretStore> = match &config.data_dir {
             Some(dir) if config.use_keychain => pm_platform::secrets::system(&dir.join(SECRETS_FILE)),
             Some(dir) => Box::new(pm_platform::secrets::FileSecrets::new(dir.join(SECRETS_FILE))),
             None => Box::new(pm_platform::secrets::MemorySecrets::default()),
         };
         let network = crate::network::Network::new(secrets, &app_settings.network_row());
-        let root = config
-            .data_dir
-            .unwrap_or_else(|| std::env::temp_dir().join("proxymate"));
         let extra_roots: Vec<CertificateDer<'static>> = config
             .extra_upstream_roots
             .into_iter()
@@ -179,7 +188,7 @@ impl Engine {
             .expect("default SSL settings compile");
         let (tx, rx) = std::sync::mpsc::channel();
         let engine = Arc::new(Engine {
-            store: RwLock::new(Store::default()),
+            store: RwLock::new(live),
             sinks: Mutex::new(HashMap::new()),
             ingest: IngestTx::new(tx),
             details: DetailStore::new(SegmentStore::new(&root)),
@@ -200,6 +209,8 @@ impl Engine {
             sender: OnceLock::new(),
             workflow: Default::default(),
             network,
+            mocks,
+            openapi,
             websockets: Default::default(),
             pool: Default::default(),
             restart: tokio::sync::Mutex::new(()),

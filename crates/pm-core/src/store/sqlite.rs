@@ -40,8 +40,11 @@ pub(crate) const FORMAT: &str = "proxymate-session";
 /// column, and added content kinds after `Binary`. Version 4 (M17) added
 /// the `annotations` table. Version 5 (M18) appended `FlowDetail.via`.
 /// Version 6 (M19) appended `edited`, `injected` and `dropped` to each
-/// `WsMessage` and added the `originals` table.
-pub(crate) const VERSION: u32 = 6;
+/// `WsMessage` and added the `originals` table. Version 7 (M20) added
+/// `PresetKind::ServeFrom` and `OpenApi`, which an applied rule's origin in
+/// `FlowDetail.rules` can name; no layout changed, so version 6 files read
+/// as they are.
+pub(crate) const VERSION: u32 = 7;
 /// The oldest version this Proxymate still reads.
 const OLDEST: u32 = 1;
 

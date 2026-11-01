@@ -14,6 +14,7 @@ use serde_json::json;
 use super::RuleError;
 use super::compile::{CompiledRule, CompiledRuleSet};
 use super::eval::{self, RequestDraft, ResponseDraft};
+use crate::mocks::MockMap;
 use crate::scripts::{ScriptMap, ScriptRun};
 use futures_util::FutureExt;
 
@@ -72,7 +73,7 @@ fn response(status: u16, content_type: &str, body: &str) -> ResponseDraft {
 }
 
 fn set(rules: Vec<Rule>) -> CompiledRuleSet {
-    CompiledRuleSet::compile(&ordered(rules), &ScriptMap::new()).expect("rules compile")
+    CompiledRuleSet::compile(&ordered(rules), &ScriptMap::new(), &MockMap::new()).expect("rules compile")
 }
 
 /// The names of the rules in `set` that match `req`.
@@ -97,7 +98,7 @@ fn header(draft: &HeaderMap, name: &str) -> Option<String> {
 // ---- Compilation ----
 
 fn compile_error(matcher: Matcher) -> String {
-    match CompiledRule::compile(&rule("bad", matcher, Vec::new()), &ScriptMap::new()) {
+    match CompiledRule::compile(&rule("bad", matcher, Vec::new()), &ScriptMap::new(), &MockMap::new()) {
         Err(err) => err.to_string(),
         Ok(_) => panic!("expected a compile error"),
     }
@@ -126,10 +127,14 @@ fn oversized_regexes_are_rejected() {
 fn invalid_globs_and_actions_are_rejected() {
     assert!(compile_error(host(Pattern::glob("[a-"))).contains("invalid glob"));
     let bad = |action: Action| {
-        CompiledRule::compile(&rule("x", Matcher::default(), vec![action]), &ScriptMap::new())
-            .err()
-            .map(|e| e.to_string())
-            .unwrap_or_default()
+        CompiledRule::compile(
+            &rule("x", Matcher::default(), vec![action]),
+            &ScriptMap::new(),
+            &MockMap::new(),
+        )
+        .err()
+        .map(|e| e.to_string())
+        .unwrap_or_default()
     };
     assert!(bad(Action::SetStatus { status: 42 }).contains("action 1: 42 isn't a valid status"));
     assert!(
@@ -164,7 +169,7 @@ fn disabled_rules_are_validated_but_never_match() {
     let mut broken = rule("broken", host(Pattern::regex("(")), Vec::new());
     broken.enabled = false;
     assert!(matches!(
-        CompiledRuleSet::compile(&[broken], &ScriptMap::new()),
+        CompiledRuleSet::compile(&[broken], &ScriptMap::new(), &MockMap::new()),
         Err(RuleError::Invalid { .. })
     ));
 
@@ -300,6 +305,7 @@ fn mismatch_explains_itself() {
     let r = CompiledRule::compile(
         &rule("r", host(Pattern::exact("a.test")), Vec::new()),
         &ScriptMap::new(),
+        &MockMap::new(),
     )
     .unwrap();
     let req = request("http://b.test/");
@@ -807,7 +813,7 @@ fn reframing_drops_the_encoding() {
 #[test]
 fn new_actions_compile_and_evaluate() {
     let bad = |action: Action| {
-        CompiledRule::compile(&any(vec![action]), &ScriptMap::new())
+        CompiledRule::compile(&any(vec![action]), &ScriptMap::new(), &MockMap::new())
             .err()
             .map(|e| e.to_string())
             .unwrap_or_default()
@@ -1005,7 +1011,9 @@ fn message_actions_compile_their_patterns() {
         Matcher::default(),
         vec![ws(None, Some(Pattern::regex("(")), WsOp::Drop)],
     );
-    let err = CompiledRuleSet::compile(&[bad], &ScriptMap::new()).err().unwrap();
+    let err = CompiledRuleSet::compile(&[bad], &ScriptMap::new(), &MockMap::new())
+        .err()
+        .unwrap();
     assert!(err.to_string().contains("message filter"), "{err}");
     let bad = rule(
         "bad",
@@ -1020,7 +1028,7 @@ fn message_actions_compile_their_patterns() {
             },
         )],
     );
-    assert!(CompiledRuleSet::compile(&[bad], &ScriptMap::new()).is_err());
+    assert!(CompiledRuleSet::compile(&[bad], &ScriptMap::new(), &MockMap::new()).is_err());
     // A rule with only message actions leaves plain requests alone.
     let only = set(vec![any(vec![ws(None, None, WsOp::Drop)])]);
     let matched = only.matching(&request("http://a.test/").info(None));

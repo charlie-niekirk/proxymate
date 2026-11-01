@@ -1019,7 +1019,7 @@ fn ws_messages(messages: &[WebSocketMessage]) -> SavedWs {
     }
 }
 
-fn parse_version(v: &str) -> HttpVersion {
+pub(crate) fn parse_version(v: &str) -> HttpVersion {
     let v = v.trim().to_ascii_lowercase();
     if v.contains("1.0") {
         HttpVersion::Http10

@@ -10,6 +10,7 @@ mod document;
 mod filter;
 mod flow;
 mod mcp;
+mod mocking;
 mod network;
 mod platform;
 mod protobuf;
@@ -32,6 +33,7 @@ pub use document::{DocumentInfo, DocumentKind, FlowSelection, LIVE_STORE, SavePr
 pub use filter::{ContentGroup, FilterSpec, ProtocolFilter, SearchScope, SortDir, SortKey, SortSpec};
 pub use flow::{ContentKind, FlowId, FlowLabel, FlowState, FlowSummary, Scheme};
 pub use mcp::{MCP_DEFAULT_PORT, McpAuditEntry, McpAuditPage, McpCallOutcome, McpClient, McpSettings, McpStatus};
+pub use mocking::{MockSource, OpenApiSpec, OperationMatch};
 pub use network::{
     ClientCert, ClientIdentity, DnsOverride, ListenerKind, ListenerStatus, NetworkSettings, ProxyServer, ReverseProxy,
     UpstreamProxy, UpstreamRule, UpstreamSettings, Via,
@@ -41,7 +43,8 @@ pub use protobuf::{Badge, DecodedBody, DecodedFormat, DecodedMessage, GrpcStatus
 pub use rules::{
     Action, AppliedRule, BlockMode, BreakpointBody, BreakpointId, BreakpointInfo, BreakpointResolution, FlowRules,
     GLOBAL_THROTTLE_RULE_ID, HeldMessage, KvMatch, MapLocalSource, Matcher, MessageEdits, Pattern, PatternKind, Phase,
-    PresetKind, ResponseMatcher, Rule, RuleId, RuleOrigin, RuleSettings, RuleTestResult, StatusRange, WsOp,
+    PresetKind, ResponseMatcher, Rule, RuleId, RuleOrigin, RuleSettings, RuleTestResult, ServeKey, ServeMiss,
+    ServePick, StatusRange, WsOp,
 };
 pub use scripts::{
     ConsoleEntry, ConsoleLevel, Script, ScriptId, ScriptIssue, ScriptKind, ScriptPhase, ScriptSettings,
