@@ -31,11 +31,12 @@ import type {
   DecodedBody_Serialize,
 } from "@/bindings";
 import type { Backend } from "@/lib/backend";
-import { GLOBAL_THROTTLE_RULE_ID, emptyMatcher, normalizeRule, type Rule } from "@/lib/rules";
+import { GLOBAL_THROTTLE_RULE_ID, NO_CACHE_RULE_ID, NO_COOKIES_RULE_ID, emptyMatcher, normalizeRule, type Rule } from "@/lib/rules";
 import { newId, parseDoc, toJson, type JNode } from "@/lib/json/doc";
 import { createMockDevices } from "@/lib/mockDevices";
 import { createMockMcp } from "@/lib/mockMcp";
 import { createMockNetwork } from "@/lib/mockNetwork";
+import { createMockCapture } from "@/lib/mockCapture";
 import { createMockMocking } from "@/lib/mockMocking";
 import { createMockProtos } from "@/lib/mockProtos";
 import { createMockScripts } from "@/lib/mockScripts";
@@ -134,7 +135,9 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
   let storageSettings: StorageSettings_Serialize = { max_flows: 250_000, max_disk_mb: 4096, max_ws_messages: 50_000 };
   let proxySettings: ProxySettings_Serialize = { port: 9090, pool_idle_secs: 90, pool_max_idle_per_host: 32, connect_timeout_secs: 10 };
   let onStorage: ((s: StorageStatus_Serialize) => void) | null = null;
+  const capture = createMockCapture(() => onStorage?.(storageStatus()));
   const storageStatus = (): StorageStatus_Serialize => ({
+    ...capture.status(),
     flows: flows.length,
     pinned: flows.filter((f) => f[20]).length,
     disk_bytes: flows.length * 2_300,
@@ -218,6 +221,37 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
       origin: { kind: "preset", preset: "throttle" },
       matcher: emptyMatcher(),
       actions: [{ type: "Throttle", download_kbps: 780, upload_kbps: 330, latency_ms: 100 }],
+    },
+    {
+      id: NO_CACHE_RULE_ID,
+      name: "No Caching",
+      enabled: false,
+      order: -999_999,
+      origin: { kind: "user" },
+      matcher: emptyMatcher(),
+      actions: [
+        { type: "RemoveHeader", phase: "request", name: "If-None-Match" },
+        { type: "RemoveHeader", phase: "request", name: "If-Modified-Since" },
+        { type: "RemoveHeader", phase: "request", name: "If-Range" },
+        { type: "SetHeader", phase: "request", name: "Cache-Control", value: "no-cache" },
+        { type: "SetHeader", phase: "request", name: "Pragma", value: "no-cache" },
+        { type: "SetHeader", phase: "response", name: "Cache-Control", value: "no-store" },
+        { type: "RemoveHeader", phase: "response", name: "ETag" },
+        { type: "RemoveHeader", phase: "response", name: "Last-Modified" },
+        { type: "RemoveHeader", phase: "response", name: "Expires" },
+      ],
+    },
+    {
+      id: NO_COOKIES_RULE_ID,
+      name: "Block Cookies",
+      enabled: false,
+      order: -999_998,
+      origin: { kind: "user" },
+      matcher: emptyMatcher(),
+      actions: [
+        { type: "RemoveHeader", phase: "request", name: "Cookie" },
+        { type: "RemoveHeader", phase: "response", name: "Set-Cookie" },
+      ],
     },
     {
       id: "mock-agent-rule",
@@ -936,6 +970,7 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
     },
     ...createMockMcp(now),
     ...createMockProtos((store, id) => (store === 0 ? full.get(id)?.decodedBodies : undefined)),
+    ...capture.methods,
     ...createMockMocking({
       documentName: (store) => documents.find((d) => d.store === store)?.name,
       hostsOf: (store) => [...new Set(storeFlows(store).map((f) => f[4]))].sort().slice(0, 8),

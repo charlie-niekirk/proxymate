@@ -19,6 +19,13 @@ import {
   type ProtoSchema,
   type MockSource,
   type OpenApiSpec,
+  type AutoSaveSettings_Deserialize,
+  type AutoSaveSettings_Serialize,
+  type InterceptApp,
+  type InterceptSession_Serialize,
+  type InterceptTarget,
+  type RecordingSettings_Deserialize,
+  type RecordingSettings_Serialize,
   type OperationMatch_Serialize,
   type BodyPart,
   type BreakpointInfo_Deserialize,
@@ -368,6 +375,25 @@ export interface Backend {
   exportScript(id: string, path: string | null): Promise<string | null>;
   /** Imports a `.js` file (asking which without `path`); null if cancelled. */
   importScript(path: string | null): Promise<Script_Serialize | null>;
+
+  // ---- Capture targets and noise (M21) ----
+  /** The Intercept menu's terminals and browsers, and which are installed. */
+  listInterceptApps(): Promise<InterceptApp[]>;
+  /** Intercepted launches still running. */
+  listIntercepts(): Promise<InterceptSession_Serialize[]>;
+  /** Starts a terminal or browser set up for the proxy. */
+  intercept(target: InterceptTarget): Promise<InterceptSession_Serialize>;
+  getRecordingSettings(): Promise<RecordingSettings_Serialize>;
+  /** Saves the recording lists (normalized: lower case, no scheme, port or path). */
+  setRecordingSettings(settings: RecordingSettings_Deserialize): Promise<RecordingSettings_Serialize>;
+  /** "Never record this host". */
+  neverRecordHost(host: string): Promise<RecordingSettings_Serialize>;
+  getAutosaveSettings(): Promise<AutoSaveSettings_Serialize>;
+  setAutosaveSettings(settings: AutoSaveSettings_Deserialize): Promise<AutoSaveSettings_Serialize>;
+  /** Saves the live capture into the auto-save folder now; resolves to the flows it writes. */
+  autosaveNow(): Promise<number>;
+  /** Asks for the auto-save folder; null if cancelled. */
+  chooseAutosaveFolder(): Promise<string | null>;
 }
 
 type Result<T> = { status: "ok"; data: T } | { status: "error"; error: string };
@@ -599,6 +625,16 @@ const tauriBackend: Backend = {
   getScriptTypeDefinitions: () => commands.getScriptTypeDefinitions(),
   exportScript: (id, path) => unwrap(commands.exportScript(id, path)),
   importScript: (path) => unwrap(commands.importScript(path)),
+  listInterceptApps: () => commands.listInterceptApps(),
+  listIntercepts: () => commands.listIntercepts(),
+  intercept: (target) => unwrap(commands.intercept(target)),
+  getRecordingSettings: () => commands.getRecordingSettings(),
+  setRecordingSettings: (settings) => unwrap(commands.setRecordingSettings(settings)),
+  neverRecordHost: (host) => unwrap(commands.neverRecordHost(host)),
+  getAutosaveSettings: () => commands.getAutosaveSettings(),
+  setAutosaveSettings: (settings) => unwrap(commands.setAutosaveSettings(settings)),
+  autosaveNow: () => unwrap(commands.autosaveNow()),
+  chooseAutosaveFolder: () => unwrap(commands.chooseAutosaveFolder()),
 };
 
 function progressChannel(onProgress: (p: SaveProgress_Serialize) => void) {

@@ -11,6 +11,7 @@ use pm_model::{
     SslSettings, StorageSettings, StorageStatus, StoreId, SystemProxyStatus, TrustStatus, UpdateSettings, ViewDelta,
     ViewId, ViewInfo, WsPage, WsQuery, WsSend,
 };
+use pm_model::{AutoSaveSettings, InterceptApp, InterceptSession, InterceptTarget, RecordingSettings};
 use pm_model::{CodeLanguage, FlowLabel, HeaderColumn, RepeatId, RepeatOpts, RepeatProgress};
 use pm_model::{ConsoleEntry, Script, ScriptId, ScriptSettings, ScriptTestResult, ScriptTestSpec, ViewResult};
 use pm_model::{DecodedBody, NetworkSettings, ProtoMapping, ProtoSchema};
@@ -1387,4 +1388,94 @@ pub async fn generate_openapi_mocks(engine: EngineState<'_>, id: u32) -> Result<
 #[specta::specta]
 pub fn flow_operation(engine: EngineState<'_>, store: StoreId, flow: FlowId) -> Result<Option<OperationMatch>, String> {
     engine.flow_operation_in(store, flow).map_err(|e| e.to_string())
+}
+
+// ---- Capture targets and noise (M21) ----
+
+/// The Intercept menu: terminals and browsers, and which are installed.
+#[tauri::command]
+#[specta::specta]
+pub fn list_intercept_apps(engine: EngineState<'_>) -> Vec<InterceptApp> {
+    engine.intercept_apps()
+}
+
+/// Intercepted launches still running.
+#[tauri::command]
+#[specta::specta]
+pub fn list_intercepts(engine: EngineState<'_>) -> Vec<InterceptSession> {
+    engine.intercepts()
+}
+
+/// Starts a terminal or browser set up for the proxy.
+#[tauri::command]
+#[specta::specta]
+pub async fn intercept(engine: EngineState<'_>, target: InterceptTarget) -> Result<InterceptSession, String> {
+    let engine = engine.inner().clone();
+    tokio::task::spawn_blocking(move || engine.intercept(target))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn get_recording_settings(engine: EngineState<'_>) -> RecordingSettings {
+    engine.recording_settings()
+}
+
+/// Saves the recording lists; they apply to flows that begin from now on.
+#[tauri::command]
+#[specta::specta]
+pub fn set_recording_settings(
+    engine: EngineState<'_>,
+    settings: RecordingSettings,
+) -> Result<RecordingSettings, String> {
+    engine.set_recording_settings(settings).map_err(|e| e.to_string())
+}
+
+/// The flow table's "Never record this host".
+#[tauri::command]
+#[specta::specta]
+pub fn never_record_host(engine: EngineState<'_>, host: String) -> Result<RecordingSettings, String> {
+    engine.never_record(&host).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn get_autosave_settings(engine: EngineState<'_>) -> AutoSaveSettings {
+    engine.autosave_settings()
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn set_autosave_settings(engine: EngineState<'_>, settings: AutoSaveSettings) -> Result<AutoSaveSettings, String> {
+    engine.set_autosave_settings(settings).map_err(|e| e.to_string())
+}
+
+/// Auto-saves now, whatever the interval; progress shows in the storage status.
+#[tauri::command]
+#[specta::specta]
+pub fn autosave_now(engine: EngineState<'_>) -> Result<u32, String> {
+    engine.autosave_now().map_err(|e| e.to_string())
+}
+
+/// Picks the auto-save folder with a dialog; `None` if it was cancelled.
+#[tauri::command]
+#[specta::specta]
+pub async fn choose_autosave_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .set_title("Auto-save folder")
+        .pick_folder(move |path| {
+            let _ = tx.send(path);
+        });
+    match rx.await.ok().flatten() {
+        Some(path) => path
+            .into_path()
+            .map(|p| Some(p.display().to_string()))
+            .map_err(|e| e.to_string()),
+        None => Ok(None),
+    }
 }

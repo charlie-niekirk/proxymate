@@ -54,6 +54,11 @@ export const decodedKey = (store: number, id: number, part: string, size: number
 /** The mock library and imported OpenAPI specs (M20). */
 export const mockSourcesKey = ["mock-sources"] as const;
 export const openApiSpecsKey = ["openapi-specs"] as const;
+// M21
+export const interceptAppsKey = ["intercept-apps"] as const;
+export const interceptsKey = ["intercepts"] as const;
+export const recordingSettingsKey = ["recording-settings"] as const;
+export const autosaveSettingsKey = ["autosave-settings"] as const;
 /** Every flow's OpenAPI operation; invalidated when specs change. */
 export const operationRootKey = ["operation"] as const;
 export const operationKey = (store: number, id: number) => [...operationRootKey, store, id] as const;

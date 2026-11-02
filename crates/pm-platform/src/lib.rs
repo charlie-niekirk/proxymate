@@ -12,10 +12,12 @@
 //! - `command`: the process runner `simctl` and `adb` are tested through (M9)
 //! - `fs`: private files (the CA key) (M2); the app data dir (M7)
 //! - `secrets`: upstream proxy and PKCS#12 passwords (M18)
+//! - `launcher`: terminals and browsers started set up for the proxy (M21)
 
 pub mod adb;
 pub mod command;
 pub mod fs;
+pub mod launcher;
 pub mod netif;
 pub mod process;
 pub mod procinfo;

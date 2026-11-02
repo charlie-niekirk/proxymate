@@ -114,6 +114,8 @@ pub struct Engine {
     pub(crate) mocks: crate::mocks::Mocks,
     /// Imported OpenAPI specs (M20).
     pub(crate) openapi: crate::openapi::OpenApi,
+    /// Recording lists, intercepted launches and auto-save (M21).
+    pub(crate) capture: crate::capture::Capture,
     /// Open WebSocket connections, for `Engine::ws_send` (M19).
     pub(crate) websockets: proxy::ws::Registry,
     /// The plain-HTTP upstream pool every listener and `Engine::send`
@@ -186,6 +188,7 @@ impl Engine {
                 SslPolicy::compile(SslSettings::default())
             })
             .expect("default SSL settings compile");
+        let capture = crate::capture::Capture::new(&root, &app_settings.recording_row());
         let (tx, rx) = std::sync::mpsc::channel();
         let engine = Arc::new(Engine {
             store: RwLock::new(live),
@@ -211,6 +214,7 @@ impl Engine {
             network,
             mocks,
             openapi,
+            capture,
             websockets: Default::default(),
             pool: Default::default(),
             restart: tokio::sync::Mutex::new(()),
@@ -253,10 +257,11 @@ impl Engine {
         self.ingest.flush();
     }
 
-    /// Starts recording a flow. Returns `None` while recording is paused,
-    /// in which case the caller forwards without recording.
+    /// Starts recording a flow. Returns `None` while recording is paused
+    /// or the recording lists (M21) leave the host out, in which case the
+    /// caller forwards without recording.
     pub fn begin_flow(self: &Arc<Self>, summary: FlowSummary, detail: FlowDetail) -> Option<FlowRecorder> {
-        if !self.is_recording() {
+        if !self.is_recording() || !self.capture.records(&summary.host) {
             return None;
         }
         Some(self.record_flow(summary, detail))
@@ -707,6 +712,11 @@ impl Engine {
         self.tls.read().ca.info().clone()
     }
 
+    /// The CA's SPKI hash, for Chromium's certificate pin (M21).
+    pub(crate) fn ca_spki(&self) -> String {
+        self.tls.read().ca.spki_sha256_base64()
+    }
+
     /// Replaces the root CA (and so every leaf). Clients must trust the new
     /// one; connections already open keep their certificates.
     pub fn regenerate_ca(&self) -> Result<CaInfo, Error> {
@@ -1041,6 +1051,7 @@ fn publisher_loop(engine: Weak<Engine>) {
             return;
         };
         engine.publish_tick();
+        engine.autosave_tick();
     }
 }
 

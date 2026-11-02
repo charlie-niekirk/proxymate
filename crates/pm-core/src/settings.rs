@@ -1,5 +1,5 @@
-//! Storage limits and proxy settings (M10) and Settings › Network (M18):
-//! rows of `app.sqlite`'s settings table, in memory without a data dir. Also where the limits are
+//! Storage limits and proxy settings (M10), Settings › Network (M18) and
+//! the recording lists and auto-save (M21): rows of `app.sqlite`'s settings table, in memory without a data dir. Also where the limits are
 //! enforced: after every ingest batch the live store evicts its oldest
 //! flows past the flow cap or the disk cap, and the segment files they
 //! alone used are deleted.
@@ -10,7 +10,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use parking_lot::{Mutex, RwLock};
-use pm_model::{FlowId, NetworkSettings, ProxySettings, StorageSettings, StorageStatus};
+use pm_model::{
+    AutoSaveSettings, FlowId, NetworkSettings, ProxySettings, RecordingSettings, StorageSettings, StorageStatus,
+};
 
 use crate::notify::Notifier;
 use crate::proxy::ProxyConfig;
@@ -21,6 +23,8 @@ use crate::{Engine, Error};
 const STORAGE_KEY: &str = "storage";
 const PROXY_KEY: &str = "proxy";
 const NETWORK_KEY: &str = "network";
+const RECORDING_KEY: &str = "recording";
+const AUTOSAVE_KEY: &str = "autosave";
 
 /// Receives storage status updates. Returning `false` unsubscribes.
 pub type StorageSink = Box<dyn FnMut(StorageStatus) -> bool + Send>;
@@ -30,6 +34,8 @@ pub(crate) struct Settings {
     storage: RwLock<StorageSettings>,
     proxy: RwLock<ProxySettings>,
     network: RwLock<NetworkSettings>,
+    recording: RwLock<RecordingSettings>,
+    autosave: RwLock<AutoSaveSettings>,
     status: Notifier<StorageStatus>,
     last_status: Mutex<Option<StorageStatus>>,
     /// The disk cap last asked eviction to go through this id; not asked
@@ -50,11 +56,15 @@ impl Settings {
         let storage = db.setting(STORAGE_KEY).unwrap_or_default();
         let proxy = db.setting(PROXY_KEY).unwrap_or_default();
         let network = db.setting(NETWORK_KEY).unwrap_or_default();
+        let recording = db.setting(RECORDING_KEY).unwrap_or_default();
+        let autosave = db.setting(AUTOSAVE_KEY).unwrap_or_default();
         Settings {
             db: Mutex::new(db),
             storage: RwLock::new(storage),
             proxy: RwLock::new(proxy),
             network: RwLock::new(network),
+            recording: RwLock::new(recording),
+            autosave: RwLock::new(autosave),
             status: Notifier::new(),
             last_status: Mutex::new(None),
             disk_through: AtomicU32::new(0),
@@ -65,6 +75,34 @@ impl Settings {
 impl Settings {
     pub fn network_row(&self) -> NetworkSettings {
         self.network.read().clone()
+    }
+
+    pub fn recording_row(&self) -> RecordingSettings {
+        self.recording.read().clone()
+    }
+
+    pub fn autosave_row(&self) -> AutoSaveSettings {
+        self.autosave.read().clone()
+    }
+
+    fn save<T: serde::Serialize>(&self, key: &str, value: &T) -> Result<(), Error> {
+        self.db
+            .lock()
+            .save_setting(key, value)
+            .map_err(|e| Error::Invalid(format!("can't save the settings: {e}")))
+    }
+
+    /// Saves the recording lists (already checked and compiled).
+    pub fn save_recording(&self, settings: RecordingSettings) -> Result<(), Error> {
+        self.save(RECORDING_KEY, &settings)?;
+        *self.recording.write() = settings;
+        Ok(())
+    }
+
+    pub fn save_autosave(&self, settings: AutoSaveSettings) -> Result<(), Error> {
+        self.save(AUTOSAVE_KEY, &settings)?;
+        *self.autosave.write() = settings;
+        Ok(())
     }
 }
 
@@ -135,6 +173,8 @@ impl Engine {
             dir: segments.dir_path().display().to_string(),
             sent_bytes: store.traffic().0,
             received_bytes: store.traffic().1,
+            unrecorded: self.capture.unrecorded(),
+            autosave: self.capture.autosave_status(),
         }
     }
 

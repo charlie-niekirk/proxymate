@@ -1,4 +1,14 @@
-import { ArrowDownToLine, CircleAlert, CircleCheck, Filter, HardDriveDownload, LoaderCircle, ScanSearch, Trash2 } from "lucide-react";
+import {
+  ArrowDownToLine,
+  CircleAlert,
+  CircleCheck,
+  EyeOff,
+  Filter,
+  HardDriveDownload,
+  LoaderCircle,
+  ScanSearch,
+  Trash2,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { SEARCH_INPUT_ID } from "@/components/FilterBar";
@@ -63,6 +73,7 @@ export function Footer() {
       {deep && <DeepStatus checked={deep.checked} total={deep.total} matched={deep.matched} running={deep.running} />}
       {save && <SaveStatus job={save} />}
       {live && <StorageWarning />}
+      {live && <Unrecorded />}
       {timing && (
         <span className="tabular-nums" data-testid="filter-timing" title="Rust refilter · filter change to painted rows">
           filter {timing.engineMs.toFixed(1)} ms · {timing.endToEndMs.toFixed(0)} ms end to end
@@ -104,6 +115,31 @@ function StorageWarning() {
         </button>
       </TooltipTrigger>
       <TooltipContent className="max-w-80">Proxymate {error}. Traffic is still forwarded. Click for Storage settings.</TooltipContent>
+    </Tooltip>
+  );
+}
+
+/** Flows the recording lists kept out of the capture (M21). */
+function Unrecorded() {
+  const count = useStorage((s) => s.status?.unrecorded ?? 0);
+  const openSettings = useUi((s) => s.openSettings);
+  if (count === 0) return null;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          className="hover:text-foreground mr-3 flex items-center gap-1 tabular-nums"
+          onClick={() => openSettings("storage")}
+          data-testid="unrecorded-count"
+        >
+          <EyeOff className="size-3" />
+          {nf.format(count)} not recorded
+        </button>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-80">
+        Flows to hosts on the Never record list (or off the Only record list) since launch. They were still proxied. Click for
+        Storage settings.
+      </TooltipContent>
     </Tooltip>
   );
 }

@@ -40,8 +40,9 @@ Run these from the repo root unless noted.
 | Rewrite dialog in the browser UI | `npm run dev`, then `http://localhost:1420/?zoo&select=0&rewrite=0`. In the app with `VITE_PM_REMOTE=1`: `{"rewrite":{"flow":3}}`, then `{"rewriteEdit":{"side":"response","json":[{"set":"/a","raw":"1"}],"save":true}}` (see `src/dev/remote.ts`) |
 | Offline mocking in the browser UI (M20) | `npm run dev`, then `http://localhost:1420/?mocks&openapi&select=0` (a mock library entry, an imported spec, and a flow its `getItem` operation labels). Settings › Mocking; a tab's menu has "Mock from session…" |
 | WebSocket rules in the browser UI (M19) | `npm run dev`, then `http://localhost:1420/?select=13` (an open mock WebSocket: composer, Resend, Edited/Injected/Dropped badges) or `?breakpoint=ws` (a held message in the Breakpoint Editor) |
+| Capture targets in the browser UI (M21) | `npm run dev`, then `http://localhost:1420/?unrecorded&autosave` (a never-recorded host and footer count, auto-save on). The Intercept menu starts nothing in the mock. With `VITE_PM_REMOTE=1`: `{"noCache":true}`, `{"neverRecord":"example.com"}`, `{"recordingLists":{"only":[],"never":[]}}`, `{"autosave":{…}}`, `{"autosaveNow":true}`; `{"intercept":"chrome"}` really launches (user's OK only) |
 | Open the app on a response tab | `VITE_PM_RESPONSE_TAB=TLS` (or `Timing`, …), for screenshots from a shell |
-| Drive the app from a shell | Start with `VITE_PM_REMOTE=1`, then `curl -d '{"select":3,"requestTab":"Body"}' localhost:1420/__pm_remote` (also `responseTab`, `viewer: {kind, viewer}`, `theme`; M8: `replay`, `editReplay`, `compose`, `composeSend`, `store`, `openDocument`, `saveSession`, `exportHar`, and `curl`, whose answer is at `/__pm_remote/out`; M14: `scripts`, `scriptTemplate`, `scriptSource`, `saveScript`, `testScript`; M15: `{"contextMenu":{"testid":"request-headers","row":1}}` right-clicks any element; M17: `selectIds`, `selectAll`, `label`, `comment`, `headerColumns`, `compare`, `repeat`, `code`, `deleteSelection`; M20: `mockFrom`, `mockFromFile`, `importOpenApi`, `generateMocks`, `removeMockSource`, `removeOpenApi`, `deleteRule`, `rules`). See `src/dev/remote.ts` |
+| Drive the app from a shell | Start with `VITE_PM_REMOTE=1`, then `curl -d '{"select":3,"requestTab":"Body"}' localhost:1420/__pm_remote` (also `responseTab`, `viewer: {kind, viewer}`, `theme`; M8: `replay`, `editReplay`, `compose`, `composeSend`, `store`, `openDocument`, `saveSession`, `exportHar`, and `curl`, whose answer is at `/__pm_remote/out`; M14: `scripts`, `scriptTemplate`, `scriptSource`, `saveScript`, `testScript`; M15: `{"contextMenu":{"testid":"request-headers","row":1}}` right-clicks any element; M17: `selectIds`, `selectAll`, `label`, `comment`, `headerColumns`, `compare`, `repeat`, `code`, `deleteSelection`; M20: `mockFrom`, `mockFromFile`, `importOpenApi`, `generateMocks`, `removeMockSource`, `removeOpenApi`, `deleteRule`, `rules`; M21: `intercept`, `neverRecord`, `recordingLists`, `autosave`, `autosaveNow`, `noCache`, `noCookies`, answered at `/__pm_remote/out`). See `src/dev/remote.ts` |
 | gRPC upstream (M16) | `cargo run -p pm-testkit --bin upstream -- --grpc [PORT]` (tonic, TLS, `shop.v1.Orders`; prints its CA). Start the app with `PROXYMATE_EXTRA_UPSTREAM_CA=<that file>`, then `HTTPS_PROXY=http://127.0.0.1:9090 grpcurl -cacert ~/Library/Application\ Support/Proxymate/ca/proxymate-ca.pem -import-path crates/pm-testkit/proto -proto shop.proto -d '{"id":"o1"}' localhost.:<port> shop.v1.Orders/GetOrder` (`localhost.`: Go never proxies `localhost`) |
 | Regenerate the zoo's binary fixtures and their decoded output | `UPDATE_ZOO=1 cargo test -p pm-testkit zoo` then `UPDATE_ZOO=1 cargo test -p pm-core --test zoo` |
 | Body-viewer zoo through the proxy | `cargo run -p pm-testkit --bin upstream -- --zoo [127.0.0.1:9090]` sends one flow per fixture in `crates/pm-testkit/fixtures/zoo/` |
@@ -84,11 +85,12 @@ crates/pm-core       headless Engine: proxy/ (h1 forward proxy, mitm.rs: CONNECT
                      (schema-less protobuf), io/objects.rs (MessagePack, CBOR), io/tree.rs (ordered JSON + badges),
                      workflow.rs (M17: delete, annotations, header columns, Repeat), io/snippets.rs (Copy as code),
                      mocks.rs (M20: the mock library and ServeFrom's index), openapi.rs (specs, operations, mocks),
-                     io/charles.rs (Charles .chlsj/.chlsx import)
+                     io/charles.rs (Charles .chlsj/.chlsx import), capture.rs (M21: recording lists,
+                     intercepted launches, auto-save)
 crates/pm-platform   OS integration traits; macos/ impls, stub.rs elsewhere: fs (private files), sysproxy (backup +
                      restore over a ProxyBackend; networksetup; the previous proxy), trust (keychain), secrets (M18:
                      SecretStore: keychain, 0600 file, memory), procinfo (libproc port scan, app
-                     bundles, icons), process (kqueue exit wait), netif (if-addrs), simctl and adb (over a
+                     bundles, icons, parent pids), launcher (M21: Terminal/iTerm, Chromium, Firefox), process (kqueue exit wait), netif (if-addrs), simctl and adb (over a
                      command::Runner, faked in tests)
 crates/pm-mcp        MCP server over Arc<Engine> (rmcp, pinned): http.rs (axum endpoint, bearer token, managed start/stop),
                      handler.rs (sessions, read-only, audit, notifications), tools.rs, resources.rs, prompts.rs,
@@ -284,3 +286,12 @@ Targets:
 - `remove_flows_in` frees segments by their oldest and newest writer (`SegmentStore::in_use_through`); every `append` must still name its flow.
 - Copy as code renders a `RequestSpec` in `io/snippets.rs`; add a language there, in `CodeLanguage` (after the last variant), in `CODE_LANGUAGES` (`lib/flow.ts`) and a golden directory.
 - `Engine::repeat` sends through `Engine::send`; anything that sends many requests should too, so rules, recording and `sent_by` stay consistent.
+
+**Capture targets (M21)**
+- M21 adds no `Action`, `PresetKind`, `ContentKind` or `FlowDetail` change: the session `VERSION` stays 7. `ServeFrom` is still the last `Action` variant.
+- Launchers live in `pm-platform/src/launcher.rs` behind `Launcher`; every command line goes through `command::Runner` (`spawn` for browsers, `run` for `open`), checked against the fake. **Tests never launch anything**; real launches need the user's OK.
+- A launch owns `<data dir>/intercept/<uuid>/` (profile or script, plus a `pid` file); `capture.rs` removes it when the root pid exits, and the next start sweeps ones whose pid is gone. Terminals report their shell's pid through that file.
+- Intercepted flows are named in `client.rs` by walking parent pids (`ProcessInfo::parent_pid`) to a tracked root: `<App> (Intercepted)`. `Engine::track_intercept` (hidden) tracks a pid without launching, for tests.
+- The recording lists are checked in `Engine::begin_flow`: one `ArcSwapOption` load when both are empty, a non-allocating `GlobSet` match otherwise. An unrecorded flow has no recorder, exactly like a paused one, and is counted in `StorageStatus.unrecorded`. Hosts are normalized (`capture::normalize_host`) before they're stored; `*.x` also matches `x`.
+- No Caching and Block Cookies are the built-in rules `builtin-no-cache` and `builtin-no-cookies` (`pm_model::NO_CACHE_RULE_ID`, `NO_COOKIES_RULE_ID`), made in `Rules::load` beside `builtin-throttle`, origin `User`, hidden from the Rules Editor like the throttle. The toolbar flips `enabled`.
+- Auto-save runs from the publisher tick (`Engine::autosave_tick`) through `spawn_save`, writing `<name>.proxymate-partial` then renaming; rotation only deletes `Proxymate Autosave *.proxymate` files, oldest by modification time first.

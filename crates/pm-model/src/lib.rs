@@ -4,6 +4,7 @@
 //! drive the Tauri commands, the generated TypeScript bindings and (from M7) the
 //! MCP schemas. No I/O, no async, no engine logic.
 
+mod capture;
 mod detail;
 mod device;
 mod document;
@@ -24,6 +25,10 @@ mod update;
 mod view;
 mod workflow;
 
+pub use capture::{
+    AutoSaveSettings, AutoSaveStatus, InterceptApp, InterceptSession, InterceptTarget, NO_CACHE_RULE_ID,
+    NO_COOKIES_RULE_ID, RecordingSettings,
+};
 pub use detail::{BodyInfo, BodyPart, FlowDetail, Header, HttpVersion, ProxyStatus, RequestHead, ResponseHead};
 pub use device::{
     AndroidDevice, AndroidStatus, DeviceAccess, DeviceClient, DeviceDecision, DevicesSnapshot, LanInterface,

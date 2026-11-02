@@ -2,6 +2,7 @@
 //!
 //! Adapters (Tauri commands, MCP tools, the CLI) talk only to [`Engine`].
 
+mod capture;
 mod client;
 mod devices;
 mod documents;

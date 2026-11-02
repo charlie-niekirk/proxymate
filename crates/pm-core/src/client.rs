@@ -8,6 +8,9 @@
 //! LAN peers (M9) are named from the device allow-list instead, as soon
 //! as they are admitted.
 //!
+//! A process descending from an intercepted launch (M21) gets its app's
+//! name with ` (Intercepted)`, found by walking its parent pids.
+//!
 //! Port → pid is a full socket scan (a few ms). Scans are coalesced: one
 //! runs at a time, and every connection accepted before it started shares
 //! its result. Pid → app is cached.
@@ -33,6 +36,8 @@ const APP_CACHE_MAX: usize = 4_096;
 /// Icon size in points; AppKit renders it at the screen's scale (64 px on
 /// Retina), plenty for the 14-16 px the UI draws.
 const ICON_PT: u32 = 32;
+/// How far up the parent chain an intercepted launch is looked for.
+const MAX_ANCESTORS: usize = 64;
 
 /// The app on the other end of a connection.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,8 +64,11 @@ pub enum ClientKind {
 
 /// Simulator apps get a suffix so they don't merge with the Mac's own
 /// (`MobileSafari (Simulator)`); every emulator process is one client.
-fn display_name(info: &AppInfo) -> (String, ClientKind) {
-    if info.simulator {
+/// So do intercepted launches (`Google Chrome (Intercepted)`).
+fn display_name(info: &AppInfo, intercepted: bool) -> (String, ClientKind) {
+    if intercepted {
+        (format!("{} (Intercepted)", info.name), ClientKind::Local)
+    } else if info.simulator {
         (format!("{} (Simulator)", info.name), ClientKind::Simulator)
     } else if info.bundle_path.is_none() && info.name.starts_with("qemu-system-") {
         ("Android Emulator".into(), ClientKind::Emulator)
@@ -81,6 +89,23 @@ pub(crate) struct ClientResolver {
     /// Every app seen, by name, for the sidebar and icons.
     known: Mutex<HashMap<Arc<str>, Arc<ClientApp>>>,
     icons: Mutex<HashMap<Arc<str>, Icon>>,
+    /// Roots of the intercepted process trees (M21).
+    intercepted: Mutex<Arc<[u32]>>,
+}
+
+/// True if `pid` is one of `roots` or descends from one.
+fn descends_from(platform: &dyn ProcessInfo, pid: u32, roots: &[u32]) -> bool {
+    let mut pid = pid;
+    for _ in 0..MAX_ANCESTORS {
+        if roots.contains(&pid) {
+            return true;
+        }
+        match platform.parent_pid(pid) {
+            Some(parent) if parent != pid => pid = parent,
+            _ => return false,
+        }
+    }
+    false
 }
 
 #[derive(Default)]
@@ -98,7 +123,15 @@ impl ClientResolver {
             apps: Mutex::new(HashMap::new()),
             known: Mutex::new(HashMap::new()),
             icons: Mutex::new(HashMap::new()),
+            intercepted: Mutex::new(Arc::from([])),
         }
+    }
+
+    /// Replaces the intercepted roots. Apps already looked up are looked up
+    /// again, so new connections pick the change up.
+    pub fn set_intercepted(&self, roots: Vec<u32>) {
+        *self.intercepted.lock() = roots.into();
+        self.apps.lock().clear();
     }
 
     /// The app behind a connection from `peer` to our `proxy_port`,
@@ -137,10 +170,15 @@ impl ClientResolver {
             return app.clone();
         }
         let platform = self.platform.clone();
-        let info = tokio::task::spawn_blocking(move || platform.app_for_pid(pid))
-            .await
-            .ok()?;
-        let app = info.map(|info| self.intern(info));
+        let roots = self.intercepted.lock().clone();
+        let info = tokio::task::spawn_blocking(move || {
+            let info = platform.app_for_pid(pid)?;
+            let intercepted = !roots.is_empty() && descends_from(&*platform, pid, &roots);
+            Some((info, intercepted))
+        })
+        .await
+        .ok()?;
+        let app = info.map(|(info, intercepted)| self.intern(info, intercepted));
         let mut apps = self.apps.lock();
         if apps.len() >= APP_CACHE_MAX {
             apps.clear();
@@ -149,8 +187,8 @@ impl ClientResolver {
         app
     }
 
-    fn intern(&self, info: AppInfo) -> Arc<ClientApp> {
-        let (name, kind) = display_name(&info);
+    fn intern(&self, info: AppInfo, intercepted: bool) -> Arc<ClientApp> {
+        let (name, kind) = display_name(&info, intercepted);
         let mut known = self.known.lock();
         if let Some(app) = known.get(name.as_str())
             && app.bundle_path == info.bundle_path
@@ -344,16 +382,61 @@ mod tests {
     #[test]
     fn simulator_and_emulator_clients_are_named_apart() {
         assert_eq!(
-            display_name(&info("MobileSafari", Some("/x/MobileSafari.app"), true)),
+            display_name(
+                &info("Google Chrome", Some("/Applications/Google Chrome.app"), false),
+                true
+            ),
+            ("Google Chrome (Intercepted)".into(), ClientKind::Local)
+        );
+        assert_eq!(
+            display_name(&info("MobileSafari", Some("/x/MobileSafari.app"), true), false),
             ("MobileSafari (Simulator)".into(), ClientKind::Simulator)
         );
         assert_eq!(
-            display_name(&info("qemu-system-aarch64", None, false)),
+            display_name(&info("qemu-system-aarch64", None, false), false),
             ("Android Emulator".into(), ClientKind::Emulator)
         );
         assert_eq!(
-            display_name(&info("Safari", Some("/Applications/Safari.app"), false)),
+            display_name(&info("Safari", Some("/Applications/Safari.app"), false), false),
             ("Safari".into(), ClientKind::Local)
         );
+    }
+
+    /// A process table: pid → parent.
+    struct Tree(HashMap<u32, u32>);
+
+    impl ProcessInfo for Tree {
+        fn loopback_peers(&self, _: u16) -> Result<HashMap<u16, u32>, pm_platform::PlatformError> {
+            Ok(HashMap::new())
+        }
+        fn app_for_pid(&self, _: u32) -> Option<AppInfo> {
+            None
+        }
+        fn icon_png(&self, _: &std::path::Path, _: u32) -> Option<Vec<u8>> {
+            None
+        }
+        fn parent_pid(&self, pid: u32) -> Option<u32> {
+            self.0.get(&pid).copied()
+        }
+    }
+
+    #[test]
+    fn descendants_of_an_intercepted_launch_are_found_by_their_parents() {
+        // launchd(1) → Terminal(10) → login(11) → shell(12) → node(13) → helper(14); Safari(20).
+        let tree = Tree(HashMap::from([
+            (10, 1),
+            (11, 10),
+            (12, 11),
+            (13, 12),
+            (14, 13),
+            (20, 1),
+        ]));
+        assert!(descends_from(&tree, 12, &[12]));
+        assert!(descends_from(&tree, 14, &[12]));
+        assert!(!descends_from(&tree, 11, &[12]));
+        assert!(!descends_from(&tree, 20, &[12, 99]));
+        // A loop in a broken table ends.
+        let looped = Tree(HashMap::from([(5, 6), (6, 5)]));
+        assert!(!descends_from(&looped, 5, &[7]));
     }
 }

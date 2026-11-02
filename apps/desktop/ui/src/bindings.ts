@@ -158,6 +158,23 @@ export const commands = {
 	getStorageStatus: () => __TAURI_INVOKE<StorageStatus_Serialize>("get_storage_status"),
 	/**  Streams the storage status (flows, disk use, write errors) as it changes. */
 	subscribeStorage: (onStatus: Channel<StorageStatus_Deserialize>) => __TAURI_INVOKE<void>("subscribe_storage", { onStatus }),
+	/**  The Intercept menu: terminals and browsers, and which are installed. */
+	listInterceptApps: () => __TAURI_INVOKE<InterceptApp[]>("list_intercept_apps"),
+	/**  Intercepted launches still running. */
+	listIntercepts: () => __TAURI_INVOKE<InterceptSession_Serialize[]>("list_intercepts"),
+	/**  Starts a terminal or browser set up for the proxy. */
+	intercept: (target: InterceptTarget) => typedError<InterceptSession_Serialize, string>(__TAURI_INVOKE("intercept", { target })),
+	getRecordingSettings: () => __TAURI_INVOKE<RecordingSettings_Serialize>("get_recording_settings"),
+	/**  Saves the recording lists; they apply to flows that begin from now on. */
+	setRecordingSettings: (settings: RecordingSettings_Deserialize) => typedError<RecordingSettings_Serialize, string>(__TAURI_INVOKE("set_recording_settings", { settings })),
+	/**  The flow table's "Never record this host". */
+	neverRecordHost: (host: string) => typedError<RecordingSettings_Serialize, string>(__TAURI_INVOKE("never_record_host", { host })),
+	getAutosaveSettings: () => __TAURI_INVOKE<AutoSaveSettings_Serialize>("get_autosave_settings"),
+	setAutosaveSettings: (settings: AutoSaveSettings_Deserialize) => typedError<AutoSaveSettings_Serialize, string>(__TAURI_INVOKE("set_autosave_settings", { settings })),
+	/**  Auto-saves now, whatever the interval; progress shows in the storage status. */
+	autosaveNow: () => typedError<number, string>(__TAURI_INVOKE("autosave_now")),
+	/**  Picks the auto-save folder with a dialog; `None` if it was cancelled. */
+	chooseAutosaveFolder: () => typedError<string | null, string>(__TAURI_INVOKE("choose_autosave_folder")),
 	/**  Pins or unpins flows of any store; pinned live flows are never evicted. */
 	pinFlows: (store: number, selection: FlowSelection_Deserialize, pinned: boolean) => typedError<number, string>(__TAURI_INVOKE("pin_flows", { store, selection, pinned })),
 	/**  The ids a selection names, in its order. */
@@ -584,6 +601,62 @@ export type AppliedRule_Serialize = {
 	name: string,
 	origin: RuleOrigin_Serialize,
 	phase: Phase,
+};
+
+/**
+ *  Settings › Storage › Auto-save: the live capture is saved every
+ *  `interval_minutes` to `folder` as `Proxymate Autosave <time>.proxymate`,
+ *  keeping the newest `keep` of them.
+ */
+export type AutoSaveSettings = AutoSaveSettings_Serialize | AutoSaveSettings_Deserialize;
+
+/**
+ *  Settings › Storage › Auto-save: the live capture is saved every
+ *  `interval_minutes` to `folder` as `Proxymate Autosave <time>.proxymate`,
+ *  keeping the newest `keep` of them.
+ */
+export type AutoSaveSettings_Deserialize = {
+	enabled?: boolean,
+	interval_minutes?: number,
+	folder?: string,
+	keep?: number,
+};
+
+/**
+ *  Settings › Storage › Auto-save: the live capture is saved every
+ *  `interval_minutes` to `folder` as `Proxymate Autosave <time>.proxymate`,
+ *  keeping the newest `keep` of them.
+ */
+export type AutoSaveSettings_Serialize = {
+	enabled: boolean,
+	interval_minutes: number,
+	folder: string,
+	keep: number,
+};
+
+/**  How auto-save is going, in the storage status. */
+export type AutoSaveStatus = AutoSaveStatus_Serialize | AutoSaveStatus_Deserialize;
+
+/**  How auto-save is going, in the storage status. */
+export type AutoSaveStatus_Deserialize = {
+	/**  A save is being written now. */
+	saving: boolean,
+	/**  When the last save finished (ms since the Unix epoch), and where. */
+	last_at_ms?: number | null,
+	last_path?: string | null,
+	/**  Why the last save failed, if it did. */
+	error?: string | null,
+};
+
+/**  How auto-save is going, in the storage status. */
+export type AutoSaveStatus_Serialize = {
+	/**  A save is being written now. */
+	saving: boolean,
+	/**  When the last save finished (ms since the Unix epoch), and where. */
+	last_at_ms: number | null,
+	last_path: string | null,
+	/**  Why the last save failed, if it did. */
+	error: string | null,
 };
 
 export type Badge = {
@@ -1628,6 +1701,62 @@ export type HostCount = {
 
 export type HttpVersion = "HTTP/1.0" | "HTTP/1.1" | "HTTP/2";
 
+/**  One entry of the Intercept menu. */
+export type InterceptApp = {
+	target: InterceptTarget,
+	/**  `Google Chrome`, `Terminal`. */
+	name: string,
+	/**  False if the app isn't in `/Applications` (or `~/Applications`). */
+	installed: boolean,
+};
+
+/**
+ *  A running intercepted launch. Its flows (and those of every process
+ *  it starts) show as `<App> (Intercepted)`.
+ */
+export type InterceptSession = InterceptSession_Serialize | InterceptSession_Deserialize;
+
+/**
+ *  A running intercepted launch. Its flows (and those of every process
+ *  it starts) show as `<App> (Intercepted)`.
+ */
+export type InterceptSession_Deserialize = {
+	id: number,
+	target: InterceptTarget,
+	name: string,
+	/**
+	 *  The root of the tracked process tree; `None` until a terminal's
+	 *  shell has said who it is.
+	 */
+	pid?: number | null,
+	/**  Milliseconds since the Unix epoch. */
+	started_at_ms: number | null,
+	/**  What the user should know, e.g. how the browser trusts the CA. */
+	notes: string[],
+};
+
+/**
+ *  A running intercepted launch. Its flows (and those of every process
+ *  it starts) show as `<App> (Intercepted)`.
+ */
+export type InterceptSession_Serialize = {
+	id: number,
+	target: InterceptTarget,
+	name: string,
+	/**
+	 *  The root of the tracked process tree; `None` until a terminal's
+	 *  shell has said who it is.
+	 */
+	pid: number | null,
+	/**  Milliseconds since the Unix epoch. */
+	started_at_ms: number | null,
+	/**  What the user should know, e.g. how the browser trusts the CA. */
+	notes: string[],
+};
+
+/**  Something the Intercept menu can start, already set up for the proxy. */
+export type InterceptTarget = "terminal" | "iterm" | "chrome" | "edge" | "brave" | "arc" | "firefox";
+
 /**  What the OS trust store says about the Proxymate CA. */
 export type KeychainTrust = "trusted" | "not_trusted" | 
 /**  Explicitly set to "Never Trust". */
@@ -2181,6 +2310,42 @@ export type ProxyStatus_Serialize = {
 	recording: boolean,
 	/**  SOCKS5 on the same port and the reverse proxy listeners (M18). */
 	listeners: ListenerStatus_Serialize[],
+};
+
+/**
+ *  Which hosts are recorded. Unrecorded traffic is still proxied (the SSL
+ *  policy and rules still apply); it just leaves no flow.
+ * 
+ *  Both lists are host globs (`*.example.com` also matches `example.com`),
+ *  case-insensitive. With `only` set, other hosts aren't recorded;
+ *  `never` wins over `only`.
+ */
+export type RecordingSettings = RecordingSettings_Serialize | RecordingSettings_Deserialize;
+
+/**
+ *  Which hosts are recorded. Unrecorded traffic is still proxied (the SSL
+ *  policy and rules still apply); it just leaves no flow.
+ * 
+ *  Both lists are host globs (`*.example.com` also matches `example.com`),
+ *  case-insensitive. With `only` set, other hosts aren't recorded;
+ *  `never` wins over `only`.
+ */
+export type RecordingSettings_Deserialize = {
+	only?: string[],
+	never?: string[],
+};
+
+/**
+ *  Which hosts are recorded. Unrecorded traffic is still proxied (the SSL
+ *  policy and rules still apply); it just leaves no flow.
+ * 
+ *  Both lists are host globs (`*.example.com` also matches `example.com`),
+ *  case-insensitive. With `only` set, other hosts aren't recorded;
+ *  `never` wins over `only`.
+ */
+export type RecordingSettings_Serialize = {
+	only: string[],
+	never: string[],
 };
 
 /**  How `Engine::repeat` sends a request again and again. */
@@ -3118,6 +3283,9 @@ export type StorageStatus_Deserialize = {
 	 */
 	sent_bytes: number,
 	received_bytes: number,
+	/**  Flows the recording lists (M21) kept out of the capture since launch. */
+	unrecorded: number,
+	autosave: AutoSaveStatus_Deserialize,
 };
 
 /**  What the live capture holds now, for Settings › Storage and the footer. */
@@ -3141,6 +3309,9 @@ export type StorageStatus_Serialize = {
 	 */
 	sent_bytes: number,
 	received_bytes: number,
+	/**  Flows the recording lists (M21) kept out of the capture since launch. */
+	unrecorded: number,
+	autosave: AutoSaveStatus_Serialize,
 };
 
 /**  Whether the OS proxy points at Proxymate. */

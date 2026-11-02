@@ -165,6 +165,18 @@ impl CertAuthority {
         &self.ca_der
     }
 
+    /// Base64 SHA-256 of the CA's SubjectPublicKeyInfo, the form Chromium's
+    /// `--ignore-certificate-errors-spki-list` takes (M21). Leaves carry the
+    /// CA in their chain, so pinning it covers every leaf.
+    pub fn spki_sha256_base64(&self) -> String {
+        use base64::Engine as _;
+        let spki = x509_parser::parse_x509_certificate(&self.ca_der)
+            .map(|(_, cert)| cert.tbs_certificate.subject_pki.raw.to_vec())
+            .unwrap_or_default();
+        let digest = ring::digest::digest(&ring::digest::SHA256, &spki);
+        base64::engine::general_purpose::STANDARD.encode(digest.as_ref())
+    }
+
     /// The leaf for `host` (a DNS name or an IP literal), from the cache or
     /// freshly issued.
     pub fn leaf(&self, host: &str) -> Result<Arc<CertifiedKey>, Arc<CaError>> {
@@ -283,6 +295,21 @@ mod tests {
         let regenerated = CertAuthority::create(&dir).unwrap();
         assert_ne!(regenerated.info().sha256, first.info().sha256);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn the_spki_hash_is_of_the_ca_key() {
+        let dir = temp_dir();
+        let ca = CertAuthority::create(&dir).unwrap();
+        let hash = ca.spki_sha256_base64();
+        // 32 bytes of SHA-256 in padded Base64.
+        assert_eq!(hash.len(), 44);
+        // Every leaf's chain carries the CA, whose key it names.
+        let leaf = ca.leaf("example.com").unwrap();
+        assert_eq!(leaf.cert[1], *ca.cert_der());
+        let again = CertAuthority::load_or_create(&dir).unwrap();
+        assert_eq!(again.spki_sha256_base64(), hash);
+        assert_ne!(CertAuthority::create(&temp_dir()).unwrap().spki_sha256_base64(), hash);
     }
 
     #[test]

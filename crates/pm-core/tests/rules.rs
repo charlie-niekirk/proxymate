@@ -792,9 +792,20 @@ async fn agent_rules_are_tagged_and_removed_together() {
     let user = proxy.rule(Matcher::default(), Vec::new());
     let ordered = proxy.engine.reorder_rules(&[user.id.clone(), a.id.clone()]).unwrap();
     let names: Vec<&str> = ordered.iter().map(|r| r.name.as_str()).collect();
-    assert_eq!(names, ["Network conditions", "test rule", "a", "b"]);
+    // The built-in rules (M5's throttle, M21's toggles) stay first.
+    assert_eq!(
+        names,
+        [
+            "Network conditions",
+            "No Caching",
+            "Block Cookies",
+            "test rule",
+            "a",
+            "b"
+        ]
+    );
     assert_eq!(proxy.engine.delete_agent_rules().unwrap(), 2);
-    assert_eq!(proxy.engine.rules().len(), 2);
+    assert_eq!(proxy.engine.rules().len(), 4);
 }
 
 /// A raw HTTP/1.1 JSON response, leaked so a `RawUpstream` can serve it.

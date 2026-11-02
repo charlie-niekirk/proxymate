@@ -18,6 +18,10 @@ export type KvMatch = KvMatch_Serialize;
 
 /** The toolbar's network conditions rule (`pm_model::GLOBAL_THROTTLE_RULE_ID`). */
 export const GLOBAL_THROTTLE_RULE_ID = "builtin-throttle";
+/** The toolbar's No Caching toggle (`pm_model::NO_CACHE_RULE_ID`, M21). */
+export const NO_CACHE_RULE_ID = "builtin-no-cache";
+/** The toolbar's Block Cookies toggle (`pm_model::NO_COOKIES_RULE_ID`, M21). */
+export const NO_COOKIES_RULE_ID = "builtin-no-cookies";
 
 /** Built-in rules are managed elsewhere (the toolbar) and can't be deleted. */
 export function isBuiltin(rule: Pick<Rule, "id">): boolean {

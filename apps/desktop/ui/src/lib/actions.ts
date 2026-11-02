@@ -5,6 +5,7 @@ import type {
   CodeLanguage,
   FlowLabel,
   FlowSelection_Deserialize,
+  InterceptTarget,
   PresetKind,
   RequestSpec_Deserialize,
   SaveProgress_Serialize,
@@ -20,11 +21,13 @@ import {
   caInfoKey,
   deviceAccessKey,
   documentsKey,
+  interceptsKey,
   mockSourcesKey,
   openApiSpecsKey,
   operationRootKey,
   proxyStatusKey,
   queryClient,
+  recordingSettingsKey,
   rulesKey,
   scriptsKey,
   sslSettingsKey,
@@ -570,4 +573,62 @@ export async function importScript(): Promise<Script | null> {
 /** Copies `proxymate.d.ts`, for an editor or an agent. */
 export function copyScriptTypes() {
   return copyLater(() => backend.getScriptTypeDefinitions(), "proxymate.d.ts");
+}
+
+// ---- Capture targets and noise (M21) ----
+
+/** Starts a terminal or browser set up for the proxy, and says what happened. */
+export async function intercept(target: InterceptTarget) {
+  try {
+    const session = await backend.intercept(target);
+    await queryClient.invalidateQueries({ queryKey: interceptsKey });
+    const terminal = target === "terminal" || target === "iterm";
+    toast.success(`Started ${session.name}`, {
+      description:
+        session.notes.join(" ") ||
+        (terminal
+          ? "Commands run in the new window go through Proxymate and trust its CA."
+          : `Its traffic shows as ${session.name} (Intercepted), decrypted without the keychain.`),
+    });
+  } catch (err) {
+    reportError("Can't start the app", err);
+  }
+}
+
+/** Turns one of the toolbar's built-in rules (No Caching, Block Cookies) on or off. */
+export async function setBuiltinRule(id: string, enabled: boolean) {
+  try {
+    await backend.setRuleEnabled(id, enabled);
+  } catch (err) {
+    reportError("Can't change the rule", err);
+  }
+  await refreshRules();
+}
+
+/** Flips a built-in rule from its current state. */
+export async function toggleBuiltinRule(id: string) {
+  const rule = (await backend.listRules()).find((r) => r.id === id);
+  if (rule) await setBuiltinRule(id, !rule.enabled);
+}
+
+/** The flow table's "Never record this host". */
+export async function neverRecordHost(host: string) {
+  try {
+    queryClient.setQueryData(recordingSettingsKey, await backend.neverRecordHost(host));
+    toast.success(`Not recording ${host}`, {
+      description: "Its traffic is still proxied. Settings › Storage lists the hosts that aren't recorded.",
+      action: { label: "Settings", onClick: () => useUi.getState().openSettings("storage") },
+    });
+  } catch (err) {
+    reportError("Can't change the recording lists", err);
+  }
+}
+
+/** Saves the live capture into the auto-save folder now. */
+export async function autosaveNow() {
+  try {
+    await backend.autosaveNow();
+  } catch (err) {
+    reportError("Can't auto-save", err);
+  }
 }

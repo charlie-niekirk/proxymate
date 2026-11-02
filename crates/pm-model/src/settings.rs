@@ -43,6 +43,9 @@ pub struct StorageStatus {
     /// footer's throughput is their rate of change.
     pub sent_bytes: u64,
     pub received_bytes: u64,
+    /// Flows the recording lists (M21) kept out of the capture since launch.
+    pub unrecorded: u64,
+    pub autosave: crate::AutoSaveStatus,
 }
 
 /// The proxy listener and its upstream client. A port or pool change

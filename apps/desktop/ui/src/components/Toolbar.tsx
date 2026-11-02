@@ -4,6 +4,7 @@ import { Circle, FileCode2, ListChecks, Plus, Settings, ShieldAlert, Smartphone,
 import type { ProxyStatus_Serialize } from "@/bindings";
 import { BreakpointBadge } from "@/components/Breakpoints/BreakpointBadge";
 import { CertificateMenu } from "@/components/CertificateMenu";
+import { InterceptMenu, NoiseToggles } from "@/components/InterceptMenu";
 import { ThrottleMenu } from "@/components/Rules/ThrottleMenu";
 import { McpIndicator } from "@/components/Settings/McpIndicator";
 import { SystemProxyMenu } from "@/components/SystemProxyMenu";
@@ -72,8 +73,10 @@ export function Toolbar() {
         <WaitingDevices />
       </div>
 
+      <InterceptMenu />
       <RulesButton />
       <ScriptsButton />
+      <NoiseToggles />
       <ThrottleMenu />
       <BreakpointBadge />
       <Separator orientation="vertical" className="mx-1 !h-5" />

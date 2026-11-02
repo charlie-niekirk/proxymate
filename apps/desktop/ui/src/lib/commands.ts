@@ -9,8 +9,10 @@ import {
   copyFlowUrl,
   copySelectionUrls,
   deleteSelection,
+  autosaveNow,
   editAndReplay,
   exportHar,
+  intercept,
   importOpenApiSpec,
   labelSelection,
   mockFromFile,
@@ -23,12 +25,15 @@ import {
   reportError,
   saveSession,
   setRecording,
+  toggleBuiltinRule,
 } from "@/lib/actions";
+import { INTERCEPT_TARGETS } from "@/lib/capture";
 import { CODE_LANGUAGES, FLOW_LABELS } from "@/lib/flow";
 import { FLOW_TABLE_ID } from "@/lib/focus";
 import { selectionCount } from "@/lib/selection";
 import { backend } from "@/lib/backend";
-import { proxyStatusKey, queryClient } from "@/lib/query";
+import { interceptAppsKey, proxyStatusKey, queryClient } from "@/lib/query";
+import { NO_CACHE_RULE_ID, NO_COOKIES_RULE_ID } from "@/lib/rules";
 import { usePrefs } from "@/store/prefs";
 import { LIVE_STORE, useUi, type SettingsPage } from "@/store/ui";
 
@@ -293,6 +298,40 @@ export const COMMANDS: AppCommand[] = [
     group: "Capture",
     keywords: ["follow", "scroll"],
     run: () => useUi.getState().setAutoScroll(!useUi.getState().autoScroll),
+  },
+  ...INTERCEPT_TARGETS.map(
+    (t): AppCommand => ({
+      id: `intercept-${t.target}`,
+      title: `Intercept: ${t.terminal ? `New ${t.name} window` : `Launch ${t.name}`}`,
+      group: "Capture",
+      keywords: ["intercept", "launch", t.terminal ? "terminal shell node python curl" : "browser"],
+      // Hidden once the app is known not to be installed.
+      enabled: () =>
+        queryClient.getQueryData<{ target: string; installed: boolean }[]>(interceptAppsKey)?.find((a) => a.target === t.target)
+          ?.installed !== false,
+      run: () => intercept(t.target),
+    }),
+  ),
+  {
+    id: "no-cache",
+    title: "Toggle No Caching",
+    group: "Capture",
+    keywords: ["cache", "etag", "304", "fresh"],
+    run: () => toggleBuiltinRule(NO_CACHE_RULE_ID),
+  },
+  {
+    id: "no-cookies",
+    title: "Toggle Block Cookies",
+    group: "Capture",
+    keywords: ["cookie", "set-cookie", "session"],
+    run: () => toggleBuiltinRule(NO_COOKIES_RULE_ID),
+  },
+  {
+    id: "autosave-now",
+    title: "Auto-save now",
+    group: "Capture",
+    keywords: ["backup", "save", "session"],
+    run: () => autosaveNow(),
   },
   {
     id: "open",

@@ -369,13 +369,27 @@ impl Engine {
     /// Shell `export` lines that send a terminal's traffic through the
     /// proxy and make common runtimes trust the CA.
     pub fn terminal_env(&self) -> String {
-        let proxy = match self.proxy_addr() {
+        let lines: Vec<String> = self
+            .proxy_env(false)
+            .into_iter()
+            .map(|(name, value)| format!("export {name}={}", shell_word(&value)))
+            .collect();
+        lines.join("\n") + "\n"
+    }
+
+    /// The variables behind [`Engine::terminal_env`]. An intercepted
+    /// terminal (M21) also gets Node's opt-in to the proxy variables, the
+    /// CA for git, the AWS CLI, Deno, pip and Cargo, and the JVM's proxy
+    /// properties.
+    pub(crate) fn proxy_env(&self, intercepted: bool) -> Vec<(String, String)> {
+        let addr = self.proxy_addr();
+        let proxy = match addr {
             Some(addr) => format!("http://{addr}"),
             None => "http://127.0.0.1:9090".into(),
         };
         let ca = self.ca_info().cert_path;
         // These replace a tool's roots rather than add to them, so they get
-        // the OS roots too; Node's variable adds to its own.
+        // the OS roots too; Node's and Deno's variables add to their own.
         let bundle = match self.write_ca_bundle(Path::new(&ca)) {
             Ok(path) => path.display().to_string(),
             Err(err) => {
@@ -383,15 +397,33 @@ impl Engine {
                 ca.clone()
             }
         };
-        let mut lines = Vec::new();
+        let mut vars: Vec<(String, String)> = Vec::new();
+        let mut set = |name: &str, value: &str| vars.push((name.to_owned(), value.to_owned()));
         for var in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"] {
-            lines.push(format!("export {var}={proxy}"));
+            set(var, &proxy);
         }
-        lines.push(format!("export NODE_EXTRA_CA_CERTS={}", shell_quote(&ca)));
+        set("NODE_EXTRA_CA_CERTS", &ca);
         for var in ["SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE"] {
-            lines.push(format!("export {var}={}", shell_quote(&bundle)));
+            set(var, &bundle);
         }
-        lines.join("\n") + "\n"
+        if intercepted {
+            set("NODE_USE_ENV_PROXY", "1");
+            for var in ["GIT_SSL_CAINFO", "AWS_CA_BUNDLE", "PIP_CERT", "CARGO_HTTP_CAINFO"] {
+                set(var, &bundle);
+            }
+            set("DENO_CERT", &ca);
+            let (host, port) = match addr {
+                Some(addr) => (addr.ip().to_string(), addr.port()),
+                None => ("127.0.0.1".into(), 9090),
+            };
+            set(
+                "JAVA_TOOL_OPTIONS",
+                &format!(
+                    "-Dhttp.proxyHost={host} -Dhttp.proxyPort={port} -Dhttps.proxyHost={host} -Dhttps.proxyPort={port}"
+                ),
+            );
+        }
+        vars
     }
 
     /// Writes `ca/bundle.pem` beside the CA: the OS's trusted roots, then
@@ -427,6 +459,14 @@ fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
 
+/// `s` as one shell word: as is if nothing in it is special, else quoted.
+fn shell_word(s: &str) -> String {
+    let plain = !s.is_empty()
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"_@%+=:,./-".contains(&b));
+    if plain { s.to_owned() } else { shell_quote(s) }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -456,6 +496,21 @@ mod tests {
         #[cfg(target_os = "macos")]
         assert!(text.matches("BEGIN CERTIFICATE").count() > 50);
         assert_eq!(shell_quote("it's"), r"'it'\''s'");
+        assert_eq!(shell_word("http://127.0.0.1:9090"), "http://127.0.0.1:9090");
+        assert_eq!(shell_word("-Da=1 -Db=2"), "'-Da=1 -Db=2'");
+        // An intercepted terminal gets the rest.
+        let vars = engine.proxy_env(true);
+        let get = |name: &str| vars.iter().find(|(n, _)| n == name).map(|(_, v)| v.as_str());
+        assert_eq!(get("NODE_USE_ENV_PROXY"), Some("1"));
+        assert_eq!(get("DENO_CERT"), Some(pem.as_str()));
+        for var in ["GIT_SSL_CAINFO", "AWS_CA_BUNDLE", "PIP_CERT", "CARGO_HTTP_CAINFO"] {
+            assert_eq!(get(var).map(std::path::PathBuf::from), Some(bundle.clone()), "{var}");
+        }
+        assert_eq!(
+            get("JAVA_TOOL_OPTIONS"),
+            Some("-Dhttp.proxyHost=127.0.0.1 -Dhttp.proxyPort=9090 -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=9090")
+        );
+        assert!(!env.contains("NODE_USE_ENV_PROXY"));
         let _ = std::fs::remove_dir_all(dir.parent().unwrap());
     }
 }
