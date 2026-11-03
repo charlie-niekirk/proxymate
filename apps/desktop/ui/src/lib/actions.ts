@@ -8,6 +8,7 @@ import type {
   InterceptTarget,
   PresetKind,
   RequestSpec_Deserialize,
+  Rule_Serialize,
   SaveProgress_Serialize,
   ScriptKind,
 } from "@/bindings";
@@ -266,9 +267,18 @@ export async function deleteRule(id: string) {
   await refreshRules();
 }
 
+/**
+ * Turns a rule on or off, showing it in the list at once; the refetch
+ * after puts it back if the engine refused.
+ */
 export async function setRuleEnabled(id: string, enabled: boolean) {
-  await backend.setRuleEnabled(id, enabled);
-  await refreshRules();
+  await queryClient.cancelQueries({ queryKey: rulesKey });
+  queryClient.setQueryData<Rule_Serialize[]>(rulesKey, (rules) => rules?.map((r) => (r.id === id ? { ...r, enabled } : r)));
+  try {
+    await backend.setRuleEnabled(id, enabled);
+  } finally {
+    await refreshRules();
+  }
 }
 
 export async function reorderRules(ids: string[]) {

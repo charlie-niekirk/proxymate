@@ -14,6 +14,7 @@ import type {
   UpstreamRule_Deserialize,
 } from "@/bindings";
 import { CopyField } from "@/components/DeviceSetup/parts";
+import { PathInput } from "@/components/PathInput";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -507,12 +508,12 @@ function CertRow({ value, onChange }: { value: ClientCert_Deserialize; onChange:
         {identity.kind === "pkcs12" ? (
           <>
             <Field label=".p12 / .pfx file" wide>
-              <Input
+              <PathInput
                 value={identity.path}
-                onChange={(e) => onChange({ ...value, identity: { ...identity, path: e.target.value } })}
+                onChange={(path) => onChange({ ...value, identity: { ...identity, path } })}
+                title="Client certificate (.p12 / .pfx)"
+                extensions={["p12", "pfx"]}
                 placeholder="/Users/me/certs/client.p12"
-                spellCheck={false}
-                className="font-mono"
               />
             </Field>
             <Field label="Password">
@@ -526,21 +527,21 @@ function CertRow({ value, onChange }: { value: ClientCert_Deserialize; onChange:
         ) : (
           <>
             <Field label="Certificate (PEM)" wide>
-              <Input
+              <PathInput
                 value={identity.cert_path}
-                onChange={(e) => onChange({ ...value, identity: { ...identity, cert_path: e.target.value } })}
+                onChange={(cert_path) => onChange({ ...value, identity: { ...identity, cert_path } })}
+                title="Client certificate (PEM)"
+                extensions={["pem", "crt", "cer"]}
                 placeholder="/Users/me/certs/client.pem"
-                spellCheck={false}
-                className="font-mono"
               />
             </Field>
             <Field label="Key (PEM, optional)" wide>
-              <Input
+              <PathInput
                 value={identity.key_path}
-                onChange={(e) => onChange({ ...value, identity: { ...identity, key_path: e.target.value } })}
+                onChange={(key_path) => onChange({ ...value, identity: { ...identity, key_path } })}
+                title="Client certificate key (PEM)"
+                extensions={["pem", "key"]}
                 placeholder="In the certificate file"
-                spellCheck={false}
-                className="font-mono"
               />
             </Field>
           </>

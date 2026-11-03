@@ -394,6 +394,12 @@ export interface Backend {
   autosaveNow(): Promise<number>;
   /** Asks for the auto-save folder; null if cancelled. */
   chooseAutosaveFolder(): Promise<string | null>;
+  /**
+   * Asks for a file (or a folder) with the OS dialog, for a path field.
+   * `extensions` limits the files offered; the dialog opens beside
+   * `current`. Null if cancelled.
+   */
+  choosePath(title: string, folder: boolean, extensions: string[], current: string | null): Promise<string | null>;
 }
 
 type Result<T> = { status: "ok"; data: T } | { status: "error"; error: string };
@@ -635,6 +641,7 @@ const tauriBackend: Backend = {
   setAutosaveSettings: (settings) => unwrap(commands.setAutosaveSettings(settings)),
   autosaveNow: () => unwrap(commands.autosaveNow()),
   chooseAutosaveFolder: () => unwrap(commands.chooseAutosaveFolder()),
+  choosePath: (title, folder, extensions, current) => unwrap(commands.choosePath(title, folder, extensions, current)),
 };
 
 function progressChannel(onProgress: (p: SaveProgress_Serialize) => void) {

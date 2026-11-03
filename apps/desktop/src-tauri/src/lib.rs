@@ -110,6 +110,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::set_autosave_settings,
             commands::autosave_now,
             commands::choose_autosave_folder,
+            commands::choose_path,
             commands::pin_flows,
             commands::selected_ids,
             commands::get_flow_urls,

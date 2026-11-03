@@ -2,6 +2,7 @@ import { ArrowDown, ArrowUp, Plus, X } from "lucide-react";
 import { useState } from "react";
 
 import type { MapLocalSource, Scheme, WsDirection } from "@/bindings";
+import { PathInput } from "@/components/PathInput";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -522,6 +523,7 @@ function MapLocalForm({ action, onChange }: { action: Extract<Action, { type: "M
             setSource(kind === "inline" ? { kind, body: "" } : kind === "file" ? { kind, path: "" } : { kind, root: "" })
           }
           className="w-32"
+          testId="map-local-source"
         />
         <NumberInput value={action.status} min={100} max={999} onChange={(status) => onChange({ ...action, status: status ?? 200 })} className="w-16" />
         <Input
@@ -536,12 +538,27 @@ function MapLocalForm({ action, onChange }: { action: Extract<Action, { type: "M
       )}
       {source.kind === "file" && (
         <Field label="File">
-          <Input className={MONO} value={source.path} placeholder="/Users/you/mock.json" onChange={(e) => setSource({ kind: "file", path: e.target.value })} />
+          <PathInput
+            className={MONO}
+            value={source.path}
+            title="Map Local file"
+            placeholder="/Users/you/mock.json"
+            onChange={(path) => setSource({ kind: "file", path })}
+            testId="map-local-file"
+          />
         </Field>
       )}
       {source.kind === "directory" && (
         <Field label="Root">
-          <Input className={MONO} value={source.root} placeholder="/Users/you/site" onChange={(e) => setSource({ kind: "directory", root: e.target.value })} />
+          <PathInput
+            className={MONO}
+            value={source.root}
+            title="Map Local directory"
+            folder
+            placeholder="/Users/you/site"
+            onChange={(root) => setSource({ kind: "directory", root })}
+            testId="map-local-root"
+          />
         </Field>
       )}
       {source.kind === "directory" && (

@@ -19,6 +19,7 @@ type CaptureMethods = Pick<
   | "setAutosaveSettings"
   | "autosaveNow"
   | "chooseAutosaveFolder"
+  | "choosePath"
 >;
 
 const APPS: InterceptApp[] = [
@@ -136,6 +137,11 @@ export function createMockCapture(changed: () => void) {
     },
     async chooseAutosaveFolder() {
       return "/Users/you/Documents/Proxymate";
+    },
+    async choosePath(_title, folder, extensions) {
+      // No OS dialog in the browser: answer with a plausible pick.
+      if (folder) return "/Users/you/site";
+      return `/Users/you/mock.${extensions[0] ?? "json"}`;
     },
   };
   return {

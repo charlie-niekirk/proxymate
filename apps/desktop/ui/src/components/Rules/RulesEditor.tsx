@@ -31,7 +31,7 @@ import { useScriptNames } from "@/hooks/useScripts";
 import { useUi } from "@/store/ui";
 
 import { ActionListEditor } from "./ActionListEditor";
-import { Checkbox, NumberInput } from "./fields";
+import { NumberInput } from "./fields";
 import { MatcherBuilder } from "./MatcherBuilder";
 import { RuleOriginBadge } from "./RuleOriginBadge";
 import { RuleTestPanel } from "./RuleTestPanel";
@@ -198,6 +198,12 @@ function RuleList({ rules, selected, hasDraft }: { rules: Rule[]; selected: stri
                 <div
                   key={rule.id}
                   draggable
+                  // A press on the checkbox only toggles. WebKit drops the click
+                  // once a drag has begun, even a cancelled one, so the row
+                  // stops being draggable for that press (and is again for any other).
+                  onPointerDown={(e) => {
+                    e.currentTarget.draggable = !(e.target instanceof HTMLInputElement);
+                  }}
                   onDragStart={(e: DragEvent) => {
                     setDragged(rule.id);
                     e.dataTransfer.effectAllowed = "move";
@@ -229,9 +235,17 @@ function RuleList({ rules, selected, hasDraft }: { rules: Rule[]; selected: stri
                     type="checkbox"
                     className="mt-0.5 size-3 shrink-0 accent-[var(--primary)]"
                     checked={rule.enabled}
-                    title={rule.enabled ? "Enabled" : "Disabled"}
+                    title={rule.enabled ? "Enabled: click to turn it off" : "Disabled: click to turn it on"}
+                    aria-label={`${rule.name || "Untitled"} enabled`}
+                    // Toggles without selecting the row; the row's onPointerDown keeps a
+                    // shaky press from starting a drag.
                     onClick={(e) => e.stopPropagation()}
-                    onChange={(e) => void setRuleEnabled(rule.id, e.target.checked)}
+                    onChange={(e) =>
+                      void setRuleEnabled(rule.id, e.target.checked).catch((err: unknown) =>
+                        reportError("Couldn't change the rule", err),
+                      )
+                    }
+                    data-testid="rule-enabled"
                   />
                   <div className={cn("min-w-0 flex-1", !rule.enabled && "opacity-50")}>
                     <div className="flex items-center gap-1">
@@ -290,7 +304,9 @@ function RuleForm({ initial }: { initial: Rule }) {
     error: null,
     busy: false,
   });
-  const unsaved = !rule.id || JSON.stringify(rule) !== JSON.stringify(initial);
+  // On/off belongs to the list's checkbox, which saves at once: the form
+  // neither marks it as an edit nor saves the state it was opened with.
+  const unsaved = !rule.id || JSON.stringify({ ...rule, enabled: initial.enabled }) !== JSON.stringify(initial);
 
   // Live validation: the engine compiles the rule as it would on save.
   useEffect(() => {
@@ -311,7 +327,7 @@ function RuleForm({ initial }: { initial: Rule }) {
     setSaving(true);
     setSaveError(null);
     try {
-      const saved = await saveRule(rule);
+      const saved = await saveRule({ ...rule, enabled: initial.enabled });
       openEditor({ ruleId: saved.id });
     } catch (e) {
       setSaveError(errorText(e));
@@ -358,7 +374,11 @@ function RuleForm({ initial }: { initial: Rule }) {
           aria-label="Rule name"
           data-testid="rule-name"
         />
-        <Checkbox checked={rule.enabled} onChange={(enabled) => setRule({ ...rule, enabled })} label="Enabled" />
+        {!initial.enabled && (
+          <span className="text-muted-foreground text-xs" title="Turn it on with its checkbox in the list" data-testid="rule-disabled">
+            Disabled
+          </span>
+        )}
         <RuleOriginBadge origin={rule.origin} />
         {unsaved && <span className="text-muted-foreground text-xs">Unsaved</span>}
         {(rule.actions.some(isVisual) || (rule.origin.kind === "preset" && rule.origin.preset === "rewrite")) && (
