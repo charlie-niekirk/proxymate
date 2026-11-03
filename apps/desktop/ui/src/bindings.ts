@@ -175,6 +175,13 @@ export const commands = {
 	autosaveNow: () => typedError<number, string>(__TAURI_INVOKE("autosave_now")),
 	/**  Picks the auto-save folder with a dialog; `None` if it was cancelled. */
 	chooseAutosaveFolder: () => typedError<string | null, string>(__TAURI_INVOKE("choose_autosave_folder")),
+	/**
+	 *  Asks for a file (or, with `folder`, a folder) with the OS dialog, for a
+	 *  path field such as Map Local's. `extensions` limits the files offered
+	 *  (empty: any file); the dialog opens beside `current` when it's set.
+	 *  `None` if it was cancelled.
+	 */
+	choosePath: (title: string, folder: boolean, extensions: string[], current: string | null) => typedError<string | null, string>(__TAURI_INVOKE("choose_path", { title, folder, extensions, current })),
 	/**  Pins or unpins flows of any store; pinned live flows are never evicted. */
 	pinFlows: (store: number, selection: FlowSelection_Deserialize, pinned: boolean) => typedError<number, string>(__TAURI_INVOKE("pin_flows", { store, selection, pinned })),
 	/**  The ids a selection names, in its order. */

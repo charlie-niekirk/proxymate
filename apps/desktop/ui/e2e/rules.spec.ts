@@ -67,3 +67,50 @@ test("a paused flow opens the Breakpoint Editor and Execute lets it go", async (
   await expect(editor).toBeHidden();
   await expect(page.getByTestId("breakpoint-badge")).not.toContainText("1");
 });
+
+test("a rule turns on and off from its checkbox in the list, which the form's Save keeps", async ({ page }) => {
+  await page.goto("/?rules");
+  const editor = page.getByTestId("rules-editor");
+  const row = editor.getByTestId("rule-row").first();
+  const toggle = row.getByTestId("rule-enabled");
+  await row.click();
+  const form = editor.getByTestId("rule-form");
+  await expect(form).toBeVisible();
+  // On/off lives in the list only.
+  await expect(form.getByRole("checkbox", { name: "Enabled" })).toHaveCount(0);
+
+  await expect(toggle).toBeChecked();
+  await toggle.click();
+  await expect(toggle).not.toBeChecked();
+  await expect(row).toHaveAttribute("data-selected", "true");
+  await expect(form.getByTestId("rule-disabled")).toBeVisible();
+  await expect(form).not.toContainText("Unsaved");
+
+  // Saving an edit doesn't turn it back on.
+  await form.getByTestId("rule-name").fill("Renamed rule");
+  await form.getByTestId("save-rule").click();
+  await expect(row).toContainText("Renamed rule");
+  await expect(toggle).not.toBeChecked();
+
+  await toggle.click();
+  await expect(toggle).toBeChecked();
+  await expect(form.getByTestId("rule-disabled")).toHaveCount(0);
+});
+
+test("Map Local's file and directory come from the OS picker", async ({ page }) => {
+  await page.goto("/");
+  await page.locator('[data-flow-id="0"]').click({ button: "right" });
+  await page.getByTestId("menu-map-local").click();
+  const editor = page.getByTestId("rules-editor");
+  const actions = editor.getByTestId("action-list");
+  await actions.getByTestId("map-local-source").click();
+  await page.getByRole("option", { name: "A file" }).click();
+  // The mock backend answers the dialog with a plausible pick.
+  await editor.getByTestId("map-local-file-choose").click();
+  await expect(editor.getByTestId("map-local-file")).toHaveValue("/Users/you/mock.json");
+
+  await actions.getByTestId("map-local-source").click();
+  await page.getByRole("option", { name: "A directory" }).click();
+  await editor.getByTestId("map-local-root-choose").click();
+  await expect(editor.getByTestId("map-local-root")).toHaveValue("/Users/you/site");
+});
