@@ -198,6 +198,12 @@ function RuleList({ rules, selected, hasDraft }: { rules: Rule[]; selected: stri
                 <div
                   key={rule.id}
                   draggable
+                  // A press on the checkbox only toggles. WebKit drops the click
+                  // once a drag has begun, even a cancelled one, so the row
+                  // stops being draggable for that press (and is again for any other).
+                  onPointerDown={(e) => {
+                    e.currentTarget.draggable = !(e.target instanceof HTMLInputElement);
+                  }}
                   onDragStart={(e: DragEvent) => {
                     setDragged(rule.id);
                     e.dataTransfer.effectAllowed = "move";
@@ -231,12 +237,8 @@ function RuleList({ rules, selected, hasDraft }: { rules: Rule[]; selected: stri
                     checked={rule.enabled}
                     title={rule.enabled ? "Enabled: click to turn it off" : "Disabled: click to turn it on"}
                     aria-label={`${rule.name || "Untitled"} enabled`}
-                    // A press here toggles; it never starts a row drag or selects the row.
-                    draggable={false}
-                    onDragStart={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                    }}
+                    // Toggles without selecting the row; the row's onPointerDown keeps a
+                    // shaky press from starting a drag.
                     onClick={(e) => e.stopPropagation()}
                     onChange={(e) =>
                       void setRuleEnabled(rule.id, e.target.checked).catch((err: unknown) =>

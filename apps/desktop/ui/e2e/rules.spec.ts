@@ -114,3 +114,34 @@ test("Map Local's file and directory come from the OS picker", async ({ page }) 
   await editor.getByTestId("map-local-root-choose").click();
   await expect(editor.getByTestId("map-local-root")).toHaveValue("/Users/you/site");
 });
+
+test("a shaky press on a rule's checkbox toggles it, and rows still drag to reorder", async ({ page }) => {
+  await page.goto("/");
+  await page.locator('[data-flow-id="0"]').click({ button: "right" });
+  await page.getByTestId("menu-map-local").click();
+  const editor = page.getByTestId("rules-editor");
+  await editor.getByTestId("save-rule").click();
+  const rows = editor.getByTestId("rule-row");
+  await expect(rows).toHaveCount(2);
+
+  // WebKit drops the click if the press starts a row drag, even a cancelled one.
+  const toggle = rows.first().getByTestId("rule-enabled");
+  await expect(toggle).toBeChecked();
+  const box = (await toggle.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  for (const dx of [2, 3, 4, 5]) await page.mouse.move(box.x + box.width / 2 + dx, box.y + box.height / 2 + 1);
+  await page.mouse.up();
+  await expect(toggle).not.toBeChecked();
+
+  const first = (await rows.first().innerText()).split("\n")[0] ?? "";
+  expect(first).not.toBe("");
+  const from = (await rows.first().boundingBox())!;
+  const to = (await rows.last().boundingBox())!;
+  await page.mouse.move(from.x + 60, from.y + from.height / 2);
+  await page.mouse.down();
+  for (let i = 1; i <= 10; i++) await page.mouse.move(from.x + 60, from.y + from.height / 2 + ((to.y - from.y) * i) / 10);
+  await page.mouse.up();
+  await expect(rows.last()).toContainText(first);
+  await expect(rows.first()).not.toContainText(first);
+});
