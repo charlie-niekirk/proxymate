@@ -579,7 +579,7 @@ async fn an_over_cap_body_streams_through_with_a_warning() {
             replacement: "y".into(),
         }],
     );
-    let len = pm_core::rules::REWRITE_BODY_CAP as u64 + 1024 * 1024;
+    let len = pm_core::test_support::REWRITE_BODY_CAP as u64 + 1024 * 1024;
     let response = client::send(
         proxy.addr,
         Request::get(upstream.url(&format!("/bytes/{len}")))

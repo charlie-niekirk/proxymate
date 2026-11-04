@@ -148,7 +148,7 @@ async fn tools_list_call_and_paginate() {
     let upstream = Upstream::start().await;
     let (status, _) = client::get(h.proxy, &upstream.url("/json")).await;
     assert_eq!(status, 200);
-    pm_core::synth::seed(&h.engine, 25, 1);
+    h.engine.seed_synthetic(25, 1);
     h.engine.flush();
 
     let (client, _) = h.client().await;

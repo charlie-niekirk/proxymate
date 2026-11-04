@@ -28,8 +28,7 @@ use pm_model::{
 
 pub use breakpoints::BreakpointSink;
 pub(crate) use breakpoints::{BreakpointManager, Outcome};
-pub use compile::{CompiledRuleSet, PATTERN_MAX_LEN, REGEX_SIZE_LIMIT};
-pub use db::APP_DB_FILE;
+pub use compile::CompiledRuleSet;
 
 use crate::mocks::Mocks;
 use crate::notify::Notifier;

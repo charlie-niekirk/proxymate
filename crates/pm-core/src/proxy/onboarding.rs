@@ -55,6 +55,7 @@ const HTML_TYPE: &str = "text/html; charset=utf-8";
 
 /// True if a request for `path` is one of the downloads, which count as a
 /// device taking part in setup.
+#[cfg(test)]
 pub fn is_download(path: &str) -> bool {
     matches!(path, "/cert.pem" | "/cert.crt" | "/proxymate.mobileconfig")
 }

@@ -231,14 +231,6 @@ impl View {
         self.indices.len() as u32
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.indices.is_empty()
-    }
-
-    pub fn spec(&self) -> &FilterSpec {
-        &self.spec
-    }
-
     pub fn set_filter(&mut self, spec: FilterSpec, flows: &[FlowSummary], operations: Option<&Arc<OpIndex>>) {
         self.filter = CompiledFilter::compile_with(&spec, operations);
         self.spec = spec;

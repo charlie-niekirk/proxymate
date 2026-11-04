@@ -100,7 +100,7 @@ async fn sends_are_recorded_and_marked() {
     let summary = engine.get_flow(id).unwrap();
     assert_eq!(summary.state, FlowState::Completed);
     assert_eq!((summary.status, summary.sent_by), (Some(200), Some(SentBy::User)));
-    assert_eq!(summary.client.as_deref(), Some(pm_core::proxy::APP_CLIENT));
+    assert_eq!(summary.client.as_deref(), Some(pm_core::test_support::APP_CLIENT));
     assert_eq!((summary.method.as_ref(), summary.query.as_str()), ("POST", "x=1"));
     let seen = inspect(&engine, id);
     assert_eq!(seen["method"], "POST");

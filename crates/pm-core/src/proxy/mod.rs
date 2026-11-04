@@ -50,7 +50,7 @@ use tokio::sync::{oneshot, watch};
 
 pub use send::APP_CLIENT;
 pub(crate) use send::Sender;
-pub use sniff::{Sniffed, classify};
+pub use sniff::Sniffed;
 pub use tee::TeeBody;
 
 use body::RuleBody;

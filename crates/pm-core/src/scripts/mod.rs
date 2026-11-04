@@ -51,6 +51,7 @@ use crate::{Engine, Error};
 pub const TYPE_DEFINITIONS: &str = include_str!("proxymate.d.ts");
 /// The globals scripts see, one per line; checked against the runtime and
 /// against `proxymate.d.ts` (`scripts/api_surface.txt`).
+#[cfg(test)]
 pub const API_SURFACE: &str = include_str!("../../../../scripts/api_surface.txt");
 
 /// Bodies larger than this reach scripts as `null` with `bodyTooLarge`.

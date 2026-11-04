@@ -9,7 +9,7 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::process::ExitCode;
 use std::time::Instant;
 
-use pm_core::{Engine, EngineConfig, ProxyConfig, synth};
+use pm_core::{Engine, EngineConfig, ProxyConfig};
 use pm_model::{
     ContentGroup, FilterSpec, FlowState, FlowSummary, MCP_DEFAULT_PORT, ProtocolFilter, SortDir, SortKey, SortSpec,
     TlsStatus,
@@ -125,7 +125,7 @@ fn soak_config(args: &[String]) -> Option<soak::SoakConfig> {
 fn bench(flows: usize) {
     let engine = Engine::new();
     let start = Instant::now();
-    synth::seed(&engine, flows, 1);
+    engine.seed_synthetic(flows, 1);
     println!("seed {flows} flows: {:.1} ms", start.elapsed().as_secs_f64() * 1e3);
 
     let view = engine.create_view(FilterSpec::default(), SortSpec::default()).view;
@@ -183,7 +183,7 @@ fn serve(config: ProxyConfig, mcp: Option<u16>) -> ExitCode {
     let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
     runtime.block_on(async {
         let extra_upstream_roots = match std::env::var_os("PROXYMATE_EXTRA_UPSTREAM_CA") {
-            Some(path) => match pm_core::tls::certs_from_pem_file(path.as_ref()) {
+            Some(path) => match Engine::read_pem_certificates(path.as_ref()) {
                 Ok(certs) => certs,
                 Err(err) => {
                     eprintln!("PROXYMATE_EXTRA_UPSTREAM_CA: {err}");

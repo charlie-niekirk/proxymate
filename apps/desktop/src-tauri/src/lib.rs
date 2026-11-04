@@ -10,7 +10,7 @@ mod window;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use pm_core::{Engine, EngineConfig, synth};
+use pm_core::{Engine, EngineConfig};
 use pm_model::MCP_DEFAULT_PORT;
 use tauri::Manager;
 
@@ -337,10 +337,10 @@ fn start_engine(data_dir: Option<PathBuf>) -> Arc<Engine> {
     let flows = env_or("PROXYMATE_SYNTH_FLOWS", 0usize);
     let rate = env_or("PROXYMATE_SYNTH_RATE", 0u32);
     if flows > 0 {
-        synth::seed(&engine, flows, 1);
+        engine.seed_synthetic(flows, 1);
     }
     if rate > 0 {
-        synth::spawn_live(Arc::downgrade(&engine), rate, 2);
+        engine.spawn_synthetic(rate, 2);
     }
     engine
 }
@@ -429,7 +429,7 @@ fn extra_upstream_roots() -> Vec<Vec<u8>> {
     let Some(path) = std::env::var_os("PROXYMATE_EXTRA_UPSTREAM_CA") else {
         return Vec::new();
     };
-    pm_core::tls::certs_from_pem_file(path.as_ref()).unwrap_or_else(|err| {
+    Engine::read_pem_certificates(path.as_ref()).unwrap_or_else(|err| {
         eprintln!("PROXYMATE_EXTRA_UPSTREAM_CA: {err}");
         Vec::new()
     })

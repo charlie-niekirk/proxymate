@@ -22,6 +22,7 @@ pub struct CompiledFilter {
 }
 
 impl CompiledFilter {
+    #[cfg(test)]
     pub fn compile(spec: &FilterSpec) -> Self {
         Self::compile_with(spec, None)
     }

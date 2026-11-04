@@ -249,6 +249,30 @@ impl Engine {
         ids
     }
 
+    /// Seeds `count` synthetic finished flows ending at about now
+    /// (`PROXYMATE_SYNTH_FLOWS`, the CLI bench). Opt-in only.
+    pub fn seed_synthetic(&self, count: usize, seed: u64) {
+        crate::synth::seed(self, count, seed);
+    }
+
+    /// Starts a thread adding about `per_sec` synthetic live flows a
+    /// second (`PROXYMATE_SYNTH_RATE`). It stops when the engine is dropped.
+    pub fn spawn_synthetic(self: &Arc<Self>, per_sec: u32, seed: u64) {
+        crate::synth::spawn_live(Arc::downgrade(self), per_sec, seed);
+    }
+
+    /// The DER of every certificate in a PEM file, for
+    /// [`EngineConfig::extra_upstream_roots`] (`PROXYMATE_EXTRA_UPSTREAM_CA`).
+    pub fn read_pem_certificates(path: &std::path::Path) -> std::io::Result<Vec<Vec<u8>>> {
+        crate::tls::certs_from_pem_file(path)
+    }
+
+    /// The MCP bearer token saved in `data_dir`, without starting an engine
+    /// (the stdio bridge). `None` if there's no database or no token yet.
+    pub fn stored_mcp_token(data_dir: &std::path::Path) -> Option<String> {
+        crate::mcp::read_token(data_dir)
+    }
+
     /// Replaces existing flows (matched by id) and waits until views see it.
     pub fn update_flows(&self, batch: Vec<FlowSummary>) {
         self.ingest.send(FlowEvent::Update(batch));

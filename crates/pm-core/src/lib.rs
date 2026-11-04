@@ -9,33 +9,44 @@ mod documents;
 mod engine;
 mod ingest;
 mod integration;
-pub mod io;
-pub mod mcp;
+pub(crate) mod io;
+pub(crate) mod mcp;
 mod mocks;
 mod network;
 mod notify;
-pub mod openapi;
+pub(crate) mod openapi;
 mod protos;
-pub mod proxy;
+pub(crate) mod proxy;
 mod recorder;
 mod replay;
-pub mod rules;
-pub mod scripts;
+pub(crate) mod rules;
+pub(crate) mod scripts;
 mod search;
 mod settings;
-pub mod store;
-pub mod synth;
-pub mod tls;
-pub mod trust;
+pub(crate) mod store;
+pub(crate) mod synth;
+pub(crate) mod tls;
+pub(crate) mod trust;
 mod updates;
 mod workflow;
+
+/// Not part of the API. What `pm-core`'s integration tests and benches (and
+/// `pm-testkit`) need beyond [`Engine`]; adapters must not use it.
+#[doc(hidden)]
+pub mod test_support {
+    pub use crate::proxy::APP_CLIENT;
+    pub use crate::rules::REWRITE_BODY_CAP;
+    pub mod synth {
+        pub use crate::synth::{Generator, seed, spawn_live};
+    }
+}
 
 pub use client::{ClientApp, ClientKind};
 pub use devices::{DevicesSink, HOLD as DEVICE_HOLD, ONBOARDING_HOST};
 pub use documents::ProgressSink;
 pub use engine::{BodyBytes, DeltaSink, Engine, EngineConfig, PUBLISH_INTERVAL};
 pub use integration::SidebarSink;
-pub use mcp::McpSink;
+pub use mcp::{McpCall, McpSink};
 pub use protos::ProtoImport;
 pub use proxy::ProxyConfig;
 pub use recorder::{BodyEnd, FlowRecorder, WsRecorder};
