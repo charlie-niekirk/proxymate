@@ -4,7 +4,13 @@
 //!
 //! Ids are allocated and Started events sent under one mutex, so the channel
 //! carries flows in id order and the store can append without reordering.
+//!
+//! Size updates (Progress, and WebSocket message sizes) are the one stream
+//! that grows with the traffic rather than with the flows, so they don't
+//! queue (R2): each flow keeps one pending update, folded into the next,
+//! and the channel carries a single marker for all of them.
 
+use std::collections::HashMap;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, SyncSender};
 use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
@@ -107,6 +113,9 @@ pub(crate) enum FlowEvent {
     Clear,
     /// Acknowledged once every earlier event has been applied.
     Flush(SyncSender<()>),
+    /// The coalesced size updates go here: the ingest thread swaps in what
+    /// [`IngestTx::take_sizes`] holds by now.
+    Sizes,
 }
 
 /// The sending side, owned by the engine.
@@ -117,12 +126,28 @@ pub(crate) struct IngestTx {
 struct TxInner {
     next_id: FlowId,
     tx: Sender<FlowEvent>,
+    /// Size updates not applied yet; a [`FlowEvent::Sizes`] is queued
+    /// whenever this goes from empty to not.
+    sizes: HashMap<FlowId, PendingSizes>,
+}
+
+#[derive(Default)]
+struct PendingSizes {
+    /// The latest Progress: totals so far.
+    progress: Option<(u64, u64)>,
+    /// WebSocket payload bytes since the last update, each way.
+    ws_sent: u64,
+    ws_received: u64,
 }
 
 impl IngestTx {
     pub fn new(tx: Sender<FlowEvent>) -> Self {
         IngestTx {
-            inner: Mutex::new(TxInner { next_id: 0, tx }),
+            inner: Mutex::new(TxInner {
+                next_id: 0,
+                tx,
+                sizes: HashMap::new(),
+            }),
         }
     }
 
@@ -156,9 +181,57 @@ impl IngestTx {
         inner.next_id
     }
 
-    /// Queues an event that needs no ordering with id allocation.
+    /// Queues an event that needs no ordering with id allocation. Size
+    /// updates are folded into the flow's pending one.
     pub fn send(&self, event: FlowEvent) {
-        let _ = self.inner.lock().tx.send(event);
+        let mut inner = self.inner.lock();
+        let id = match &event {
+            FlowEvent::Progress { id, .. } | FlowEvent::WsMsg { id, .. } => *id,
+            _ => {
+                let _ = inner.tx.send(event);
+                return;
+            }
+        };
+        let first = inner.sizes.is_empty();
+        let pending = inner.sizes.entry(id).or_default();
+        match event {
+            FlowEvent::Progress {
+                req_size, resp_size, ..
+            } => pending.progress = Some((req_size, resp_size)),
+            FlowEvent::WsMsg { direction, len, .. } => match direction {
+                WsDirection::Sent => pending.ws_sent += len,
+                WsDirection::Received => pending.ws_received += len,
+            },
+            _ => unreachable!("only size updates get here"),
+        }
+        if first {
+            let _ = inner.tx.send(FlowEvent::Sizes);
+        }
+    }
+
+    /// The pending size updates, as events, oldest flow first.
+    pub(crate) fn take_sizes(&self) -> Vec<FlowEvent> {
+        let mut sizes: Vec<(FlowId, PendingSizes)> = self.inner.lock().sizes.drain().collect();
+        sizes.sort_unstable_by_key(|(id, _)| *id);
+        let mut events = Vec::with_capacity(sizes.len());
+        for (id, pending) in sizes {
+            if let Some((req_size, resp_size)) = pending.progress {
+                events.push(FlowEvent::Progress {
+                    id,
+                    req_size,
+                    resp_size,
+                });
+            }
+            for (direction, len) in [
+                (WsDirection::Sent, pending.ws_sent),
+                (WsDirection::Received, pending.ws_received),
+            ] {
+                if len > 0 {
+                    events.push(FlowEvent::WsMsg { id, direction, len });
+                }
+            }
+        }
+        events
     }
 
     /// Blocks until every event queued so far has been applied.
@@ -189,6 +262,16 @@ pub(crate) fn ingest_loop(rx: Receiver<FlowEvent>, engine: Weak<Engine>) {
         let Some(engine) = engine.upgrade() else {
             return;
         };
+        if batch.iter().any(|e| matches!(e, FlowEvent::Sizes)) {
+            let mut expanded = Vec::with_capacity(batch.len());
+            for event in batch {
+                match event {
+                    FlowEvent::Sizes => expanded.extend(engine.ingest().take_sizes()),
+                    event => expanded.push(event),
+                }
+            }
+            batch = expanded;
+        }
         let acks = engine.apply_events(batch);
         for ack in acks {
             let _ = ack.send(());
@@ -196,5 +279,56 @@ pub(crate) fn ingest_loop(rx: Receiver<FlowEvent>, engine: Weak<Engine>) {
         if disconnected {
             return;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn size_updates_fold_into_one_pending_update_per_flow() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let ingest = IngestTx::new(tx);
+        for size in 1..=100u64 {
+            ingest.send(FlowEvent::Progress {
+                id: 3,
+                req_size: size,
+                resp_size: size * 2,
+            });
+            ingest.send(FlowEvent::WsMsg {
+                id: 1,
+                direction: WsDirection::Received,
+                len: 10,
+            });
+        }
+        ingest.send(FlowEvent::Edited { id: 3 });
+        // One marker for all 200 updates, then the other event.
+        let queued: Vec<FlowEvent> = rx.try_iter().collect();
+        assert!(matches!(queued[..], [FlowEvent::Sizes, FlowEvent::Edited { id: 3 }]));
+        let sizes = ingest.take_sizes();
+        assert!(matches!(
+            sizes[..],
+            [
+                FlowEvent::WsMsg {
+                    id: 1,
+                    direction: WsDirection::Received,
+                    len: 1000
+                },
+                FlowEvent::Progress {
+                    id: 3,
+                    req_size: 100,
+                    resp_size: 200
+                },
+            ]
+        ));
+        // Taken: the next update queues a new marker.
+        assert!(ingest.take_sizes().is_empty());
+        ingest.send(FlowEvent::Progress {
+            id: 3,
+            req_size: 101,
+            resp_size: 202,
+        });
+        assert!(matches!(rx.try_iter().collect::<Vec<_>>()[..], [FlowEvent::Sizes]));
     }
 }

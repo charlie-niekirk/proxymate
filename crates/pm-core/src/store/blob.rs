@@ -47,6 +47,20 @@ impl BlobRef {
         }
     }
 
+    /// The first `max` bytes, reading only the extents that hold them.
+    pub fn read_prefix(&self, segments: &SegmentStore, max: usize) -> io::Result<Vec<u8>> {
+        match self {
+            BlobRef::Empty => Ok(Vec::new()),
+            BlobRef::Inline(bytes) => Ok(bytes[..bytes.len().min(max)].to_vec()),
+            BlobRef::Segments(extents) => {
+                let total: usize = extents.iter().map(|e| e.len as usize).sum();
+                let mut out = Vec::with_capacity(total.min(max));
+                segments.read_prefix_into(extents, max, &mut out)?;
+                Ok(out)
+            }
+        }
+    }
+
     pub fn read(&self, segments: &SegmentStore) -> io::Result<Vec<u8>> {
         match self {
             BlobRef::Empty => Ok(Vec::new()),
@@ -139,15 +153,17 @@ impl Capture {
         if self.buf.is_empty() {
             return;
         }
-        match segments.append(self.owner, &self.buf) {
+        // The writer thread does the I/O; this only queues the chunk.
+        let bytes = std::mem::take(&mut self.buf);
+        let len = bytes.len() as u64;
+        match segments.append_owned(self.owner, bytes) {
             Ok(extent) => self.extents.push(extent),
             Err(_) => {
                 // Keep forwarding; the recording just ends here.
                 self.truncated = true;
-                self.captured -= self.buf.len() as u64;
+                self.captured -= len;
             }
         }
-        self.buf.clear();
     }
 }
 

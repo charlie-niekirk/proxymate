@@ -78,7 +78,7 @@ impl DetailStore {
             return Ok(());
         }
         let encoded = postcard::to_allocvec(&*stored).map_err(io::Error::other)?;
-        let result = self.segments.append(id, &encoded).map(|extent| {
+        let result = self.segments.append_owned(id, encoded).map(|extent| {
             self.persisted.lock().insert(id, extent);
         });
         // Cached either way, so the detail stays readable for a while even if
@@ -123,6 +123,25 @@ impl DetailStore {
         }
         match self.get(id)? {
             Some(stored) => stored.body(part).read(&self.segments).map(Some),
+            None => Ok(None),
+        }
+    }
+
+    /// The first `max` bytes of [`DetailStore::body`]: a finished flow's
+    /// body is read only as far as that.
+    pub fn body_prefix(&self, id: FlowId, part: BodyPart, max: usize) -> io::Result<Option<Vec<u8>>> {
+        if self.is_cleared(id) {
+            return Ok(None);
+        }
+        let live = self.live.lock().get(&id).cloned();
+        if let Some(flow) = live {
+            return flow.body_snapshot(part, &self.segments).map(|mut bytes| {
+                bytes.truncate(max);
+                Some(bytes)
+            });
+        }
+        match self.get(id)? {
+            Some(stored) => stored.body(part).read_prefix(&self.segments, max).map(Some),
             None => Ok(None),
         }
     }

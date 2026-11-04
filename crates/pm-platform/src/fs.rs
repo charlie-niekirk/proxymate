@@ -24,6 +24,31 @@ pub fn write_private(path: &Path, contents: &[u8]) -> io::Result<()> {
     std::fs::rename(&tmp, path)
 }
 
+/// Fills `buf` from `file` at `offset` without moving a shared cursor, so
+/// threads can read one open file at once (`pread` on Unix).
+pub fn read_exact_at(file: &std::fs::File, buf: &mut [u8], offset: u64) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::FileExt;
+        file.read_exact_at(buf, offset)
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::FileExt;
+        let (mut done, mut at) = (0, offset);
+        while done < buf.len() {
+            match file.seek_read(&mut buf[done..], at)? {
+                0 => return Err(io::ErrorKind::UnexpectedEof.into()),
+                n => {
+                    done += n;
+                    at += n as u64;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 /// A temp file next to `path`, unique per process and per call, so
 /// concurrent writers never share one.
 pub fn temp_sibling(path: &Path) -> PathBuf {

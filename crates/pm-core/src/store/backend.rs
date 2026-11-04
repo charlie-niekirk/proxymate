@@ -27,6 +27,16 @@ pub(crate) trait BlobBackend: Send + Sync {
     /// `BodyInfo::encoding` says).
     fn body(&self, id: FlowId, part: BodyPart) -> io::Result<Option<Vec<u8>>>;
 
+    /// The first `max` bytes of [`BlobBackend::body`], reading no more of
+    /// it than that where the backend can (R2: a deep search reads 4 MB
+    /// of a 64 MB body, not all of it).
+    fn body_prefix(&self, id: FlowId, part: BodyPart, max: usize) -> io::Result<Option<Vec<u8>>> {
+        Ok(self.body(id, part)?.map(|mut bytes| {
+            bytes.truncate(max);
+            bytes
+        }))
+    }
+
     /// The flow's WebSocket messages, if it became a WebSocket.
     fn ws(&self, id: FlowId) -> io::Result<Option<Arc<WsLog>>>;
 
@@ -44,6 +54,10 @@ impl BlobBackend for SegmentBackend {
 
     fn body(&self, id: FlowId, part: BodyPart) -> io::Result<Option<Vec<u8>>> {
         DetailStore::body(self, id, part)
+    }
+
+    fn body_prefix(&self, id: FlowId, part: BodyPart, max: usize) -> io::Result<Option<Vec<u8>>> {
+        DetailStore::body_prefix(self, id, part, max)
     }
 
     fn ws(&self, id: FlowId) -> io::Result<Option<Arc<WsLog>>> {
