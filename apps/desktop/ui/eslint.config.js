@@ -21,6 +21,13 @@ export default defineConfig([
     },
   },
   {
+    // Type-aware: a promise nobody awaits, returns or `void`s is an error
+    // that would vanish (a rejected IPC call with no toast).
+    files: ["src/**/*.{ts,tsx}"],
+    languageOptions: { parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname } },
+    rules: { "@typescript-eslint/no-floating-promises": "error" },
+  },
+  {
     // shadcn/ui components export variants next to components by design.
     files: ["src/components/ui/**"],
     rules: { "react-refresh/only-export-components": "off" },

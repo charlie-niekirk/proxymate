@@ -19,7 +19,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/componen
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { addSslBypass, openRewrite, setInsecureUpstream } from "@/lib/actions";
+import { addSslBypass, errorText, openRewrite, setInsecureUpstream } from "@/lib/actions";
 import { backend } from "@/lib/backend";
 import { explainFailure, type FailureHelp } from "@/lib/errors";
 import { flowUrl, formatDuration, formatSize } from "@/lib/flow";
@@ -66,7 +66,7 @@ interface Inspected {
 export function DetailPane() {
   const id = useUi((s) => s.selectedId);
   const store = useUi((s) => s.store);
-  const { data } = useQuery({
+  const { data, error, refetch } = useQuery({
     queryKey: flowKey(store, id),
     enabled: id !== null,
     queryFn: async (): Promise<Inspected | null> => {
@@ -75,13 +75,24 @@ export function DetailPane() {
     },
   });
 
-  if (id === null || !data || data.flow.id !== id) {
+  if (id === null) return <PaneMessage>Select a flow to inspect it</PaneMessage>;
+  if (error) {
     return (
-      <div className="bg-background text-muted-foreground flex h-full items-center justify-center text-sm">
-        Select a flow to inspect it
-      </div>
+      <PaneMessage testid="inspector-error">
+        <span>Couldn't load this flow</span>
+        <span className="max-w-md text-center text-xs" data-selectable>
+          {errorText(error)}
+        </span>
+        <Button size="sm" variant="outline" onClick={() => void refetch()}>
+          Try again
+        </Button>
+      </PaneMessage>
     );
   }
+  // `null` is an answer: the store has no such flow (cleared, deleted or evicted).
+  if (data === null) return <PaneMessage testid="inspector-gone">This flow is no longer available</PaneMessage>;
+  // Still loading: a blank pane rather than a message flashing on every arrow key.
+  if (data === undefined || data.flow.id !== id) return <div className="bg-background h-full" />;
 
   const { flow, detail } = data;
   const stream = streamKind(flow, detail);
@@ -483,6 +494,18 @@ function FillTab({ value, children }: { value: string; children: ReactNode }) {
     <TabsContent value={value} className="min-h-0 flex-1">
       {children}
     </TabsContent>
+  );
+}
+
+/** The inspector's whole area, holding one centred message (nothing selected, an error, a gone flow). */
+function PaneMessage({ children, testid }: { children: ReactNode; testid?: string }) {
+  return (
+    <div
+      className="bg-background text-muted-foreground flex h-full flex-col items-center justify-center gap-2 text-sm"
+      data-testid={testid}
+    >
+      {children}
+    </div>
   );
 }
 

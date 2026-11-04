@@ -651,18 +651,32 @@ function progressChannel(onProgress: (p: SaveProgress_Serialize) => void) {
   return channel as unknown as Channel<SaveProgress_Deserialize>;
 }
 
+/** Why every call fails in a release build opened outside the app (see `unavailableBackend`). */
+export const NO_ENGINE = "Proxymate's interface only runs inside the Proxymate app.";
+
+/**
+ * A release build in a plain browser has no engine. Rather than show the
+ * mock's synthetic traffic as if it were real, every call fails; `main.tsx`
+ * renders a notice instead of the app. (Every `Backend` method is async.)
+ */
+function unavailableBackend(): Backend {
+  return new Proxy({} as Backend, { get: () => () => Promise.reject(new Error(NO_ENGINE)) });
+}
+
 function pickBackend(): Backend {
   if (isTauri()) return tauriBackend;
-  // Dev only: `?zoo` serves the body-viewer fixtures (crates/pm-testkit/fixtures/zoo)
+  // A constant `false` in release builds, so the mock is left out of the bundle.
+  if (!import.meta.env.DEV) return unavailableBackend();
+  // `?zoo` serves the body-viewer fixtures (crates/pm-testkit/fixtures/zoo)
   // instead of synthetic rows, for the Playwright viewer tests.
-  if (import.meta.env.DEV && new URLSearchParams(window.location.search).has("zoo")) {
+  if (new URLSearchParams(window.location.search).has("zoo")) {
     return createMockBackend(0, import("@/dev/zoo").then((m) => m.loadZoo()));
   }
   return createMockBackend(100_000);
 }
 
 /**
- * The Tauri backend inside the app; an in-memory mock in a plain browser
- * (`npm run dev` on its own) and in tests.
+ * The Tauri backend inside the app. In dev and tests outside the app
+ * (`npm run dev` on its own, vitest), an in-memory mock.
  */
 export const backend: Backend = pickBackend();

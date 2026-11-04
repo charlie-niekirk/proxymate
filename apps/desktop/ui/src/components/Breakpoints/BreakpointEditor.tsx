@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { queryOptions, useQuery } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, CirclePlay, OctagonPause, Plus, Reply, Trash2, X, XCircle } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 
@@ -20,6 +20,7 @@ import { backend } from "@/lib/backend";
 import { languageFor } from "@/lib/compose";
 import { base64, hexBytes } from "@/lib/copyFormats";
 import { bodyText, headerValue } from "@/lib/http";
+import { breakpointBodyKey } from "@/lib/query";
 import { parseHex } from "@/lib/stream";
 import { cleanHeaders } from "@/lib/rules";
 import { cn } from "@/lib/utils";
@@ -203,10 +204,8 @@ function BreakpointForm({ bp }: { bp: BreakpointInfo_Serialize }) {
   const [answer, setAnswer] = useState({ status: 200 as number | null, headers: [{ name: "content-type", value: "application/json" }] as Header[], body: "" });
   const [error, setError] = useState<string | null>(null);
   const { data: originalBody = "", isPending: bodyPending } = useQuery({
-    queryKey: ["breakpoint-body", bp.id],
-    queryFn: async () => new TextDecoder().decode(await backend.getBreakpointBody(bp.id)),
-    staleTime: Infinity,
-    gcTime: 0,
+    ...breakpointBody(bp.id),
+    select: (bytes) => new TextDecoder().decode(bytes),
   });
   const bodyText = body ?? originalBody;
 
@@ -334,6 +333,18 @@ function BreakpointForm({ bp }: { bp: BreakpointInfo_Serialize }) {
   );
 }
 
+/**
+ * A held body as bytes. Both forms read it through this one query, so the
+ * cache entry always has the same shape; the HTTP form decodes it with `select`.
+ */
+const breakpointBody = (id: number) =>
+  queryOptions({
+    queryKey: breakpointBodyKey(id),
+    queryFn: async () => new Uint8Array(await backend.getBreakpointBody(id)),
+    staleTime: Infinity,
+    gcTime: 0,
+  });
+
 type MessageMode = "text" | "tree" | "hex";
 
 /**
@@ -343,12 +354,7 @@ type MessageMode = "text" | "tree" | "hex";
  */
 function MessageForm({ bp }: { bp: BreakpointInfo_Serialize }) {
   const held = bp.message!;
-  const { data: original, isPending } = useQuery({
-    queryKey: ["breakpoint-body", bp.id],
-    queryFn: async () => new Uint8Array(await backend.getBreakpointBody(bp.id)),
-    staleTime: Infinity,
-    gcTime: 0,
-  });
+  const { data: original, isPending } = useQuery(breakpointBody(bp.id));
   const originalText = useMemo(() => (original ? bodyText(original) : null), [original]);
   const isJson = originalText !== null && parsed(originalText) !== null;
   const [mode, setMode] = useState<MessageMode | null>(null);
