@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use futures_util::{SinkExt, StreamExt};
 use pm_core::{BodyEnd, Engine, EngineConfig, ProxyConfig};
 use pm_model::{
-    BodyInfo, BodyPart, ContentKind, DocumentKind, FilterSpec, FlowDetail, FlowSelection, FlowState, Header,
+    BodyInfo, BodyPart, ContentKind, DocumentKind, ErrorKind, FilterSpec, FlowDetail, FlowSelection, FlowState, Header,
     HttpVersion, LIVE_STORE, RequestHead, ResponseHead, SaveProgress, SortSpec, StoreId, Timing, WsQuery,
 };
 use pm_testkit::Upstream;
@@ -100,6 +100,7 @@ fn record(engine: &Arc<Engine>, n: usize) {
             rules: Default::default(),
             trailers: None,
             via: None,
+            error_kind: None,
         };
         let recorder = engine.begin_flow(summary, detail).expect("recording");
         let (request, response) = body_for(i);
@@ -419,7 +420,9 @@ fn a_version_2_session_still_opens() {
             .collect::<Result<_, _>>()
             .unwrap();
         for (id, mut detail) in details {
-            // `trailers: None` and `via: None` are the last bytes.
+            // `trailers: None`, `via: None` and `error_kind: None` are the
+            // last bytes.
+            assert_eq!(detail.pop(), Some(0));
             assert_eq!(detail.pop(), Some(0));
             assert_eq!(detail.pop(), Some(0));
             conn.execute(
@@ -443,8 +446,91 @@ fn a_version_2_session_still_opens() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
-/// A session saved by M17 (format version 4, before `FlowDetail.via`)
-/// still opens.
+/// Turns a version 8 file into an older one: takes `error_kind` (the last
+/// field of each detail) back out and sets `version`.
+fn strip_error_kinds(path: &Path, version: &str) {
+    let conn = rusqlite::Connection::open(path).unwrap();
+    let details: Vec<(i64, Vec<u8>)> = conn
+        .prepare("SELECT id, detail FROM flows")
+        .unwrap()
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    for (id, mut detail) in details {
+        // `None` is one 0; `Some(kind)` is a 1 and the kind's index.
+        if detail.last() == Some(&0) && detail[detail.len() - 2] != 1 {
+            detail.pop();
+        } else {
+            detail.truncate(detail.len() - 2);
+        }
+        conn.execute(
+            "UPDATE flows SET detail = ?1 WHERE id = ?2",
+            rusqlite::params![detail, id],
+        )
+        .unwrap();
+    }
+    conn.execute("UPDATE meta SET value = ?1 WHERE key = 'version'", [version])
+        .unwrap();
+}
+
+/// A session saved before R3 (format version 7, before
+/// `FlowDetail.error_kind`) opens, and a failed flow gets its kind from its
+/// message, as the inspector used to work it out.
+#[test]
+fn a_version_7_session_still_opens() {
+    let dir = temp_dir();
+    let engine = engine(&dir);
+    record(&engine, 1);
+    let failed = engine
+        .begin_flow(
+            Generator::new(3).active_flow(),
+            FlowDetail {
+                id: 0,
+                request: RequestHead {
+                    method: "GET".into(),
+                    url: "http://127.0.0.1:1/".into(),
+                    version: HttpVersion::Http11,
+                    headers: Vec::new(),
+                },
+                response: None,
+                request_body: BodyInfo::default(),
+                response_body: BodyInfo::default(),
+                error: None,
+                tls: None,
+                timing: Timing::default(),
+                rules: Default::default(),
+                trailers: None,
+                via: None,
+                error_kind: None,
+            },
+        )
+        .expect("recording");
+    failed.fail(ErrorKind::Refused, "can't reach 127.0.0.1:1: Connection refused");
+    engine.flush();
+    let path = dir.join("v7.proxymate");
+    finish(|sink| {
+        engine
+            .save_session(LIVE_STORE, &FlowSelection::All, path.clone(), sink)
+            .unwrap()
+    });
+    let doc = engine.open_document(&path).expect("a v8 session opens");
+    let detail = engine.flow_detail_in(doc.store, 1).unwrap().unwrap();
+    assert_eq!(detail.error_kind, Some(ErrorKind::Refused), "saved with its kind");
+    strip_error_kinds(&path, "7");
+    let doc = engine.open_document(&path).expect("a v7 session opens");
+    let ok = engine.flow_detail_in(doc.store, 0).unwrap().unwrap();
+    assert_eq!((ok.error, ok.error_kind), (None, None));
+    let detail = engine.flow_detail_in(doc.store, 1).unwrap().unwrap();
+    assert_eq!(
+        detail.error.as_deref(),
+        Some("can't reach 127.0.0.1:1: Connection refused")
+    );
+    assert_eq!(detail.error_kind, Some(ErrorKind::Refused), "inferred from the message");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A session saved by M19 (format version 6) still opens.
 #[test]
 fn a_version_6_session_still_opens() {
     let dir = temp_dir();
@@ -456,12 +542,9 @@ fn a_version_6_session_still_opens() {
             .save_session(LIVE_STORE, &FlowSelection::All, path.clone(), sink)
             .unwrap()
     });
-    {
-        // Version 7 only added preset kinds: a version 6 file is the same bytes.
-        let conn = rusqlite::Connection::open(&path).unwrap();
-        conn.execute("UPDATE meta SET value = '6' WHERE key = 'version'", [])
-            .unwrap();
-    }
+    // Version 7 only added preset kinds: a version 6 file is a version 7
+    // one.
+    strip_error_kinds(&path, "6");
     let doc = engine.open_document(&path).expect("a v6 session opens");
     let detail = engine.flow_detail_in(doc.store, 1).unwrap().unwrap();
     assert_eq!(detail.request.headers[0].value, "1");
@@ -489,7 +572,8 @@ fn a_version_4_session_still_opens() {
             .collect::<Result<_, _>>()
             .unwrap();
         for (id, mut detail) in details {
-            assert_eq!(detail.pop(), Some(0), "`via: None` is the last byte");
+            assert_eq!(detail.pop(), Some(0), "`error_kind: None` is the last byte");
+            assert_eq!(detail.pop(), Some(0), "then `via: None`");
             conn.execute(
                 "UPDATE flows SET detail = ?1 WHERE id = ?2",
                 rusqlite::params![detail, id],

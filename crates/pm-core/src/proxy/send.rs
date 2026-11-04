@@ -121,6 +121,7 @@ impl Sender {
             rules: Default::default(),
             trailers: None,
             via: None,
+            error_kind: None,
         };
         let recorder = engine.record_flow(summary, detail);
         let id = recorder.id();

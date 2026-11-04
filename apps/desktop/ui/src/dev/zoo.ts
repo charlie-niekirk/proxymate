@@ -118,6 +118,7 @@ export async function loadZoo(): Promise<MockFlow[]> {
           rules: { applied: [], rewrite_skipped: null, breakpoint_timeout: false, mocked: false, scripts: [] },
           trailers: decoded?.response?.trailers.length ? decoded.response.trailers : null,
           via: null,
+          error_kind: null,
         },
         decodedBodies: decoded,
         bodies: {

@@ -300,6 +300,7 @@ pub(super) fn get_flow(ctx: &Ctx<'_>, p: GetFlow) -> ToolResult {
             "trailers": detail.trailers,
         })),
         "error": detail.error,
+        "error_kind": detail.error_kind,
     });
     if let Ok(Some(op)) = ctx.engine.flow_operation_in(LIVE_STORE, p.id) {
         out["operation"] = json!(op);

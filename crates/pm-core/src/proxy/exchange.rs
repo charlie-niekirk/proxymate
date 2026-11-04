@@ -56,6 +56,7 @@ use super::{
 };
 use crate::Engine;
 use crate::client::PeerClient;
+use crate::failure::Failure;
 use crate::io::decode;
 use crate::recorder::FlowRecorder;
 use crate::rules::compile::CompiledRule;
@@ -63,6 +64,7 @@ use crate::rules::eval::{self, RequestDraft, ResponseDraft, ThrottleSpec, header
 use crate::rules::{BREAKPOINT_EDIT_CAP, Outcome, REWRITE_BODY_CAP, local};
 use crate::scripts::traffic::js_request;
 use crate::scripts::{JsRequest, ScriptRun};
+use pm_model::ErrorKind;
 
 /// How long a request waits for its client app when a rule matches on it.
 const CLIENT_APP_WAIT: Duration = Duration::from_millis(300);
@@ -209,7 +211,7 @@ impl Exchange<'_> {
         let target = Target::new(self.scheme, &self.host, self.port);
         let mut upstream = match self.send(parts, pq, &target, body, upgrade.is_some()).await {
             Ok(response) => response,
-            Err(message) => return Ok(self.fail(message)),
+            Err(failure) => return Ok(self.fail(failure)),
         };
         // The recorded head is what the upstream sent, before hop-by-hop stripping.
         let head = response_head(&upstream);
@@ -266,7 +268,7 @@ impl Exchange<'_> {
                 Err(err) => {
                     let message = format!("request body: {err}");
                     if let Some(rec) = &rec {
-                        rec.fail(message.clone());
+                        rec.fail(ErrorKind::Other, message.clone());
                     }
                     return Err(Reset::new(message));
                 }
@@ -452,7 +454,7 @@ impl Exchange<'_> {
         let body = TeeBody::new(body, rec.clone(), BodyPart::Request);
         let upstream = match self.send(parts, pq, &target, body, websocket).await {
             Ok(response) => response,
-            Err(message) => return Ok(self.fail(message)),
+            Err(failure) => return Ok(self.fail(failure)),
         };
         if let Some(upgrade) = upgrade
             && upstream.status() == StatusCode::SWITCHING_PROTOCOLS
@@ -570,7 +572,7 @@ impl Exchange<'_> {
                 }
                 Err(err) => {
                     let message = format!("The upstream response body failed: {}", error_chain(&err));
-                    return Ok(self.fail(message));
+                    return Ok(self.fail(Failure::from_chain(&err, ErrorKind::Upstream, message)));
                 }
             };
         }
@@ -811,7 +813,7 @@ impl Exchange<'_> {
         target: &Target,
         body: super::UpstreamBody,
         websocket: bool,
-    ) -> Result<Response<Incoming>, String> {
+    ) -> Result<Response<Incoming>, Failure> {
         let original = target.scheme == self.scheme && target.host == self.host && target.port == self.port;
         let authority: Authority = target
             .authority()
@@ -867,7 +869,7 @@ impl Exchange<'_> {
         let response = pool
             .request(Request::from_parts(parts, body))
             .await
-            .map_err(|e| error_chain(&e))?;
+            .map_err(|e| Failure::from_chain(&e, ErrorKind::Upstream, error_chain(&e)))?;
         if let Some(rec) = &self.recorder
             && let Some(info) = response.extensions().get::<super::dial::PoolInfo>()
         {
@@ -878,9 +880,10 @@ impl Exchange<'_> {
     }
 
     /// Fails the flow with an upstream error and answers 502.
-    fn fail(&self, message: String) -> Response<ProxyBody> {
+    fn fail(&self, failure: Failure) -> Response<ProxyBody> {
+        let message = failure.message.clone();
         if let Some(rec) = &self.recorder {
-            rec.fail(message.clone());
+            rec.failed(failure);
         }
         match &self.route {
             Route::Forward => text_response(
@@ -922,7 +925,10 @@ struct ClientGone(Option<FlowRecorder>);
 impl Drop for ClientGone {
     fn drop(&mut self) {
         if let Some(rec) = &self.0 {
-            rec.fail("The client went away while the flow was paused at a breakpoint.");
+            rec.fail(
+                ErrorKind::ClientGone,
+                "The client went away while the flow was paused at a breakpoint.",
+            );
         }
     }
 }

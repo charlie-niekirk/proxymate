@@ -52,6 +52,7 @@ fn begin(engine: &Arc<Engine>, generator: &mut Generator, i: usize, headers: Vec
         rules: Default::default(),
         trailers: None,
         via: None,
+        error_kind: None,
     };
     let recorder = engine.begin_flow(summary, detail).expect("recording");
     recorder.body_end(BodyPart::Request, BodyEnd::Complete);

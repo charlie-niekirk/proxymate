@@ -570,6 +570,8 @@ fn flow(t: Transaction) -> SavedFlow {
                 ..Default::default()
             },
         },
+        // Charles carries only the text.
+        error_kind: error.as_deref().map(crate::failure::legacy_kind),
         error,
         tls: None,
         timing: Timing {

@@ -9,7 +9,7 @@ use bytes::Bytes;
 use http::Request;
 use http_body_util::{BodyExt, Full};
 use pm_core::{Engine, EngineConfig, ProxyConfig};
-use pm_model::{BodyPart, ContentKind, FlowDetail, FlowId, FlowState, FlowSummary};
+use pm_model::{BodyPart, ContentKind, ErrorKind, FlowDetail, FlowId, FlowState, FlowSummary};
 use pm_testkit::client::{self, eventually};
 use pm_testkit::upstream::{self, CHUNKS, JSON_BODY};
 use pm_testkit::{RawUpstream, Upstream};
@@ -234,6 +234,11 @@ async fn unreachable_upstreams_fail_the_flow_with_502() {
     assert!(String::from_utf8_lossy(&body).contains("upstream error"));
     let (flow, detail) = finished(&engine, 0).await;
     assert_eq!((flow.state, flow.status), (FlowState::Failed, None));
+    assert_eq!(
+        detail.error_kind,
+        Some(ErrorKind::Refused),
+        "typed through the pool's dial error"
+    );
     assert!(detail.error.unwrap().to_lowercase().contains("refused"));
 }
 

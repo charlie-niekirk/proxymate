@@ -2,6 +2,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
+use crate::errors::ErrorKind;
 use crate::flow::{ContentKind, FlowId};
 use crate::network::{ListenerStatus, Via};
 use crate::rules::FlowRules;
@@ -106,10 +107,14 @@ pub struct FlowDetail {
     /// Session format 3 appended it.
     #[serde(default)]
     pub trailers: Option<Vec<Header>>,
-    /// The route the upstream connection took (M18). Last: session format
-    /// 5 appended it.
+    /// The route the upstream connection took (M18). Session format 5
+    /// appended it.
     #[serde(default)]
     pub via: Option<Via>,
+    /// Why the flow failed, by kind, beside `error` (R3). Last: session
+    /// format 8 appended it; older sessions get it from their message.
+    #[serde(default)]
+    pub error_kind: Option<ErrorKind>,
 }
 
 /// Which body of a flow.

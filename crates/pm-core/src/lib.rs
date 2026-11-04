@@ -7,6 +7,7 @@ mod client;
 mod devices;
 mod documents;
 mod engine;
+mod failure;
 mod ingest;
 mod integration;
 pub(crate) mod io;

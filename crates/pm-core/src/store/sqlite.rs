@@ -43,8 +43,9 @@ pub(crate) const FORMAT: &str = "proxymate-session";
 /// `WsMessage` and added the `originals` table. Version 7 (M20) added
 /// `PresetKind::ServeFrom` and `OpenApi`, which an applied rule's origin in
 /// `FlowDetail.rules` can name; no layout changed, so version 6 files read
-/// as they are.
-pub(crate) const VERSION: u32 = 7;
+/// as they are. Version 8 (R3) appended `FlowDetail.error_kind`; older
+/// failed flows get it from their message (`failure::legacy_kind`).
+pub(crate) const VERSION: u32 = 8;
 /// The oldest version this Proxymate still reads.
 const OLDEST: u32 = 1;
 
@@ -361,7 +362,8 @@ impl BlobBackend for SqliteBackend {
         };
         // Fields appended since: version 1 had no `FlowRules.scripts` (an
         // empty list is one 0), versions 1 and 2 no `trailers` (`None` is
-        // one 0), versions up to 4 no `via` (`None` again).
+        // one 0), versions up to 4 no `via`, up to 7 no `error_kind`
+        // (`None` again).
         if self.version == 1 {
             bytes.push(0);
         }
@@ -372,7 +374,13 @@ impl BlobBackend for SqliteBackend {
         if self.version <= 4 {
             bytes.push(0);
         }
-        let detail: FlowDetail = postcard::from_bytes(&bytes).map_err(io::Error::other)?;
+        if self.version <= 7 {
+            bytes.push(0);
+        }
+        let mut detail: FlowDetail = postcard::from_bytes(&bytes).map_err(io::Error::other)?;
+        if self.version <= 7 {
+            detail.error_kind = detail.error.as_deref().map(crate::failure::legacy_kind);
+        }
         self.details.insert(id, Arc::new(detail.clone()));
         Ok(Some(detail))
     }

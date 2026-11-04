@@ -134,7 +134,7 @@ fn defs() -> Vec<Def> {
             "get_flow",
             Read,
             GetFlow,
-            "One flow: summary, request and response heads, body metadata, timing, TLS, the rules that changed it and any error."
+            "One flow: summary, request and response heads, body metadata, timing, TLS, the rules that changed it and any error (with a stable `error_kind`: dns, refused, timeout, upstream_cert_untrusted, client_rejected_cert, …)."
         ),
         def!(
             "get_flow_body",

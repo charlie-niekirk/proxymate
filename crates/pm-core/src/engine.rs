@@ -1258,6 +1258,7 @@ mod tests {
                 rules: Default::default(),
                 trailers: None,
                 via: None,
+                error_kind: None,
             },
             body: gz.finish().unwrap(),
             reads: Mutex::new(Vec::new()),

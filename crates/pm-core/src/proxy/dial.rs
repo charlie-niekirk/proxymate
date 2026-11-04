@@ -24,7 +24,7 @@ use base64::Engine as _;
 use http::{HeaderValue, Uri};
 use hyper_util::client::legacy::connect::{Connected, Connection};
 use hyper_util::rt::TokioIo;
-use pm_model::{Timing, Via};
+use pm_model::{ErrorKind, Timing, Via};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
@@ -70,15 +70,30 @@ pub(crate) enum DialErrorKind {
 #[derive(Debug)]
 pub(crate) struct DialError {
     pub kind: DialErrorKind,
+    /// What a flow that failed here records (R3). Follows `kind`, except
+    /// that anything going wrong with an upstream proxy is the proxy's.
+    pub flow: ErrorKind,
     pub message: String,
 }
 
 impl DialError {
     fn new(kind: DialErrorKind, message: impl Into<String>) -> DialError {
+        let flow = match kind {
+            DialErrorKind::Resolve => ErrorKind::Dns,
+            DialErrorKind::Refused | DialErrorKind::Unreachable => ErrorKind::Refused,
+            DialErrorKind::Timeout => ErrorKind::Timeout,
+            DialErrorKind::Proxy => ErrorKind::UpstreamProxy,
+        };
         DialError {
             kind,
+            flow,
             message: message.into(),
         }
+    }
+
+    fn with_flow(mut self, flow: ErrorKind) -> DialError {
+        self.flow = flow;
+        self
     }
 
     /// The SOCKS5 reply code (RFC 1928 §6) for a SOCKS client.
@@ -100,12 +115,6 @@ impl std::fmt::Display for DialError {
 }
 
 impl std::error::Error for DialError {}
-
-impl From<DialError> for String {
-    fn from(err: DialError) -> String {
-        err.message
-    }
-}
 
 /// Connects to `host:port` the way Settings › Network says.
 pub(crate) async fn dial(engine: &Arc<Engine>, host: &str, port: u16, purpose: Purpose) -> Result<Dialed, DialError> {
@@ -142,7 +151,10 @@ pub(crate) async fn dial(engine: &Arc<Engine>, host: &str, port: u16, purpose: P
         .map_or_else(|| server.host.clone(), |(ip, _)| ip.to_string());
     let (mut stream, mut timing, addr) = connect(&proxy_target, server.port, connect_timeout, false)
         .await
-        .map_err(|e| DialError::new(e.kind, format!("the upstream proxy {label}: {}", e.message)))?;
+        .map_err(|e| {
+            DialError::new(e.kind, format!("the upstream proxy {label}: {}", e.message))
+                .with_flow(ErrorKind::UpstreamProxy)
+        })?;
     via.addr = Some(addr.to_string());
     if engine.is_own_endpoint(addr) {
         return Err(DialError::new(
@@ -150,7 +162,8 @@ pub(crate) async fn dial(engine: &Arc<Engine>, host: &str, port: u16, purpose: P
             format!(
                 "the upstream proxy {label} is Proxymate itself, which would loop. Change it in Settings › Network."
             ),
-        ));
+        )
+        .with_flow(ErrorKind::UpstreamProxyLoop));
     }
     let credentials = server.credentials(engine.network().secrets());
     let started = Instant::now();
@@ -186,7 +199,8 @@ async fn within(handshake: impl Future<Output = Result<(), DialError>>, label: &
             Err(DialError::new(
                 DialErrorKind::Timeout,
                 format!("the upstream proxy {label} didn't answer in time"),
-            ))
+            )
+            .with_flow(ErrorKind::UpstreamProxy))
         })
 }
 
@@ -323,13 +337,15 @@ async fn http_connect(
             format!(
                 "the upstream proxy {label} rejected the username and password (407). Check them in Settings › Network."
             ),
-        )),
+        )
+        .with_flow(ErrorKind::UpstreamProxyAuth)),
         407 => Err(DialError::new(
             DialErrorKind::Proxy,
             format!(
                 "the upstream proxy {label} asks for a username and password (407). Add them in Settings › Network."
             ),
-        )),
+        )
+        .with_flow(ErrorKind::UpstreamProxyAuth)),
         _ => Err(DialError::new(
             DialErrorKind::Proxy,
             format!("the upstream proxy {label} answered CONNECT {target} with {status_line:?}"),
@@ -371,15 +387,17 @@ pub(crate) async fn socks5_connect(
             let mut status = [0u8; 2];
             stream.read_exact(&mut status).await.map_err(io_err)?;
             if status[1] != 0x00 {
-                return Err(proxy_err(
-                    "rejected the username and password. Check them in Settings › Network.".into(),
-                ));
+                return Err(
+                    proxy_err("rejected the username and password. Check them in Settings › Network.".into())
+                        .with_flow(ErrorKind::UpstreamProxyAuth),
+                );
             }
         }
         (0xFF, None) => {
-            return Err(proxy_err(
-                "asks for a username and password. Add them in Settings › Network.".into(),
-            ));
+            return Err(
+                proxy_err("asks for a username and password. Add them in Settings › Network.".into())
+                    .with_flow(ErrorKind::UpstreamProxyAuth),
+            );
         }
         _ => return Err(proxy_err("offered no authentication method Proxymate supports".into())),
     }
@@ -494,7 +512,9 @@ impl tower_service::Service<Uri> for Connector {
         let engine = self.engine.clone();
         Box::pin(async move {
             let Some(engine) = engine.upgrade() else {
-                return Err(DialError::new(DialErrorKind::Proxy, "Proxymate is shutting down"));
+                return Err(
+                    DialError::new(DialErrorKind::Proxy, "Proxymate is shutting down").with_flow(ErrorKind::Other)
+                );
             };
             let host = uri
                 .host()

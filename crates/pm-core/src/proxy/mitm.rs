@@ -57,8 +57,10 @@ use super::{
 };
 use crate::Engine;
 use crate::client::PeerClient;
+use crate::failure::Failure;
 use crate::recorder::FlowRecorder;
 use crate::tls::{H2, HTTP11, TlsContext, summarize};
+use pm_model::ErrorKind;
 
 /// A SOCKS client that says nothing for this long after connecting is
 /// relayed as a raw tunnel: the protocol may be one where the server
@@ -219,7 +221,7 @@ async fn passthrough(engine: &Arc<Engine>, req: Request<Incoming>, target: Targe
     tokio::spawn(async move {
         let Ok(upgraded) = hyper::upgrade::on(req).await else {
             if let Some(recorder) = &recorder {
-                recorder.fail("the client went away before the tunnel opened");
+                recorder.fail(ErrorKind::ClientGone, "the client went away before the tunnel opened");
             }
             return;
         };
@@ -245,7 +247,7 @@ pub(super) async fn open_tunnel(
         }
         Err(err) => {
             if let Some(recorder) = recorder {
-                recorder.fail(err.message.clone());
+                recorder.fail(err.flow, err.message.clone());
             }
             Err(err)
         }
@@ -410,7 +412,12 @@ where
                 Err(message) => (None, Some(message), Some(timing), Some(via)),
             }
         }
-        Err(failure) => (None, Some(failure.message), Some(failure.timing), failure.via),
+        Err(failure) => (
+            None,
+            Some(Failure::new(failure.kind, failure.message)),
+            Some(failure.timing),
+            failure.via,
+        ),
     };
     let conn = Arc::new(MitmConn {
         ctx,
@@ -454,7 +461,7 @@ where
             && let Some(recorder) =
                 record_connect(&engine, &conn.target, TlsStatus::Intercepted, Some(conn.info.clone()))
         {
-            recorder.fail(failure.clone());
+            recorder.failed(failure.clone());
         }
     } else if counters.read() == 0 && handshake_done.elapsed() < PINNED_CLOSE_WINDOW {
         record_pinned(
@@ -491,7 +498,10 @@ fn record_rejection(ctx: &ProxyCtx, target: &Target, info: TlsInfo, err: &std::i
             if let Some(engine) = ctx.engine.upgrade()
                 && let Some(recorder) = record_connect(&engine, target, TlsStatus::Intercepted, Some(info))
             {
-                recorder.fail(format!("TLS handshake with the client failed: {err}"));
+                recorder.fail(
+                    ErrorKind::ClientTls,
+                    format!("TLS handshake with the client failed: {err}"),
+                );
             }
             return;
         }
@@ -504,12 +514,15 @@ fn record_pinned(ctx: &ProxyCtx, target: &Target, info: TlsInfo, reason: &str) {
         return;
     };
     if let Some(recorder) = record_connect(&engine, target, TlsStatus::LikelyPinned, Some(info)) {
-        recorder.fail(format!(
-            "The client rejected the Proxymate certificate. {reason} Either it doesn't trust the Proxymate CA \
+        recorder.fail(
+            ErrorKind::ClientRejectedCert,
+            format!(
+                "The client rejected the Proxymate certificate. {reason} Either it doesn't trust the Proxymate CA \
              yet, or it pins its certificates. Add {} to the SSL bypass list to let its traffic through \
              without decrypting it.",
-            target.host
-        ));
+                target.host
+            ),
+        );
     }
 }
 
@@ -559,6 +572,7 @@ pub(super) fn record_connect(
         rules: Default::default(),
         trailers: None,
         via: None,
+        error_kind: None,
     };
     target.peer.begin_flow(engine, summary, detail)
 }
@@ -638,6 +652,7 @@ struct Upstream {
 }
 
 struct DialFailure {
+    kind: ErrorKind,
     message: String,
     chain: Vec<pm_model::CertSummary>,
     timing: Timing,
@@ -646,8 +661,9 @@ struct DialFailure {
 
 impl Dial {
     async fn connect(&self) -> Result<Upstream, Box<DialFailure>> {
-        let fail = |message: String| {
+        let fail = |kind: ErrorKind, message: String| {
             Box::new(DialFailure {
+                kind,
                 message,
                 chain: Vec::new(),
                 timing: Timing::default(),
@@ -655,11 +671,11 @@ impl Dial {
             })
         };
         let Some(engine) = self.engine.upgrade() else {
-            return Err(fail("Proxymate is shutting down".into()));
+            return Err(fail(ErrorKind::Other, "Proxymate is shutting down".into()));
         };
         let dialed = dial(&engine, &self.host, self.port, Purpose::Tunnel)
             .await
-            .map_err(|e| fail(e.message))?;
+            .map_err(|e| fail(e.flow, e.message))?;
         let (tcp, mut timing, mut via) = (dialed.stream, dialed.timing, dialed.via);
         let identity =
             engine
@@ -676,6 +692,7 @@ impl Dial {
             Ok(name) => name,
             Err(_) => {
                 return Err(Box::new(DialFailure {
+                    kind: ErrorKind::Other,
                     message: format!("{name:?} is not a valid TLS server name"),
                     chain: Vec::new(),
                     timing,
@@ -691,8 +708,10 @@ impl Dial {
         let stream = match result {
             Ok(Ok(stream)) => stream,
             Ok(Err(err)) => {
+                let failure = upstream_tls_error(&self.host, &err);
                 return Err(Box::new(DialFailure {
-                    message: upstream_tls_error(&self.host, &err),
+                    kind: failure.kind,
+                    message: failure.message,
                     chain: chain(),
                     timing,
                     via: Some(via),
@@ -700,6 +719,7 @@ impl Dial {
             }
             Err(_) => {
                 return Err(Box::new(DialFailure {
+                    kind: ErrorKind::UpstreamTls,
                     message: format!("The TLS handshake with {} timed out.", self.host),
                     chain: chain(),
                     timing,
@@ -723,42 +743,57 @@ impl Dial {
     }
 }
 
-/// A readable reason for an upstream handshake failure.
-fn upstream_tls_error(host: &str, err: &std::io::Error) -> String {
+/// A readable reason for an upstream handshake failure, and its kind.
+fn upstream_tls_error(host: &str, err: &std::io::Error) -> Failure {
     use rustls::{CertificateError, Error as TlsError};
     let Some(tls) = err.get_ref().and_then(|e| e.downcast_ref::<TlsError>()) else {
-        return format!("The TLS handshake with {host} failed: {}", error_chain(err));
+        return Failure::new(
+            ErrorKind::UpstreamTls,
+            format!("The TLS handshake with {host} failed: {}", error_chain(err)),
+        );
     };
     let untrusted = |detail: &str| {
-        format!(
-            "{host}'s certificate isn't trusted: it is self-signed or issued by an unknown CA{detail}. If you \
-             trust this server, allow insecure upstream for {host}."
+        Failure::new(
+            ErrorKind::UpstreamCertUntrusted,
+            format!(
+                "{host}'s certificate isn't trusted: it is self-signed or issued by an unknown CA{detail}. If you \
+                 trust this server, allow insecure upstream for {host}."
+            ),
         )
     };
+    let invalid = |message: String| Failure::new(ErrorKind::UpstreamCertInvalid, message);
     match tls {
-        TlsError::AlertReceived(rustls::AlertDescription::CertificateRequired) => certificate_required(host),
+        TlsError::AlertReceived(rustls::AlertDescription::CertificateRequired) => {
+            Failure::new(ErrorKind::ClientCertRequired, certificate_required(host))
+        }
         TlsError::InvalidCertificate(CertificateError::UnknownIssuer) => untrusted(""),
         TlsError::InvalidCertificate(CertificateError::Expired | CertificateError::ExpiredContext { .. }) => {
-            format!("{host}'s certificate has expired.")
+            invalid(format!("{host}'s certificate has expired."))
         }
         TlsError::InvalidCertificate(
             CertificateError::NotValidForName | CertificateError::NotValidForNameContext { .. },
-        ) => format!("{host}'s certificate isn't valid for that name."),
+        ) => invalid(format!("{host}'s certificate isn't valid for that name.")),
         // The macOS and Windows verifiers report trust failures as OS errors.
         TlsError::InvalidCertificate(CertificateError::Other(other)) => {
             let detail = other.to_string();
             if detail.contains("not trusted") || detail.contains("untrusted") {
                 untrusted(&format!(" ({detail})"))
             } else {
-                format!("{host}'s certificate was rejected: {detail}.")
+                invalid(format!("{host}'s certificate was rejected: {detail}."))
             }
         }
-        TlsError::InvalidCertificate(other) => format!("{host}'s certificate was rejected: {other:?}."),
-        TlsError::PeerIncompatible(_) => format!(
-            "{host} only offers TLS versions or ciphers Proxymate doesn't support (TLS 1.0 and 1.1 are not \
-             supported): {tls}."
+        TlsError::InvalidCertificate(other) => invalid(format!("{host}'s certificate was rejected: {other:?}.")),
+        TlsError::PeerIncompatible(_) => Failure::new(
+            ErrorKind::UpstreamTlsVersion,
+            format!(
+                "{host} only offers TLS versions or ciphers Proxymate doesn't support (TLS 1.0 and 1.1 are not \
+                 supported): {tls}."
+            ),
         ),
-        other => format!("The TLS handshake with {host} failed: {other}."),
+        other => Failure::new(
+            ErrorKind::UpstreamTls,
+            format!("The TLS handshake with {host} failed: {other}."),
+        ),
     }
 }
 
@@ -769,7 +804,7 @@ fn certificate_required(host: &str) -> String {
 /// Why an upstream connection's task ended, once it has. A request that
 /// finds the connection already gone reports this rather than hyper's
 /// "channel closed".
-pub(super) type Died = Arc<std::sync::OnceLock<String>>;
+pub(super) type Died = Arc<std::sync::OnceLock<Failure>>;
 
 fn spawn_conn<F>(conn: F) -> Died
 where
@@ -779,7 +814,7 @@ where
     let slot = died.clone();
     tokio::spawn(async move {
         if let Err(err) = conn.await {
-            let _ = slot.set(error_chain(&err));
+            let _ = slot.set(Failure::from_chain(&err, ErrorKind::Upstream, error_chain(&err)));
         }
     });
     died
@@ -788,22 +823,22 @@ where
 /// A failed upstream request, explained when the reason is known: with
 /// TLS 1.3 a server's demand for a client certificate only shows up once
 /// the first request is sent, and often as the connection's own error.
-async fn request_failed(host: &str, err: hyper::Error, died: &Died) -> String {
-    let mut chain = error_chain(&err);
-    if err.is_closed() || err.is_canceled() || chain.contains("channel closed") {
+async fn request_failed(host: &str, err: hyper::Error, died: &Died) -> Failure {
+    let mut why = Failure::from_chain(&err, ErrorKind::Upstream, error_chain(&err));
+    if err.is_closed() || err.is_canceled() || why.message.contains("channel closed") {
         // The connection task records its error right after it ends.
         for _ in 0..20 {
-            if let Some(why) = died.get() {
-                chain = why.clone();
+            if let Some(died) = died.get() {
+                why = died.clone();
                 break;
             }
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
     }
-    if chain.contains("CertificateRequired") {
-        certificate_required(host)
+    if why.kind == ErrorKind::ClientCertRequired || why.message.contains("CertificateRequired") {
+        Failure::new(ErrorKind::ClientCertRequired, certificate_required(host))
     } else {
-        format!("The upstream request failed: {chain}")
+        Failure::new(why.kind, format!("The upstream request failed: {}", why.message))
     }
 }
 
@@ -835,20 +870,32 @@ impl Sender {
 }
 
 /// Starts HTTP over a fresh upstream TLS connection.
-async fn handshake(up: Upstream) -> Result<Sender, String> {
+async fn handshake(up: Upstream) -> Result<Sender, Failure> {
     let io = TokioIo::new(up.stream);
     if up.alpn.as_deref() == Some(H2) {
         let (sender, conn) = client_h2::Builder::new(TokioExecutor::new())
             .handshake(io)
             .await
-            .map_err(|e| format!("HTTP/2 handshake with the upstream failed: {}", error_chain(&e)))?;
+            .map_err(|e| {
+                Failure::from_chain(
+                    &e,
+                    ErrorKind::Upstream,
+                    format!("HTTP/2 handshake with the upstream failed: {}", error_chain(&e)),
+                )
+            })?;
         Ok(Sender::H2(sender, spawn_conn(conn)))
     } else {
         let (sender, conn) = client_h1::Builder::new()
             .preserve_header_case(true)
             .handshake(io)
             .await
-            .map_err(|e| format!("HTTP/1.1 handshake with the upstream failed: {}", error_chain(&e)))?;
+            .map_err(|e| {
+                Failure::from_chain(
+                    &e,
+                    ErrorKind::Upstream,
+                    format!("HTTP/1.1 handshake with the upstream failed: {}", error_chain(&e)),
+                )
+            })?;
         // A WebSocket handshake takes the connection over; the next request
         // dials a new one.
         Ok(Sender::H1(sender, spawn_conn(conn.with_upgrades())))
@@ -862,7 +909,7 @@ pub(super) struct MitmConn {
     dial: Dial,
     info: TlsInfo,
     /// Why there is no upstream; every request gets the 502 page.
-    failure: Option<String>,
+    failure: Option<Failure>,
     client_h2: bool,
     slot: tokio::sync::Mutex<Slot>,
     requests: AtomicU32,
@@ -927,7 +974,7 @@ impl MitmConn {
         authority: Authority,
         body: UpstreamBody,
         recorder: Option<&FlowRecorder>,
-    ) -> Result<Response<Incoming>, String> {
+    ) -> Result<Response<Incoming>, Failure> {
         let mut slot = self.slot.lock().await;
         if let Some(failure) = &self.failure {
             // No upstream: the flow fails with why, after the setup timing.
@@ -942,7 +989,7 @@ impl MitmConn {
             return Err(failure.clone());
         }
         if slot.sender.as_ref().is_none_or(Sender::is_closed) {
-            let up = self.dial.connect().await.map_err(|f| f.message)?;
+            let up = self.dial.connect().await.map_err(|f| Failure::new(f.kind, f.message))?;
             if (up.alpn.as_deref() == Some(H2)) != self.client_h2 {
                 return Err("The upstream switched HTTP versions when Proxymate reconnected.".into());
             }
@@ -1044,7 +1091,7 @@ pub(super) async fn open_h1(
     host: &str,
     port: u16,
     recorder: Option<&FlowRecorder>,
-) -> Result<(client_h1::SendRequest<UpstreamBody>, Died), String> {
+) -> Result<(client_h1::SendRequest<UpstreamBody>, Died), Failure> {
     let Some(engine) = ctx.engine.upgrade() else {
         return Err("Proxymate is shutting down".into());
     };
@@ -1059,7 +1106,13 @@ pub(super) async fn open_h1(
             .preserve_header_case(true)
             .handshake(TokioIo::new(dialed.stream))
             .await
-            .map_err(|e| format!("HTTP/1.1 handshake with the upstream failed: {}", error_chain(&e)))?;
+            .map_err(|e| {
+                Failure::from_chain(
+                    &e,
+                    ErrorKind::Upstream,
+                    format!("HTTP/1.1 handshake with the upstream failed: {}", error_chain(&e)),
+                )
+            })?;
         return Ok((sender, spawn_conn(conn.with_upgrades())));
     }
     let dial = Dial {
@@ -1072,7 +1125,7 @@ pub(super) async fn open_h1(
         insecure: engine.ssl_policy().insecure_upstream(host),
     };
     drop(engine);
-    let up = dial.connect().await.map_err(|f| f.message)?;
+    let up = dial.connect().await.map_err(|f| Failure::new(f.kind, f.message))?;
     if let Some(recorder) = recorder {
         recorder.connection_timing(&up.timing);
         recorder.via(&up.via);
@@ -1092,7 +1145,7 @@ pub(super) async fn send_once(
     authority: Authority,
     body: UpstreamBody,
     recorder: Option<&FlowRecorder>,
-) -> Result<Response<Incoming>, String> {
+) -> Result<Response<Incoming>, Failure> {
     parts.uri = Uri::from(pq);
     parts.version = http::Version::HTTP_11;
     if !parts.headers.contains_key(header::HOST)
@@ -1124,7 +1177,7 @@ pub(super) async fn send_direct(
     authority: Authority,
     body: UpstreamBody,
     recorder: Option<&FlowRecorder>,
-) -> Result<Response<Incoming>, String> {
+) -> Result<Response<Incoming>, Failure> {
     let mut sender = open_h1(ctx, true, host, port, recorder).await?;
     send_once(&mut sender, host, parts, pq, authority, body, recorder).await
 }
@@ -1177,7 +1230,8 @@ mod tests {
             std::io::ErrorKind::InvalidData,
             rustls::Error::InvalidCertificate(rustls::CertificateError::UnknownIssuer),
         );
-        let message = upstream_tls_error("self-signed.test", &err);
-        assert!(message.contains("allow insecure upstream"), "{message}");
+        let failure = upstream_tls_error("self-signed.test", &err);
+        assert!(failure.message.contains("allow insecure upstream"), "{failure}");
+        assert_eq!(failure.kind, ErrorKind::UpstreamCertUntrusted);
     }
 }

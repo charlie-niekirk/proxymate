@@ -905,6 +905,8 @@ fn flow(entry: &Entry) -> Option<SavedFlow> {
             response_detected.mime,
             response_detected.kind,
         ),
+        // A HAR carries only the text.
+        error_kind: error.as_deref().map(crate::failure::legacy_kind),
         error,
         tls: None,
         timing,
@@ -1176,6 +1178,7 @@ mod tests {
             rules: Default::default(),
             trailers: None,
             via: None,
+            error_kind: None,
         }
     }
 

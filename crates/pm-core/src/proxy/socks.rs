@@ -17,6 +17,7 @@ use tokio::net::TcpStream;
 use super::ProxyCtx;
 use super::mitm::{self, Decision, Target};
 use crate::client::PeerClient;
+use pm_model::ErrorKind;
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -77,7 +78,7 @@ pub(super) async fn serve(ctx: Arc<ProxyCtx>, peer: Arc<PeerClient>, mut stream:
                     if reply(&mut stream, SUCCEEDED).await {
                         mitm::relay(recorder, stream, upstream).await;
                     } else if let Some(recorder) = &recorder {
-                        recorder.fail("the client went away before the tunnel opened");
+                        recorder.fail(ErrorKind::ClientGone, "the client went away before the tunnel opened");
                     }
                 }
                 Err(err) => {

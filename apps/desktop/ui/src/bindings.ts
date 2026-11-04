@@ -1287,6 +1287,51 @@ export type DomainNode = {
 };
 
 /**
+ *  Why a flow failed, as recorded with its error message
+ *  (`FlowDetail.error_kind`). Stored in sessions by position: add variants
+ *  at the end only (and pin them in `store/sqlite/v7_fixture.rs`).
+ */
+export type ErrorKind = 
+/**  Anything without a more specific kind. */
+"other" | 
+/**
+ *  The client refused Proxymate's certificate: it doesn't trust the CA
+ *  yet, or it pins its certificates.
+ */
+"client_rejected_cert" | 
+/**  The TLS handshake with the client failed for another reason. */
+"client_tls" | 
+/**  The client closed the connection or went away before the flow ended. */
+"client_gone" | 
+/**  The upstream's host name didn't resolve. */
+"dns" | 
+/**  Nothing answered at the upstream's address (refused, unreachable). */
+"refused" | 
+/**  Connecting, resolving or a TLS handshake took too long. */
+"timeout" | 
+/**  The upstream server asks for a client certificate. */
+"client_cert_required" | 
+/**  The upstream's certificate isn't trusted (self-signed, unknown CA). */
+"upstream_cert_untrusted" | 
+/**  The upstream's certificate is expired, for another name, or rejected. */
+"upstream_cert_invalid" | 
+/**  The upstream only speaks TLS versions or ciphers we don't. */
+"upstream_tls_version" | 
+/**  The TLS handshake with the upstream failed for another reason. */
+"upstream_tls" | 
+/**  An upstream proxy refused or failed. */
+"upstream_proxy" | 
+/**  An upstream proxy wants (other) credentials. */
+"upstream_proxy_auth" | 
+/**  The upstream proxy is Proxymate itself, which would loop. */
+"upstream_proxy_loop" | 
+/**
+ *  The upstream failed after connecting: a reset, a bad response, a body
+ *  that broke off.
+ */
+"upstream";
+
+/**
  *  What a view shows. Shared by the filter row, the sidebar and (from M7) MCP.
  * 
  *  `text` is the search box, in the filter DSL (`pm-core/src/store/query.rs`:
@@ -1366,10 +1411,15 @@ export type FlowDetail_Deserialize = {
 	 */
 	trailers?: Header[] | null,
 	/**
-	 *  The route the upstream connection took (M18). Last: session format
-	 *  5 appended it.
+	 *  The route the upstream connection took (M18). Session format 5
+	 *  appended it.
 	 */
 	via?: Via_Deserialize | null,
+	/**
+	 *  Why the flow failed, by kind, beside `error` (R3). Last: session
+	 *  format 8 appended it; older sessions get it from their message.
+	 */
+	error_kind?: ErrorKind | null,
 };
 
 /**
@@ -1395,10 +1445,15 @@ export type FlowDetail_Serialize = {
 	 */
 	trailers: Header[] | null,
 	/**
-	 *  The route the upstream connection took (M18). Last: session format
-	 *  5 appended it.
+	 *  The route the upstream connection took (M18). Session format 5
+	 *  appended it.
 	 */
 	via: Via_Serialize | null,
+	/**
+	 *  Why the flow failed, by kind, beside `error` (R3). Last: session
+	 *  format 8 appended it; older sessions get it from their message.
+	 */
+	error_kind: ErrorKind | null,
 };
 
 /**

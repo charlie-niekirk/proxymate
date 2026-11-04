@@ -14,6 +14,7 @@
 
 pub(crate) mod body;
 mod dial;
+pub(crate) use dial::DialError;
 mod exchange;
 mod io;
 mod mitm;
@@ -449,6 +450,7 @@ fn record_request(engine: &Arc<Engine>, req: &Request<Incoming>, origin: Origin)
         rules: Default::default(),
         trailers: None,
         via: None,
+        error_kind: None,
     };
     let mut detail = detail;
     detail.request_body.encoding = content_encoding(&detail.request.headers);

@@ -11,7 +11,7 @@ use http::Request;
 use http_body_util::{BodyExt, Full};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use pm_core::{Engine, EngineConfig, ProxyConfig};
-use pm_model::{BodyPart, FlowDetail, FlowId, FlowState, FlowSummary, HttpVersion, Scheme, TlsStatus};
+use pm_model::{BodyPart, ErrorKind, FlowDetail, FlowId, FlowState, FlowSummary, HttpVersion, Scheme, TlsStatus};
 use pm_testkit::client::{self, HttpsResponse, eventually, https_get, tls_config, tls_through};
 use pm_testkit::upstream::JSON_BODY;
 use pm_testkit::{Alpn, TestCa, TlsUpstream, Upstream};
@@ -241,6 +241,7 @@ async fn self_signed_upstreams_fail_with_a_readable_502() {
     assert_eq!(flow.path, "/json");
     let error = detail.error.expect("error");
     assert!(error.contains("self-signed or issued by an unknown CA"), "{error}");
+    assert_eq!(detail.error_kind, Some(ErrorKind::UpstreamCertUntrusted));
     let tls = detail.tls.expect("TLS info");
     assert_eq!(tls.chain.len(), 1, "the rejected chain is still shown");
     assert!(detail.timing.tls_ms.is_some());
@@ -266,6 +267,7 @@ async fn unreachable_upstreams_fail_the_flow() {
     assert_eq!(response.status, 502);
     let (flow, detail) = proxy.finished(0).await;
     assert_eq!(flow.state, FlowState::Failed);
+    assert_eq!(detail.error_kind, Some(ErrorKind::Refused));
     assert!(detail.error.unwrap().contains("can't reach 127.0.0.1"));
 }
 
@@ -290,6 +292,7 @@ async fn clients_rejecting_our_certificate_are_flagged_as_pinned() {
     assert_eq!(&*flow.method, "CONNECT");
     let error = detail.error.unwrap();
     assert!(error.contains("unknown_ca") && error.contains("SSL bypass"), "{error}");
+    assert_eq!(detail.error_kind, Some(ErrorKind::ClientRejectedCert));
 }
 
 #[tokio::test]
