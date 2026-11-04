@@ -29,7 +29,10 @@ use crate::recorder::{FlowRecorder, is_event_stream};
 use crate::rules::Rules;
 use crate::scripts::Scripts;
 use crate::settings::Settings;
-use crate::store::{BlobBackend, DeepJob, DetailStore, SegmentStore, Store, VIEW_STORE_SHIFT, page_events, sse_event};
+use crate::store::{
+    BlobBackend, DeepJob, DetailStore, SegmentStore, SharedStore, Store, VIEW_STORE_SHIFT, Watcher, page_events,
+    sse_event,
+};
 use crate::tls::{CertAuthority, SslPolicy, TlsContext};
 
 const SSL_SETTINGS_FILE: &str = "ssl.json";
@@ -81,7 +84,7 @@ pub struct BodyBytes {
 }
 
 pub struct Engine {
-    pub(crate) store: RwLock<Store>,
+    pub(crate) store: SharedStore,
     sinks: Mutex<HashMap<ViewId, DeltaSink>>,
     ingest: IngestTx,
     details: DetailStore,
@@ -191,7 +194,7 @@ impl Engine {
         let capture = crate::capture::Capture::new(&root, &app_settings.recording_row());
         let (tx, rx) = std::sync::mpsc::channel();
         let engine = Arc::new(Engine {
-            store: RwLock::new(live),
+            store: SharedStore::new(live),
             sinks: Mutex::new(HashMap::new()),
             ingest: IngestTx::new(tx),
             details: DetailStore::new(SegmentStore::new(&root)),
@@ -252,9 +255,11 @@ impl Engine {
         self.ingest.flush();
     }
 
-    /// Blocks until every flow event emitted so far is in the store.
+    /// Blocks until every flow event emitted so far is in the store, and
+    /// every body and detail written so far is in its segment file.
     pub fn flush(&self) {
         self.ingest.flush();
+        self.details.segments.sync();
     }
 
     /// Starts recording a flow. Returns `None` while recording is paused
@@ -845,7 +850,8 @@ impl Engine {
                     let Some(engine) = engine.upgrade() else {
                         return;
                     };
-                    let batch = engine.with_view_store(view, |s| Ok(s.take_deep_batch(view, &cancel, DEEP_BATCH)));
+                    // Handing out candidates changes nothing the UI sees.
+                    let batch = engine.with_view_store_quiet(view, |s| s.take_deep_batch(view, &cancel, DEEP_BATCH));
                     let Ok(Some(batch)) = batch else {
                         return;
                     };
@@ -896,17 +902,35 @@ impl Engine {
     /// Routes a view's deltas to `sink`, replacing any previous subscriber.
     /// The first delta is structural and goes out on the next tick.
     pub fn subscribe(&self, view: ViewId, sink: DeltaSink) -> Result<(), Error> {
-        self.with_view_store(view, |store| {
+        // The sink goes in first: marking the view is the change that makes
+        // the next tick look at its store.
+        self.sinks.lock().insert(view, sink);
+        let marked = self.with_view_store(view, |store| {
             store.view_mut(view).ok_or(Error::UnknownView(view))?.mark_structural();
             Ok(())
-        })?;
-        self.sinks.lock().insert(view, sink);
-        Ok(())
+        });
+        if marked.is_err() {
+            self.sinks.lock().remove(&view);
+        }
+        marked
     }
 
     /// Drops the delta subscribers whose view fails `keep`.
     pub(crate) fn sinks_retain(&self, keep: impl Fn(ViewId) -> bool) {
         self.sinks.lock().retain(|&view, _| keep(view));
+    }
+
+    /// Like [`Engine::with_view_store`], for bookkeeping the publisher
+    /// needn't look at (see [`SharedStore::write_quiet`]).
+    fn with_view_store_quiet<R>(&self, view: ViewId, f: impl FnOnce(&mut Store) -> R) -> Result<R, Error> {
+        match view >> VIEW_STORE_SHIFT {
+            LIVE_STORE => Ok(f(&mut self.store.write_quiet())),
+            store => {
+                let doc = self.docs.get(store).map_err(|_| Error::UnknownView(view))?;
+                let mut store = doc.store.write_quiet();
+                Ok(f(&mut store))
+            }
+        }
     }
 
     /// Runs `f` on the store `view` is over, write-locked.
@@ -940,16 +964,28 @@ impl Engine {
         if sinks.is_empty() {
             return;
         }
-        let deltas: Vec<ViewDelta> = {
-            let mut store = self.store.write();
-            sinks
-                .keys()
-                .filter_map(|&view| match view >> VIEW_STORE_SHIFT {
-                    LIVE_STORE => store.take_delta(view),
-                    doc => self.docs.get(doc).ok()?.store.write().take_delta(view),
-                })
-                .collect()
-        };
+        // Views by store; a store nothing wrote to since the last tick has
+        // nothing to report, and its write lock isn't taken.
+        let mut by_store: std::collections::BTreeMap<StoreId, Vec<ViewId>> = Default::default();
+        for &view in sinks.keys() {
+            by_store.entry(view >> VIEW_STORE_SHIFT).or_default().push(view);
+        }
+        let mut deltas: Vec<ViewDelta> = Vec::new();
+        for (store, views) in by_store {
+            let doc = match store {
+                LIVE_STORE => None,
+                doc => match self.docs.get(doc) {
+                    Ok(doc) => Some(doc),
+                    Err(_) => continue,
+                },
+            };
+            let shared = doc.as_ref().map_or(&self.store, |d| &d.store);
+            if !shared.changed(Watcher::Views) {
+                continue;
+            }
+            let mut store = shared.write_quiet();
+            deltas.extend(views.into_iter().filter_map(|view| store.take_delta(view)));
+        }
         for delta in deltas {
             let view = delta.view;
             if let Some(sink) = sinks.get_mut(&view)
@@ -1006,7 +1042,15 @@ pub(crate) fn body_head(
     decode: bool,
     max: Option<usize>,
 ) -> Result<BodyBytes, Error> {
-    let mut bytes = backend.body(id, part)?.ok_or(Error::UnknownFlow(id))?;
+    // With a limit, only the start of the body is read: `max + 1` bytes
+    // (to tell whether there is more), decoded or not. A body that decodes
+    // to less than it takes on the wire is read again whole.
+    let raw_cap = max.map(|max| max.saturating_add(1));
+    let read = |cap: Option<usize>| match cap {
+        Some(cap) => backend.body_prefix(id, part, cap),
+        None => backend.body(id, part),
+    };
+    let mut bytes = read(raw_cap)?.ok_or(Error::UnknownFlow(id))?;
     let encoding = if decode {
         backend.detail(id)?.and_then(|detail| match part {
             BodyPart::Request => detail.request_body.encoding,
@@ -1018,7 +1062,11 @@ pub(crate) fn body_head(
     let (bytes, decoded_from) = match (encoding, max) {
         (Some(encoding), None) if !bytes.is_empty() => (decode::decode(&encoding, &bytes)?, Some(encoding)),
         (Some(encoding), Some(max)) if !bytes.is_empty() => {
-            let head = decode::decode_prefix(&encoding, &bytes, max.saturating_add(1));
+            let mut head = decode::decode_prefix(&encoding, &bytes, max.saturating_add(1));
+            if head.len() <= max && Some(bytes.len()) == raw_cap {
+                bytes = read(None)?.ok_or(Error::UnknownFlow(id))?;
+                head = decode::decode_prefix(&encoding, &bytes, max.saturating_add(1));
+            }
             if head.is_empty() {
                 // Report why it didn't decode.
                 decode::decode(&encoding, &bytes)?;
@@ -1080,6 +1128,135 @@ mod tests {
         // The background publisher may have raced us to this tick.
         let delta = rx.recv_timeout(Duration::from_secs(1)).unwrap();
         assert_eq!((delta.appended, delta.len), (3, 13));
+    }
+
+    #[test]
+    fn a_clean_tick_leaves_the_store_unlocked() {
+        let engine = Engine::new();
+        let mut generator = Generator::new(1);
+        engine.insert_flows((0..10).map(|_| generator.completed_flow()).collect());
+        let view = engine.create_view(FilterSpec::default(), SortSpec::default()).view;
+        let (tx, rx) = mpsc::channel();
+        engine.subscribe(view, Box::new(move |d| tx.send(d).is_ok())).unwrap();
+        engine.publish_tick();
+        assert!(rx.recv_timeout(Duration::from_secs(1)).unwrap().structural);
+
+        // A reader holds the store: a tick that wanted its write lock would wait.
+        let reader = engine.store.read();
+        let (done_tx, done_rx) = mpsc::channel();
+        let ticker = engine.clone();
+        std::thread::spawn(move || {
+            ticker.publish_tick();
+            let _ = done_tx.send(());
+        });
+        done_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("a clean tick must not take the store's write lock");
+        drop(reader);
+
+        // A change is still published.
+        engine.insert_flows((0..2).map(|_| generator.completed_flow()).collect());
+        engine.publish_tick();
+        let delta = rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert_eq!((delta.appended, delta.len), (2, 12));
+    }
+
+    /// A backend with one body, recording how much of it was read.
+    struct OneBody {
+        detail: FlowDetail,
+        body: Vec<u8>,
+        reads: Mutex<Vec<Option<usize>>>,
+    }
+
+    impl BlobBackend for OneBody {
+        fn detail(&self, _: FlowId) -> std::io::Result<Option<FlowDetail>> {
+            Ok(Some(self.detail.clone()))
+        }
+
+        fn body(&self, _: FlowId, _: BodyPart) -> std::io::Result<Option<Vec<u8>>> {
+            self.reads.lock().push(None);
+            Ok(Some(self.body.clone()))
+        }
+
+        fn body_prefix(&self, _: FlowId, _: BodyPart, max: usize) -> std::io::Result<Option<Vec<u8>>> {
+            self.reads.lock().push(Some(max));
+            Ok(Some(self.body[..self.body.len().min(max)].to_vec()))
+        }
+
+        fn ws(&self, _: FlowId) -> std::io::Result<Option<Arc<crate::store::WsLog>>> {
+            Ok(None)
+        }
+
+        fn sse(&self, _: FlowId) -> std::io::Result<Option<Arc<crate::store::SseLog>>> {
+            Ok(None)
+        }
+
+        fn segments(&self) -> Option<&SegmentStore> {
+            None
+        }
+    }
+
+    fn gzipped(body: &[u8]) -> OneBody {
+        use std::io::Write;
+        let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        gz.write_all(body).unwrap();
+        OneBody {
+            detail: FlowDetail {
+                id: 0,
+                request: pm_model::RequestHead {
+                    method: "GET".into(),
+                    url: "http://example.com/".into(),
+                    version: pm_model::HttpVersion::Http11,
+                    headers: Vec::new(),
+                },
+                response: None,
+                request_body: Default::default(),
+                response_body: pm_model::BodyInfo {
+                    encoding: Some("gzip".into()),
+                    ..Default::default()
+                },
+                error: None,
+                tls: None,
+                timing: Default::default(),
+                rules: Default::default(),
+                trailers: None,
+                via: None,
+            },
+            body: gz.finish().unwrap(),
+            reads: Mutex::new(Vec::new()),
+        }
+    }
+
+    #[test]
+    fn a_limited_body_read_reads_only_its_prefix() {
+        // Compresses well: the first bytes on the wire decode to far more than asked.
+        let backend = gzipped(&vec![b'a'; 1 << 20]);
+        let head = body_head(&backend, 0, BodyPart::Response, true, Some(1000)).unwrap();
+        assert_eq!((head.bytes.len(), head.cut), (1000, true));
+        assert_eq!(*backend.reads.lock(), vec![Some(1001)]);
+
+        // Doesn't compress: the prefix decodes to less than asked, so the
+        // whole body is read after all.
+        let mut state = 7u32;
+        let noise: Vec<u8> = (0..20_000)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 17;
+                state ^= state << 5;
+                state as u8
+            })
+            .collect();
+        let backend = gzipped(&noise);
+        assert!(backend.body.len() > noise.len());
+        let head = body_head(&backend, 0, BodyPart::Response, true, Some(19_990)).unwrap();
+        assert_eq!(head.bytes, noise[..19_990]);
+        assert!(head.cut);
+        assert_eq!(*backend.reads.lock(), vec![Some(19_991), None]);
+
+        // Not decoded: the prefix only.
+        let head = body_head(&backend, 0, BodyPart::Response, false, Some(10)).unwrap();
+        assert_eq!(head.bytes, backend.body[..10]);
+        assert_eq!(backend.reads.lock().last(), Some(&Some(11)));
     }
 
     #[test]

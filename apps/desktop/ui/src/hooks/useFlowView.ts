@@ -1,6 +1,6 @@
 import { useEffect, useReducer, useRef, useState } from "react";
 
-import type { ViewDelta_Serialize } from "@/bindings";
+import type { FilterSpec_Deserialize, ViewDelta_Serialize } from "@/bindings";
 import { errorText, reportError } from "@/lib/actions";
 import { backend } from "@/lib/backend";
 import { flowKey, queryClient, streamKey } from "@/lib/query";
@@ -10,6 +10,24 @@ import { useUi } from "@/store/ui";
 interface Live {
   view: number;
   cache: RowCache;
+}
+
+/**
+ * Typing in the search box refilters once the keys pause this long (R2);
+ * chips, scopes and clearing the box apply at once.
+ */
+export const FILTER_DEBOUNCE_MS = 120;
+
+/** True if `next` differs from `prev` only in a non-empty search text. */
+function typedOnly(prev: FilterSpec_Deserialize, next: FilterSpec_Deserialize): boolean {
+  return (
+    next.text !== "" &&
+    prev.protocol === next.protocol &&
+    prev.host === next.host &&
+    prev.client === next.client &&
+    prev.content.length === next.content.length &&
+    prev.content.every((c, i) => next.content[i] === c)
+  );
 }
 
 /**
@@ -90,21 +108,36 @@ export function useFlowView() {
   }, [store, attempt]);
 
   // Filter changes: refilter synchronously in Rust, then refetch visible rows.
+  // Typing is debounced; the timing starts when the filter is sent.
   const filterSeq = useRef(0);
+  const sentFilter = useRef(filter);
   useEffect(() => {
-    if (live === null || filter === initial.current.filter) return;
-    const seq = ++filterSeq.current;
-    const t0 = performance.now();
-    backend.setFilter(live.view, filter).then((info) => {
-      if (seq !== filterSeq.current) return;
-      const pending = { t0, engineMs: info.elapsed_us / 1000 };
-      if (info.len === 0) reportFilterTiming(pending);
-      else pendingFilter.current = pending;
-      live.cache.reset(info.len);
-      useUi.getState().setStats({ len: info.len, total: info.total });
-      useUi.getState().setDeep(info.deep);
-      bump();
-    }, reportError.bind(null, "Couldn't apply the filter"));
+    if (live === null) return;
+    if (filter === initial.current.filter) {
+      sentFilter.current = filter;
+      return;
+    }
+    const apply = () => {
+      sentFilter.current = filter;
+      const seq = ++filterSeq.current;
+      const t0 = performance.now();
+      backend.setFilter(live.view, filter).then((info) => {
+        if (seq !== filterSeq.current) return;
+        const pending = { t0, engineMs: info.elapsed_us / 1000 };
+        if (info.len === 0) reportFilterTiming(pending);
+        else pendingFilter.current = pending;
+        live.cache.reset(info.len);
+        useUi.getState().setStats({ len: info.len, total: info.total });
+        useUi.getState().setDeep(info.deep);
+        bump();
+      }, reportError.bind(null, "Couldn't apply the filter"));
+    };
+    if (!typedOnly(sentFilter.current, filter)) {
+      apply();
+      return;
+    }
+    const timer = setTimeout(apply, FILTER_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
   }, [live, filter]);
 
   // Like filters, only the latest sort's reply may reset the rows.

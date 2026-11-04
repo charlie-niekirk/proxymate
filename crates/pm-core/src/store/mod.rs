@@ -17,6 +17,7 @@ mod filter;
 mod messages;
 mod query;
 mod segments;
+mod shared;
 mod sidebar;
 mod sqlite;
 mod view;
@@ -37,6 +38,8 @@ pub use filter::CompiledFilter;
 pub(crate) use messages::{SseLog, WsEntry, WsLog, page_events, sse_event};
 pub use query::FlowQuery;
 pub(crate) use segments::SegmentStore;
+pub(crate) use shared::Watcher;
+pub use shared::{SharedStore, StoreWriteGuard};
 pub use sidebar::{SidebarCounts, in_domain, registrable_domain};
 pub(crate) use sqlite::{Opened, SavedFlow, SavedWs, SessionWriter, SqliteBackend};
 pub use view::{DeepJob, View};
@@ -314,6 +317,8 @@ impl Store {
                     }
                 }
                 FlowEvent::Flush(ack) => acks.push(ack),
+                // Expanded by the ingest thread before a batch gets here.
+                FlowEvent::Sizes => {}
             }
         }
         for view in self.views.values_mut() {
@@ -777,6 +782,143 @@ mod tests {
         assert!(again.evicted.is_empty());
         assert_eq!(again.kept, vec![1, 2]);
         assert_eq!(store.evict(0, None), None);
+    }
+
+    /// Live traffic into sorted and filtered views (R2's settle): after
+    /// every batch each view holds what a full rebuild would, and a delta
+    /// that isn't structural only appended rows after the ones the UI has.
+    #[test]
+    fn settled_views_match_a_rebuild_and_append_only_at_the_end() {
+        let mut store = Store::default();
+        let specs = [
+            (FilterSpec::default(), SortSpec::default()),
+            (
+                FilterSpec::default(),
+                SortSpec {
+                    key: SortKey::Id,
+                    dir: SortDir::Desc,
+                    ..Default::default()
+                },
+            ),
+            (
+                FilterSpec::default(),
+                SortSpec {
+                    key: SortKey::Duration,
+                    dir: SortDir::Desc,
+                    ..Default::default()
+                },
+            ),
+            (
+                FilterSpec {
+                    text: "status:2xx".into(),
+                    ..Default::default()
+                },
+                SortSpec::default(),
+            ),
+            (
+                FilterSpec {
+                    protocol: ProtocolFilter::Https,
+                    ..Default::default()
+                },
+                SortSpec {
+                    key: SortKey::Url,
+                    dir: SortDir::Asc,
+                    ..Default::default()
+                },
+            ),
+            (
+                FilterSpec {
+                    text: "api".into(),
+                    ..Default::default()
+                },
+                SortSpec {
+                    key: SortKey::Status,
+                    dir: SortDir::Asc,
+                    ..Default::default()
+                },
+            ),
+        ];
+        let views: Vec<ViewId> = specs
+            .iter()
+            .map(|(f, s)| store.create_view(f.clone(), *s).view)
+            .collect();
+        let ids = |store: &Store, view| -> Vec<FlowId> {
+            store
+                .rows(view, 0, u32::MAX)
+                .unwrap()
+                .rows
+                .iter()
+                .map(|r| r.0)
+                .collect()
+        };
+        let mut seen: Vec<Vec<FlowId>> = views.iter().map(|_| Vec::new()).collect();
+        let mut generator = Generator::new(11);
+        let mut active: Vec<FlowSummary> = Vec::new();
+        let (mut appended, mut structural) = (0, 0);
+        for round in 0..60 {
+            let mut events = Vec::new();
+            // Some flows finish (status, duration and sizes change)...
+            let finishing = active.len().min(1 + round % 7);
+            for mut flow in active.drain(..finishing) {
+                generator.complete(&mut flow);
+                events.push(FlowEvent::Response {
+                    id: flow.id,
+                    status: flow.status.unwrap_or(200),
+                    content_kind: flow.content_kind,
+                });
+                events.push(FlowEvent::Finished {
+                    id: flow.id,
+                    state: flow.state,
+                    duration_ms: flow.duration_ms.unwrap_or(1),
+                    req_size: flow.req_size,
+                    resp_size: flow.resp_size,
+                });
+            }
+            // ...and new ones start (first, in id order, as the channel
+            // carries them), some finishing in the same batch.
+            let mut starts = Vec::new();
+            for i in 0..(round % 5) {
+                let mut flow = generator.active_flow();
+                flow.id = store.next_id() + i as FlowId;
+                starts.push(FlowEvent::Started(flow.clone()));
+                if i % 2 == 0 {
+                    active.push(flow);
+                } else {
+                    generator.complete(&mut flow);
+                    events.push(FlowEvent::Update(vec![flow]));
+                }
+            }
+            starts.extend(events);
+            store.apply(starts);
+            for (i, &view) in views.iter().enumerate() {
+                let (filter, sort) = specs[i].clone();
+                let expected = {
+                    let fresh = store.create_view(filter, sort).view;
+                    let rows = ids(&store, fresh);
+                    store.drop_view(fresh);
+                    rows
+                };
+                let now = ids(&store, view);
+                assert_eq!(now, expected, "view {i} after round {round}");
+                if let Some(delta) = store.take_delta(view) {
+                    if delta.structural {
+                        structural += 1;
+                    } else {
+                        assert!(
+                            now.starts_with(&seen[i]),
+                            "view {i} round {round}: rows moved without a structural delta"
+                        );
+                        assert_eq!(delta.appended as usize, now.len() - seen[i].len());
+                        appended += 1;
+                    }
+                }
+                seen[i] = now;
+            }
+        }
+        assert!(
+            appended > 0 && structural > 0,
+            "{appended} appended, {structural} structural"
+        );
     }
 
     #[test]

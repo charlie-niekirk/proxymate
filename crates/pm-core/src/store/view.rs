@@ -95,9 +95,11 @@ pub struct View {
     changed: Vec<FlowId>,
     structural: bool,
     last_total: u32,
-    // Deferred work for the end of an ingest batch.
-    needs_resort: bool,
-    needs_rebuild: bool,
+    /// Rows that may have joined, left or moved since the view last
+    /// settled: new flows of a sorted view, flows whose sort key or
+    /// membership changed, deep search hits. Settled at the end of each
+    /// ingest batch by [`View::settle`], in O(n + k log n).
+    touched: Vec<Pos>,
     deep: Option<DeepState>,
 }
 
@@ -121,8 +123,7 @@ impl View {
             changed: Vec::new(),
             structural: true,
             last_total: u32::MAX,
-            needs_resort: false,
-            needs_rebuild: false,
+            touched: Vec::new(),
             deep: None,
         };
         view.start_deep(flows);
@@ -190,28 +191,15 @@ impl View {
         // A batch handed out before a clear reports after it.
         deep.checked = (deep.checked + checked).min(deep.total);
         deep.dirty = true;
-        let mut in_order = true;
-        let mut added = 0u32;
         for &(id, pos) in hits {
             deep.matched.insert(id);
-            let Some(pos) = pos else { continue };
-            if get_bit(&self.members, pos) || !self.filter.matches(&flows[pos as usize]) {
-                continue;
+            if let Some(pos) = pos
+                && !get_bit(&self.members, pos)
+            {
+                self.touched.push(pos);
             }
-            in_order &= self.indices.last().is_none_or(|&l| pos > l);
-            self.indices.push(pos);
-            set_bit(&mut self.members, pos);
-            added += 1;
         }
-        if added == 0 {
-            return;
-        }
-        if self.is_arrival_order() && in_order {
-            self.appended += added;
-        } else {
-            self.sort_indices(flows);
-            self.mark_structural();
-        }
+        self.settle(flows);
     }
 
     /// Forgets the deep search's candidates and matches (a clear).
@@ -293,7 +281,7 @@ impl View {
         for &pos in &self.indices {
             set_bit(&mut self.members, pos);
         }
-        self.needs_rebuild = false;
+        self.touched.clear();
         self.mark_structural();
     }
 
@@ -311,18 +299,15 @@ impl View {
                 }
                 continue;
             }
-            self.indices.push(pos as Pos);
-            set_bit(&mut self.members, pos as Pos);
+            if self.is_arrival_order() {
+                // Ids grow with positions: new rows go at the end.
+                self.indices.push(pos as Pos);
+                set_bit(&mut self.members, pos as Pos);
+            } else {
+                self.touched.push(pos as Pos);
+            }
         }
-        let added = (self.indices.len() - before) as u32;
-        if added == 0 {
-            return;
-        }
-        if self.is_arrival_order() {
-            self.appended += added;
-        } else {
-            self.needs_resort = true;
-        }
+        self.appended += (self.indices.len() - before) as u32;
     }
 
     /// Called after the flow at `pos` was replaced by `new`.
@@ -341,25 +326,89 @@ impl View {
         match (was, is) {
             (true, true) => {
                 if !self.is_arrival_order() && compare_key(self.sort, old, new) != Ordering::Equal {
-                    self.needs_resort = true;
-                } else {
-                    self.changed.push(new.id);
+                    self.touched.push(pos);
                 }
+                self.changed.push(new.id);
             }
             (false, false) => {}
-            // Membership changed: rows move, so rebuild once at the end of the batch.
-            _ => self.needs_rebuild = true,
+            // Joins or leaves: settled at the end of the batch.
+            _ => self.touched.push(pos),
         }
     }
 
     /// Applies deferred work at the end of an ingest batch.
     pub fn finish_batch(&mut self, flows: &[FlowSummary]) {
-        if self.needs_rebuild {
-            self.rebuild(flows);
-        } else if self.needs_resort {
-            self.sort_indices(flows);
+        self.settle(flows);
+    }
+
+    /// Puts the touched rows where they now belong: each leaves the view,
+    /// and goes back in at its sorted place if the filter still accepts it.
+    /// The other rows keep their order, so this is a binary insertion per
+    /// touched row rather than a sort. The delta is structural only if a
+    /// row the UI already has moved: rows that land after every old one
+    /// are appended.
+    fn settle(&mut self, flows: &[FlowSummary]) {
+        if self.touched.is_empty() {
+            return;
+        }
+        let mut touched = std::mem::take(&mut self.touched);
+        touched.sort_unstable();
+        touched.dedup();
+        let mut left = false;
+        for &pos in &touched {
+            if get_bit(&self.members, pos) {
+                clear_bit(&mut self.members, pos);
+                left = true;
+            }
+        }
+        // A row that changed in place may not be where it was: compare
+        // against the old order rather than guess.
+        let old = left.then(|| {
+            let old = self.indices.clone();
+            let members = &self.members;
+            self.indices.retain(|&p| get_bit(members, p));
+            old
+        });
+        let mut adds: Vec<Pos> = touched
+            .into_iter()
+            .filter(|&pos| flows.get(pos as usize).is_some_and(|f| self.accepts(f)))
+            .collect();
+        adds.sort_unstable_by(|&a, &b| self.order(flows, a, b));
+        let rest = std::mem::take(&mut self.indices);
+        let mut merged = Vec::with_capacity(rest.len() + adds.len());
+        let mut tail = &rest[..];
+        let mut at_end = true;
+        for &pos in &adds {
+            let at = tail.partition_point(|&p| self.order(flows, p, pos) == Ordering::Less);
+            at_end &= at == tail.len();
+            merged.extend_from_slice(&tail[..at]);
+            merged.push(pos);
+            tail = &tail[at..];
+            set_bit(&mut self.members, pos);
+        }
+        merged.extend_from_slice(tail);
+        self.indices = merged;
+        let kept_order = match &old {
+            Some(old) => self.indices.len() >= old.len() && self.indices[..old.len()] == old[..],
+            None => at_end,
+        };
+        if kept_order {
+            let before = old.as_ref().map_or(rest.len(), Vec::len);
+            self.appended += (self.indices.len() - before) as u32;
+        } else {
             self.mark_structural();
         }
+    }
+
+    /// The display order of two arena positions.
+    fn order(&self, flows: &[FlowSummary], a: Pos, b: Pos) -> Ordering {
+        let SortSpec { key, dir, .. } = self.sort;
+        let ord = if key == SortKey::Id {
+            a.cmp(&b)
+        } else {
+            compare_key(self.sort, &flows[a as usize], &flows[b as usize]).then(a.cmp(&b))
+        };
+        if dir == SortDir::Desc { ord.reverse() } else { ord }
     }
 
     /// Drains the pending change into a delta, if there is anything to report.
@@ -406,7 +455,6 @@ impl View {
     }
 
     fn sort_indices(&mut self, flows: &[FlowSummary]) {
-        self.needs_resort = false;
         let SortSpec { key, dir, extra } = self.sort;
         if key == SortKey::Id {
             // Positions are pushed in arrival order, which is id order.
@@ -457,6 +505,12 @@ fn set_bit(bits: &mut Vec<u64>, pos: Pos) {
         bits.resize(word + 1, 0);
     }
     bits[word] |= 1 << (pos % 64);
+}
+
+fn clear_bit(bits: &mut [u64], pos: Pos) {
+    if let Some(word) = bits.get_mut(pos as usize / 64) {
+        *word &= !(1 << (pos % 64));
+    }
 }
 
 fn get_bit(bits: &[u64], pos: Pos) -> bool {

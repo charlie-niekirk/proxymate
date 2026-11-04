@@ -391,6 +391,28 @@ impl BlobBackend for SqliteBackend {
         }
     }
 
+    fn body_prefix(&self, id: FlowId, part: BodyPart, max: usize) -> io::Result<Option<Vec<u8>>> {
+        use std::io::Read;
+        let part = match part {
+            BodyPart::Request => 0u8,
+            BodyPart::Response => 1u8,
+        };
+        match self.blob(
+            "SELECT data FROM bodies WHERE flow = ?1 AND part = ?2",
+            params![id, part],
+        )? {
+            // Decompress only as far as needed.
+            Some(data) => {
+                let mut out = Vec::new();
+                zstd::stream::read::Decoder::new(&data[..])?
+                    .take(max as u64)
+                    .read_to_end(&mut out)?;
+                Ok(Some(out))
+            }
+            None => Ok(self.exists(id)?.then(Vec::new)),
+        }
+    }
+
     fn ws(&self, id: FlowId) -> io::Result<Option<Arc<WsLog>>> {
         if let Some(log) = self.ws.get(&id) {
             return Ok(log);

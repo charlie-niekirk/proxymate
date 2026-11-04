@@ -40,6 +40,7 @@ import { createMockCapture } from "@/lib/mockCapture";
 import { createMockMocking } from "@/lib/mockMocking";
 import { createMockProtos } from "@/lib/mockProtos";
 import { createMockScripts } from "@/lib/mockScripts";
+import { MAX_ROWS_PER_CALL } from "@/lib/rowCache";
 
 /** A fully specified mock flow with bodies (the dev zoo, see `dev/zoo.ts`). */
 export interface MockFlow {
@@ -362,7 +363,9 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
     async getRows(view, start, n) {
       await ready;
       const ids = views.get(view) ?? [];
-      return { view, start, len: ids.length, rows: ids.slice(start, start + n).map((id) => withExtra(flows[id]!)) };
+      // Capped like the engine's `get_rows`.
+      const count = Math.min(n, MAX_ROWS_PER_CALL);
+      return { view, start, len: ids.length, rows: ids.slice(start, start + count).map((id) => withExtra(flows[id]!)) };
     },
     async getFlow(store, id): Promise<FlowSummary_Serialize | null> {
       await ready;

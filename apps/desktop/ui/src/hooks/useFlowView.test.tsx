@@ -18,7 +18,7 @@ const backend = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/backend", () => ({ backend }));
 
-import { useFlowView } from "@/hooks/useFlowView";
+import { FILTER_DEBOUNCE_MS, useFlowView } from "@/hooks/useFlowView";
 import { useUi } from "@/store/ui";
 
 // React only flushes effects inside `act` when it knows it's a test.
@@ -83,5 +83,24 @@ describe("useFlowView", () => {
     await act(async () => second.resolve(info(20)));
     await act(async () => first.resolve(info(99)));
     expect(result.cache?.len).toBe(20);
+  });
+
+  it("debounces typing in the search box, but applies chips at once", async () => {
+    backend.createView.mockResolvedValueOnce(info(10));
+    await act(async () => root.render(createElement(Probe)));
+    backend.setFilter.mockResolvedValue(info(5));
+    await act(async () => useUi.getState().setText("ap"));
+    await act(async () => useUi.getState().setText("api"));
+    expect(backend.setFilter).not.toHaveBeenCalled();
+    await act(() => new Promise((r) => setTimeout(r, FILTER_DEBOUNCE_MS + 50)));
+    expect(backend.setFilter).toHaveBeenCalledTimes(1);
+    expect(backend.setFilter).toHaveBeenLastCalledWith(7, expect.objectContaining({ text: "api" }));
+
+    await act(async () => useUi.getState().setProtocol("https"));
+    expect(backend.setFilter).toHaveBeenCalledTimes(2);
+    // Clearing the box is immediate too.
+    await act(async () => useUi.getState().setText(""));
+    expect(backend.setFilter).toHaveBeenCalledTimes(3);
+    await act(async () => useUi.getState().setProtocol("all"));
   });
 });

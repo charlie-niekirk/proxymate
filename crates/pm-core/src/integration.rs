@@ -6,6 +6,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 use pm_model::{
@@ -17,9 +18,12 @@ use pm_platform::trust::{CaCert, TrustState, TrustStore};
 
 use crate::client::{ClientKind, ClientResolver};
 use crate::devices::DeviceRegistry;
+use crate::store::Watcher;
 use crate::{Engine, Error};
 
 const SYSPROXY_BACKUP_FILE: &str = "sysproxy-backup.json";
+/// The sidebar is sent at most this often (about 4 Hz).
+const SIDEBAR_INTERVAL: Duration = Duration::from_millis(250);
 
 /// Receives sidebar snapshots. Returning `false` unsubscribes.
 pub type SidebarSink = Box<dyn FnMut(SidebarSnapshot) -> bool + Send>;
@@ -35,6 +39,10 @@ pub(crate) struct Platform {
     guardian_exe: Option<PathBuf>,
     guardian_spawned: AtomicBool,
     sidebar_sink: Mutex<Option<SidebarSink>>,
+    /// When the sidebar was last sent; it goes out at most every
+    /// [`SIDEBAR_INTERVAL`], unless `sidebar_now` asks for it sooner.
+    sidebar_sent: Mutex<Option<Instant>>,
+    sidebar_now: AtomicBool,
     /// The store the sidebar counts: the live capture or the document tab
     /// the UI shows.
     sidebar_store: AtomicU32,
@@ -56,6 +64,8 @@ impl Platform {
             guardian_exe,
             guardian_spawned: AtomicBool::new(false),
             sidebar_sink: Mutex::new(None),
+            sidebar_sent: Mutex::new(None),
+            sidebar_now: AtomicBool::new(false),
             sidebar_store: AtomicU32::new(LIVE_STORE),
             devices,
         }
@@ -115,6 +125,7 @@ impl Engine {
     }
 
     fn mark_sidebar_dirty(&self) {
+        self.platform.sidebar_now.store(true, Ordering::Release);
         match self.platform.sidebar_store.load(Ordering::Relaxed) {
             LIVE_STORE => self.store.write().sidebar_mut().mark_dirty(),
             doc => match self.docs.get(doc) {
@@ -127,16 +138,24 @@ impl Engine {
         }
     }
 
-    /// Part of the publisher tick.
+    /// Part of the publisher tick: the counts change with nearly every
+    /// flow, so they go out at most 4 times a second, and a tick with no
+    /// store write since the last look doesn't lock the store.
     pub(crate) fn publish_sidebar(&self) {
         let mut sink = self.platform.sidebar_sink.lock();
         let Some(send) = sink.as_mut() else {
             return;
         };
+        let now = Instant::now();
+        let forced = self.platform.sidebar_now.swap(false, Ordering::AcqRel);
+        let mut sent = self.platform.sidebar_sent.lock();
+        if !forced && sent.is_some_and(|at| now.duration_since(at) < SIDEBAR_INTERVAL) {
+            return;
+        }
         let dirty = match self.platform.sidebar_store.load(Ordering::Relaxed) {
-            LIVE_STORE => self.store.write().sidebar_mut().take_dirty(),
+            LIVE_STORE => self.store.changed(Watcher::Sidebar) && self.store.write_quiet().sidebar_mut().take_dirty(),
             doc => match self.docs.get(doc) {
-                Ok(doc) => doc.store.write().sidebar_mut().take_dirty(),
+                Ok(doc) => doc.store.changed(Watcher::Sidebar) && doc.store.write_quiet().sidebar_mut().take_dirty(),
                 // Its tab closed: back to the live capture.
                 Err(_) => {
                     self.platform.sidebar_store.store(LIVE_STORE, Ordering::Relaxed);
@@ -147,6 +166,7 @@ impl Engine {
         if !dirty {
             return;
         }
+        *sent = Some(now);
         if !send(self.sidebar()) {
             *sink = None;
         }

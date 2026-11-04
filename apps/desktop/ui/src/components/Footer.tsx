@@ -9,7 +9,7 @@ import {
   ScanSearch,
   Trash2,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 
 import { SEARCH_INPUT_ID } from "@/components/FilterBar";
 import { CopyMenu } from "@/components/menus/items";
@@ -26,7 +26,8 @@ import { LIVE_STORE, useUi, type SaveJob } from "@/store/ui";
 
 const nf = new Intl.NumberFormat();
 
-export function Footer() {
+/** The status bar. Memoised: it follows the stores itself, so the shell's re-renders skip it. */
+export const Footer = memo(function Footer() {
   const { len, total } = useUi((s) => s.stats);
   const selected = useUi((s) => (s.selectedId !== null ? 1 : 0));
   const count = useUi((s) => selectionCount(s.selection, s.stats.len));
@@ -82,7 +83,7 @@ export function Footer() {
       <Throughput />
     </footer>
   );
-}
+});
 
 /** The table's deep search: progress while it runs, then what it found. */
 function DeepStatus({ checked, total, matched, running }: { checked: number; total: number; matched: number; running: boolean }) {

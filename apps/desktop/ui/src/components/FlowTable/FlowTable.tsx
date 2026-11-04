@@ -32,6 +32,7 @@ import { backend } from "@/lib/backend";
 import { formatDuration, formatSize, formatTime, versionLabel, type Row } from "@/lib/flow";
 import { isSelected, range, selectionCount } from "@/lib/selection";
 import { proxyStatusKey } from "@/lib/query";
+import { MAX_ROWS_PER_CALL } from "@/lib/rowCache";
 import { sslTitle } from "@/lib/tls";
 import { cn } from "@/lib/utils";
 import { MAX_HEADER_COLUMNS, usePrefs } from "@/store/prefs";
@@ -136,8 +137,15 @@ export function FlowTable() {
       if (ids.length === hi - lo + 1) return ids;
       const view = useUi.getState().view;
       if (view === null) return ids;
-      const page = await backend.getRows(view, lo, hi - lo + 1);
-      return page.rows.map((r) => r[0]);
+      // `get_rows` answers at most MAX_ROWS_PER_CALL rows: ask in steps.
+      const all: number[] = [];
+      for (let start = lo; start <= hi; start += MAX_ROWS_PER_CALL) {
+        const count = Math.min(MAX_ROWS_PER_CALL, hi - start + 1);
+        const page = await backend.getRows(view, start, count);
+        all.push(...page.rows.map((r) => r[0]));
+        if (page.rows.length < count) break;
+      }
+      return all;
     },
     [cache],
   );
@@ -352,8 +360,11 @@ function EmptyState() {
   );
 }
 
-/** Column headers: click sorts, drag the right edge resizes, drag a header reorders, right-click picks columns. */
-function Header({ columns, template }: { columns: PlacedColumn[]; template: string }) {
+/**
+ * Column headers: click sorts, drag the right edge resizes, drag a header reorders, right-click picks columns.
+ * Memoised: the table re-renders on every delta, the header only when its columns or the sort change.
+ */
+const Header = memo(function Header({ columns, template }: { columns: PlacedColumn[]; template: string }) {
   const sort = useUi((s) => s.sort);
   const setSort = useUi((s) => s.setSort);
   const layout = usePrefs((s) => s.columns);
@@ -471,7 +482,7 @@ function Header({ columns, template }: { columns: PlacedColumn[]; template: stri
       </ContextMenuContent>
     </ContextMenu>
   );
-}
+});
 
 /** Drag to resize; double-click restores the default width. */
 function ResizeHandle({ column }: { column: PlacedColumn }) {

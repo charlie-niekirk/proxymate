@@ -14,7 +14,7 @@ use pm_model::{DocumentInfo, DocumentKind, FlowId, FlowSelection, FlowSummary, L
 use rusqlite::Connection;
 
 use crate::io::{charles, har, session};
-use crate::store::{Opened, SavedFlow, SessionWriter, SqliteBackend, Store, VIEW_STORE_SHIFT};
+use crate::store::{Opened, SavedFlow, SessionWriter, SharedStore, SqliteBackend, Store, VIEW_STORE_SHIFT};
 use crate::{Engine, Error};
 
 /// Receives a save's progress; the last update has `finished` set.
@@ -26,7 +26,7 @@ const MAX_DOCUMENTS: StoreId = (1 << (32 - VIEW_STORE_SHIFT)) - 1;
 
 pub(crate) struct Document {
     pub info: DocumentInfo,
-    pub store: RwLock<Store>,
+    pub store: SharedStore,
     pub backend: SqliteBackend,
 }
 
@@ -67,7 +67,7 @@ impl Documents {
         flows.set_operations(Some(operations));
         let doc = Document {
             info: info.clone(),
-            store: RwLock::new(flows),
+            store: SharedStore::new(flows),
             backend: opened.backend,
         };
         self.open.write().insert(store, Arc::new(doc));
