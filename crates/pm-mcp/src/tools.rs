@@ -431,11 +431,52 @@ fn parse<T: DeserializeOwned>(args: JsonObject) -> Result<T, ToolError> {
 
 pub(crate) async fn call(ctx: &Ctx<'_>, name: &str, args: JsonObject) -> ToolResult {
     match name {
+        "search_flows" => search_flows(ctx, parse(args)?).await,
+        "get_flow_body" => get_flow_body(ctx, parse(args)?).await,
+        "wait_for_flow" => wait_for_flow(ctx, parse(args)?).await,
+        "test_rule" => test_rule(ctx, parse(args)?).await,
+        "repeat_flow" => repeat_flow(ctx, parse(args)?).await,
+        "replay_flow" => replay_flow(ctx, parse(args)?).await,
+        "create_script" => create_script(ctx, parse(args)?).await,
+        "update_script" => update_script(ctx, parse(args)?).await,
+        "set_script_enabled" => {
+            let p: SetScriptEnabled = parse(args)?;
+            Ok(json!(
+                blocking(ctx, move |e| e.set_script_enabled(&p.id, p.enabled)).await?
+            ))
+        }
+        "delete_script" => {
+            let p: ScriptIdParam = parse(args)?;
+            blocking(ctx, move |e| e.delete_script(&p.id)).await?;
+            Ok(json!({ "deleted": true }))
+        }
+        "delete_agent_scripts" => Ok(json!({ "deleted": blocking(ctx, |e| e.delete_agent_scripts()).await? })),
+        "test_script" => test_script(ctx, parse(args)?).await,
+        "get_flow_views" => {
+            let p: GetFlowViews = parse(args)?;
+            let part = p.part.unwrap_or(BodyPart::Response);
+            Ok(json!({ "results": ctx.engine.run_view_scripts(LIVE_STORE, p.id, part).await? }))
+        }
+        "send_request" => {
+            let p: SendRequest = parse(args)?;
+            send(ctx, p.request, p.apply_rules, p.wait).await
+        }
+
+        // Every other tool is a sync engine call: it runs on the blocking
+        // pool (R2), so a refilter or a body read waiting for the store
+        // lock never stalls the async threads that serve MCP and traffic.
+        _ => {
+            let name = name.to_owned();
+            on_pool(ctx, move |ctx| call_sync(ctx, &name, args)).await
+        }
+    }
+}
+
+fn call_sync(ctx: &Ctx<'_>, name: &str, args: JsonObject) -> ToolResult {
+    match name {
         "get_status" => get_status(ctx),
         "list_flows" => list_flows(ctx, parse(args)?),
-        "search_flows" => search_flows(ctx, parse(args)?).await,
         "get_flow" => get_flow(ctx, parse(args)?),
-        "get_flow_body" => get_flow_body(ctx, parse(args)?).await,
         "list_proto_schemas" => Ok(json!({
             "schemas": ctx.engine.proto_schemas(),
             "mappings": ctx.engine.proto_mappings(),
@@ -456,7 +497,6 @@ pub(crate) async fn call(ctx: &Ctx<'_>, name: &str, args: JsonObject) -> ToolRes
             ctx.engine.ws_close(p.id)?;
             Ok(json!({ "closing": p.id }))
         }
-        "wait_for_flow" => wait_for_flow(ctx, parse(args)?).await,
         "list_rules" => list_rules(ctx, parse(args)?),
         "get_rule" => {
             let p: RuleIdParam = parse(args)?;
@@ -485,7 +525,6 @@ pub(crate) async fn call(ctx: &Ctx<'_>, name: &str, args: JsonObject) -> ToolRes
         "list_mock_sources" => Ok(json!({ "sources": ctx.engine.mock_sources() })),
         "create_breakpoint" => create_breakpoint(ctx, parse(args)?),
         "create_rewrite" => create_rewrite(ctx, parse(args)?),
-        "test_rule" => test_rule(ctx, parse(args)?).await,
         "resolve_breakpoint" => {
             let p: ResolveBreakpoint = parse(args)?;
             ctx.engine.resolve_breakpoint(p.id, p.resolution)?;
@@ -510,9 +549,7 @@ pub(crate) async fn call(ctx: &Ctx<'_>, name: &str, args: JsonObject) -> ToolRes
             let code = ctx.engine.code_snippet(LIVE_STORE, p.id, p.language)?;
             Ok(json!({ "id": p.id, "language": p.language, "code": code }))
         }
-        "repeat_flow" => repeat_flow(ctx, parse(args)?).await,
         "export_har" => export_har(ctx, parse(args)?),
-        "replay_flow" => replay_flow(ctx, parse(args)?).await,
         "list_scripts" => list_scripts(ctx, parse(args)?),
         "get_script" => {
             let p: ScriptIdParam = parse(args)?;
@@ -521,37 +558,31 @@ pub(crate) async fn call(ctx: &Ctx<'_>, name: &str, args: JsonObject) -> ToolRes
                 .map(|s| json!(s))
                 .ok_or_else(|| ToolError(format!("no script with id {}", p.id)))
         }
-        "create_script" => create_script(ctx, parse(args)?).await,
-        "update_script" => update_script(ctx, parse(args)?).await,
-        "set_script_enabled" => {
-            let p: SetScriptEnabled = parse(args)?;
-            Ok(json!(
-                blocking(ctx, move |e| e.set_script_enabled(&p.id, p.enabled)).await?
-            ))
-        }
-        "delete_script" => {
-            let p: ScriptIdParam = parse(args)?;
-            blocking(ctx, move |e| e.delete_script(&p.id)).await?;
-            Ok(json!({ "deleted": true }))
-        }
-        "delete_agent_scripts" => Ok(json!({ "deleted": blocking(ctx, |e| e.delete_agent_scripts()).await? })),
-        "test_script" => test_script(ctx, parse(args)?).await,
-        "get_flow_views" => {
-            let p: GetFlowViews = parse(args)?;
-            let part = p.part.unwrap_or(BodyPart::Response);
-            Ok(json!({ "results": ctx.engine.run_view_scripts(LIVE_STORE, p.id, part).await? }))
-        }
         "get_script_console" => {
             let p: GetScriptConsole = parse(args)?;
             let entries = ctx.engine.script_console(p.since, limit(p.limit, 200, 2000) as u32);
             Ok(json!({ "entries": entries }))
         }
-        "send_request" => {
-            let p: SendRequest = parse(args)?;
-            send(ctx, p.request, p.apply_rules, p.wait).await
-        }
         other => Err(ToolError(format!("unknown tool {other:?}"))),
     }
+}
+
+/// Runs a sync tool on the blocking pool with its own copy of the context.
+async fn on_pool(ctx: &Ctx<'_>, f: impl FnOnce(&Ctx<'_>) -> ToolResult + Send + 'static) -> ToolResult {
+    let engine = ctx.engine.clone();
+    let client = ctx.client.to_owned();
+    let session = ctx.session.to_owned();
+    let ct = ctx.ct.clone();
+    tokio::task::spawn_blocking(move || {
+        f(&Ctx {
+            engine: &engine,
+            client: &client,
+            session: &session,
+            ct: &ct,
+        })
+    })
+    .await
+    .map_err(|e| ToolError(format!("the tool failed: {e}")))?
 }
 
 // ---- Parameters ----
@@ -1637,15 +1668,22 @@ async fn wait_for_flow(ctx: &Ctx<'_>, p: WaitForFlow) -> ToolResult {
         .engine
         .parse_query(&p.filter)
         .map_err(|e| ToolError(e.to_string()))?;
-    let after = p.after_id.or_else(|| {
+    let after = match p.after_id {
+        Some(after) => Some(after),
         // Flows that start after this call: everything up to the newest now.
-        let newest = ctx.engine.find_flows("", None, None, 1, true).ok()?;
-        newest.flows.first().map(|f| f.id)
-    });
+        None => blocking(ctx, |e| Ok(e.find_flows("", None, None, 1, true).ok()))
+            .await?
+            .and_then(|newest| newest.flows.first().map(|f| f.id)),
+    };
     let timeout = Duration::from_millis(p.timeout_ms.unwrap_or(WAIT_DEFAULT_MS).min(WAIT_MAX_MS));
     let deadline = tokio::time::Instant::now() + timeout;
+    let query = Arc::new(query);
+    let include_active = p.include_active;
     loop {
-        if let Some(flow) = ctx.engine.first_flow_matching(&query, after, p.include_active) {
+        // A scan of the whole store (deep terms read bodies): off the async threads.
+        let q = query.clone();
+        let found = blocking(ctx, move |e| Ok(e.first_flow_matching(&q, after, include_active))).await?;
+        if let Some(flow) = found {
             return Ok(json!({ "flow": brief(&flow), "timed_out": false }));
         }
         if tokio::time::Instant::now() >= deadline {
@@ -1751,7 +1789,8 @@ async fn send(ctx: &Ctx<'_>, spec: RequestSpec, apply_rules: bool, wait: bool) -
 }
 
 async fn repeat_flow(ctx: &Ctx<'_>, p: RepeatFlow) -> ToolResult {
-    let spec = ctx.engine.request_spec(LIVE_STORE, p.id, false)?;
+    let id = p.id;
+    let spec = blocking(ctx, move |e| e.request_spec(LIVE_STORE, id, false)).await?;
     let opts = RepeatOpts {
         iterations: p.iterations,
         concurrency: p.concurrency,
@@ -1816,7 +1855,8 @@ async fn replay_flow(ctx: &Ctx<'_>, p: ReplayFlow) -> ToolResult {
         let error = ctx.engine.flow_detail(id).ok().flatten().and_then(|d| d.error);
         return Ok(json!({ "id": id, "replayed": p.id, "flow": flow, "error": error }));
     };
-    let mut spec = ctx.engine.request_spec(LIVE_STORE, p.id, true)?;
+    let id = p.id;
+    let mut spec = blocking(ctx, move |e| e.request_spec(LIVE_STORE, id, true)).await?;
     if let Some(method) = edits.method {
         spec.method = method;
     }
@@ -1851,8 +1891,8 @@ fn agent_origin(ctx: &Ctx<'_>) -> RuleOrigin {
     }
 }
 
-/// Runs an engine call that may block (saving a script evaluates it) off
-/// the async runtime's threads.
+/// Runs an engine call that may block (saving a script evaluates it, a
+/// scan reads bodies) off the async runtime's threads.
 async fn blocking<T: Send + 'static>(
     ctx: &Ctx<'_>,
     f: impl FnOnce(&Engine) -> Result<T, pm_core::Error> + Send + 'static,
