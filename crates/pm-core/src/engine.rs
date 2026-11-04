@@ -249,6 +249,19 @@ impl Engine {
         ids
     }
 
+    /// Runs engine work that may block (a refilter, a body read, a store
+    /// lock held by an ingest batch, saving a script) on tokio's blocking
+    /// pool, so it never stalls the async threads that serve the UI, MCP and
+    /// traffic (R2). The one helper the async adapters share; the error is a
+    /// panic in `f`.
+    pub async fn blocking<T: Send + 'static>(
+        self: &Arc<Self>,
+        f: impl FnOnce(&Arc<Engine>) -> T + Send + 'static,
+    ) -> Result<T, tokio::task::JoinError> {
+        let engine = Arc::clone(self);
+        tokio::task::spawn_blocking(move || f(&engine)).await
+    }
+
     /// Seeds `count` synthetic finished flows ending at about now
     /// (`PROXYMATE_SYNTH_FLOWS`, the CLI bench). Opt-in only.
     pub fn seed_synthetic(&self, count: usize, seed: u64) {

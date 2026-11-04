@@ -48,8 +48,8 @@ pub use protobuf::{Badge, DecodedBody, DecodedFormat, DecodedMessage, GrpcStatus
 pub use rules::{
     Action, AppliedRule, BlockMode, BreakpointBody, BreakpointId, BreakpointInfo, BreakpointResolution, FlowRules,
     GLOBAL_THROTTLE_RULE_ID, HeldMessage, KvMatch, MapLocalSource, Matcher, MessageEdits, Pattern, PatternKind, Phase,
-    PresetKind, ResponseMatcher, Rule, RuleId, RuleOrigin, RuleSettings, RuleTestResult, ServeKey, ServeMiss,
-    ServePick, StatusRange, WsOp,
+    PresetKind, ResponseMatcher, Rule, RuleId, RuleOrigin, RulePatch, RuleSettings, RuleTestResult, ServeKey,
+    ServeMiss, ServePick, StatusRange, WsOp,
 };
 pub use scripts::{
     ConsoleEntry, ConsoleLevel, Script, ScriptId, ScriptIssue, ScriptKind, ScriptPhase, ScriptSettings,

@@ -609,6 +609,16 @@ pub struct FlowRules {
     pub scripts: Vec<crate::scripts::ScriptIssue>,
 }
 
+/// A partial edit of a saved rule: only the fields that are set change
+/// (`Engine::patch_rule`, MCP's `update_rule`).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Type, JsonSchema)]
+pub struct RulePatch {
+    pub name: Option<String>,
+    pub enabled: Option<bool>,
+    pub matcher: Option<Matcher>,
+    pub actions: Option<Vec<Action>>,
+}
+
 /// Rule-related settings, kept in `app.sqlite`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, JsonSchema)]
 pub struct RuleSettings {
