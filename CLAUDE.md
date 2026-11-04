@@ -6,7 +6,7 @@ A fast desktop HTTP(S) debugging proxy (in the vein of Proxyman / Charles), buil
 
 ## Delivery workflow (mandatory)
 
-- Each milestone (M0–M21 in `docs/PLAN.md`) is built in **its own Claude session** and lands as **its own PR**.
+- Each milestone (M0–M21 in `docs/PLAN.md`) is built in **its own Claude session** and lands as **its own PR**. The review track (R0–R4, same file) follows the same rules on `rN-<slug>` branches.
 - Branch from the latest `main` as `mN-<slug>` (for example `m1-http-proxy`). Use the branch name the Milestones table gives.
 - Do not implement more than one milestone in a session, and do not start the next one.
 - Open the PR titled `MN: <Title>`. Its description covers:
@@ -140,7 +140,7 @@ Targets:
 **State**
 - Zustand (`store/ui.ts`) holds UI state; `store/prefs.ts` holds what persists across launches (appearance, columns, sort).
 - Row data lives in the non-reactive `RowCache`, never in React state.
-- TanStack Query is planned for detail, bodies and rules.
+- TanStack Query holds server state (flow detail, bodies, rules, settings): one `QueryClient` and the key factories in `lib/query.ts`. Keep one shape per key.
 
 **Design system: shadcn/ui** (Radix + Tailwind v4)
 - The components are copied into `src/components/ui/` and restyled to a compact density: 12–13 px text and 24–28 px controls. Add more with `npx shadcn@latest add <name>` from `apps/desktop/ui`.
@@ -236,7 +236,7 @@ Targets:
 - `Engine::send(RequestSpec, SendOpts)` is the one way Proxymate sends a request itself (Replay, Compose, MCP). It goes through `proxy/exchange.rs` like proxied traffic; the flow's summary gets `sent_by`.
 - Flow ids are per store. The live capture is `LIVE_STORE` (0); every opened session or HAR is a document store. Flow-level Engine methods have `*_in(store, …)` forms (the live-only ones stay for existing callers); view ids already encode their store. UI code reads the active store from `useUi().store` and puts it in query keys (`flowKey(store, id)`).
 - Golden files are in `crates/pm-core/tests/golden/` (cURL, HAR and M17's `snippets/`); rewrite them with `UPDATE_GOLDEN=1 cargo test -p pm-core --lib io::`. The Chrome HAR fixture is `crates/pm-core/tests/fixtures/chrome-devtools.har`.
-- A session's postcard layouts are part of its format: bump `store/sqlite.rs` `VERSION` when `FlowDetail` or the message types change shape. Version 7 (M20: `PresetKind::ServeFrom` and `OpenApi`, which an applied rule's origin can name; no layout change) still reads 6 (M19: WebSocket message flags and the `originals` table), 5 (M18: `FlowDetail.via`, the old message layout) down to 1 (`tests/fixtures/session-v1.proxymate`; `a_version_2_session_still_opens`, `a_version_4_session_still_opens`, `a_version_6_session_still_opens` and `store::sqlite::tests::a_version_5_websocket_log_still_opens` make older files from a current one). `Action` itself is never in a session (only `AppliedRule` is), but `PresetKind` is: a new preset bumps `VERSION`.
+- A session's postcard layouts are part of its format: bump `store/sqlite.rs` `VERSION` when `FlowDetail` or the message types change shape. Version 7 (M20: `PresetKind::ServeFrom` and `OpenApi`, which an applied rule's origin can name; no layout change) still reads 6 (M19: WebSocket message flags and the `originals` table), 5 (M18: `FlowDetail.via`, the old message layout) down to 1 (`tests/fixtures/session-v1.proxymate`; `tests/fixtures/session-v7.proxymate` is a committed version 7 file that `store/sqlite/v7_fixture.rs` decodes field by field, and never regenerate it: a layout change bumps `VERSION` and keeps it as the version 7 case; the same file pins the postcard index of each enum a session stores by position, so a new variant must be appended there; `a_version_2_session_still_opens`, `a_version_4_session_still_opens`, `a_version_6_session_still_opens` and `store::sqlite::tests::a_version_5_websocket_log_still_opens` make older files from a current one). `Action` itself is never in a session (only `AppliedRule` is), but `PresetKind` is: a new preset bumps `VERSION`.
 - postcard can't deserialize internally tagged enums (`#[serde(tag = …)]`). Anything inside `FlowDetail` must not be one, or must serialize by hand like `RuleOrigin`.
 
 **Visual rewrite (M13)**

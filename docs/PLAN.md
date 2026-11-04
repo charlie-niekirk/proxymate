@@ -703,6 +703,50 @@ After v0.3.0 the user asked for a feature audit against Proxyman, Charles, HTTP 
 - PAC files and NTLM/Kerberos upstream auth, DoH, gRPC server reflection, protobuf rewrites, OpenAPI validation, Docker interception, saved request collections.
 - (From M16) h2c prior knowledge inside a CONNECT (plaintext gRPC through the proxy): `serve_plain` speaks h1 only, so `grpcurl -plaintext` via the proxy fails. A decoded, read-only protobuf view and hex editing in the Breakpoint Editor.
 
+## Review track: R0–R4
+
+### Context
+After M21 the user asked for an architecture, performance, UI and CI/CD review. These phases carry out its findings. They change no product scope, and run beside the milestones (M12 is still open). Each phase lands as one or more PRs on branches named `rN-<slug>`, with the delivery workflow's rules: never merged by the session that opened them, CI green, PR description as for a milestone.
+
+### R0: CI hardening (`r0-ci`)
+- Pin the Rust toolchain in `rust-toolchain.toml`. Give `ci.yml` `permissions: contents: read`, a `timeout-minutes` on every job, and `cancel-in-progress` for pull requests only.
+- fmt and clippy on Ubuntu only. Tests on macOS and Linux (per-test timeouts with `cargo nextest`). Skip docs-only changes.
+- Actions pinned by SHA, Dependabot for cargo, npm and Actions, `cargo-deny` (advisories, licences, duplicates) and `npm audit --omit=dev`.
+
+### R1: Quick fixes and safety nets (`r1-ui-fixes`, `r1-format-pins`)
+- UI:
+  - the Breakpoint Editor's two body queries share one key and one shape;
+  - a release build outside the app shows a notice instead of the mock;
+  - `useFlowView` reports a view it couldn't open, with a retry, and guards sort replies;
+  - the inspector separates loading, error and flow-gone states;
+  - type-aware `no-floating-promises`.
+- Formats:
+  - a committed version 7 session (`tests/fixtures/session-v7.proxymate`, checked by `store/sqlite/v7_fixture.rs`) that must keep decoding as written;
+  - the postcard index of every enum a session stores by position, as an exhaustive list;
+  - a contract test that the mock's `getFlow` matches `decodeRow` of its rows.
+
+### R2: Hot path performance
+Measure first, then fix:
+- Bench and CI budget. Sorted views, eviction and deep search in `benches/ingest.rs`, and a budget job that fails CI.
+- Async commands. The heavy Tauri commands (`set_filter`, `get_rows`, `get_body`, `clear_flows`, `remove_flows`, …) are async on the blocking pool, and `get_rows` is capped at 512 rows. MCP tools wrap every sync engine call the same way.
+- Sorted views. Binary insertion instead of a full resort per ingest batch, resorting at the publish tick, and a structural delta only when positions moved.
+- Segment writes. A writer thread fed by a bounded channel, outside the per-flow lock. The ingest channel is bounded too, or coalesces Progress events.
+- Publisher. A dirty generation so clean ticks skip the store write lock, and the sidebar throttled to about 4 Hz.
+- Deep search. `body:` reads only the body's prefix extents.
+- UI. The filter is debounced, row fetches are coalesced per animation frame, and the table header and footer are memoised.
+
+### R3: Architecture tidy (no behaviour change)
+- **Boundaries.** `pm-core` internals become `pub(crate)`, with a hidden door for its integration tests. The three helpers adapters reach for become `Engine` methods. The guardian spawn moves into `pm-platform`.
+- **Error kinds.** A stable `ErrorKind` on failed flows (a `FlowDetail` change: session `VERSION` 8) that `ui/src/lib/errors.ts` switches on instead of matching message text. IPC errors become typed `{kind, message}`.
+- **Adapters.** `commands.rs` and `tools.rs` are split by domain, with one shared blocking helper. `Engine::patch_rule` replaces MCP's read-modify-write.
+- **Optional.** A store handle instead of the `*_in` twins, a `ProxyController`, and `scripts`/`protos` cargo features.
+
+### R4: UI quality
+- **Accessibility.** The flow table gets gridcells, sortable header buttons and keyboard column resizing. Dialogs set an explicit initial focus. `@axe-core/playwright` scans the main window and dialogs, and `jsx-a11y` lints.
+- **Data.** `useMutation` with invalidation, an `AbortSignal` through `Backend`, and typed keys for every query. Tests for `store/ui.ts`, `useFlowView` and the table's keys.
+- **Split.** `FlowTable` and `RewriteDialog` are split up, dev-bridge registrations move into one harness, and the contrast test scans `tokens.css` for text tokens.
+- **Record button.** A green Play while not recording and a red Stop while recording, from `--record-start` and `--record-stop` tokens at 3:1 non-text contrast. The command and toolbar say Start/Stop recording, and the tooltip still says traffic is forwarded.
+
 ## Critical files (to be created)
 - `crates/pm-model/src/lib.rs`: the shared types that drive the TS bindings and the MCP schemas.
 - `crates/pm-core/src/proxy/mitm.rs`: CONNECT, the ALPN-mirrored handshake, passthrough and pinning detection.

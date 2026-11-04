@@ -171,6 +171,8 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
   // Deleted flows stay in `flows` (ids index it) but leave every view.
   const removed = new Set<number>();
   const storeFlows = (store: number) => (store === 0 ? flows : flows.slice(0, DOCUMENT_FLOWS)).filter((f) => !removed.has(f[0]));
+  /** Whether a flow id exists in a store: a document holds the first `DOCUMENT_FLOWS` flows. */
+  const inStore = (store: number, id: number) => store === 0 || id < DOCUMENT_FLOWS;
   let headerColumns: HeaderColumn[] = [];
   // The headers the synthetic flows' details have (fixtures carry their own).
   const headerLists = (f: FlowRow_Serialize): Record<BodyPart, { name: string; value: string }[]> => {
@@ -362,10 +364,10 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
       const ids = views.get(view) ?? [];
       return { view, start, len: ids.length, rows: ids.slice(start, start + n).map((id) => withExtra(flows[id]!)) };
     },
-    async getFlow(_store, id): Promise<FlowSummary_Serialize | null> {
+    async getFlow(store, id): Promise<FlowSummary_Serialize | null> {
       await ready;
       const f = flows[id];
-      if (!f || removed.has(id)) return null;
+      if (!f || removed.has(id) || !inStore(store, id)) return null;
       return {
         id: f[0], state: f[1], scheme: f[2], method: f[3], host: f[4], port: f[5], path: f[6], query: f[7],
         status: f[8], content_kind: f[9], client: f[10], started_at_ms: f[11], duration_ms: f[12],
@@ -386,8 +388,9 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
         0,
       );
     },
-    async getFlowDetail(_store, id): Promise<FlowDetail_Serialize | null> {
+    async getFlowDetail(store, id): Promise<FlowDetail_Serialize | null> {
       await ready;
+      if (!inStore(store, id)) return null;
       const fixture = full.get(id);
       if (fixture) return fixture.detail;
       const f = flows[id];

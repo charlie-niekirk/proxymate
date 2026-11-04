@@ -567,6 +567,9 @@ fn unpack<T: DeserializeOwned>(packed: &[u8]) -> io::Result<T> {
 }
 
 #[cfg(test)]
+mod v7_fixture;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::synth::Generator;
