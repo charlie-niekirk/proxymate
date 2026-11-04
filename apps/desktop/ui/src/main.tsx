@@ -3,6 +3,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import App from "@/App";
+import { NoEngine } from "@/components/NoEngine";
 import { startTheme } from "@/lib/theme";
 import { useUi, type DeviceTab, type RequestTab, type ResponseTab, type SettingsPage } from "@/store/ui";
 import "@/styles/index.css";
@@ -17,10 +18,12 @@ const pinnedTheme = import.meta.env.DEV ? new URLSearchParams(window.location.se
 // Before the first render, so the first paint already has the right theme.
 startTheme(pinnedTheme === "light" || pinnedTheme === "dark" ? pinnedTheme : null);
 
+// A release build outside the app has no engine (lib/backend.ts): say so
+// instead of rendering an app whose every call fails.
+const hasEngine = isTauri() || import.meta.env.DEV;
+
 createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
+  <StrictMode>{hasEngine ? <App /> : <NoEngine />}</StrictMode>,
 );
 
 // Dev only: start with Auto Select on, so new traffic is inspected without a

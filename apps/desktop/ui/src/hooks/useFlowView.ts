@@ -1,6 +1,7 @@
 import { useEffect, useReducer, useRef, useState } from "react";
 
 import type { ViewDelta_Serialize } from "@/bindings";
+import { errorText, reportError } from "@/lib/actions";
 import { backend } from "@/lib/backend";
 import { flowKey, queryClient, streamKey } from "@/lib/query";
 import { RowCache } from "@/lib/rowCache";
@@ -15,8 +16,9 @@ interface Live {
  * Owns one engine view for the flow table: creates it over the active store
  * (again when the tab changes), follows its 20 Hz deltas over a Channel,
  * applies filter/sort changes and keeps the row cache in sync. Returns the
- * cache (null until the view exists), the view id and a version that bumps
- * whenever rows land or the view changes.
+ * cache (null until the view exists), the view id, a version that bumps
+ * whenever rows land or the view changes, and why the view couldn't be
+ * opened (with `retry`), so the table never waits for traffic that can't come.
  */
 export function useFlowView() {
   const filter = useUi((s) => s.filter);
@@ -24,6 +26,8 @@ export function useFlowView() {
   const store = useUi((s) => s.store);
   const [version, bump] = useReducer((n: number) => n + 1, 0);
   const [live, setLive] = useState<Live | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [attempt, retry] = useReducer((n: number) => n + 1, 0);
   // Filter change start time, until the first rows of the new result are painted.
   const pendingFilter = useRef<{ t0: number; engineMs: number } | null>(null);
   const initial = useRef({ filter, sort });
@@ -38,7 +42,7 @@ export function useFlowView() {
       const info = await backend.createView(store, filter, sort);
       created = info.view;
       if (cancelled) {
-        void backend.dropView(info.view);
+        void backend.dropView(info.view).catch(() => {});
         return;
       }
       const cache = new RowCache(
@@ -69,15 +73,21 @@ export function useFlowView() {
         refreshInspected(store, d);
         bump();
       });
-    })();
+    })().catch((err: unknown) => {
+      if (cancelled) return;
+      setError(errorText(err));
+      reportError("Couldn't open the flow list", err);
+    });
     // The sidebar counts the store the table shows.
-    void backend.setSidebarStore(store);
+    backend.setSidebarStore(store).catch((err: unknown) => reportError("Couldn't update the sidebar", err));
     return () => {
       cancelled = true;
       setLive(null);
-      if (created !== null) void backend.dropView(created);
+      // A new store or a retry starts without the old error.
+      setError(null);
+      if (created !== null) void backend.dropView(created).catch(() => {});
     };
-  }, [store]);
+  }, [store, attempt]);
 
   // Filter changes: refilter synchronously in Rust, then refetch visible rows.
   const filterSeq = useRef(0);
@@ -85,7 +95,7 @@ export function useFlowView() {
     if (live === null || filter === initial.current.filter) return;
     const seq = ++filterSeq.current;
     const t0 = performance.now();
-    void backend.setFilter(live.view, filter).then((info) => {
+    backend.setFilter(live.view, filter).then((info) => {
       if (seq !== filterSeq.current) return;
       const pending = { t0, engineMs: info.elapsed_us / 1000 };
       if (info.len === 0) reportFilterTiming(pending);
@@ -94,18 +104,22 @@ export function useFlowView() {
       useUi.getState().setStats({ len: info.len, total: info.total });
       useUi.getState().setDeep(info.deep);
       bump();
-    });
+    }, reportError.bind(null, "Couldn't apply the filter"));
   }, [live, filter]);
 
+  // Like filters, only the latest sort's reply may reset the rows.
+  const sortSeq = useRef(0);
   useEffect(() => {
     if (live === null || sort === initial.current.sort) return;
-    void backend.setSort(live.view, sort).then((info) => {
+    const seq = ++sortSeq.current;
+    backend.setSort(live.view, sort).then((info) => {
+      if (seq !== sortSeq.current) return;
       live.cache.reset(info.len);
       bump();
-    });
+    }, reportError.bind(null, "Couldn't sort the flows"));
   }, [live, sort]);
 
-  return { cache: live?.cache ?? null, view: live?.view ?? null, version };
+  return { cache: live?.cache ?? null, view: live?.view ?? null, version, error, retry };
 }
 
 /** Refetches the inspected flow if this delta may have changed it. */

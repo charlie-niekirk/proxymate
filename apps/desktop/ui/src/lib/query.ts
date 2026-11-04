@@ -62,3 +62,5 @@ export const autosaveSettingsKey = ["autosave-settings"] as const;
 /** Every flow's OpenAPI operation; invalidated when specs change. */
 export const operationRootKey = ["operation"] as const;
 export const operationKey = (store: number, id: number) => [...operationRootKey, store, id] as const;
+/** A held breakpoint's body (or WebSocket payload) as bytes; one shape for every reader. */
+export const breakpointBodyKey = (id: number) => ["breakpoint-body", id] as const;

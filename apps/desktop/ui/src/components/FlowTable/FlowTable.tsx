@@ -16,6 +16,7 @@ import {
 
 import { AppIcon } from "@/components/AppIcon";
 import { CopyMenu } from "@/components/menus/items";
+import { Button } from "@/components/ui/button";
 import {
   ContextMenu,
   ContextMenuCheckboxItem,
@@ -64,7 +65,7 @@ const HEADER_HEIGHT = 22;
  * flow ids (`lib/selection.ts`), and the inspector follows the focused one.
  */
 export function FlowTable() {
-  const { cache, version } = useFlowView();
+  const { cache, version, error, retry } = useFlowView();
   const len = useUi((s) => s.stats.len);
   const selectedId = useUi((s) => s.selectedId);
   const selection = useUi((s) => s.selection);
@@ -299,11 +300,30 @@ export function FlowTable() {
               );
             })}
           </div>
-          {len === 0 && <EmptyState />}
+          {error !== null ? <ViewError error={error} retry={retry} /> : len === 0 && <EmptyState />}
         </div>
       </ContextMenuTrigger>
       <FlowContextMenu row={menu?.row ?? null} column={menu?.column ?? null} />
     </ContextMenu>
+  );
+}
+
+/** The view couldn't be opened: say why, rather than waiting for traffic that can't arrive. */
+function ViewError({ error, retry }: { error: string; retry: () => void }) {
+  return (
+    <div
+      className="text-muted-foreground absolute inset-0 top-[22px] flex flex-col items-center justify-center gap-2 text-sm"
+      role="alert"
+      data-testid="view-error"
+    >
+      <span>Couldn't open the flow list</span>
+      <span className="max-w-md text-center text-xs" data-selectable>
+        {error}
+      </span>
+      <Button size="sm" variant="outline" onClick={retry}>
+        Try again
+      </Button>
+    </div>
   );
 }
 
