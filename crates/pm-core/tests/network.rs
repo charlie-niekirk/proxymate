@@ -15,9 +15,9 @@ use http_body_util::{BodyExt, Full};
 use hyper_util::rt::TokioIo;
 use pm_core::{Engine, EngineConfig, ProxyConfig};
 use pm_model::{
-    ClientCert, ClientIdentity, DnsOverride, FlowDetail, FlowId, FlowState, FlowSummary, ListenerKind, NetworkSettings,
-    ProxyServer, RequestSpec, ReverseProxy, Scheme, SendOpts, SendOrigin, TlsStatus, UpstreamProxy, UpstreamRule,
-    UpstreamSettings,
+    ClientCert, ClientIdentity, DnsOverride, ErrorKind, FlowDetail, FlowId, FlowState, FlowSummary, ListenerKind,
+    NetworkSettings, ProxyServer, RequestSpec, ReverseProxy, Scheme, SendOpts, SendOrigin, TlsStatus, UpstreamProxy,
+    UpstreamRule, UpstreamSettings,
 };
 use pm_testkit::client::{self, eventually, https_get, tls_config};
 use pm_testkit::proxies::socks5_connect;
@@ -241,6 +241,7 @@ async fn https_goes_through_connect_and_auth_failures_explain_themselves() {
     assert_eq!(summary.state, FlowState::Failed);
     let error = detail.error.unwrap();
     assert!(error.contains("rejected the username and password"), "{error}");
+    assert_eq!(detail.error_kind, Some(ErrorKind::UpstreamProxyAuth));
 
     // No credentials at all.
     proxy
@@ -282,6 +283,7 @@ async fn the_loop_guard_refuses_proxymate_as_its_own_upstream() {
     let (_, detail) = proxy.last().await;
     let error = detail.error.unwrap();
     assert!(error.contains("is Proxymate itself"), "{error}");
+    assert_eq!(detail.error_kind, Some(ErrorKind::UpstreamProxyLoop));
 }
 
 #[tokio::test]
@@ -318,6 +320,7 @@ async fn a_socks5_upstream_resolves_names_remotely() {
     let (status, _) = client::get(proxy.addr, &url).await;
     assert_eq!(status, 502);
     let (_, detail) = proxy.last().await;
+    assert_eq!(detail.error_kind, Some(ErrorKind::UpstreamProxyAuth));
     assert!(detail.error.unwrap().contains("rejected the username and password"));
 }
 
@@ -463,6 +466,7 @@ async fn client_certificates_open_an_mtls_upstream() {
     let (_, detail) = proxy.last().await;
     let error = detail.error.unwrap();
     assert!(error.contains("asks for a client certificate"), "{error}");
+    assert_eq!(detail.error_kind, Some(ErrorKind::ClientCertRequired));
 
     // PEM files.
     let cert_path = proxy.dir.join("client.pem");

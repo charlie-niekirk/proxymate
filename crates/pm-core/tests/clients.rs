@@ -106,7 +106,7 @@ async fn the_trust_check_handshakes_without_recording() {
 #[tokio::test]
 async fn the_sidebar_is_pushed_when_it_changes() {
     let (engine, _addr) = proxy(None).await;
-    let mut generator = pm_core::synth::Generator::new(3);
+    let mut generator = pm_core::test_support::synth::Generator::new(3);
     engine.insert_flows((0..500).map(|_| generator.completed_flow()).collect());
 
     let (tx, rx) = mpsc::channel::<SidebarSnapshot>();

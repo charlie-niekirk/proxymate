@@ -32,15 +32,13 @@ use pm_model::{FilterSpec, FlowId, FlowState, FlowSummary, RowsPage, SortSpec, V
 
 pub(crate) use backend::BlobBackend;
 pub(crate) use blob::Capture;
-pub use deep::DeepQuery;
 pub(crate) use detail::{DetailStore, StoredDetail};
-pub use filter::CompiledFilter;
 pub(crate) use messages::{SseLog, WsEntry, WsLog, page_events, sse_event};
 pub use query::FlowQuery;
 pub(crate) use segments::SegmentStore;
+pub use shared::SharedStore;
 pub(crate) use shared::Watcher;
-pub use shared::{SharedStore, StoreWriteGuard};
-pub use sidebar::{SidebarCounts, in_domain, registrable_domain};
+pub use sidebar::{SidebarCounts, in_domain};
 pub(crate) use sqlite::{Opened, SavedFlow, SavedWs, SessionWriter, SqliteBackend};
 pub use view::{DeepJob, View};
 
@@ -173,6 +171,7 @@ impl Store {
     }
 
     /// Replaces existing flows by id and updates every view. Unknown ids are ignored.
+    #[cfg(test)]
     pub fn update(&mut self, batch: impl IntoIterator<Item = FlowSummary>) {
         self.apply([FlowEvent::Update(batch.into_iter().collect())]);
     }
@@ -629,7 +628,7 @@ mod tests {
             ..Default::default()
         };
         let expected: Vec<FlowId> = {
-            let filter = CompiledFilter::compile(&spec);
+            let filter = filter::CompiledFilter::compile(&spec);
             store.flows.iter().filter(|f| filter.matches(f)).map(|f| f.id).collect()
         };
         assert!(!expected.is_empty() && expected.len() < 5_000);

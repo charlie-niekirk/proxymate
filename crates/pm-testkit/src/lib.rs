@@ -17,7 +17,7 @@ pub mod upstream;
 pub mod zoo;
 
 pub use grpc::GrpcUpstream;
-pub use pm_core::synth;
+pub use pm_core::test_support::synth;
 pub use proxies::{HttpProxy, ProxyRequest, Socks5Server};
 pub use tls::{Alpn, ClientIdentity, TestCa, TlsUpstream};
 pub use upstream::{RawUpstream, Upstream};

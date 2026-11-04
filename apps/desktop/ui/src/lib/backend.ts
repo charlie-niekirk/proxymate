@@ -6,6 +6,8 @@ import {
   commands,
   type AndroidStatus_Serialize,
   type ConsoleEntry_Serialize,
+  type IpcError,
+  type IpcErrorKind,
   type Script_Deserialize,
   type Script_Serialize,
   type ScriptSettings_Deserialize,
@@ -402,11 +404,25 @@ export interface Backend {
   choosePath(title: string, folder: boolean, extensions: string[], current: string | null): Promise<string | null>;
 }
 
-type Result<T> = { status: "ok"; data: T } | { status: "error"; error: string };
+type Result<T> = { status: "ok"; data: T } | { status: "error"; error: IpcError };
+
+/**
+ * A command that failed (R3): `kind` is stable, so code that reacts to a
+ * failure switches on it; `message` is for people.
+ */
+export class BackendError extends Error {
+  readonly kind: IpcErrorKind;
+
+  constructor(error: IpcError) {
+    super(error.message);
+    this.name = "BackendError";
+    this.kind = error.kind;
+  }
+}
 
 async function unwrap<T>(result: Promise<Result<T>>): Promise<T> {
   const r = await result;
-  if (r.status === "error") throw new Error(r.error);
+  if (r.status === "error") throw new BackendError(r.error);
   return r.data;
 }
 

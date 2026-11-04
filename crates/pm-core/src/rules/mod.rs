@@ -23,13 +23,12 @@ use parking_lot::{Mutex, RwLock};
 use pm_model::{
     Action, BodyPart, BreakpointId, BreakpointInfo, BreakpointResolution, FlowId, GLOBAL_THROTTLE_RULE_ID,
     MapLocalSource, Matcher, NO_CACHE_RULE_ID, NO_COOKIES_RULE_ID, Pattern, Phase, PresetKind, RequestHead,
-    ResponseHead, Rule, RuleId, RuleOrigin, RuleSettings, RuleTestResult, StoreId, WsDirection, WsOpcode,
+    ResponseHead, Rule, RuleId, RuleOrigin, RulePatch, RuleSettings, RuleTestResult, StoreId, WsDirection, WsOpcode,
 };
 
 pub use breakpoints::BreakpointSink;
 pub(crate) use breakpoints::{BreakpointManager, Outcome};
-pub use compile::{CompiledRuleSet, PATTERN_MAX_LEN, REGEX_SIZE_LIMIT};
-pub use db::APP_DB_FILE;
+pub use compile::CompiledRuleSet;
 
 use crate::mocks::Mocks;
 use crate::notify::Notifier;
@@ -298,6 +297,37 @@ impl Engine {
                 .ok_or_else(|| RuleError::Unknown(rule.id.clone()))?;
             *slot = rule.clone();
             Ok(rule)
+        })
+    }
+
+    /// Changes the fields `patch` sets on the rule `id`, in one change: an
+    /// edit made meanwhile (by the UI or another agent) to the other fields
+    /// is kept, unlike reading the rule and writing it back.
+    pub fn patch_rule(&self, id: &str, patch: RulePatch) -> Result<Rule, Error> {
+        self.change_rules(|rules| {
+            let rule = rules
+                .iter_mut()
+                .find(|r| r.id == id)
+                .ok_or_else(|| RuleError::Unknown(id.to_owned()))?;
+            let RulePatch {
+                name,
+                enabled,
+                matcher,
+                actions,
+            } = patch;
+            if let Some(name) = name {
+                rule.name = name;
+            }
+            if let Some(enabled) = enabled {
+                rule.enabled = enabled;
+            }
+            if let Some(matcher) = matcher {
+                rule.matcher = matcher;
+            }
+            if let Some(actions) = actions {
+                rule.actions = actions;
+            }
+            Ok(rule.clone())
         })
     }
 

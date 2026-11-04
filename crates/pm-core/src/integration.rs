@@ -366,19 +366,7 @@ impl Engine {
         if self.platform.guardian_spawned.swap(true, Ordering::SeqCst) {
             return;
         }
-        let pid = std::process::id().to_string();
-        let mut command = std::process::Command::new(exe);
-        command
-            .args(["--sysproxy-guardian", &pid, "--data-dir"])
-            .arg(&self.root)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::inherit());
-        // Its own process group, so a Ctrl-C to the app's terminal doesn't
-        // take the guardian down with it.
-        #[cfg(unix)]
-        std::os::unix::process::CommandExt::process_group(&mut command, 0);
-        if let Err(err) = command.spawn() {
+        if let Err(err) = pm_platform::sysproxy::spawn_guardian(exe, &self.root) {
             self.platform.guardian_spawned.store(false, Ordering::SeqCst);
             eprintln!("proxymate: can't start the system proxy guardian: {err}");
         }

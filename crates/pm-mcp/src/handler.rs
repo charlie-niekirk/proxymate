@@ -12,7 +12,7 @@ use std::time::Instant;
 
 use parking_lot::Mutex;
 use pm_core::Engine;
-use pm_core::mcp::McpCall;
+use pm_core::McpCall;
 use pm_model::{McpCallOutcome, McpClient};
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, GetPromptRequestParams, GetPromptResponse,

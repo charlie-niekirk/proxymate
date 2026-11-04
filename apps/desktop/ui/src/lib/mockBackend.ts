@@ -446,6 +446,7 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
           mime: f[9] === "json" ? "application/json" : "text/plain",
         },
         error: f[17] === "likely_pinned" ? "The client rejected the Proxymate certificate. It sent an unknown_ca alert." : null,
+        error_kind: f[17] === "likely_pinned" ? "client_rejected_cert" : null,
         rules: mockFlowRules(f[15], id),
         trailers: null,
         // Every fourth flow went through the corporate proxy (Settings › Network).

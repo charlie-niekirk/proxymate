@@ -13,7 +13,6 @@
 
 use std::fmt::Write as _;
 
-use base64::Engine as _;
 use pm_model::{CodeLanguage, RequestSpec};
 
 use super::curl;
@@ -424,8 +423,9 @@ fn powershell(r: &Request) -> String {
 }
 
 /// Base64 for a body given as bytes, for callers building a spec.
+#[cfg(test)]
 pub fn base64_body(bytes: &[u8]) -> String {
-    base64::engine::general_purpose::STANDARD.encode(bytes)
+    base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes)
 }
 
 #[cfg(test)]

@@ -160,5 +160,6 @@ pub(crate) fn fallback_detail(s: &FlowSummary) -> FlowDetail {
         rules: Default::default(),
         trailers: None,
         via: None,
+        error_kind: None,
     }
 }

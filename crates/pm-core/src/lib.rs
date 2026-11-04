@@ -7,35 +7,47 @@ mod client;
 mod devices;
 mod documents;
 mod engine;
+mod failure;
 mod ingest;
 mod integration;
-pub mod io;
-pub mod mcp;
+pub(crate) mod io;
+pub(crate) mod mcp;
 mod mocks;
 mod network;
 mod notify;
-pub mod openapi;
+pub(crate) mod openapi;
 mod protos;
-pub mod proxy;
+pub(crate) mod proxy;
 mod recorder;
 mod replay;
-pub mod rules;
-pub mod scripts;
+pub(crate) mod rules;
+pub(crate) mod scripts;
 mod search;
 mod settings;
-pub mod store;
-pub mod synth;
-pub mod tls;
-pub mod trust;
+pub(crate) mod store;
+pub(crate) mod synth;
+pub(crate) mod tls;
+pub(crate) mod trust;
 mod updates;
 mod workflow;
+
+/// Not part of the API. What `pm-core`'s integration tests and benches (and
+/// `pm-testkit`) need beyond [`Engine`]; adapters must not use it.
+#[doc(hidden)]
+pub mod test_support {
+    pub use crate::proxy::APP_CLIENT;
+    pub use crate::rules::REWRITE_BODY_CAP;
+    pub mod synth {
+        pub use crate::synth::{Generator, seed, spawn_live};
+    }
+}
 
 pub use client::{ClientApp, ClientKind};
 pub use devices::{DevicesSink, HOLD as DEVICE_HOLD, ONBOARDING_HOST};
 pub use documents::ProgressSink;
 pub use engine::{BodyBytes, DeltaSink, Engine, EngineConfig, PUBLISH_INTERVAL};
 pub use integration::SidebarSink;
-pub use mcp::McpSink;
+pub use mcp::{McpCall, McpSink};
 pub use protos::ProtoImport;
 pub use proxy::ProxyConfig;
 pub use recorder::{BodyEnd, FlowRecorder, WsRecorder};
@@ -45,6 +57,8 @@ pub use search::{FlowPage, SearchHit, SearchMatch, SearchPage};
 pub use settings::StorageSink;
 pub use workflow::{MAX_REPEAT_CONCURRENCY, MAX_REPEAT_ITERATIONS, RepeatSink};
 
+/// What every engine call fails with. Adapters turn it into an
+/// [`IpcError`](pm_model::IpcError) (Tauri) or a tool error (MCP).
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("unknown view {0}")]
@@ -92,4 +106,38 @@ pub enum Error {
     /// Sending into or closing a WebSocket that can't take it.
     #[error("{0}")]
     WebSocket(String),
+}
+
+impl Error {
+    /// The stable kind the UI switches on.
+    pub fn kind(&self) -> pm_model::IpcErrorKind {
+        use pm_model::IpcErrorKind as K;
+        match self {
+            Error::UnknownView(_) | Error::UnknownFlow(_) | Error::UnknownMessage(..) | Error::UnknownStore(_) => {
+                K::NotFound
+            }
+            Error::Proxy(_) => K::Proxy,
+            Error::Decode(_) => K::Decode,
+            Error::Storage(_) => K::Storage,
+            Error::Tls(_) => K::Tls,
+            Error::Settings(_) | Error::Invalid(_) => K::Invalid,
+            Error::Platform(pm_platform::PlatformError::Cancelled) => K::Cancelled,
+            Error::Platform(pm_platform::PlatformError::Unsupported) => K::Unsupported,
+            Error::Platform(_) => K::Platform,
+            Error::Rule(_) => K::Rule,
+            Error::Script(_) => K::Script,
+            Error::Query(_) => K::Query,
+            Error::Device(_) => K::Device,
+            Error::Send(_) => K::Send,
+            Error::Document(_) => K::Document,
+            Error::Proto(_) => K::Proto,
+            Error::WebSocket(_) => K::WebSocket,
+        }
+    }
+}
+
+impl From<Error> for pm_model::IpcError {
+    fn from(err: Error) -> pm_model::IpcError {
+        pm_model::IpcError::new(err.kind(), err.to_string())
+    }
 }

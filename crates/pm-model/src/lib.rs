@@ -8,6 +8,7 @@ mod capture;
 mod detail;
 mod device;
 mod document;
+mod errors;
 mod filter;
 mod flow;
 mod mcp;
@@ -35,6 +36,7 @@ pub use device::{
     LocalActivity, SimDevice, SimInstallResult, SimulatorStatus,
 };
 pub use document::{DocumentInfo, DocumentKind, FlowSelection, LIVE_STORE, SaveProgress, StoreId};
+pub use errors::{ErrorKind, IpcError, IpcErrorKind};
 pub use filter::{ContentGroup, FilterSpec, ProtocolFilter, SearchScope, SortDir, SortKey, SortSpec};
 pub use flow::{ContentKind, FlowId, FlowLabel, FlowState, FlowSummary, Scheme};
 pub use mcp::{MCP_DEFAULT_PORT, McpAuditEntry, McpAuditPage, McpCallOutcome, McpClient, McpSettings, McpStatus};
@@ -48,8 +50,8 @@ pub use protobuf::{Badge, DecodedBody, DecodedFormat, DecodedMessage, GrpcStatus
 pub use rules::{
     Action, AppliedRule, BlockMode, BreakpointBody, BreakpointId, BreakpointInfo, BreakpointResolution, FlowRules,
     GLOBAL_THROTTLE_RULE_ID, HeldMessage, KvMatch, MapLocalSource, Matcher, MessageEdits, Pattern, PatternKind, Phase,
-    PresetKind, ResponseMatcher, Rule, RuleId, RuleOrigin, RuleSettings, RuleTestResult, ServeKey, ServeMiss,
-    ServePick, StatusRange, WsOp,
+    PresetKind, ResponseMatcher, Rule, RuleId, RuleOrigin, RulePatch, RuleSettings, RuleTestResult, ServeKey,
+    ServeMiss, ServePick, StatusRange, WsOp,
 };
 pub use scripts::{
     ConsoleEntry, ConsoleLevel, Script, ScriptId, ScriptIssue, ScriptKind, ScriptPhase, ScriptSettings,

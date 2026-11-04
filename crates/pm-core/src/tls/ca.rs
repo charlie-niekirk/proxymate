@@ -185,6 +185,7 @@ impl CertAuthority {
     }
 
     /// Leaves issued so far, i.e. cache misses.
+    #[cfg(test)]
     pub fn issued(&self) -> u64 {
         self.issued.load(Ordering::Relaxed)
     }

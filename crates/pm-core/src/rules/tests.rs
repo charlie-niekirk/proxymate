@@ -119,7 +119,7 @@ fn oversized_regexes_are_rejected() {
     });
     assert!(err.contains("path: the regex is too complex"), "{err}");
 
-    let err = compile_error(host(Pattern::regex("a".repeat(super::PATTERN_MAX_LEN + 1))));
+    let err = compile_error(host(Pattern::regex("a".repeat(super::compile::PATTERN_MAX_LEN + 1))));
     assert!(err.contains("characters long"), "{err}");
 }
 

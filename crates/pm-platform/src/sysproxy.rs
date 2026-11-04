@@ -256,6 +256,29 @@ impl SystemProxy {
     }
 }
 
+/// The flag the app's binary answers as the guardian:
+/// `<exe> --sysproxy-guardian <pid> --data-dir <dir>`.
+pub const GUARDIAN_FLAG: &str = "--sysproxy-guardian";
+
+/// Starts the guardian for this process: `exe` (the app itself) with
+/// [`GUARDIAN_FLAG`], our pid and the data dir holding the backup. It runs
+/// in its own process group, so a Ctrl-C to the app's terminal doesn't take
+/// it down too, and isn't waited on: it outlives us by design.
+pub fn spawn_guardian(exe: &Path, data_dir: &Path) -> std::io::Result<()> {
+    let mut command = std::process::Command::new(exe);
+    command
+        .arg(GUARDIAN_FLAG)
+        .arg(std::process::id().to_string())
+        .arg("--data-dir")
+        .arg(data_dir)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::inherit());
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    command.spawn().map(drop)
+}
+
 pub fn read_backup(path: &Path) -> Result<Option<Backup>, PlatformError> {
     match std::fs::read(path) {
         Ok(bytes) => Ok(Some(serde_json::from_slice(&bytes)?)),

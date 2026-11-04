@@ -94,13 +94,13 @@ crates/pm-platform   OS integration traits; macos/ impls, stub.rs elsewhere: fs 
                      bundles, icons, parent pids), launcher (M21: Terminal/iTerm, Chromium, Firefox), process (kqueue exit wait), netif (if-addrs), simctl and adb (over a
                      command::Runner, faked in tests)
 crates/pm-mcp        MCP server over Arc<Engine> (rmcp, pinned): http.rs (axum endpoint, bearer token, managed start/stop),
-                     handler.rs (sessions, read-only, audit, notifications), tools.rs, resources.rs, prompts.rs,
+                     handler.rs (sessions, read-only, audit, notifications), tools/ (by domain), resources.rs, prompts.rs,
                      bridge.rs (mcp-stdio); tests/mcp.rs drives an rmcp client against a headless engine
 crates/pm-testkit    test upstreams (h1, TLS h1/h2 with a test CA, mTLS, WS echo, slow SSE, grpc.rs: tonic gRPC + gRPC-web
                      from proto/shop.proto via build.rs), proxies.rs (M18: HTTP proxy with Basic auth, SOCKS5 server and
                      client), the body-viewer zoo (fixtures/zoo), proxy, HTTPS, gRPC and WebSocket
                      clients; re-export of pm_core::synth
-apps/desktop/src-tauri   thin Tauri adapters (commands.rs), the pmbody:// scheme (body_scheme.rs), window chrome (window.rs),
+apps/desktop/src-tauri   thin Tauri adapters (commands/, one module per domain), the pmbody:// scheme (body_scheme.rs), window chrome (window.rs),
                          the menu bar (menu.rs: File items reach the UI as `pm-menu` events); updater.rs (tauri-plugin-updater,
                          Check for Updates…, the launch check)
 apps/desktop/ui          Vite + React 19 + TS strict + Tailwind v4 + shadcn/ui
@@ -109,6 +109,7 @@ apps/cli                 proxymate-cli (headless; `bench` today)
 
 Rules:
 - **Adapters call only the `Engine` facade** (`pm_core::Engine`). Tauri commands, MCP tools and the CLI never reach into `pm_core::store` or other internals. This keeps the UI and agents behaving the same. If an adapter needs something new, add it to `Engine`.
+  - (R3) `pm-core`'s modules are `pub(crate)`, so the compiler enforces this. Its integration tests, benches and `pm-testkit` use the hidden `pm_core::test_support` door; adapters never do.
 - `pm-core` has **no Tauri dependency** and stays headless and testable.
 - `pm-model` holds data types only: no I/O and no engine logic. Every type that crosses IPC lives here and derives `Serialize`, `Deserialize` and `specta::Type`.
 - OS-specific code goes in `pm-platform` behind traits, never `cfg`-sprinkled through `pm-core`.
@@ -119,7 +120,7 @@ Rules:
 2. The publisher thread ticks at 20 Hz and sends one `ViewDelta` per subscribed view over a `tauri::ipc::Channel`. A delta carries `{total, len, appended, changed ids, structural}`. Stores are `SharedStore`s: every write guard bumps a generation, and a tick skips a store nothing wrote to (`write_quiet` is for bookkeeping the publisher needn't see). The sidebar goes out at most every 250 ms.
 3. The UI (`hooks/useFlowView.ts` and `lib/rowCache.ts`) fetches only the visible window plus one page of read-ahead with `get_rows(view, start, count)`, coalesced to one call per run of adjacent pages per animation frame. Rows arrive as positional `FlowRow` tuples, decoded by `lib/flow.ts`. `get_rows` returns at most 512 rows (`MAX_ROWS_PER_CALL`): ask in steps for more.
 4. `set_filter` and `set_sort` refilter synchronously in Rust (rayon above 50k flows) and return the new length right away. Search-box typing is debounced (`FILTER_DEBOUNCE_MS`); chips and scopes apply at once.
-5. Tauri commands that touch the store, bodies or disk are `async` and run on the blocking pool (`run_blocking` in `commands.rs`): a sync command runs on the main thread. MCP runs every sync tool on the blocking pool (`call_sync` in `tools.rs`).
+5. Tauri commands that touch the store, bodies or disk are `async` and run on the blocking pool (`blocking` in `commands/mod.rs`): a sync command runs on the main thread. MCP runs every sync tool on the blocking pool (`call_sync` in `tools/mod.rs`). Both go through `Engine::blocking`.
 
 Targets:
 - 100k rows scroll at 60 fps.
@@ -132,7 +133,7 @@ Targets:
 **Rust**
 - Edition 2024, with `rustfmt.toml` at `max_width = 120`.
 - Clippy must pass with `-D warnings`. `unsafe_code` is denied workspace-wide; scope any exception with `#[allow]` and a justification.
-- Errors use `thiserror` in library crates. Tauri commands map errors to `String` for now.
+- Errors use `thiserror` in library crates. Tauri commands fail with `pm_model::IpcError` (`{kind, message}`): `pm_core::Error::kind()` gives an engine error's `IpcErrorKind`, anything else is `internal` (`ipc` in `commands/mod.rs`). The UI's `unwrap` throws a `BackendError` with that `kind`; switch on it, never on the message.
 - Each module has a short `//!` doc. Comments explain *why*, not *what*.
 
 **TypeScript**
@@ -171,7 +172,7 @@ Targets:
 
 **Keyboard and commands (M10)**
 - `lib/commands.ts` is the single list: the ⌘K palette shows every command, and a command's `key` binds ⌘/Ctrl+key in `hooks/useShortcuts.ts`. Add commands there, not ad-hoc `keydown` listeners. ⌘⌫ never fires in text fields; ⌘F inside CodeMirror is left to its search.
-- Errors from actions go to `reportError` (a sonner toast); a failed flow's explanation and fixes come from `lib/errors.ts`.
+- Errors from actions go to `reportError` (a sonner toast); a failed flow's explanation and fixes come from `lib/errors.ts`, which switches on `FlowDetail.error_kind` (R3), never on the message text.
 
 **Window chrome**
 - The overlay title bar with inset traffic lights is set in `tauri.conf.json`.
@@ -193,7 +194,7 @@ Targets:
 
 **MCP (M7)**
 - The server is an adapter: tools call only `Engine`. MCP state the UI also sees (settings, token, audit log, connected clients) lives in `pm-core/src/mcp.rs`; the server reports serving/clients there.
-- Add a tool in `tools.rs`: a parameter struct deriving `JsonSchema` (reuse `pm-model` types), a `def!` entry with its kind (`Read`, `Write`, `Destructive`: read-only mode hides every non-`Read`) and a `call` arm. Return JSON; errors the agent should read are `ToolError`.
+- Add a tool in its domain module under `tools/` (flows, websocket, rules, scripts, send): a parameter struct deriving `JsonSchema` (reuse `pm-model` types) and a handler there; a `def!` entry with its kind (`Read`, `Write`, `Destructive`: read-only mode hides every non-`Read`) and a `call` (async) or `call_sync` arm in `tools/mod.rs`. Return JSON; errors the agent should read are `ToolError`. Rules change through `Engine` in one step (`patch_rule`, not read-modify-write).
 - Filters are the DSL in `store/query.rs` (`FlowQuery::parse` strict for MCP, `parse_lenient` for the search box).
 - `PROXYMATE_MCP_PORT` moves the app's endpoint off 9095 (parallel dev instances). Every dev instance shares the token and audit log in `app.sqlite`.
 
@@ -238,7 +239,7 @@ Targets:
 - `Engine::send(RequestSpec, SendOpts)` is the one way Proxymate sends a request itself (Replay, Compose, MCP). It goes through `proxy/exchange.rs` like proxied traffic; the flow's summary gets `sent_by`.
 - Flow ids are per store. The live capture is `LIVE_STORE` (0); every opened session or HAR is a document store. Flow-level Engine methods have `*_in(store, …)` forms (the live-only ones stay for existing callers); view ids already encode their store. UI code reads the active store from `useUi().store` and puts it in query keys (`flowKey(store, id)`).
 - Golden files are in `crates/pm-core/tests/golden/` (cURL, HAR and M17's `snippets/`); rewrite them with `UPDATE_GOLDEN=1 cargo test -p pm-core --lib io::`. The Chrome HAR fixture is `crates/pm-core/tests/fixtures/chrome-devtools.har`.
-- A session's postcard layouts are part of its format: bump `store/sqlite.rs` `VERSION` when `FlowDetail` or the message types change shape. Version 7 (M20: `PresetKind::ServeFrom` and `OpenApi`, which an applied rule's origin can name; no layout change) still reads 6 (M19: WebSocket message flags and the `originals` table), 5 (M18: `FlowDetail.via`, the old message layout) down to 1 (`tests/fixtures/session-v1.proxymate`; `tests/fixtures/session-v7.proxymate` is a committed version 7 file that `store/sqlite/v7_fixture.rs` decodes field by field, and never regenerate it: a layout change bumps `VERSION` and keeps it as the version 7 case; the same file pins the postcard index of each enum a session stores by position, so a new variant must be appended there; `a_version_2_session_still_opens`, `a_version_4_session_still_opens`, `a_version_6_session_still_opens` and `store::sqlite::tests::a_version_5_websocket_log_still_opens` make older files from a current one). `Action` itself is never in a session (only `AppliedRule` is), but `PresetKind` is: a new preset bumps `VERSION`.
+- A session's postcard layouts are part of its format: bump `store/sqlite.rs` `VERSION` when `FlowDetail` or the message types change shape. Version 8 (R3: `FlowDetail.error_kind`; reading 7 and older infers the kind from the message with `failure::legacy_kind`) still reads 7 (M20: `PresetKind::ServeFrom` and `OpenApi`, which an applied rule's origin can name; no layout change), 6 (M19: WebSocket message flags and the `originals` table), 5 (M18: `FlowDetail.via`, the old message layout) down to 1 (`tests/fixtures/session-v1.proxymate`; `tests/fixtures/session-v7.proxymate` is a committed version 7 file that `store/sqlite/v7_fixture.rs` decodes field by field, and never regenerate it: it is the version 7 case, and a later layout change bumps `VERSION` again; the same file pins the postcard index of each enum a session stores by position (`ErrorKind` too), so a new variant must be appended there; `a_version_2_session_still_opens`, `a_version_4_session_still_opens`, `a_version_6_session_still_opens`, `a_version_7_session_still_opens` and `store::sqlite::tests::a_version_5_websocket_log_still_opens` make older files from a current one). `Action` itself is never in a session (only `AppliedRule` is), but `PresetKind` is: a new preset bumps `VERSION`.
 - postcard can't deserialize internally tagged enums (`#[serde(tag = …)]`). Anything inside `FlowDetail` must not be one, or must serialize by hand like `RuleOrigin`.
 
 **Visual rewrite (M13)**
@@ -248,7 +249,7 @@ Targets:
 - The JSON editor handles its own keys (`[data-json-editor]` counts as editable for global shortcuts); a dialog holding it passes `keepEscapeInEditor` as `onEscapeKeyDown`.
 
 **Protobuf and gRPC (M16)**
-- `ContentKind::Cbor` is the last variant and `FlowDetail.via` (M18, session format 5) the last field of `FlowDetail`; `grpc_status` is `FlowRow`'s last field. New kinds or detail fields go after them, with a `VERSION` bump.
+- `ContentKind::Cbor` is the last variant and `FlowDetail.error_kind` (R3, session format 8) the last field of `FlowDetail`; `grpc_status` is `FlowRow`'s last field. New kinds or detail fields go after them, with a `VERSION` bump.
 - All decoding is in Rust: `Engine::decode_body_in` serves the inspector's `grpc`/`decoded` viewers and MCP's `get_flow_body` `format: "decoded"` alike. Don't decode protobuf, MessagePack or CBOR in the UI; the mock backend serves the engine's output (`<fixture>.<part>.decoded.json`).
 - Decoded JSON is written by `io/tree.rs` in field order (never via serde_json's sorted `Map`) and travels as text, so 64-bit numbers stay exact. Notes on values are `Badge`s by JSON pointer.
 - Schemas live compiled in `app.sqlite` (`proto_schemas`); mappings are the `proto_mappings` settings row. Any change goes through `Protos::reload`, which bumps the generation the decode cache keys on.
@@ -290,7 +291,7 @@ Targets:
 - `Engine::repeat` sends through `Engine::send`; anything that sends many requests should too, so rules, recording and `sent_by` stay consistent.
 
 **Capture targets (M21)**
-- M21 adds no `Action`, `PresetKind`, `ContentKind` or `FlowDetail` change: the session `VERSION` stays 7. `ServeFrom` is still the last `Action` variant.
+- M21 adds no `Action`, `PresetKind`, `ContentKind` or `FlowDetail` change: the session `VERSION` stayed 7 (R3 made it 8). `ServeFrom` is still the last `Action` variant.
 - Launchers live in `pm-platform/src/launcher.rs` behind `Launcher`; every command line goes through `command::Runner` (`spawn` for browsers, `run` for `open`), checked against the fake. **Tests never launch anything**; real launches need the user's OK.
 - A launch owns `<data dir>/intercept/<uuid>/` (profile or script, plus a `pid` file); `capture.rs` removes it when the root pid exits, and the next start sweeps ones whose pid is gone. Terminals report their shell's pid through that file.
 - Intercepted flows are named in `client.rs` by walking parent pids (`ProcessInfo::parent_pid`) to a tracked root: `<App> (Intercepted)`. `Engine::track_intercept` (hidden) tracks a pid without launching, for tests.

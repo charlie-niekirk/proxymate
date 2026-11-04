@@ -12,61 +12,56 @@ export interface FailureHelp {
 }
 
 /**
- * Turns a failed flow's error into a headline and the fixes that apply:
- * a client refusing our certificate (CA not trusted, or pinning), an
- * upstream certificate we can't verify, an old TLS version, a server that
- * wants a client certificate, an upstream proxy that refused or would
- * loop (M18), DNS and connect failures, timeouts.
+ * Turns a failed flow's error into a headline and the fixes that apply,
+ * by its kind (R3; the engine records it where the failure happens, and
+ * infers it for sessions saved before format 8): a client refusing our
+ * certificate (CA not trusted, or pinning), an upstream certificate we
+ * can't verify, an old TLS version, a server that wants a client
+ * certificate, an upstream proxy that refused or would loop (M18), DNS and
+ * connect failures, timeouts. The message is shown as it is.
  */
 export function explainFailure(flow: FlowSummary_Serialize, detail: FlowDetail_Serialize | null): FailureHelp | null {
   const error = detail?.error;
   if (!error) return null;
-  const e = error.toLowerCase();
+  const help = (title: string, actions: FixAction[] = [], text = error): FailureHelp => ({ title, detail: text, actions });
   if (flow.tls === "likely_pinned") {
-    return {
-      title: "The client refused Proxymate's certificate",
-      detail: error,
-      actions: ["cert-wizard", "bypass"],
-    };
+    return help("The client refused Proxymate's certificate", ["cert-wizard", "bypass"]);
   }
-  if (e.includes("asks for a client certificate")) {
-    return { title: "The server wants a client certificate", detail: error, actions: ["network-settings"] };
+  switch (detail.error_kind ?? "other") {
+    case "client_rejected_cert":
+      return help("The client refused Proxymate's certificate", ["cert-wizard", "bypass"]);
+    case "client_tls":
+      return help("The TLS handshake with the client failed", ["cert-wizard", "bypass"]);
+    case "client_cert_required":
+      return help("The server wants a client certificate", ["network-settings"]);
+    case "upstream_proxy_auth":
+      return help("The upstream proxy wants other credentials", ["network-settings"]);
+    case "upstream_proxy_loop":
+      return help("The upstream proxy is Proxymate itself", ["network-settings"]);
+    case "upstream_proxy":
+      return help("The upstream proxy couldn't connect", ["network-settings"]);
+    case "upstream_cert_untrusted":
+      return help("The server's certificate isn't trusted", ["insecure-upstream", "bypass"]);
+    case "upstream_cert_invalid":
+      return help("The server's certificate is invalid", ["insecure-upstream", "bypass"]);
+    case "upstream_tls_version":
+      return help(
+        "The server only speaks an old TLS version",
+        ["bypass"],
+        `${error} Proxymate supports TLS 1.2 and 1.3; add the host to the SSL bypass list to tunnel it instead.`,
+      );
+    case "upstream_tls":
+      return help("The TLS handshake with the server failed", ["bypass", "tls-settings"]);
+    case "dns":
+      return help(`Couldn't find ${flow.host}`, [], `${error} Check the host name and this Mac's DNS.`);
+    case "timeout":
+      return help("The server didn't answer in time", ["timeouts"]);
+    case "refused":
+      return help(`Nothing answered at ${flow.host}:${flow.port}`, [], `${error} Is the server running?`);
+    case "client_gone":
+      return help("The client gave up");
+    case "upstream":
+    case "other":
+      return help("The flow failed");
   }
-  if (e.includes("upstream proxy") || e.includes("socks5 proxy")) {
-    const title = e.includes("username and password")
-      ? "The upstream proxy wants other credentials"
-      : e.includes("proxymate itself")
-        ? "The upstream proxy is Proxymate itself"
-        : "The upstream proxy couldn't connect";
-    return { title, detail: error, actions: ["network-settings"] };
-  }
-  if (e.includes("certificate isn't trusted") || e.includes("unknownissuer") || e.includes("self-signed")) {
-    return { title: "The server's certificate isn't trusted", detail: error, actions: ["insecure-upstream", "bypass"] };
-  }
-  if (e.includes("certificate has expired") || e.includes("isn't valid for that name")) {
-    return { title: "The server's certificate is invalid", detail: error, actions: ["insecure-upstream", "bypass"] };
-  }
-  if (e.includes("protocol version") || e.includes("tls 1.0") || e.includes("tlsv1.0") || e.includes("handshake failure")) {
-    return {
-      title: "The server only speaks an old TLS version",
-      detail: `${error} Proxymate supports TLS 1.2 and 1.3; add the host to the SSL bypass list to tunnel it instead.`,
-      actions: ["bypass"],
-    };
-  }
-  if (e.includes("tls handshake with") && flow.tls === "intercepted") {
-    return { title: "The TLS handshake with the server failed", detail: error, actions: ["bypass", "tls-settings"] };
-  }
-  if (e.includes("can't resolve") || e.includes("failed to lookup") || e.includes("nodename nor servname")) {
-    return { title: `Couldn't find ${flow.host}`, detail: `${error} Check the host name and this Mac's DNS.`, actions: [] };
-  }
-  if (e.includes("timed out")) {
-    return { title: "The server didn't answer in time", detail: error, actions: ["timeouts"] };
-  }
-  if (e.includes("connection refused") || e.includes("can't reach")) {
-    return { title: `Nothing answered at ${flow.host}:${flow.port}`, detail: `${error} Is the server running?`, actions: [] };
-  }
-  if (e.includes("client went away") || e.includes("client closed")) {
-    return { title: "The client gave up", detail: error, actions: [] };
-  }
-  return { title: "The flow failed", detail: error, actions: [] };
 }

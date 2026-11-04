@@ -45,7 +45,7 @@ async fn origin_get(proxy: SocketAddr, path: &str) -> (String, Vec<u8>) {
 async fn onboarding_routes_serve_the_ca() {
     let (engine, proxy) = proxy().await;
     let ca_pem = std::fs::read_to_string(engine.ca_info().cert_path).unwrap();
-    let ca_der = pm_core::tls::certs_from_pem_file(engine.ca_info().cert_path.as_ref())
+    let ca_der = Engine::read_pem_certificates(engine.ca_info().cert_path.as_ref())
         .unwrap()
         .remove(0);
 

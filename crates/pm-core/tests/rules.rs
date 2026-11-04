@@ -13,7 +13,7 @@ use hyper_util::rt::{TokioExecutor, TokioIo};
 use pm_core::{Engine, EngineConfig, ProxyConfig};
 use pm_model::{
     Action, BlockMode, BreakpointResolution, FlowDetail, FlowId, FlowState, FlowSummary, Header, MapLocalSource,
-    Matcher, MessageEdits, Pattern, Phase, PresetKind, Rule, RuleOrigin, RuleSettings,
+    Matcher, MessageEdits, Pattern, Phase, PresetKind, Rule, RuleOrigin, RulePatch, RuleSettings,
 };
 use pm_testkit::client::{self, eventually, tls_config, tls_through};
 use pm_testkit::upstream::{JSON_BODY, pattern_byte};
@@ -579,7 +579,7 @@ async fn an_over_cap_body_streams_through_with_a_warning() {
             replacement: "y".into(),
         }],
     );
-    let len = pm_core::rules::REWRITE_BODY_CAP as u64 + 1024 * 1024;
+    let len = pm_core::test_support::REWRITE_BODY_CAP as u64 + 1024 * 1024;
     let response = client::send(
         proxy.addr,
         Request::get(upstream.url(&format!("/bytes/{len}")))
@@ -806,6 +806,30 @@ async fn agent_rules_are_tagged_and_removed_together() {
     );
     assert_eq!(proxy.engine.delete_agent_rules().unwrap(), 2);
     assert_eq!(proxy.engine.rules().len(), 4);
+}
+
+/// `patch_rule` changes only the fields it sets, so an edit made between an
+/// agent reading a rule and patching it survives (R3).
+#[tokio::test]
+async fn a_patch_keeps_the_fields_it_doesnt_set() {
+    let proxy = Proxy::start(None).await;
+    let rule = proxy.rule(Matcher::default(), Vec::new());
+    proxy.engine.set_rule_enabled(&rule.id, false).unwrap();
+    let patched = proxy
+        .engine
+        .patch_rule(
+            &rule.id,
+            RulePatch {
+                name: Some("renamed".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(patched.name, "renamed");
+    assert!(!patched.enabled, "the concurrent disable is kept");
+    assert_eq!(proxy.engine.rule(&rule.id), Some(patched));
+    let err = proxy.engine.patch_rule("nope", RulePatch::default()).unwrap_err();
+    assert_eq!(err.to_string(), "no rule with id nope");
 }
 
 /// A raw HTTP/1.1 JSON response, leaked so a `RawUpstream` can serve it.

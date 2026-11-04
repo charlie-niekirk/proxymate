@@ -11,11 +11,12 @@ use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 use pm_model::{
-    AppliedRule, BodyPart, ContentKind, FlowDetail, FlowId, FlowState, RequestHead, ResponseHead, Timing, WsClose,
-    WsDirection, WsOpcode,
+    AppliedRule, BodyPart, ContentKind, ErrorKind, FlowDetail, FlowId, FlowState, RequestHead, ResponseHead, Timing,
+    WsClose, WsDirection, WsOpcode,
 };
 
 use crate::Engine;
+use crate::failure::Failure;
 use crate::ingest::FlowEvent;
 use crate::io::content::{self, GRAPHQL_MAX, SNIFF_LEN};
 use crate::io::{decode, grpc};
@@ -286,7 +287,7 @@ impl FlowRecorder {
     /// A `Block` rule (or a breakpoint's Abort) reset the connection.
     pub fn reset(&self, reason: impl Into<String>, blocked: bool) {
         let state = if blocked { FlowState::Blocked } else { FlowState::Failed };
-        self.finish(state, Some(reason.into()));
+        self.finish(state, Some(Failure::new(ErrorKind::Other, reason)));
     }
 
     /// Tees one chunk of a body.
@@ -366,18 +367,29 @@ impl FlowRecorder {
             }
             BodyPart::Response => match end {
                 BodyEnd::Complete => self.finish(FlowState::Completed, None),
-                BodyEnd::Error(err) => self.finish(FlowState::Failed, Some(format!("response body: {err}"))),
+                BodyEnd::Error(err) => self.finish(
+                    FlowState::Failed,
+                    Some(Failure::new(ErrorKind::Upstream, format!("response body: {err}"))),
+                ),
                 BodyEnd::Aborted => self.finish(
                     FlowState::Failed,
-                    Some("the client closed the connection before the response finished".into()),
+                    Some(Failure::new(
+                        ErrorKind::ClientGone,
+                        "the client closed the connection before the response finished",
+                    )),
                 ),
             },
         }
     }
 
-    /// Finishes the flow as failed, e.g. the upstream was unreachable.
-    pub fn fail(&self, error: impl Into<String>) {
-        self.finish(FlowState::Failed, Some(error.into()));
+    /// Finishes the flow as failed, e.g. the upstream was unreachable,
+    /// with why by kind (for the inspector's help) and in words.
+    pub fn fail(&self, kind: ErrorKind, error: impl Into<String>) {
+        self.failed(Failure::new(kind, error));
+    }
+
+    pub(crate) fn failed(&self, failure: Failure) {
+        self.finish(FlowState::Failed, Some(failure));
     }
 
     /// Live byte counts of a tunnel (nothing is captured).
@@ -414,13 +426,13 @@ impl FlowRecorder {
         }
     }
 
-    fn finish(&self, end_state: FlowState, error: Option<String>) {
+    fn finish(&self, end_state: FlowState, error: Option<Failure>) {
         self.finish_with(end_state, error, None);
     }
 
     /// Finishes the flow. `sizes` overrides the summary's (request,
     /// response) byte counts, which otherwise come from the body captures.
-    fn finish_with(&self, end_state: FlowState, error: Option<String>, sizes: Option<(u64, u64)>) {
+    fn finish_with(&self, end_state: FlowState, error: Option<Failure>, sizes: Option<(u64, u64)>) {
         let Some(engine) = self.flow.engine.upgrade() else {
             return;
         };
@@ -452,7 +464,8 @@ impl FlowRecorder {
             } else {
                 end_state
             };
-            state.detail.error = error;
+            state.detail.error_kind = error.as_ref().map(|f| f.kind);
+            state.detail.error = error.map(|f| f.message);
             if let Some(response_at) = state.response_at {
                 state.detail.timing.transfer_ms = Some(ms(response_at.elapsed()));
             }
@@ -551,6 +564,7 @@ impl WsRecorder {
         } else {
             FlowState::Completed
         };
+        let error = error.map(|message| Failure::new(ErrorKind::Other, message));
         self.flow.finish_with(state, error, Some(self.log.totals()));
     }
 }

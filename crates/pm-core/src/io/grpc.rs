@@ -321,6 +321,7 @@ fn decode_any(mut b: &[u8]) -> Option<serde_json::Value> {
 }
 
 /// Frames `messages` as a gRPC body (uncompressed), for tests and fixtures.
+#[cfg(test)]
 pub fn frame(messages: &[&[u8]]) -> Vec<u8> {
     let mut out = Vec::new();
     for m in messages {

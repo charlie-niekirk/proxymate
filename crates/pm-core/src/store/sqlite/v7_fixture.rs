@@ -9,15 +9,17 @@
 //! variant added anywhere but the end.
 //!
 //! **Never regenerate the fixture to make these tests pass.** A file saved
-//! by today's release has exactly these bytes. If the layout must change,
-//! bump `VERSION`, teach `SqliteBackend` to read version 7, and keep this
-//! file as the version 7 case. `write_the_v7_fixture` refuses to overwrite it.
+//! by a version 7 release has exactly these bytes. Version 8 (R3) appended
+//! `FlowDetail.error_kind`, so this file is now the version 7 case:
+//! [`flows`] gives the kind reading it infers. A later layout change bumps
+//! `VERSION` again and keeps this file as it is. `write_the_v7_fixture`
+//! refuses to overwrite it.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use pm_model::{
-    AppliedRule, BodyInfo, BodyPart, CertSummary, ContentKind, FlowDetail, FlowLabel, FlowRules, FlowState,
+    AppliedRule, BodyInfo, BodyPart, CertSummary, ContentKind, ErrorKind, FlowDetail, FlowLabel, FlowRules, FlowState,
     FlowSummary, Header, HttpVersion, Phase, PresetKind, RequestHead, ResponseHead, RuleOrigin, Scheme, ScriptIssue,
     ScriptPhase, SentBy, SseEvent, Timing, TlsInfo, TlsStatus, Via, WsClose, WsDirection, WsMessage, WsOpcode, WsQuery,
 };
@@ -102,6 +104,9 @@ fn detail(id: u32, url: &str) -> FlowDetail {
         },
         response_body: body(11, ContentKind::Cbor, "application/cbor"),
         error: Some("upstream reset the stream after the response".into()),
+        // Not in the file (version 8 appended it): what reading a version 7
+        // file infers from the message (`failure::legacy_kind`).
+        error_kind: Some(ErrorKind::Other),
         tls: Some(TlsInfo {
             sni: Some("api.example.test".into()),
             client_alpn: vec!["h2".into(), "http/1.1".into()],
@@ -410,4 +415,23 @@ fn session_enums_keep_their_postcard_indices() {
     pin!(ScriptPhase { Request = 0, Response = 1, Mock = 2, View = 3, WsMessage = 4 });
     pin!(WsDirection { Sent = 0, Received = 1 });
     pin!(WsOpcode { Text = 0, Binary = 1, Ping = 2, Pong = 3, Close = 4 });
+    // Version 8 (R3): `FlowDetail.error_kind`.
+    pin!(ErrorKind {
+        Other = 0,
+        ClientRejectedCert = 1,
+        ClientTls = 2,
+        ClientGone = 3,
+        Dns = 4,
+        Refused = 5,
+        Timeout = 6,
+        ClientCertRequired = 7,
+        UpstreamCertUntrusted = 8,
+        UpstreamCertInvalid = 9,
+        UpstreamTlsVersion = 10,
+        UpstreamTls = 11,
+        UpstreamProxy = 12,
+        UpstreamProxyAuth = 13,
+        UpstreamProxyLoop = 14,
+        Upstream = 15,
+    });
 }

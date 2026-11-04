@@ -59,7 +59,7 @@ async fn wait_for_server(config: &BridgeConfig) -> Result<String, String> {
     let mut launched = false;
     loop {
         let listening = TcpStream::connect(config.addr).await.is_ok();
-        let token = pm_core::mcp::read_token(&config.data_dir);
+        let token = pm_core::Engine::stored_mcp_token(&config.data_dir);
         if listening && let Some(token) = token {
             return Ok(token);
         }

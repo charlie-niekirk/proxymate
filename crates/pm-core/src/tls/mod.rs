@@ -15,7 +15,7 @@ use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::sign::CertifiedKey;
 use rustls::{ClientConfig, DigitallySignedStruct, ServerConfig, SignatureScheme};
 
-pub use ca::{CaError, CertAuthority};
+pub use ca::CertAuthority;
 pub use cert_summary::summarize;
 pub(crate) use policy::globs;
 pub use policy::{PolicyError, SslPolicy};
