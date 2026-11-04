@@ -18,23 +18,33 @@ pub mod workflow;
 use std::sync::Arc;
 
 use pm_core::Engine;
+use pm_model::{IpcError, IpcErrorKind};
 use tauri::State;
 
 type EngineState<'a> = State<'a, Arc<Engine>>;
 
-/// Runs a command's engine work on the blocking pool (R2). A sync command
-/// runs on the main thread, so a refilter, a body read or a clear that
-/// waits for the store lock behind an ingest batch would stall the UI.
-async fn run_blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {
-    tauri::async_runtime::spawn_blocking(f)
+/// Runs a command's engine work on the blocking pool through
+/// [`Engine::blocking`] (R2): a sync command runs on the main thread, so a
+/// refilter, a body read or a clear waiting for the store lock behind an
+/// ingest batch would stall the UI. Saving a script evaluates it, so those
+/// commands use it too.
+async fn blocking<T: Send + 'static, E: Into<Ipc>>(
+    engine: &Arc<Engine>,
+    f: impl FnOnce(&Arc<Engine>) -> Result<T, E> + Send + 'static,
+) -> Result<T, IpcError> {
+    engine
+        .blocking(move |engine| f(engine).map_err(ipc))
         .await
-        .map_err(|e| format!("the command failed: {e}"))?
+        .map_err(|e| IpcError::internal(format!("the command failed: {e}")))?
 }
 
-/// [`run_blocking`] for commands without an error to return; a panic in `f`
+/// [`blocking`] for commands without an error to return; a panic in `f`
 /// gives the default.
-async fn run_blocking_or_default<T: Default + Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
-    tauri::async_runtime::spawn_blocking(f).await.unwrap_or_default()
+async fn blocking_or_default<T: Default + Send + 'static>(
+    engine: &Arc<Engine>,
+    f: impl FnOnce(&Arc<Engine>) -> T + Send + 'static,
+) -> T {
+    engine.blocking(move |engine| f(engine)).await.unwrap_or_default()
 }
 
 /// The engine, for async commands that take the app handle (which
@@ -44,15 +54,42 @@ fn engine_of(app: &tauri::AppHandle) -> Arc<Engine> {
     app.state::<Arc<Engine>>().inner().clone()
 }
 
-/// Saving a script evaluates it once (up to the traffic timeout), so the
-/// mutating commands run off the IPC thread.
-async fn blocking<T: Send + 'static>(
-    engine: &EngineState<'_>,
-    f: impl FnOnce(&Engine) -> Result<T, pm_core::Error> + Send + 'static,
-) -> Result<T, String> {
-    let engine = engine.inner().clone();
-    tokio::task::spawn_blocking(move || f(&engine))
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())
+/// An error on its way to the webview: engine errors keep their kind
+/// (`pm_core::Error::kind`); anything else (a dialog, a join) is
+/// `internal`.
+pub(crate) struct Ipc(IpcError);
+
+impl From<pm_core::Error> for Ipc {
+    fn from(err: pm_core::Error) -> Ipc {
+        Ipc(err.into())
+    }
+}
+
+impl From<IpcError> for Ipc {
+    fn from(err: IpcError) -> Ipc {
+        Ipc(err)
+    }
+}
+
+impl From<tauri::Error> for Ipc {
+    fn from(err: tauri::Error) -> Ipc {
+        Ipc(IpcError::internal(err))
+    }
+}
+
+impl From<tokio::task::JoinError> for Ipc {
+    fn from(err: tokio::task::JoinError) -> Ipc {
+        Ipc(IpcError::internal(err))
+    }
+}
+
+/// Writing a file the user picked.
+impl From<std::io::Error> for Ipc {
+    fn from(err: std::io::Error) -> Ipc {
+        Ipc(IpcError::new(IpcErrorKind::Storage, err.to_string()))
+    }
+}
+
+fn ipc(err: impl Into<Ipc>) -> IpcError {
+    err.into().0
 }

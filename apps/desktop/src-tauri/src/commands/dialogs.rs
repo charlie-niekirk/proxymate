@@ -1,12 +1,14 @@
 //! File dialogs, shared by the commands that save or open files.
 
+use pm_model::IpcError;
+
 pub(super) async fn save_path(
     app: &tauri::AppHandle,
     path: Option<String>,
     file_name: &str,
     kind: &str,
     extension: &str,
-) -> Result<Option<std::path::PathBuf>, String> {
+) -> Result<Option<std::path::PathBuf>, IpcError> {
     use tauri_plugin_dialog::DialogExt;
     if let Some(path) = path {
         return Ok(Some(path.into()));
@@ -20,7 +22,7 @@ pub(super) async fn save_path(
             let _ = tx.send(path);
         });
     match rx.await.ok().flatten() {
-        Some(path) => path.into_path().map(Some).map_err(|e| e.to_string()),
+        Some(path) => path.into_path().map(Some).map_err(IpcError::internal),
         None => Ok(None),
     }
 }
@@ -30,7 +32,7 @@ pub(super) async fn pick_file(
     app: &tauri::AppHandle,
     title: &str,
     filter: (&str, &[&str]),
-) -> Result<Option<std::path::PathBuf>, String> {
+) -> Result<Option<std::path::PathBuf>, IpcError> {
     use tauri_plugin_dialog::DialogExt;
     let (tx, rx) = tokio::sync::oneshot::channel();
     app.dialog()
@@ -41,7 +43,7 @@ pub(super) async fn pick_file(
             let _ = tx.send(path);
         });
     match rx.await.ok().flatten() {
-        Some(path) => path.into_path().map(Some).map_err(|e| e.to_string()),
+        Some(path) => path.into_path().map(Some).map_err(IpcError::internal),
         None => Ok(None),
     }
 }
@@ -58,7 +60,7 @@ pub async fn choose_path(
     folder: bool,
     extensions: Vec<String>,
     current: Option<String>,
-) -> Result<Option<String>, String> {
+) -> Result<Option<String>, IpcError> {
     use tauri_plugin_dialog::DialogExt;
     let (tx, rx) = tokio::sync::oneshot::channel();
     let mut dialog = app.dialog().file().set_title(title);
@@ -89,7 +91,7 @@ pub async fn choose_path(
         Some(path) => path
             .into_path()
             .map(|p| Some(p.display().to_string()))
-            .map_err(|e| e.to_string()),
+            .map_err(IpcError::internal),
         None => Ok(None),
     }
 }
@@ -97,7 +99,7 @@ pub async fn choose_path(
 /// Picks the auto-save folder with a dialog; `None` if it was cancelled.
 #[tauri::command]
 #[specta::specta]
-pub async fn choose_autosave_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
+pub async fn choose_autosave_folder(app: tauri::AppHandle) -> Result<Option<String>, IpcError> {
     use tauri_plugin_dialog::DialogExt;
     let (tx, rx) = tokio::sync::oneshot::channel();
     app.dialog()
@@ -110,7 +112,7 @@ pub async fn choose_autosave_folder(app: tauri::AppHandle) -> Result<Option<Stri
         Some(path) => path
             .into_path()
             .map(|p| Some(p.display().to_string()))
-            .map_err(|e| e.to_string()),
+            .map_err(IpcError::internal),
         None => Ok(None),
     }
 }

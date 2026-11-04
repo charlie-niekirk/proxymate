@@ -1,11 +1,9 @@
 //! The MCP server's settings, token and audit log (M7).
 
-use std::sync::Arc;
-
-use pm_model::{McpAuditPage, McpSettings, McpStatus};
+use pm_model::{IpcError, McpAuditPage, McpSettings, McpStatus};
 use tauri::ipc::Channel;
 
-use super::{EngineState, run_blocking};
+use super::{EngineState, blocking, ipc};
 
 #[tauri::command]
 #[specta::specta]
@@ -22,8 +20,8 @@ pub fn subscribe_mcp(engine: EngineState<'_>, on_status: Channel<McpStatus>) {
 
 #[tauri::command]
 #[specta::specta]
-pub fn set_mcp_settings(engine: EngineState<'_>, settings: McpSettings) -> Result<McpSettings, String> {
-    engine.set_mcp_settings(settings).map_err(|e| e.to_string())
+pub fn set_mcp_settings(engine: EngineState<'_>, settings: McpSettings) -> Result<McpSettings, IpcError> {
+    engine.set_mcp_settings(settings).map_err(ipc)
 }
 
 /// The bearer token, for the copy buttons.
@@ -35,21 +33,19 @@ pub fn get_mcp_token(engine: EngineState<'_>) -> String {
 
 #[tauri::command]
 #[specta::specta]
-pub fn regenerate_mcp_token(engine: EngineState<'_>) -> Result<String, String> {
-    engine.regenerate_mcp_token().map_err(|e| e.to_string())
+pub fn regenerate_mcp_token(engine: EngineState<'_>) -> Result<String, IpcError> {
+    engine.regenerate_mcp_token().map_err(ipc)
 }
 
 /// Audit entries older than `before` (all, without), newest first.
 #[tauri::command]
 #[specta::specta]
-pub async fn get_mcp_audit(engine: EngineState<'_>, before: Option<i64>, limit: u32) -> Result<McpAuditPage, String> {
-    let engine = Arc::clone(&engine);
-    run_blocking(move || engine.mcp_audit(before, limit).map_err(|e| e.to_string())).await
+pub async fn get_mcp_audit(engine: EngineState<'_>, before: Option<i64>, limit: u32) -> Result<McpAuditPage, IpcError> {
+    blocking(&engine, move |engine| engine.mcp_audit(before, limit)).await
 }
 
 #[tauri::command]
 #[specta::specta]
-pub async fn clear_mcp_audit(engine: EngineState<'_>) -> Result<(), String> {
-    let engine = Arc::clone(&engine);
-    run_blocking(move || engine.clear_mcp_audit().map_err(|e| e.to_string())).await
+pub async fn clear_mcp_audit(engine: EngineState<'_>) -> Result<(), IpcError> {
+    blocking(&engine, move |engine| engine.clear_mcp_audit()).await
 }

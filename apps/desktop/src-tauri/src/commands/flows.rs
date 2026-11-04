@@ -1,16 +1,14 @@
 //! Views, rows, flow details, bodies and WebSocket/SSE messages.
 
-use std::sync::Arc;
-
 use pm_model::{
-    BodyPart, FilterSpec, FlowDetail, FlowId, FlowSummary, RowsPage, SortSpec, SsePage, StoreId, ViewDelta, ViewId,
-    ViewInfo, WsPage, WsQuery, WsSend,
+    BodyPart, FilterSpec, FlowDetail, FlowId, FlowSummary, IpcError, IpcErrorKind, RowsPage, SortSpec, SsePage,
+    StoreId, ViewDelta, ViewId, ViewInfo, WsPage, WsQuery, WsSend,
 };
 use tauri::ipc::Channel;
 use tauri::ipc::InvokeResponseBody;
 use tauri::ipc::IpcResponse;
 
-use super::{EngineState, engine_of, run_blocking, run_blocking_or_default};
+use super::{EngineState, blocking, blocking_or_default, engine_of, ipc};
 
 /// `get_rows` returns at most this many rows per call (R2): the table's
 /// row cache asks for up to four 128-row pages at once
@@ -24,30 +22,26 @@ pub async fn create_view(
     store: StoreId,
     filter: FilterSpec,
     sort: SortSpec,
-) -> Result<ViewInfo, String> {
-    let engine = Arc::clone(&engine);
-    run_blocking(move || engine.create_view_in(store, filter, sort).map_err(|e| e.to_string())).await
+) -> Result<ViewInfo, IpcError> {
+    blocking(&engine, move |engine| engine.create_view_in(store, filter, sort)).await
 }
 
 #[tauri::command]
 #[specta::specta]
-pub async fn set_filter(engine: EngineState<'_>, view: ViewId, filter: FilterSpec) -> Result<ViewInfo, String> {
-    let engine = Arc::clone(&engine);
-    run_blocking(move || engine.set_filter(view, filter).map_err(|e| e.to_string())).await
+pub async fn set_filter(engine: EngineState<'_>, view: ViewId, filter: FilterSpec) -> Result<ViewInfo, IpcError> {
+    blocking(&engine, move |engine| engine.set_filter(view, filter)).await
 }
 
 #[tauri::command]
 #[specta::specta]
-pub async fn set_sort(engine: EngineState<'_>, view: ViewId, sort: SortSpec) -> Result<ViewInfo, String> {
-    let engine = Arc::clone(&engine);
-    run_blocking(move || engine.set_sort(view, sort).map_err(|e| e.to_string())).await
+pub async fn set_sort(engine: EngineState<'_>, view: ViewId, sort: SortSpec) -> Result<ViewInfo, IpcError> {
+    blocking(&engine, move |engine| engine.set_sort(view, sort)).await
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn drop_view(app: tauri::AppHandle, view: ViewId) {
-    let engine = engine_of(&app);
-    run_blocking_or_default(move || {
+    blocking_or_default(&engine_of(&app), move |engine| {
         engine.drop_view(view);
     })
     .await
@@ -55,32 +49,26 @@ pub async fn drop_view(app: tauri::AppHandle, view: ViewId) {
 
 #[tauri::command]
 #[specta::specta]
-pub async fn get_rows(engine: EngineState<'_>, view: ViewId, start: u32, count: u32) -> Result<RowsPage, String> {
-    let engine = Arc::clone(&engine);
-    run_blocking(move || {
-        engine
-            .get_rows(view, start, count.min(MAX_ROWS))
-            .map_err(|e| e.to_string())
-    })
-    .await
+pub async fn get_rows(engine: EngineState<'_>, view: ViewId, start: u32, count: u32) -> Result<RowsPage, IpcError> {
+    blocking(&engine, move |engine| engine.get_rows(view, start, count.min(MAX_ROWS))).await
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn get_flow(app: tauri::AppHandle, store: StoreId, id: FlowId) -> Option<FlowSummary> {
-    let engine = engine_of(&app);
-    run_blocking_or_default(move || engine.get_flow_in(store, id)).await
+    blocking_or_default(&engine_of(&app), move |engine| engine.get_flow_in(store, id)).await
 }
 
 /// Streams the view's 20 Hz deltas to the webview until the channel closes.
 #[tauri::command]
 #[specta::specta]
-pub async fn subscribe_view(engine: EngineState<'_>, view: ViewId, on_delta: Channel<ViewDelta>) -> Result<(), String> {
-    let engine = Arc::clone(&engine);
-    run_blocking(move || {
-        engine
-            .subscribe(view, Box::new(move |delta| on_delta.send(delta).is_ok()))
-            .map_err(|e| e.to_string())
+pub async fn subscribe_view(
+    engine: EngineState<'_>,
+    view: ViewId,
+    on_delta: Channel<ViewDelta>,
+) -> Result<(), IpcError> {
+    blocking(&engine, move |engine| {
+        engine.subscribe(view, Box::new(move |delta| on_delta.send(delta).is_ok()))
     })
     .await
 }
@@ -91,9 +79,8 @@ pub async fn get_flow_detail(
     engine: EngineState<'_>,
     store: StoreId,
     id: FlowId,
-) -> Result<Option<FlowDetail>, String> {
-    let engine = Arc::clone(&engine);
-    run_blocking(move || engine.flow_detail_in(store, id).map_err(|e| e.to_string())).await
+) -> Result<Option<FlowDetail>, IpcError> {
+    blocking(&engine, move |engine| engine.flow_detail_in(store, id)).await
 }
 
 /// A body's bytes as a raw `ArrayBuffer`, not JSON. With `decoded`, a
@@ -108,14 +95,12 @@ pub async fn get_body(
     part: BodyPart,
     decoded: bool,
     max: Option<u64>,
-) -> Result<RawBytes, String> {
-    let engine = Arc::clone(&engine);
-    run_blocking(move || {
+) -> Result<RawBytes, IpcError> {
+    blocking(&engine, move |engine| {
         let max = max.map(|m| usize::try_from(m).unwrap_or(usize::MAX));
         engine
             .body_head_in(store, id, part, decoded, max)
             .map(|body| RawBytes(tauri::ipc::Response::new(body.bytes)))
-            .map_err(|e| e.to_string())
     })
     .await
 }
@@ -132,7 +117,7 @@ pub async fn save_body(
     part: BodyPart,
     decoded: bool,
     file_name: String,
-) -> Result<Option<String>, String> {
+) -> Result<Option<String>, IpcError> {
     use tauri_plugin_dialog::DialogExt;
     let (tx, rx) = tokio::sync::oneshot::channel();
     app.dialog().file().set_file_name(&file_name).save_file(move |path| {
@@ -141,10 +126,8 @@ pub async fn save_body(
     let Some(path) = rx.await.ok().flatten() else {
         return Ok(None);
     };
-    let path = path.into_path().map_err(|e| e.to_string())?;
-    engine
-        .save_body_in(store, id, part, decoded, &path)
-        .map_err(|e| e.to_string())?;
+    let path = path.into_path().map_err(IpcError::internal)?;
+    engine.save_body_in(store, id, part, decoded, &path).map_err(ipc)?;
     Ok(Some(path.display().to_string()))
 }
 
@@ -157,12 +140,9 @@ pub async fn get_websocket_messages(
     query: WsQuery,
     start: u32,
     count: u32,
-) -> Result<WsPage, String> {
-    let engine = Arc::clone(&engine);
-    run_blocking(move || {
-        engine
-            .websocket_messages_in(store, id, &query, start, count)
-            .map_err(|e| e.to_string())
+) -> Result<WsPage, IpcError> {
+    blocking(&engine, move |engine| {
+        engine.websocket_messages_in(store, id, &query, start, count)
     })
     .await
 }
@@ -175,13 +155,11 @@ pub async fn get_websocket_payload(
     store: StoreId,
     id: FlowId,
     index: u32,
-) -> Result<RawBytes, String> {
-    let engine = Arc::clone(&engine);
-    run_blocking(move || {
+) -> Result<RawBytes, IpcError> {
+    blocking(&engine, move |engine| {
         engine
             .websocket_payload_in(store, id, index)
             .map(|bytes| RawBytes(tauri::ipc::Response::new(bytes)))
-            .map_err(|e| e.to_string())
     })
     .await
 }
@@ -195,12 +173,16 @@ pub async fn get_websocket_original(
     store: StoreId,
     id: FlowId,
     index: u32,
-) -> Result<RawBytes, String> {
-    let engine = Arc::clone(&engine);
-    run_blocking(move || match engine.websocket_original_in(store, id, index) {
-        Ok(Some(bytes)) => Ok(RawBytes(tauri::ipc::Response::new(bytes))),
-        Ok(None) => Err(format!("message {} wasn't edited", index + 1)),
-        Err(e) => Err(e.to_string()),
+) -> Result<RawBytes, IpcError> {
+    blocking(&engine, move |engine| {
+        match engine.websocket_original_in(store, id, index) {
+            Ok(Some(bytes)) => Ok(RawBytes(tauri::ipc::Response::new(bytes))),
+            Ok(None) => Err(IpcError::new(
+                IpcErrorKind::NotFound,
+                format!("message {} wasn't edited", index + 1),
+            )),
+            Err(e) => Err(e.into()),
+        }
     })
     .await
 }
@@ -208,15 +190,15 @@ pub async fn get_websocket_original(
 /// Sends a message into an open WebSocket of the live capture.
 #[tauri::command]
 #[specta::specta]
-pub fn ws_send(engine: EngineState<'_>, id: FlowId, message: WsSend) -> Result<(), String> {
-    engine.ws_send(id, &message).map_err(|e| e.to_string())
+pub fn ws_send(engine: EngineState<'_>, id: FlowId, message: WsSend) -> Result<(), IpcError> {
+    engine.ws_send(id, &message).map_err(ipc)
 }
 
 /// Closes an open WebSocket of the live capture.
 #[tauri::command]
 #[specta::specta]
-pub fn ws_close(engine: EngineState<'_>, id: FlowId) -> Result<(), String> {
-    engine.ws_close(id).map_err(|e| e.to_string())
+pub fn ws_close(engine: EngineState<'_>, id: FlowId) -> Result<(), IpcError> {
+    engine.ws_close(id).map_err(ipc)
 }
 
 #[tauri::command]
@@ -228,12 +210,9 @@ pub async fn get_sse_events(
     text: String,
     start: u32,
     count: u32,
-) -> Result<SsePage, String> {
-    let engine = Arc::clone(&engine);
-    run_blocking(move || {
-        engine
-            .sse_events_in(store, id, &text, start, count)
-            .map_err(|e| e.to_string())
+) -> Result<SsePage, IpcError> {
+    blocking(&engine, move |engine| {
+        engine.sse_events_in(store, id, &text, start, count)
     })
     .await
 }
@@ -241,8 +220,7 @@ pub async fn get_sse_events(
 #[tauri::command]
 #[specta::specta]
 pub async fn clear_flows(app: tauri::AppHandle) {
-    let engine = engine_of(&app);
-    run_blocking_or_default(move || {
+    blocking_or_default(&engine_of(&app), move |engine| {
         engine.clear();
     })
     .await

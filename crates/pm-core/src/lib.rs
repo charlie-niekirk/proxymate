@@ -56,6 +56,8 @@ pub use search::{FlowPage, SearchHit, SearchMatch, SearchPage};
 pub use settings::StorageSink;
 pub use workflow::{MAX_REPEAT_CONCURRENCY, MAX_REPEAT_ITERATIONS, RepeatSink};
 
+/// What every engine call fails with. Adapters turn it into an
+/// [`IpcError`](pm_model::IpcError) (Tauri) or a tool error (MCP).
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("unknown view {0}")]
@@ -103,4 +105,38 @@ pub enum Error {
     /// Sending into or closing a WebSocket that can't take it.
     #[error("{0}")]
     WebSocket(String),
+}
+
+impl Error {
+    /// The stable kind the UI switches on.
+    pub fn kind(&self) -> pm_model::IpcErrorKind {
+        use pm_model::IpcErrorKind as K;
+        match self {
+            Error::UnknownView(_) | Error::UnknownFlow(_) | Error::UnknownMessage(..) | Error::UnknownStore(_) => {
+                K::NotFound
+            }
+            Error::Proxy(_) => K::Proxy,
+            Error::Decode(_) => K::Decode,
+            Error::Storage(_) => K::Storage,
+            Error::Tls(_) => K::Tls,
+            Error::Settings(_) | Error::Invalid(_) => K::Invalid,
+            Error::Platform(pm_platform::PlatformError::Cancelled) => K::Cancelled,
+            Error::Platform(pm_platform::PlatformError::Unsupported) => K::Unsupported,
+            Error::Platform(_) => K::Platform,
+            Error::Rule(_) => K::Rule,
+            Error::Script(_) => K::Script,
+            Error::Query(_) => K::Query,
+            Error::Device(_) => K::Device,
+            Error::Send(_) => K::Send,
+            Error::Document(_) => K::Document,
+            Error::Proto(_) => K::Proto,
+            Error::WebSocket(_) => K::WebSocket,
+        }
+    }
+}
+
+impl From<Error> for pm_model::IpcError {
+    fn from(err: Error) -> pm_model::IpcError {
+        pm_model::IpcError::new(err.kind(), err.to_string())
+    }
 }

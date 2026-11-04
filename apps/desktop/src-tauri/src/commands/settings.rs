@@ -1,9 +1,9 @@
 //! Storage, proxy, network and update settings (M10, M11, M18).
 
-use pm_model::{NetworkSettings, ProxySettings, StorageSettings, StorageStatus, UpdateSettings};
+use pm_model::{IpcError, NetworkSettings, ProxySettings, StorageSettings, StorageStatus, UpdateSettings};
 use tauri::ipc::Channel;
 
-use super::EngineState;
+use super::{EngineState, ipc};
 
 #[tauri::command]
 #[specta::specta]
@@ -14,8 +14,8 @@ pub fn get_storage_settings(engine: EngineState<'_>) -> StorageSettings {
 /// Saves new limits; flows past them are evicted straight away.
 #[tauri::command]
 #[specta::specta]
-pub fn set_storage_settings(engine: EngineState<'_>, settings: StorageSettings) -> Result<StorageSettings, String> {
-    engine.set_storage_settings(settings).map_err(|e| e.to_string())
+pub fn set_storage_settings(engine: EngineState<'_>, settings: StorageSettings) -> Result<StorageSettings, IpcError> {
+    engine.set_storage_settings(settings).map_err(ipc)
 }
 
 #[tauri::command]
@@ -41,8 +41,8 @@ pub fn get_proxy_settings(engine: EngineState<'_>) -> ProxySettings {
 /// they changed. A port that can't be bound is an error; the old one stays.
 #[tauri::command]
 #[specta::specta]
-pub async fn set_proxy_settings(engine: EngineState<'_>, settings: ProxySettings) -> Result<ProxySettings, String> {
-    engine.set_proxy_settings(settings).await.map_err(|e| e.to_string())
+pub async fn set_proxy_settings(engine: EngineState<'_>, settings: ProxySettings) -> Result<ProxySettings, IpcError> {
+    engine.set_proxy_settings(settings).await.map_err(ipc)
 }
 
 /// Settings › Network (M18). Passwords never come back: `has_password`
@@ -61,8 +61,8 @@ pub fn get_network_settings(engine: EngineState<'_>) -> NetworkSettings {
 pub async fn set_network_settings(
     engine: EngineState<'_>,
     settings: NetworkSettings,
-) -> Result<NetworkSettings, String> {
-    engine.set_network_settings(settings).await.map_err(|e| e.to_string())
+) -> Result<NetworkSettings, IpcError> {
+    engine.set_network_settings(settings).await.map_err(ipc)
 }
 
 #[tauri::command]
@@ -73,8 +73,8 @@ pub fn get_update_settings(engine: EngineState<'_>) -> UpdateSettings {
 
 #[tauri::command]
 #[specta::specta]
-pub fn set_update_settings(engine: EngineState<'_>, settings: UpdateSettings) -> Result<UpdateSettings, String> {
-    engine.set_update_settings(settings).map_err(|e| e.to_string())
+pub fn set_update_settings(engine: EngineState<'_>, settings: UpdateSettings) -> Result<UpdateSettings, IpcError> {
+    engine.set_update_settings(settings).map_err(ipc)
 }
 
 /// Settings › Updates' "Check Now": the same check as the menu item, which

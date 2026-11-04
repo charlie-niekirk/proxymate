@@ -8,6 +8,7 @@ mod capture;
 mod detail;
 mod device;
 mod document;
+mod errors;
 mod filter;
 mod flow;
 mod mcp;
@@ -35,6 +36,7 @@ pub use device::{
     LocalActivity, SimDevice, SimInstallResult, SimulatorStatus,
 };
 pub use document::{DocumentInfo, DocumentKind, FlowSelection, LIVE_STORE, SaveProgress, StoreId};
+pub use errors::{ErrorKind, IpcError, IpcErrorKind};
 pub use filter::{ContentGroup, FilterSpec, ProtocolFilter, SearchScope, SortDir, SortKey, SortSpec};
 pub use flow::{ContentKind, FlowId, FlowLabel, FlowState, FlowSummary, Scheme};
 pub use mcp::{MCP_DEFAULT_PORT, McpAuditEntry, McpAuditPage, McpCallOutcome, McpClient, McpSettings, McpStatus};

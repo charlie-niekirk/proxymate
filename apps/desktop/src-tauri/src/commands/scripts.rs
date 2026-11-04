@@ -1,13 +1,13 @@
 //! Scripts (M14).
 
 use pm_model::{
-    BodyPart, ConsoleEntry, FlowId, Script, ScriptId, ScriptSettings, ScriptTestResult, ScriptTestSpec, StoreId,
-    ViewResult,
+    BodyPart, ConsoleEntry, FlowId, IpcError, IpcErrorKind, Script, ScriptId, ScriptSettings, ScriptTestResult,
+    ScriptTestSpec, StoreId, ViewResult,
 };
 use tauri::ipc::Channel;
 
 use super::dialogs::save_path;
-use super::{EngineState, blocking};
+use super::{EngineState, blocking, ipc};
 
 /// Every script, grouped by kind (view, rewrite, mock), then by name.
 #[tauri::command]
@@ -20,33 +20,33 @@ pub fn list_scripts(engine: EngineState<'_>) -> Vec<Script> {
 /// with it (a syntax error, a missing entry point).
 #[tauri::command]
 #[specta::specta]
-pub async fn create_script(engine: EngineState<'_>, script: Script) -> Result<Script, String> {
+pub async fn create_script(engine: EngineState<'_>, script: Script) -> Result<Script, IpcError> {
     blocking(&engine, move |e| e.create_script(script)).await
 }
 
 #[tauri::command]
 #[specta::specta]
-pub async fn update_script(engine: EngineState<'_>, script: Script) -> Result<Script, String> {
+pub async fn update_script(engine: EngineState<'_>, script: Script) -> Result<Script, IpcError> {
     blocking(&engine, move |e| e.update_script(script)).await
 }
 
 #[tauri::command]
 #[specta::specta]
-pub async fn set_script_enabled(engine: EngineState<'_>, id: ScriptId, enabled: bool) -> Result<Script, String> {
+pub async fn set_script_enabled(engine: EngineState<'_>, id: ScriptId, enabled: bool) -> Result<Script, IpcError> {
     blocking(&engine, move |e| e.set_script_enabled(&id, enabled)).await
 }
 
 /// Refused while a rule runs the script; the error names those rules.
 #[tauri::command]
 #[specta::specta]
-pub async fn delete_script(engine: EngineState<'_>, id: ScriptId) -> Result<(), String> {
+pub async fn delete_script(engine: EngineState<'_>, id: ScriptId) -> Result<(), IpcError> {
     blocking(&engine, move |e| e.delete_script(&id)).await
 }
 
 /// Deletes every agent-created script no rule runs; returns how many.
 #[tauri::command]
 #[specta::specta]
-pub async fn delete_agent_scripts(engine: EngineState<'_>) -> Result<u32, String> {
+pub async fn delete_agent_scripts(engine: EngineState<'_>) -> Result<u32, IpcError> {
     blocking(&engine, |e| e.delete_agent_scripts()).await
 }
 
@@ -58,8 +58,8 @@ pub async fn test_script(
     store: StoreId,
     flow: FlowId,
     spec: ScriptTestSpec,
-) -> Result<ScriptTestResult, String> {
-    engine.test_script(store, flow, spec).await.map_err(|e| e.to_string())
+) -> Result<ScriptTestResult, IpcError> {
+    engine.test_script(store, flow, spec).await.map_err(ipc)
 }
 
 /// The view scripts' views of one body; empty when none applies.
@@ -70,11 +70,8 @@ pub async fn get_flow_views(
     store: StoreId,
     flow: FlowId,
     part: BodyPart,
-) -> Result<Vec<ViewResult>, String> {
-    engine
-        .run_view_scripts(store, flow, part)
-        .await
-        .map_err(|e| e.to_string())
+) -> Result<Vec<ViewResult>, IpcError> {
+    engine.run_view_scripts(store, flow, part).await.map_err(ipc)
 }
 
 /// Console entries newer than `since`, oldest first.
@@ -112,8 +109,8 @@ pub fn get_script_settings(engine: EngineState<'_>) -> ScriptSettings {
 
 #[tauri::command]
 #[specta::specta]
-pub fn set_script_settings(engine: EngineState<'_>, settings: ScriptSettings) -> Result<ScriptSettings, String> {
-    engine.set_script_settings(settings).map_err(|e| e.to_string())
+pub fn set_script_settings(engine: EngineState<'_>, settings: ScriptSettings) -> Result<ScriptSettings, IpcError> {
+    engine.set_script_settings(settings).map_err(ipc)
 }
 
 /// `proxymate.d.ts`, for "Copy type definitions".
@@ -132,8 +129,8 @@ pub async fn export_script(
     engine: EngineState<'_>,
     id: ScriptId,
     path: Option<String>,
-) -> Result<Option<String>, String> {
-    let text = engine.export_script(&id).map_err(|e| e.to_string())?;
+) -> Result<Option<String>, IpcError> {
+    let text = engine.export_script(&id).map_err(ipc)?;
     let name = engine.script(&id).map(|s| s.name).unwrap_or_default();
     let file_name: String = name
         .chars()
@@ -149,7 +146,7 @@ pub async fn export_script(
     let Some(path) = save_path(&app, path, &file_name, "JavaScript", "js").await? else {
         return Ok(None);
     };
-    std::fs::write(&path, text).map_err(|e| e.to_string())?;
+    std::fs::write(&path, text).map_err(ipc)?;
     Ok(Some(path.display().to_string()))
 }
 
@@ -161,7 +158,7 @@ pub async fn import_script(
     app: tauri::AppHandle,
     engine: EngineState<'_>,
     path: Option<String>,
-) -> Result<Option<Script>, String> {
+) -> Result<Option<Script>, IpcError> {
     use tauri_plugin_dialog::DialogExt;
     let path = match path {
         Some(path) => std::path::PathBuf::from(path),
@@ -176,10 +173,11 @@ pub async fn import_script(
             let Some(path) = rx.await.ok().flatten() else {
                 return Ok(None);
             };
-            path.into_path().map_err(|e| e.to_string())?
+            path.into_path().map_err(IpcError::internal)?
         }
     };
-    let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let text = std::fs::read_to_string(&path)
+        .map_err(|e| IpcError::new(IpcErrorKind::Storage, format!("{}: {e}", path.display())))?;
     let file_name = path.file_name().map(|n| n.to_string_lossy().into_owned());
     blocking(&engine, move |e| {
         e.import_script(&text, file_name.as_deref(), pm_model::RuleOrigin::User)

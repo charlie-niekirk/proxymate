@@ -1,6 +1,6 @@
 //! Protobuf schemas, mappings and decoded bodies (M16).
 
-use pm_model::{BodyPart, DecodedBody, FlowId, ProtoMapping, ProtoSchema, StoreId};
+use pm_model::{BodyPart, DecodedBody, FlowId, IpcError, ProtoMapping, ProtoSchema, StoreId};
 
 use super::{EngineState, blocking};
 
@@ -13,7 +13,7 @@ pub async fn decode_body(
     store: StoreId,
     flow: FlowId,
     part: BodyPart,
-) -> Result<DecodedBody, String> {
+) -> Result<DecodedBody, IpcError> {
     blocking(&engine, move |e| e.decode_body_in(store, flow, part)).await
 }
 
@@ -31,7 +31,7 @@ pub async fn import_proto_schema(
     app: tauri::AppHandle,
     engine: EngineState<'_>,
     paths: Option<Vec<String>>,
-) -> Result<Option<ProtoSchema>, String> {
+) -> Result<Option<ProtoSchema>, IpcError> {
     use tauri_plugin_dialog::DialogExt;
     let paths: Vec<std::path::PathBuf> = match paths {
         Some(paths) => paths.into_iter().map(Into::into).collect(),
@@ -48,7 +48,7 @@ pub async fn import_proto_schema(
             };
             picked
                 .into_iter()
-                .map(|p| p.into_path().map_err(|e| e.to_string()))
+                .map(|p| p.into_path().map_err(IpcError::internal))
                 .collect::<Result<_, _>>()?
         }
     };
@@ -57,7 +57,7 @@ pub async fn import_proto_schema(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn remove_proto_schema(engine: EngineState<'_>, id: u32) -> Result<(), String> {
+pub async fn remove_proto_schema(engine: EngineState<'_>, id: u32) -> Result<(), IpcError> {
     blocking(&engine, move |e| e.remove_proto_schema(id)).await
 }
 
@@ -76,6 +76,6 @@ pub fn list_proto_mappings(engine: EngineState<'_>) -> Vec<ProtoMapping> {
 
 #[tauri::command]
 #[specta::specta]
-pub async fn set_proto_mappings(engine: EngineState<'_>, mappings: Vec<ProtoMapping>) -> Result<(), String> {
+pub async fn set_proto_mappings(engine: EngineState<'_>, mappings: Vec<ProtoMapping>) -> Result<(), IpcError> {
     blocking(&engine, move |e| e.set_proto_mappings(mappings)).await
 }

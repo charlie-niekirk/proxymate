@@ -1,11 +1,9 @@
 //! Offline mocking: the mock library and OpenAPI specs (M20).
 
-use std::sync::Arc;
-
-use pm_model::{FlowId, MockSource, OpenApiSpec, OperationMatch, Rule, StoreId};
+use pm_model::{FlowId, IpcError, MockSource, OpenApiSpec, OperationMatch, Rule, StoreId};
 
 use super::dialogs::pick_file;
-use super::{EngineState, blocking, run_blocking};
+use super::{EngineState, blocking, ipc};
 
 #[tauri::command]
 #[specta::specta]
@@ -21,7 +19,7 @@ pub async fn create_mock_source(
     engine: EngineState<'_>,
     store: StoreId,
     name: Option<String>,
-) -> Result<MockSource, String> {
+) -> Result<MockSource, IpcError> {
     blocking(&engine, move |e| e.create_mock_source(store, name)).await
 }
 
@@ -33,7 +31,7 @@ pub async fn create_mock_source_from_file(
     app: tauri::AppHandle,
     engine: EngineState<'_>,
     path: Option<String>,
-) -> Result<Option<MockSource>, String> {
+) -> Result<Option<MockSource>, IpcError> {
     let path = match path {
         Some(path) => std::path::PathBuf::from(path),
         None => match pick_file(
@@ -57,15 +55,15 @@ pub async fn create_mock_source_from_file(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn remove_mock_source(engine: EngineState<'_>, id: String) -> Result<(), String> {
+pub async fn remove_mock_source(engine: EngineState<'_>, id: String) -> Result<(), IpcError> {
     blocking(&engine, move |e| e.remove_mock_source(&id)).await
 }
 
 /// The "Serve from" preset for a mock source (unsaved).
 #[tauri::command]
 #[specta::specta]
-pub fn draft_serve_from_rule(engine: EngineState<'_>, source: String) -> Result<Rule, String> {
-    engine.draft_serve_from_rule(&source).map_err(|e| e.to_string())
+pub fn draft_serve_from_rule(engine: EngineState<'_>, source: String) -> Result<Rule, IpcError> {
+    engine.draft_serve_from_rule(&source).map_err(ipc)
 }
 
 #[tauri::command]
@@ -82,7 +80,7 @@ pub async fn import_openapi_spec(
     app: tauri::AppHandle,
     engine: EngineState<'_>,
     path: Option<String>,
-) -> Result<Option<OpenApiSpec>, String> {
+) -> Result<Option<OpenApiSpec>, IpcError> {
     let path = match path {
         Some(path) => std::path::PathBuf::from(path),
         None => match pick_file(
@@ -101,14 +99,14 @@ pub async fn import_openapi_spec(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn remove_openapi_spec(engine: EngineState<'_>, id: u32) -> Result<(), String> {
+pub async fn remove_openapi_spec(engine: EngineState<'_>, id: u32) -> Result<(), IpcError> {
     blocking(&engine, move |e| e.remove_openapi_spec(id)).await
 }
 
 /// "Generate mocks": one disabled Map Local rule per operation, saved.
 #[tauri::command]
 #[specta::specta]
-pub async fn generate_openapi_mocks(engine: EngineState<'_>, id: u32) -> Result<Vec<Rule>, String> {
+pub async fn generate_openapi_mocks(engine: EngineState<'_>, id: u32) -> Result<Vec<Rule>, IpcError> {
     blocking(&engine, move |e| e.generate_openapi_mocks(id)).await
 }
 
@@ -119,7 +117,6 @@ pub async fn flow_operation(
     engine: EngineState<'_>,
     store: StoreId,
     flow: FlowId,
-) -> Result<Option<OperationMatch>, String> {
-    let engine = Arc::clone(&engine);
-    run_blocking(move || engine.flow_operation_in(store, flow).map_err(|e| e.to_string())).await
+) -> Result<Option<OperationMatch>, IpcError> {
+    blocking(&engine, move |engine| engine.flow_operation_in(store, flow)).await
 }

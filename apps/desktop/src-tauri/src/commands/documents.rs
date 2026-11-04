@@ -1,24 +1,24 @@
 //! Replay, compose and cURL; sessions and HAR files (M8).
 
-use std::sync::Arc;
-
-use pm_model::{DocumentInfo, FlowId, FlowSelection, RequestSpec, SaveProgress, SendOpts, SendOrigin, StoreId};
+use pm_model::{
+    DocumentInfo, FlowId, FlowSelection, IpcError, RequestSpec, SaveProgress, SendOpts, SendOrigin, StoreId,
+};
 use tauri::ipc::Channel;
 
 use super::dialogs::save_path;
-use super::{EngineState, run_blocking};
+use super::{EngineState, blocking, ipc};
 
 /// Sends a composed (or edited) request from the app; resolves to the new
 /// flow's id once it is recorded.
 #[tauri::command]
 #[specta::specta]
-pub async fn send_request(engine: EngineState<'_>, spec: RequestSpec, apply_rules: bool) -> Result<FlowId, String> {
+pub async fn send_request(engine: EngineState<'_>, spec: RequestSpec, apply_rules: bool) -> Result<FlowId, IpcError> {
     let opts = SendOpts {
         apply_rules,
         wait: false,
         origin: SendOrigin::User,
     };
-    engine.send(spec, opts).await.map_err(|e| e.to_string())
+    engine.send(spec, opts).await.map_err(ipc)
 }
 
 /// Sends a recorded request again, as it was sent.
@@ -29,28 +29,26 @@ pub async fn replay_flow(
     store: StoreId,
     id: FlowId,
     apply_rules: bool,
-) -> Result<FlowId, String> {
+) -> Result<FlowId, IpcError> {
     let opts = SendOpts {
         apply_rules,
         wait: false,
         origin: SendOrigin::User,
     };
-    engine.replay(store, id, opts).await.map_err(|e| e.to_string())
+    engine.replay(store, id, opts).await.map_err(ipc)
 }
 
 /// A recorded request, editable (body decoded), for Edit & Replay.
 #[tauri::command]
 #[specta::specta]
-pub async fn get_request_spec(engine: EngineState<'_>, store: StoreId, id: FlowId) -> Result<RequestSpec, String> {
-    let engine = Arc::clone(&engine);
-    run_blocking(move || engine.request_spec(store, id, true).map_err(|e| e.to_string())).await
+pub async fn get_request_spec(engine: EngineState<'_>, store: StoreId, id: FlowId) -> Result<RequestSpec, IpcError> {
+    blocking(&engine, move |engine| engine.request_spec(store, id, true)).await
 }
 
 #[tauri::command]
 #[specta::specta]
-pub async fn get_curl(engine: EngineState<'_>, store: StoreId, id: FlowId) -> Result<String, String> {
-    let engine = Arc::clone(&engine);
-    run_blocking(move || engine.curl_command(store, id).map_err(|e| e.to_string())).await
+pub async fn get_curl(engine: EngineState<'_>, store: StoreId, id: FlowId) -> Result<String, IpcError> {
+    blocking(&engine, move |engine| engine.curl_command(store, id)).await
 }
 
 #[tauri::command]
@@ -70,7 +68,7 @@ pub async fn open_document(
     engine: EngineState<'_>,
     path: Option<String>,
     har: bool,
-) -> Result<Option<DocumentInfo>, String> {
+) -> Result<Option<DocumentInfo>, IpcError> {
     use tauri_plugin_dialog::DialogExt;
     let path = match path {
         Some(path) => std::path::PathBuf::from(path),
@@ -93,23 +91,19 @@ pub async fn open_document(
             let Some(path) = rx.await.ok().flatten() else {
                 return Ok(None);
             };
-            path.into_path().map_err(|e| e.to_string())?
+            path.into_path().map_err(IpcError::internal)?
         }
     };
-    let engine = engine.inner().clone();
     // Loading a big session or HAR takes a moment; keep it off the IPC thread.
-    tokio::task::spawn_blocking(move || engine.open_document(&path))
+    blocking(&engine, move |engine| engine.open_document(&path))
         .await
-        .map_err(|e| e.to_string())?
         .map(Some)
-        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 #[specta::specta]
-pub async fn close_document(engine: EngineState<'_>, store: StoreId) -> Result<(), String> {
-    let engine = Arc::clone(&engine);
-    run_blocking(move || engine.close_document(store).map_err(|e| e.to_string())).await
+pub async fn close_document(engine: EngineState<'_>, store: StoreId) -> Result<(), IpcError> {
+    blocking(&engine, move |engine| engine.close_document(store)).await
 }
 
 /// Saves flows of a store as a `.proxymate` session in the background;
@@ -125,13 +119,13 @@ pub async fn save_session(
     path: Option<String>,
     file_name: String,
     on_progress: Channel<SaveProgress>,
-) -> Result<Option<String>, String> {
+) -> Result<Option<String>, IpcError> {
     let Some(path) = save_path(&app, path, &file_name, "Proxymate session", "proxymate").await? else {
         return Ok(None);
     };
     engine
         .save_session(store, &selection, path.clone(), progress_sink(on_progress))
-        .map_err(|e| e.to_string())?;
+        .map_err(ipc)?;
     Ok(Some(path.display().to_string()))
 }
 
@@ -147,13 +141,13 @@ pub async fn export_har(
     path: Option<String>,
     file_name: String,
     on_progress: Channel<SaveProgress>,
-) -> Result<Option<String>, String> {
+) -> Result<Option<String>, IpcError> {
     let Some(path) = save_path(&app, path, &file_name, "HAR", "har").await? else {
         return Ok(None);
     };
     engine
         .export_har(store, &selection, path.clone(), progress_sink(on_progress))
-        .map_err(|e| e.to_string())?;
+        .map_err(ipc)?;
     Ok(Some(path.display().to_string()))
 }
 

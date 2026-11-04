@@ -6,132 +6,132 @@ import { invoke as __TAURI_INVOKE, Channel } from "@tauri-apps/api/core";
 
 /** Commands */
 export const commands = {
-	createView: (store: number, filter: FilterSpec_Deserialize, sort: SortSpec_Deserialize) => typedError<ViewInfo_Serialize, string>(__TAURI_INVOKE("create_view", { store, filter, sort })),
-	setFilter: (view: number, filter: FilterSpec_Deserialize) => typedError<ViewInfo_Serialize, string>(__TAURI_INVOKE("set_filter", { view, filter })),
-	setSort: (view: number, sort: SortSpec_Deserialize) => typedError<ViewInfo_Serialize, string>(__TAURI_INVOKE("set_sort", { view, sort })),
+	createView: (store: number, filter: FilterSpec_Deserialize, sort: SortSpec_Deserialize) => typedError<ViewInfo_Serialize, IpcError>(__TAURI_INVOKE("create_view", { store, filter, sort })),
+	setFilter: (view: number, filter: FilterSpec_Deserialize) => typedError<ViewInfo_Serialize, IpcError>(__TAURI_INVOKE("set_filter", { view, filter })),
+	setSort: (view: number, sort: SortSpec_Deserialize) => typedError<ViewInfo_Serialize, IpcError>(__TAURI_INVOKE("set_sort", { view, sort })),
 	dropView: (view: number) => __TAURI_INVOKE<void>("drop_view", { view }),
-	getRows: (view: number, start: number, count: number) => typedError<RowsPage_Serialize, string>(__TAURI_INVOKE("get_rows", { view, start, count })),
+	getRows: (view: number, start: number, count: number) => typedError<RowsPage_Serialize, IpcError>(__TAURI_INVOKE("get_rows", { view, start, count })),
 	getFlow: (store: number, id: number) => __TAURI_INVOKE<FlowSummary_Serialize | null>("get_flow", { store, id }),
 	/**  Streams the view's 20 Hz deltas to the webview until the channel closes. */
-	subscribeView: (view: number, onDelta: Channel<ViewDelta_Deserialize>) => typedError<null, string>(__TAURI_INVOKE("subscribe_view", { view, onDelta })),
-	getFlowDetail: (store: number, id: number) => typedError<FlowDetail_Serialize | null, string>(__TAURI_INVOKE("get_flow_detail", { store, id })),
+	subscribeView: (view: number, onDelta: Channel<ViewDelta_Deserialize>) => typedError<null, IpcError>(__TAURI_INVOKE("subscribe_view", { view, onDelta })),
+	getFlowDetail: (store: number, id: number) => typedError<FlowDetail_Serialize | null, IpcError>(__TAURI_INVOKE("get_flow_detail", { store, id })),
 	/**
 	 *  A body's bytes as a raw `ArrayBuffer`, not JSON. With `decoded`, a
 	 *  content-encoded body is decoded first; decoding errors are returned.
 	 *  With `max`, only the first `max` bytes are sent.
 	 */
-	getBody: (store: number, id: number, part: BodyPart, decoded: boolean, max: number | null) => typedError<unknown, string>(__TAURI_INVOKE("get_body", { store, id, part, decoded, max })),
+	getBody: (store: number, id: number, part: BodyPart, decoded: boolean, max: number | null) => typedError<unknown, IpcError>(__TAURI_INVOKE("get_body", { store, id, part, decoded, max })),
 	/**
 	 *  Asks where to save a body (decoded, with `decoded`) and writes it there.
 	 *  Returns the path, or `None` if the user cancelled.
 	 */
-	saveBody: (store: number, id: number, part: BodyPart, decoded: boolean, fileName: string) => typedError<string | null, string>(__TAURI_INVOKE("save_body", { store, id, part, decoded, fileName })),
-	getWebsocketMessages: (store: number, id: number, query: WsQuery_Deserialize, start: number, count: number) => typedError<WsPage_Serialize, string>(__TAURI_INVOKE("get_websocket_messages", { store, id, query, start, count })),
+	saveBody: (store: number, id: number, part: BodyPart, decoded: boolean, fileName: string) => typedError<string | null, IpcError>(__TAURI_INVOKE("save_body", { store, id, part, decoded, fileName })),
+	getWebsocketMessages: (store: number, id: number, query: WsQuery_Deserialize, start: number, count: number) => typedError<WsPage_Serialize, IpcError>(__TAURI_INVOKE("get_websocket_messages", { store, id, query, start, count })),
 	/**  One WebSocket message's payload as a raw `ArrayBuffer`. */
-	getWebsocketPayload: (store: number, id: number, index: number) => typedError<unknown, string>(__TAURI_INVOKE("get_websocket_payload", { store, id, index })),
+	getWebsocketPayload: (store: number, id: number, index: number) => typedError<unknown, IpcError>(__TAURI_INVOKE("get_websocket_payload", { store, id, index })),
 	/**
 	 *  What arrived for an edited WebSocket message (M19), as a raw
 	 *  `ArrayBuffer`.
 	 */
-	getWebsocketOriginal: (store: number, id: number, index: number) => typedError<unknown, string>(__TAURI_INVOKE("get_websocket_original", { store, id, index })),
+	getWebsocketOriginal: (store: number, id: number, index: number) => typedError<unknown, IpcError>(__TAURI_INVOKE("get_websocket_original", { store, id, index })),
 	/**  Sends a message into an open WebSocket of the live capture. */
-	wsSend: (id: number, message: WsSend_Deserialize) => typedError<null, string>(__TAURI_INVOKE("ws_send", { id, message })),
+	wsSend: (id: number, message: WsSend_Deserialize) => typedError<null, IpcError>(__TAURI_INVOKE("ws_send", { id, message })),
 	/**  Closes an open WebSocket of the live capture. */
-	wsClose: (id: number) => typedError<null, string>(__TAURI_INVOKE("ws_close", { id })),
-	getSseEvents: (store: number, id: number, text: string, start: number, count: number) => typedError<SsePage_Serialize, string>(__TAURI_INVOKE("get_sse_events", { store, id, text, start, count })),
+	wsClose: (id: number) => typedError<null, IpcError>(__TAURI_INVOKE("ws_close", { id })),
+	getSseEvents: (store: number, id: number, text: string, start: number, count: number) => typedError<SsePage_Serialize, IpcError>(__TAURI_INVOKE("get_sse_events", { store, id, text, start, count })),
 	clearFlows: () => __TAURI_INVOKE<void>("clear_flows"),
 	setRecording: (on: boolean) => __TAURI_INVOKE<ProxyStatus_Serialize>("set_recording", { on }),
 	getProxyStatus: () => __TAURI_INVOKE<ProxyStatus_Serialize>("get_proxy_status"),
 	getCaInfo: () => __TAURI_INVOKE<CaInfo>("get_ca_info"),
-	regenerateCa: (removeOldTrust: boolean) => typedError<CaInfo, string>(__TAURI_INVOKE("regenerate_ca", { removeOldTrust })),
+	regenerateCa: (removeOldTrust: boolean) => typedError<CaInfo, IpcError>(__TAURI_INVOKE("regenerate_ca", { removeOldTrust })),
 	getSslSettings: () => __TAURI_INVOKE<SslSettings_Serialize>("get_ssl_settings"),
-	setSslSettings: (settings: SslSettings_Deserialize) => typedError<SslSettings_Serialize, string>(__TAURI_INVOKE("set_ssl_settings", { settings })),
-	addSslBypass: (host: string) => typedError<SslSettings_Serialize, string>(__TAURI_INVOKE("add_ssl_bypass", { host })),
-	setInsecureUpstream: (host: string, allow: boolean) => typedError<SslSettings_Serialize, string>(__TAURI_INVOKE("set_insecure_upstream", { host, allow })),
+	setSslSettings: (settings: SslSettings_Deserialize) => typedError<SslSettings_Serialize, IpcError>(__TAURI_INVOKE("set_ssl_settings", { settings })),
+	addSslBypass: (host: string) => typedError<SslSettings_Serialize, IpcError>(__TAURI_INVOKE("add_ssl_bypass", { host })),
+	setInsecureUpstream: (host: string, allow: boolean) => typedError<SslSettings_Serialize, IpcError>(__TAURI_INVOKE("set_insecure_upstream", { host, allow })),
 	/**  Streams the sidebar's Apps and Domains whenever they change. */
 	subscribeSidebar: (onSnapshot: Channel<SidebarSnapshot_Deserialize>) => __TAURI_INVOKE<void>("subscribe_sidebar", { onSnapshot }),
-	setAppSslExcluded: (app: string, excluded: boolean) => typedError<SslSettings_Serialize, string>(__TAURI_INVOKE("set_app_ssl_excluded", { app, excluded })),
+	setAppSslExcluded: (app: string, excluded: boolean) => typedError<SslSettings_Serialize, IpcError>(__TAURI_INVOKE("set_app_ssl_excluded", { app, excluded })),
 	/**  Keychain trust plus a real handshake check through the proxy. */
-	getTrustStatus: () => typedError<TrustStatus_Serialize, string>(__TAURI_INVOKE("get_trust_status")),
+	getTrustStatus: () => typedError<TrustStatus_Serialize, IpcError>(__TAURI_INVOKE("get_trust_status")),
 	/**  Installs and trusts the CA; resolves once the macOS prompt is answered. */
-	installCaTrust: () => typedError<TrustStatus_Serialize, string>(__TAURI_INVOKE("install_ca_trust")),
-	uninstallCaTrust: () => typedError<TrustStatus_Serialize, string>(__TAURI_INVOKE("uninstall_ca_trust")),
-	getSystemProxyStatus: () => typedError<SystemProxyStatus_Serialize, string>(__TAURI_INVOKE("get_system_proxy_status")),
+	installCaTrust: () => typedError<TrustStatus_Serialize, IpcError>(__TAURI_INVOKE("install_ca_trust")),
+	uninstallCaTrust: () => typedError<TrustStatus_Serialize, IpcError>(__TAURI_INVOKE("uninstall_ca_trust")),
+	getSystemProxyStatus: () => typedError<SystemProxyStatus_Serialize, IpcError>(__TAURI_INVOKE("get_system_proxy_status")),
 	/**  Failures are reported in the returned status, not as an error. */
-	setSystemProxy: (on: boolean) => typedError<SystemProxyStatus_Serialize, string>(__TAURI_INVOKE("set_system_proxy", { on })),
+	setSystemProxy: (on: boolean) => typedError<SystemProxyStatus_Serialize, IpcError>(__TAURI_INVOKE("set_system_proxy", { on })),
 	/**  `export` lines for a proxied terminal. */
 	getTerminalEnv: () => __TAURI_INVOKE<string>("get_terminal_env"),
 	/**  Every rule, in evaluation order. */
 	listRules: () => __TAURI_INVOKE<Rule_Serialize[]>("list_rules"),
 	/**  Saves a new rule at the end of the list (a fresh id is assigned). */
-	createRule: (rule: Rule_Deserialize) => typedError<Rule_Serialize, string>(__TAURI_INVOKE("create_rule", { rule })),
-	updateRule: (rule: Rule_Deserialize) => typedError<Rule_Serialize, string>(__TAURI_INVOKE("update_rule", { rule })),
-	setRuleEnabled: (id: string, enabled: boolean) => typedError<Rule_Serialize, string>(__TAURI_INVOKE("set_rule_enabled", { id, enabled })),
-	deleteRule: (id: string) => typedError<null, string>(__TAURI_INVOKE("delete_rule", { id })),
+	createRule: (rule: Rule_Deserialize) => typedError<Rule_Serialize, IpcError>(__TAURI_INVOKE("create_rule", { rule })),
+	updateRule: (rule: Rule_Deserialize) => typedError<Rule_Serialize, IpcError>(__TAURI_INVOKE("update_rule", { rule })),
+	setRuleEnabled: (id: string, enabled: boolean) => typedError<Rule_Serialize, IpcError>(__TAURI_INVOKE("set_rule_enabled", { id, enabled })),
+	deleteRule: (id: string) => typedError<null, IpcError>(__TAURI_INVOKE("delete_rule", { id })),
 	/**  Deletes every agent-created rule; returns how many. */
-	deleteAgentRules: () => typedError<number, string>(__TAURI_INVOKE("delete_agent_rules")),
+	deleteAgentRules: () => typedError<number, IpcError>(__TAURI_INVOKE("delete_agent_rules")),
 	/**  Puts the listed rules first, in that order. */
-	reorderRules: (ids: string[]) => typedError<Rule_Serialize[], string>(__TAURI_INVOKE("reorder_rules", { ids })),
+	reorderRules: (ids: string[]) => typedError<Rule_Serialize[], IpcError>(__TAURI_INVOKE("reorder_rules", { ids })),
 	/**  Compiles a rule without saving it; the error says what's wrong. */
-	validateRule: (rule: Rule_Deserialize) => typedError<null, string>(__TAURI_INVOKE("validate_rule", { rule })),
+	validateRule: (rule: Rule_Deserialize) => typedError<null, IpcError>(__TAURI_INVOKE("validate_rule", { rule })),
 	/**  An unsaved rule pre-filled from a flow (in any store) by a preset. */
-	draftRule: (store: number, flow: number, preset: PresetKind) => typedError<Rule_Serialize, string>(__TAURI_INVOKE("draft_rule", { store, flow, preset })),
+	draftRule: (store: number, flow: number, preset: PresetKind) => typedError<Rule_Serialize, IpcError>(__TAURI_INVOKE("draft_rule", { store, flow, preset })),
 	/**
 	 *  Dry run of a rule against a recorded flow; the bodies shown are cut at
 	 *  `body_limit` bytes (default 256 KB).
 	 */
-	testRule: (store: number, rule: Rule_Deserialize, flow: number, bodyLimit: number | null) => typedError<RuleTestResult_Serialize, string>(__TAURI_INVOKE("test_rule", { store, rule, flow, bodyLimit })),
+	testRule: (store: number, rule: Rule_Deserialize, flow: number, bodyLimit: number | null) => typedError<RuleTestResult_Serialize, IpcError>(__TAURI_INVOKE("test_rule", { store, rule, flow, bodyLimit })),
 	getRuleSettings: () => __TAURI_INVOKE<RuleSettings>("get_rule_settings"),
-	setRuleSettings: (settings: RuleSettings) => typedError<RuleSettings, string>(__TAURI_INVOKE("set_rule_settings", { settings })),
+	setRuleSettings: (settings: RuleSettings) => typedError<RuleSettings, IpcError>(__TAURI_INVOKE("set_rule_settings", { settings })),
 	listBreakpoints: () => __TAURI_INVOKE<BreakpointInfo_Serialize[]>("list_breakpoints"),
 	/**  Streams the breakpoint queue whenever it changes. */
 	subscribeBreakpoints: (onQueue: Channel<BreakpointInfo_Deserialize[]>) => __TAURI_INVOKE<void>("subscribe_breakpoints", { onQueue }),
 	/**  A paused message's (decoded) body as a raw `ArrayBuffer`. */
-	getBreakpointBody: (id: number) => typedError<unknown, string>(__TAURI_INVOKE("get_breakpoint_body", { id })),
+	getBreakpointBody: (id: number) => typedError<unknown, IpcError>(__TAURI_INVOKE("get_breakpoint_body", { id })),
 	/**  Continues, aborts or answers a paused flow. The first resolution wins. */
-	resolveBreakpoint: (id: number, resolution: BreakpointResolution_Deserialize) => typedError<null, string>(__TAURI_INVOKE("resolve_breakpoint", { id, resolution })),
+	resolveBreakpoint: (id: number, resolution: BreakpointResolution_Deserialize) => typedError<null, IpcError>(__TAURI_INVOKE("resolve_breakpoint", { id, resolution })),
 	/**  LAN interfaces, the chosen one, the setup URL and its QR code. */
-	getDeviceAccess: () => typedError<DeviceAccess_Serialize, string>(__TAURI_INVOKE("get_device_access")),
+	getDeviceAccess: () => typedError<DeviceAccess_Serialize, IpcError>(__TAURI_INVOKE("get_device_access")),
 	/**
 	 *  Listens on every interface (or loopback only). Failures come back in
 	 *  `error`.
 	 */
-	setLanAccess: (on: boolean) => typedError<DeviceAccess_Serialize, string>(__TAURI_INVOKE("set_lan_access", { on })),
-	setLanInterface: (name: string) => typedError<DeviceAccess_Serialize, string>(__TAURI_INVOKE("set_lan_interface", { name })),
+	setLanAccess: (on: boolean) => typedError<DeviceAccess_Serialize, IpcError>(__TAURI_INVOKE("set_lan_access", { on })),
+	setLanInterface: (name: string) => typedError<DeviceAccess_Serialize, IpcError>(__TAURI_INVOKE("set_lan_interface", { name })),
 	/**  Streams LAN clients (pending prompts first) and device activity. */
 	subscribeDevices: (onSnapshot: Channel<DevicesSnapshot_Deserialize>) => __TAURI_INVOKE<void>("subscribe_devices", { onSnapshot }),
-	decideDevice: (ip: string, allow: boolean, nickname: string | null) => typedError<DevicesSnapshot_Serialize, string>(__TAURI_INVOKE("decide_device", { ip, allow, nickname })),
-	forgetDevice: (ip: string) => typedError<DevicesSnapshot_Serialize, string>(__TAURI_INVOKE("forget_device", { ip })),
-	getSimulatorStatus: () => typedError<SimulatorStatus_Serialize, string>(__TAURI_INVOKE("get_simulator_status")),
+	decideDevice: (ip: string, allow: boolean, nickname: string | null) => typedError<DevicesSnapshot_Serialize, IpcError>(__TAURI_INVOKE("decide_device", { ip, allow, nickname })),
+	forgetDevice: (ip: string) => typedError<DevicesSnapshot_Serialize, IpcError>(__TAURI_INVOKE("forget_device", { ip })),
+	getSimulatorStatus: () => typedError<SimulatorStatus_Serialize, IpcError>(__TAURI_INVOKE("get_simulator_status")),
 	/**  Adds the CA to each booted simulator in `udids` (all booted if empty). */
-	installSimulatorCert: (udids: string[]) => typedError<SimInstallResult_Serialize[], string>(__TAURI_INVOKE("install_simulator_cert", { udids })),
-	getAndroidStatus: () => typedError<AndroidStatus_Serialize, string>(__TAURI_INVOKE("get_android_status")),
+	installSimulatorCert: (udids: string[]) => typedError<SimInstallResult_Serialize[], IpcError>(__TAURI_INVOKE("install_simulator_cert", { udids })),
+	getAndroidStatus: () => typedError<AndroidStatus_Serialize, IpcError>(__TAURI_INVOKE("get_android_status")),
 	/**  Points an emulator's proxy at us, or clears it. */
-	setAndroidProxy: (serial: string, on: boolean) => typedError<AndroidStatus_Serialize, string>(__TAURI_INVOKE("set_android_proxy", { serial, on })),
+	setAndroidProxy: (serial: string, on: boolean) => typedError<AndroidStatus_Serialize, IpcError>(__TAURI_INVOKE("set_android_proxy", { serial, on })),
 	/**  Copies the CA to the device's Downloads; returns the path on the device. */
-	pushAndroidCert: (serial: string) => typedError<string, string>(__TAURI_INVOKE("push_android_cert", { serial })),
+	pushAndroidCert: (serial: string) => typedError<string, IpcError>(__TAURI_INVOKE("push_android_cert", { serial })),
 	/**  Streams the rule list whenever anyone (the UI or an agent) changes it. */
 	subscribeRules: (onRules: Channel<Rule_Deserialize[]>) => __TAURI_INVOKE<void>("subscribe_rules", { onRules }),
 	getMcpStatus: () => __TAURI_INVOKE<McpStatus_Serialize>("get_mcp_status"),
 	/**  Streams the MCP status (connected clients, settings, errors). */
 	subscribeMcp: (onStatus: Channel<McpStatus_Deserialize>) => __TAURI_INVOKE<void>("subscribe_mcp", { onStatus }),
-	setMcpSettings: (settings: McpSettings) => typedError<McpSettings, string>(__TAURI_INVOKE("set_mcp_settings", { settings })),
+	setMcpSettings: (settings: McpSettings) => typedError<McpSettings, IpcError>(__TAURI_INVOKE("set_mcp_settings", { settings })),
 	/**  The bearer token, for the copy buttons. */
 	getMcpToken: () => __TAURI_INVOKE<string>("get_mcp_token"),
-	regenerateMcpToken: () => typedError<string, string>(__TAURI_INVOKE("regenerate_mcp_token")),
+	regenerateMcpToken: () => typedError<string, IpcError>(__TAURI_INVOKE("regenerate_mcp_token")),
 	/**  Audit entries older than `before` (all, without), newest first. */
-	getMcpAudit: (before: number | null, limit: number) => typedError<McpAuditPage_Serialize, string>(__TAURI_INVOKE("get_mcp_audit", { before, limit })),
-	clearMcpAudit: () => typedError<null, string>(__TAURI_INVOKE("clear_mcp_audit")),
+	getMcpAudit: (before: number | null, limit: number) => typedError<McpAuditPage_Serialize, IpcError>(__TAURI_INVOKE("get_mcp_audit", { before, limit })),
+	clearMcpAudit: () => typedError<null, IpcError>(__TAURI_INVOKE("clear_mcp_audit")),
 	/**
 	 *  Sends a composed (or edited) request from the app; resolves to the new
 	 *  flow's id once it is recorded.
 	 */
-	sendRequest: (spec: RequestSpec_Deserialize, applyRules: boolean) => typedError<number, string>(__TAURI_INVOKE("send_request", { spec, applyRules })),
+	sendRequest: (spec: RequestSpec_Deserialize, applyRules: boolean) => typedError<number, IpcError>(__TAURI_INVOKE("send_request", { spec, applyRules })),
 	/**  Sends a recorded request again, as it was sent. */
-	replayFlow: (store: number, id: number, applyRules: boolean) => typedError<number, string>(__TAURI_INVOKE("replay_flow", { store, id, applyRules })),
+	replayFlow: (store: number, id: number, applyRules: boolean) => typedError<number, IpcError>(__TAURI_INVOKE("replay_flow", { store, id, applyRules })),
 	/**  A recorded request, editable (body decoded), for Edit & Replay. */
-	getRequestSpec: (store: number, id: number) => typedError<RequestSpec_Serialize, string>(__TAURI_INVOKE("get_request_spec", { store, id })),
-	getCurl: (store: number, id: number) => typedError<string, string>(__TAURI_INVOKE("get_curl", { store, id })),
+	getRequestSpec: (store: number, id: number) => typedError<RequestSpec_Serialize, IpcError>(__TAURI_INVOKE("get_request_spec", { store, id })),
+	getCurl: (store: number, id: number) => typedError<string, IpcError>(__TAURI_INVOKE("get_curl", { store, id })),
 	listDocuments: () => __TAURI_INVOKE<DocumentInfo[]>("list_documents"),
 	/**
 	 *  Opens a session, HAR or Charles file as a document; without `path`,
@@ -139,22 +139,22 @@ export const commands = {
 	 *  A binary Charles session (`.chls`) can be picked, so its error says how
 	 *  to export a readable one.
 	 */
-	openDocument: (path: string | null, har: boolean) => typedError<DocumentInfo | null, string>(__TAURI_INVOKE("open_document", { path, har })),
-	closeDocument: (store: number) => typedError<null, string>(__TAURI_INVOKE("close_document", { store })),
+	openDocument: (path: string | null, har: boolean) => typedError<DocumentInfo | null, IpcError>(__TAURI_INVOKE("open_document", { path, har })),
+	closeDocument: (store: number) => typedError<null, IpcError>(__TAURI_INVOKE("close_document", { store })),
 	/**
 	 *  Saves flows of a store as a `.proxymate` session in the background;
 	 *  without `path`, asks where. Resolves to the path (`None` if cancelled)
 	 *  once the save has started; `on_progress` hears the rest.
 	 */
-	saveSession: (store: number, selection: FlowSelection_Deserialize, path: string | null, fileName: string, onProgress: Channel<SaveProgress_Deserialize>) => typedError<string | null, string>(__TAURI_INVOKE("save_session", { store, selection, path, fileName, onProgress })),
+	saveSession: (store: number, selection: FlowSelection_Deserialize, path: string | null, fileName: string, onProgress: Channel<SaveProgress_Deserialize>) => typedError<string | null, IpcError>(__TAURI_INVOKE("save_session", { store, selection, path, fileName, onProgress })),
 	/**
 	 *  Exports flows of a store as a HAR file in the background; like
 	 *  [`save_session`].
 	 */
-	exportHar: (store: number, selection: FlowSelection_Deserialize, path: string | null, fileName: string, onProgress: Channel<SaveProgress_Deserialize>) => typedError<string | null, string>(__TAURI_INVOKE("export_har", { store, selection, path, fileName, onProgress })),
+	exportHar: (store: number, selection: FlowSelection_Deserialize, path: string | null, fileName: string, onProgress: Channel<SaveProgress_Deserialize>) => typedError<string | null, IpcError>(__TAURI_INVOKE("export_har", { store, selection, path, fileName, onProgress })),
 	getStorageSettings: () => __TAURI_INVOKE<StorageSettings_Serialize>("get_storage_settings"),
 	/**  Saves new limits; flows past them are evicted straight away. */
-	setStorageSettings: (settings: StorageSettings_Deserialize) => typedError<StorageSettings_Serialize, string>(__TAURI_INVOKE("set_storage_settings", { settings })),
+	setStorageSettings: (settings: StorageSettings_Deserialize) => typedError<StorageSettings_Serialize, IpcError>(__TAURI_INVOKE("set_storage_settings", { settings })),
 	getStorageStatus: () => __TAURI_INVOKE<StorageStatus_Serialize>("get_storage_status"),
 	/**  Streams the storage status (flows, disk use, write errors) as it changes. */
 	subscribeStorage: (onStatus: Channel<StorageStatus_Deserialize>) => __TAURI_INVOKE<void>("subscribe_storage", { onStatus }),
@@ -163,45 +163,45 @@ export const commands = {
 	/**  Intercepted launches still running. */
 	listIntercepts: () => __TAURI_INVOKE<InterceptSession_Serialize[]>("list_intercepts"),
 	/**  Starts a terminal or browser set up for the proxy. */
-	intercept: (target: InterceptTarget) => typedError<InterceptSession_Serialize, string>(__TAURI_INVOKE("intercept", { target })),
+	intercept: (target: InterceptTarget) => typedError<InterceptSession_Serialize, IpcError>(__TAURI_INVOKE("intercept", { target })),
 	getRecordingSettings: () => __TAURI_INVOKE<RecordingSettings_Serialize>("get_recording_settings"),
 	/**  Saves the recording lists; they apply to flows that begin from now on. */
-	setRecordingSettings: (settings: RecordingSettings_Deserialize) => typedError<RecordingSettings_Serialize, string>(__TAURI_INVOKE("set_recording_settings", { settings })),
+	setRecordingSettings: (settings: RecordingSettings_Deserialize) => typedError<RecordingSettings_Serialize, IpcError>(__TAURI_INVOKE("set_recording_settings", { settings })),
 	/**  The flow table's "Never record this host". */
-	neverRecordHost: (host: string) => typedError<RecordingSettings_Serialize, string>(__TAURI_INVOKE("never_record_host", { host })),
+	neverRecordHost: (host: string) => typedError<RecordingSettings_Serialize, IpcError>(__TAURI_INVOKE("never_record_host", { host })),
 	getAutosaveSettings: () => __TAURI_INVOKE<AutoSaveSettings_Serialize>("get_autosave_settings"),
-	setAutosaveSettings: (settings: AutoSaveSettings_Deserialize) => typedError<AutoSaveSettings_Serialize, string>(__TAURI_INVOKE("set_autosave_settings", { settings })),
+	setAutosaveSettings: (settings: AutoSaveSettings_Deserialize) => typedError<AutoSaveSettings_Serialize, IpcError>(__TAURI_INVOKE("set_autosave_settings", { settings })),
 	/**  Auto-saves now, whatever the interval; progress shows in the storage status. */
-	autosaveNow: () => typedError<number, string>(__TAURI_INVOKE("autosave_now")),
+	autosaveNow: () => typedError<number, IpcError>(__TAURI_INVOKE("autosave_now")),
 	/**  Picks the auto-save folder with a dialog; `None` if it was cancelled. */
-	chooseAutosaveFolder: () => typedError<string | null, string>(__TAURI_INVOKE("choose_autosave_folder")),
+	chooseAutosaveFolder: () => typedError<string | null, IpcError>(__TAURI_INVOKE("choose_autosave_folder")),
 	/**
 	 *  Asks for a file (or, with `folder`, a folder) with the OS dialog, for a
 	 *  path field such as Map Local's. `extensions` limits the files offered
 	 *  (empty: any file); the dialog opens beside `current` when it's set.
 	 *  `None` if it was cancelled.
 	 */
-	choosePath: (title: string, folder: boolean, extensions: string[], current: string | null) => typedError<string | null, string>(__TAURI_INVOKE("choose_path", { title, folder, extensions, current })),
+	choosePath: (title: string, folder: boolean, extensions: string[], current: string | null) => typedError<string | null, IpcError>(__TAURI_INVOKE("choose_path", { title, folder, extensions, current })),
 	/**  Pins or unpins flows of any store; pinned live flows are never evicted. */
-	pinFlows: (store: number, selection: FlowSelection_Deserialize, pinned: boolean) => typedError<number, string>(__TAURI_INVOKE("pin_flows", { store, selection, pinned })),
+	pinFlows: (store: number, selection: FlowSelection_Deserialize, pinned: boolean) => typedError<number, IpcError>(__TAURI_INVOKE("pin_flows", { store, selection, pinned })),
 	/**  The ids a selection names, in its order. */
-	selectedIds: (store: number, selection: FlowSelection_Deserialize) => typedError<number[], string>(__TAURI_INVOKE("selected_ids", { store, selection })),
-	getFlowUrls: (store: number, selection: FlowSelection_Deserialize) => typedError<string[], string>(__TAURI_INVOKE("get_flow_urls", { store, selection })),
+	selectedIds: (store: number, selection: FlowSelection_Deserialize) => typedError<number[], IpcError>(__TAURI_INVOKE("selected_ids", { store, selection })),
+	getFlowUrls: (store: number, selection: FlowSelection_Deserialize) => typedError<string[], IpcError>(__TAURI_INVOKE("get_flow_urls", { store, selection })),
 	/**  Deletes flows; returns how many went. */
-	removeFlows: (store: number, selection: FlowSelection_Deserialize) => typedError<number, string>(__TAURI_INVOKE("remove_flows", { store, selection })),
-	labelFlows: (store: number, selection: FlowSelection_Deserialize, label: FlowLabel | null) => typedError<number, string>(__TAURI_INVOKE("label_flows", { store, selection, label })),
-	commentFlow: (store: number, id: number, comment: string) => typedError<null, string>(__TAURI_INVOKE("comment_flow", { store, id, comment })),
-	setHeaderColumns: (columns: HeaderColumn[]) => typedError<HeaderColumn[], string>(__TAURI_INVOKE("set_header_columns", { columns })),
-	getCode: (store: number, id: number, language: CodeLanguage) => typedError<string, string>(__TAURI_INVOKE("get_code", { store, id, language })),
+	removeFlows: (store: number, selection: FlowSelection_Deserialize) => typedError<number, IpcError>(__TAURI_INVOKE("remove_flows", { store, selection })),
+	labelFlows: (store: number, selection: FlowSelection_Deserialize, label: FlowLabel | null) => typedError<number, IpcError>(__TAURI_INVOKE("label_flows", { store, selection, label })),
+	commentFlow: (store: number, id: number, comment: string) => typedError<null, IpcError>(__TAURI_INVOKE("comment_flow", { store, id, comment })),
+	setHeaderColumns: (columns: HeaderColumn[]) => typedError<HeaderColumn[], IpcError>(__TAURI_INVOKE("set_header_columns", { columns })),
+	getCode: (store: number, id: number, language: CodeLanguage) => typedError<string, IpcError>(__TAURI_INVOKE("get_code", { store, id, language })),
 	/**  Starts repeating a recorded request; progress streams to `on_progress`. */
-	startRepeat: (store: number, id: number, opts: RepeatOpts_Deserialize, onProgress: Channel<RepeatProgress_Deserialize>) => typedError<number, string>(__TAURI_INVOKE("start_repeat", { store, id, opts, onProgress })),
+	startRepeat: (store: number, id: number, opts: RepeatOpts_Deserialize, onProgress: Channel<RepeatProgress_Deserialize>) => typedError<number, IpcError>(__TAURI_INVOKE("start_repeat", { store, id, opts, onProgress })),
 	cancelRepeat: (id: number) => __TAURI_INVOKE<boolean>("cancel_repeat", { id }),
 	getProxySettings: () => __TAURI_INVOKE<ProxySettings_Serialize>("get_proxy_settings"),
 	/**
 	 *  Saves the port and upstream pool settings, restarting the listener if
 	 *  they changed. A port that can't be bound is an error; the old one stays.
 	 */
-	setProxySettings: (settings: ProxySettings_Deserialize) => typedError<ProxySettings_Serialize, string>(__TAURI_INVOKE("set_proxy_settings", { settings })),
+	setProxySettings: (settings: ProxySettings_Deserialize) => typedError<ProxySettings_Serialize, IpcError>(__TAURI_INVOKE("set_proxy_settings", { settings })),
 	/**
 	 *  Settings › Network (M18). Passwords never come back: `has_password`
 	 *  says one is saved.
@@ -212,76 +212,76 @@ export const commands = {
 	 *  client certificates are loaded and reverse proxies restarted. A bad
 	 *  setting is an error that says why; nothing is changed then.
 	 */
-	setNetworkSettings: (settings: NetworkSettings_Deserialize) => typedError<NetworkSettings_Serialize, string>(__TAURI_INVOKE("set_network_settings", { settings })),
+	setNetworkSettings: (settings: NetworkSettings_Deserialize) => typedError<NetworkSettings_Serialize, IpcError>(__TAURI_INVOKE("set_network_settings", { settings })),
 	/**  Makes the sidebar's Apps and Domains count the tab the UI shows. */
 	setSidebarStore: (store: number) => __TAURI_INVOKE<void>("set_sidebar_store", { store }),
 	getUpdateSettings: () => __TAURI_INVOKE<UpdateSettings>("get_update_settings"),
-	setUpdateSettings: (settings: UpdateSettings) => typedError<UpdateSettings, string>(__TAURI_INVOKE("set_update_settings", { settings })),
+	setUpdateSettings: (settings: UpdateSettings) => typedError<UpdateSettings, IpcError>(__TAURI_INVOKE("set_update_settings", { settings })),
 	/**
 	 *  Settings › Updates' "Check Now": the same check as the menu item, which
 	 *  answers with a native dialog.
 	 */
 	checkForUpdates: () => __TAURI_INVOKE<void>("check_for_updates"),
 	/**  Flows of a store (newest first) a rule's matcher matches. */
-	flowsMatchingRule: (store: number, rule: Rule_Deserialize, limit: number) => typedError<number[], string>(__TAURI_INVOKE("flows_matching_rule", { store, rule, limit })),
+	flowsMatchingRule: (store: number, rule: Rule_Deserialize, limit: number) => typedError<number[], IpcError>(__TAURI_INVOKE("flows_matching_rule", { store, rule, limit })),
 	/**  Every script, grouped by kind (view, rewrite, mock), then by name. */
 	listScripts: () => __TAURI_INVOKE<Script_Serialize[]>("list_scripts"),
 	/**
 	 *  Saves a new script (a fresh id is assigned). The error says what's wrong
 	 *  with it (a syntax error, a missing entry point).
 	 */
-	createScript: (script: Script_Deserialize) => typedError<Script_Serialize, string>(__TAURI_INVOKE("create_script", { script })),
-	updateScript: (script: Script_Deserialize) => typedError<Script_Serialize, string>(__TAURI_INVOKE("update_script", { script })),
-	setScriptEnabled: (id: string, enabled: boolean) => typedError<Script_Serialize, string>(__TAURI_INVOKE("set_script_enabled", { id, enabled })),
+	createScript: (script: Script_Deserialize) => typedError<Script_Serialize, IpcError>(__TAURI_INVOKE("create_script", { script })),
+	updateScript: (script: Script_Deserialize) => typedError<Script_Serialize, IpcError>(__TAURI_INVOKE("update_script", { script })),
+	setScriptEnabled: (id: string, enabled: boolean) => typedError<Script_Serialize, IpcError>(__TAURI_INVOKE("set_script_enabled", { id, enabled })),
 	/**  Refused while a rule runs the script; the error names those rules. */
-	deleteScript: (id: string) => typedError<null, string>(__TAURI_INVOKE("delete_script", { id })),
+	deleteScript: (id: string) => typedError<null, IpcError>(__TAURI_INVOKE("delete_script", { id })),
 	/**  Deletes every agent-created script no rule runs; returns how many. */
-	deleteAgentScripts: () => typedError<number, string>(__TAURI_INVOKE("delete_agent_scripts")),
+	deleteAgentScripts: () => typedError<number, IpcError>(__TAURI_INVOKE("delete_agent_scripts")),
 	/**  Dry run of a script (saved, or unsaved source) against a recorded flow. */
-	testScript: (store: number, flow: number, spec: ScriptTestSpec_Deserialize) => typedError<ScriptTestResult_Serialize, string>(__TAURI_INVOKE("test_script", { store, flow, spec })),
+	testScript: (store: number, flow: number, spec: ScriptTestSpec_Deserialize) => typedError<ScriptTestResult_Serialize, IpcError>(__TAURI_INVOKE("test_script", { store, flow, spec })),
 	/**  The view scripts' views of one body; empty when none applies. */
-	getFlowViews: (store: number, flow: number, part: BodyPart) => typedError<ViewResult_Serialize[], string>(__TAURI_INVOKE("get_flow_views", { store, flow, part })),
+	getFlowViews: (store: number, flow: number, part: BodyPart) => typedError<ViewResult_Serialize[], IpcError>(__TAURI_INVOKE("get_flow_views", { store, flow, part })),
 	/**
 	 *  A gRPC, protobuf, MessagePack or CBOR body decoded to JSON trees (live
 	 *  flows too, as far as they've arrived).
 	 */
-	decodeBody: (store: number, flow: number, part: BodyPart) => typedError<DecodedBody_Serialize, string>(__TAURI_INVOKE("decode_body", { store, flow, part })),
+	decodeBody: (store: number, flow: number, part: BodyPart) => typedError<DecodedBody_Serialize, IpcError>(__TAURI_INVOKE("decode_body", { store, flow, part })),
 	listProtoSchemas: () => __TAURI_INVOKE<ProtoSchema[]>("list_proto_schemas"),
 	/**
 	 *  Imports `.proto` files or one descriptor set; with no paths, asks with
 	 *  a file dialog. `None` if the dialog was cancelled.
 	 */
-	importProtoSchema: (paths: string[] | null) => typedError<ProtoSchema | null, string>(__TAURI_INVOKE("import_proto_schema", { paths })),
-	removeProtoSchema: (id: number) => typedError<null, string>(__TAURI_INVOKE("remove_proto_schema", { id })),
+	importProtoSchema: (paths: string[] | null) => typedError<ProtoSchema | null, IpcError>(__TAURI_INVOKE("import_proto_schema", { paths })),
+	removeProtoSchema: (id: number) => typedError<null, IpcError>(__TAURI_INVOKE("remove_proto_schema", { id })),
 	listMockSources: () => __TAURI_INVOKE<MockSource[]>("list_mock_sources"),
 	/**
 	 *  "Mock from session…" on a document tab (or the live capture): copies
 	 *  the store into the mock library.
 	 */
-	createMockSource: (store: number, name: string | null) => typedError<MockSource, string>(__TAURI_INVOKE("create_mock_source", { store, name })),
+	createMockSource: (store: number, name: string | null) => typedError<MockSource, IpcError>(__TAURI_INVOKE("create_mock_source", { store, name })),
 	/**
 	 *  "Mock from session…" for a file that isn't open; without `path`, asks
 	 *  for one. `None` if the dialog was cancelled.
 	 */
-	createMockSourceFromFile: (path: string | null) => typedError<MockSource | null, string>(__TAURI_INVOKE("create_mock_source_from_file", { path })),
-	removeMockSource: (id: string) => typedError<null, string>(__TAURI_INVOKE("remove_mock_source", { id })),
+	createMockSourceFromFile: (path: string | null) => typedError<MockSource | null, IpcError>(__TAURI_INVOKE("create_mock_source_from_file", { path })),
+	removeMockSource: (id: string) => typedError<null, IpcError>(__TAURI_INVOKE("remove_mock_source", { id })),
 	/**  The "Serve from" preset for a mock source (unsaved). */
-	draftServeFromRule: (source: string) => typedError<Rule_Serialize, string>(__TAURI_INVOKE("draft_serve_from_rule", { source })),
+	draftServeFromRule: (source: string) => typedError<Rule_Serialize, IpcError>(__TAURI_INVOKE("draft_serve_from_rule", { source })),
 	listOpenapiSpecs: () => __TAURI_INVOKE<OpenApiSpec[]>("list_openapi_specs"),
 	/**
 	 *  Imports an OpenAPI 3.0/3.1 file; without `path`, asks for one. `None`
 	 *  if the dialog was cancelled.
 	 */
-	importOpenapiSpec: (path: string | null) => typedError<OpenApiSpec | null, string>(__TAURI_INVOKE("import_openapi_spec", { path })),
-	removeOpenapiSpec: (id: number) => typedError<null, string>(__TAURI_INVOKE("remove_openapi_spec", { id })),
+	importOpenapiSpec: (path: string | null) => typedError<OpenApiSpec | null, IpcError>(__TAURI_INVOKE("import_openapi_spec", { path })),
+	removeOpenapiSpec: (id: number) => typedError<null, IpcError>(__TAURI_INVOKE("remove_openapi_spec", { id })),
 	/**  "Generate mocks": one disabled Map Local rule per operation, saved. */
-	generateOpenapiMocks: (id: number) => typedError<Rule_Serialize[], string>(__TAURI_INVOKE("generate_openapi_mocks", { id })),
+	generateOpenapiMocks: (id: number) => typedError<Rule_Serialize[], IpcError>(__TAURI_INVOKE("generate_openapi_mocks", { id })),
 	/**  The OpenAPI operation a flow is, for the inspector. */
-	flowOperation: (store: number, flow: number) => typedError<OperationMatch_Serialize | null, string>(__TAURI_INVOKE("flow_operation", { store, flow })),
+	flowOperation: (store: number, flow: number) => typedError<OperationMatch_Serialize | null, IpcError>(__TAURI_INVOKE("flow_operation", { store, flow })),
 	/**  Every message type the schemas define, for "Decode as…". */
 	listProtoMessageTypes: () => __TAURI_INVOKE<string[]>("list_proto_message_types"),
 	listProtoMappings: () => __TAURI_INVOKE<ProtoMapping_Serialize[]>("list_proto_mappings"),
-	setProtoMappings: (mappings: ProtoMapping_Deserialize[]) => typedError<null, string>(__TAURI_INVOKE("set_proto_mappings", { mappings })),
+	setProtoMappings: (mappings: ProtoMapping_Deserialize[]) => typedError<null, IpcError>(__TAURI_INVOKE("set_proto_mappings", { mappings })),
 	/**  Console entries newer than `since`, oldest first. */
 	getScriptConsole: (since: number | null, limit: number) => __TAURI_INVOKE<ConsoleEntry_Serialize[]>("get_script_console", { since, limit }),
 	clearScriptConsole: () => __TAURI_INVOKE<void>("clear_script_console"),
@@ -290,19 +290,19 @@ export const commands = {
 	/**  Streams the script list whenever anyone (the UI or an agent) changes it. */
 	subscribeScripts: (onScripts: Channel<Script_Deserialize[]>) => __TAURI_INVOKE<void>("subscribe_scripts", { onScripts }),
 	getScriptSettings: () => __TAURI_INVOKE<ScriptSettings_Serialize>("get_script_settings"),
-	setScriptSettings: (settings: ScriptSettings_Deserialize) => typedError<ScriptSettings_Serialize, string>(__TAURI_INVOKE("set_script_settings", { settings })),
+	setScriptSettings: (settings: ScriptSettings_Deserialize) => typedError<ScriptSettings_Serialize, IpcError>(__TAURI_INVOKE("set_script_settings", { settings })),
 	/**  `proxymate.d.ts`, for "Copy type definitions". */
 	getScriptTypeDefinitions: () => __TAURI_INVOKE<string>("get_script_type_definitions"),
 	/**
 	 *  Saves a script as a `.js` file with a metadata header; without `path`,
 	 *  asks where. `None` if the user cancelled.
 	 */
-	exportScript: (id: string, path: string | null) => typedError<string | null, string>(__TAURI_INVOKE("export_script", { id, path })),
+	exportScript: (id: string, path: string | null) => typedError<string | null, IpcError>(__TAURI_INVOKE("export_script", { id, path })),
 	/**
 	 *  Imports a `.js` file as a new script; without `path`, asks for one.
 	 *  `None` if the user cancelled.
 	 */
-	importScript: (path: string | null) => typedError<Script_Serialize | null, string>(__TAURI_INVOKE("import_script", { path })),
+	importScript: (path: string | null) => typedError<Script_Serialize | null, IpcError>(__TAURI_INVOKE("import_script", { path })),
 };
 
 /* Types */
@@ -1763,6 +1763,53 @@ export type InterceptSession_Serialize = {
 
 /**  Something the Intercept menu can start, already set up for the proxy. */
 export type InterceptTarget = "terminal" | "iterm" | "chrome" | "edge" | "brave" | "arc" | "firefox";
+
+/**
+ *  Why a command failed: a stable `kind` to switch on and a `message` to
+ *  show. Every Tauri command's error is one of these.
+ */
+export type IpcError = {
+	kind: IpcErrorKind,
+	message: string,
+};
+
+export type IpcErrorKind = 
+/**  No such view, flow, message or open document. */
+"not_found" | 
+/**  A setting, rule or argument that isn't valid, with what is allowed. */
+"invalid" | 
+/**  A filter query or search pattern that doesn't parse. */
+"query" | 
+/**  A rule that doesn't compile, or a rule store failure. */
+"rule" | 
+/**  A script that doesn't evaluate, or a script store failure. */
+"script" | 
+/**  A protobuf schema or mapping that doesn't load. */
+"proto" | 
+/**  A body that doesn't decode. */
+"decode" | 
+/**  Reading or writing flow storage or a file. */
+"storage" | 
+/**  Certificate authority and TLS failures. */
+"tls" | 
+/**  The proxy couldn't start or isn't running. */
+"proxy" | 
+/**  An OS integration failed (keychain, system proxy, a system tool). */
+"platform" | 
+/**  The user dismissed a system prompt. */
+"cancelled" | 
+/**  Not supported on this platform yet. */
+"unsupported" | 
+/**  Device setup: a bad address, a missing tool. */
+"device" | 
+/**  A request that can't be sent as given. */
+"send" | 
+/**  Saving, opening or importing a session, HAR or Charles file. */
+"document" | 
+/**  A WebSocket that can't take a message or a close. */
+"web_socket" | 
+/**  Anything else: a dialog that failed, a command that panicked. */
+"internal";
 
 /**  What the OS trust store says about the Proxymate CA. */
 export type KeychainTrust = "trusted" | "not_trusted" | 
