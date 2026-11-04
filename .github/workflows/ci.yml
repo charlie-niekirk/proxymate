@@ -39,6 +39,23 @@ jobs:
       - name: TypeScript bindings are up to date
         run: git diff --exit-code -- apps/desktop/ui/src/bindings.ts
 
+  # R2: the hot path at 100k flows against crates/pm-core/benches/budget.json.
+  # Budgets are ceilings for this runner, well above the docs/PLAN.md targets
+  # measured on a laptop, so they catch the regressions R2 fixed, not noise.
+  bench:
+    name: bench budget
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Hot path benches (quick)
+        run: cargo bench -p pm-core --bench ingest
+        env:
+          PM_BENCH_QUICK: "1"
+      - name: Within budget
+        run: python3 scripts/bench-budget.py
+
   ui:
     name: ui
     runs-on: ubuntu-latest

@@ -735,6 +735,16 @@ Measure first, then fix:
 - Deep search. `body:` reads only the body's prefix extents.
 - UI. The filter is debounced, row fetches are coalesced per animation frame, and the table header and footer are memoised.
 
+As built (`r2-hot-path`):
+- The bench (`benches/ingest.rs`) adds sorted views, 1k flows trickled 5 per batch into 100k sorted views, a 20k flow cap, refilter and sort at 100k, and a `body:` search over 100k flows with large bodies. CI's `bench` job runs it with `PM_BENCH_QUICK=1` and `scripts/bench-budget.py` fails over `benches/budget.json`: ceilings for the runner, not the laptop targets above.
+- Sorted views settle at the end of each ingest batch rather than at the publish tick. A settle is a binary insertion per touched row (O(n + k log n)), cheap enough per batch, and reads between ticks (`get_rows`, selections, MCP) then see the view in order with its length. Membership changes go through the same path instead of a full rebuild.
+- Segment writes: the extent is reserved (and small appends batched to 64 KB) under a short lock; the `pm-segments` thread does the I/O. A full queue (64 jobs, about 16 MB) still makes an append wait: that is the backpressure on a slow disk. A failed write shows in the storage status; reads of what it lost fail rather than the capture being marked truncated.
+- The ingest channel stays unbounded, and size updates (Progress and WebSocket message sizes) are coalesced instead: one pending update per flow behind one marker event. A bounded channel would make proxied requests wait on the ingest thread.
+- The publisher's dirty generation lives in `SharedStore` (every write guard bumps it). The sidebar is sent at most every 250 ms, at once after a subscribe or a store switch.
+- `Engine::flush` also waits for queued segment writes.
+- Deep search: reading only a body's prefix was a small part of it. A profile showed opening the segment file for every detail read was most of its time, so reads share cached handles with positional reads (`pm_platform::fs::read_exact_at`): a `body:` search over 100k flows went from 1.18 s to 0.17 s.
+- Row fetches coalesce on `requestAnimationFrame`. The perf probe showed no difference from coalescing at the end of each task, fast flings included.
+
 ### R3: Architecture tidy (no behaviour change)
 - **Boundaries.** `pm-core` internals become `pub(crate)`, with a hidden door for its integration tests. The three helpers adapters reach for become `Engine` methods. The guardian spawn moves into `pm-platform`.
 - **Error kinds.** A stable `ErrorKind` on failed flows (a `FlowDetail` change: session `VERSION` 8) that `ui/src/lib/errors.ts` switches on instead of matching message text. IPC errors become typed `{kind, message}`.

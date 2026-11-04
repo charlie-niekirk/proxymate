@@ -1,0 +1,11 @@
+{
+  "_note": "Ceilings in ms for CI's bench job (ubuntu-latest, PM_BENCH_QUICK=1), checked by scripts/bench-budget.py. Each sits several times above what R2 measured and below what the regression it guards would cost; the docs/PLAN.md targets (ingest < 2 s per 100k, refilter or sort < 10 ms) are for a laptop. Raise one only with the bench numbers that justify it in the PR.",
+  "ingest/100k recorded flows": { "max_ms": 2000 },
+  "ingest/100k recorded flows sorted views": { "max_ms": 2000 },
+  "ingest/100k recorded flows 20k cap": { "max_ms": 2000 },
+  "ingest/100k summaries (synthetic insert)": { "max_ms": 200 },
+  "ingest/trickle 1k flows into 100k sorted views": { "max_ms": 250 },
+  "views/refilter 100k": { "max_ms": 10 },
+  "views/sort 100k": { "max_ms": 25 },
+  "deep/body search 100k flows": { "max_ms": 2000 }
+}

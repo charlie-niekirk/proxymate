@@ -291,7 +291,9 @@ fn bench_deep(c: &mut Criterion) {
     let engine = engine_with_views("deep");
     record(&engine, active_flows(FLOWS), BODY);
     // A few large bodies, past what a deep search reads of a body.
-    let large: Vec<u8> = (0..LARGE_BODY).map(|i| b"abcdefghijklmnopqrstuvwxyz \n"[i % 28]).collect();
+    let large: Vec<u8> = (0..LARGE_BODY)
+        .map(|i| b"abcdefghijklmnopqrstuvwxyz \n"[i % 28])
+        .collect();
     record(&engine, active_flows(LARGE_BODIES), &large);
     let view = engine.create_view(FilterSpec::default(), SortSpec::default()).view;
     let (tx, rx) = mpsc::channel();

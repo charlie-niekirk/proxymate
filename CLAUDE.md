@@ -58,7 +58,8 @@ Run these from the repo root unless noted.
 | Regenerate TS bindings | `cargo test -p proxymate-desktop export_bindings`. Debug app launches also regenerate them |
 | Engine micro-bench | `cargo run --release -p proxymate-cli -- bench [FLOWS]` |
 | Soak (M10) | `cargo run --release -p proxymate-cli -- bench --rps 500 --duration 3600 [--max-flows N]` (own engine), or `--proxy 127.0.0.1:9090 --pid <app pid>` against the app. CSV every `--interval` seconds: rate, p50/p99, failures, RSS, flows, disk, evicted |
-| Ingest bench (criterion, target < 2 s per 100k flows) | `cargo bench -p pm-core --bench ingest` |
+| Hot path bench (criterion: ingest < 2 s per 100k flows, sorted views, eviction, refilter/sort < 10 ms, deep search) | `cargo bench -p pm-core --bench ingest` |
+| Bench budget (CI's `bench` job) | `PM_BENCH_QUICK=1 cargo bench -p pm-core --bench ingest && scripts/bench-budget.py` (ceilings in `crates/pm-core/benches/budget.json`) |
 | Release bundle | `npm run tauri build` (host arch, ad-hoc signed) |
 | macOS release build (universal DMG, checks, staging) | `scripts/release/macos.sh` (needs `rustup target add x86_64-apple-darwin`; ad-hoc unless the signing variables in `docs/RELEASING.md` are set; output in `target/release/macos`) |
 | Updater end to end | Debug bundle (`npm run tauri -- build --debug`) launched with `PROXYMATE_UPDATE_TEST=1`: checks at launch and installs without asking. Recipe in `docs/RELEASING.md` |
@@ -114,10 +115,11 @@ Rules:
 
 ## Data path (performance core)
 
-1. Traffic handlers record through a `FlowRecorder` (`Engine::begin_flow`). Summary changes go as small `FlowEvent`s over one channel to the `pm-ingest` thread, which applies each batch (up to 5 ms) under one write lock. Views update incrementally. Bodies never travel in events: they are tee'd into `store/blob.rs` (inline up to 8 KB, else segment files, capped at 64 MB, still content-encoded).
-2. The publisher thread ticks at 20 Hz and sends one `ViewDelta` per subscribed view over a `tauri::ipc::Channel`. A delta carries `{total, len, appended, changed ids, structural}`.
-3. The UI (`hooks/useFlowView.ts` and `lib/rowCache.ts`) fetches only the visible window plus one page of read-ahead with `get_rows(view, start, count)`. Rows arrive as positional `FlowRow` tuples, decoded by `lib/flow.ts`.
-4. `set_filter` and `set_sort` refilter synchronously in Rust (rayon above 50k flows) and return the new length right away.
+1. Traffic handlers record through a `FlowRecorder` (`Engine::begin_flow`). Summary changes go as small `FlowEvent`s over one channel to the `pm-ingest` thread, which applies each batch (up to 5 ms) under one write lock. Size updates (Progress, WebSocket message sizes) don't queue: `IngestTx::send` folds them into one pending update per flow behind a single `FlowEvent::Sizes` marker. Views update incrementally: a sorted view settles the rows a batch touched with binary insertion (`View::settle`), and its delta is structural only if a row the UI has moved. Bodies never travel in events: they are tee'd into `store/blob.rs` (inline up to 8 KB, else segment files, capped at 64 MB, still content-encoded). Segment I/O runs on the `pm-segments` thread: `SegmentStore::append` only reserves the extent and queues the bytes (bounded, about 16 MB), and reads wait for the writes before them. `Engine::flush` waits for both.
+2. The publisher thread ticks at 20 Hz and sends one `ViewDelta` per subscribed view over a `tauri::ipc::Channel`. A delta carries `{total, len, appended, changed ids, structural}`. Stores are `SharedStore`s: every write guard bumps a generation, and a tick skips a store nothing wrote to (`write_quiet` is for bookkeeping the publisher needn't see). The sidebar goes out at most every 250 ms.
+3. The UI (`hooks/useFlowView.ts` and `lib/rowCache.ts`) fetches only the visible window plus one page of read-ahead with `get_rows(view, start, count)`, coalesced to one call per run of adjacent pages per animation frame. Rows arrive as positional `FlowRow` tuples, decoded by `lib/flow.ts`. `get_rows` returns at most 512 rows (`MAX_ROWS_PER_CALL`): ask in steps for more.
+4. `set_filter` and `set_sort` refilter synchronously in Rust (rayon above 50k flows) and return the new length right away. Search-box typing is debounced (`FILTER_DEBOUNCE_MS`); chips and scopes apply at once.
+5. Tauri commands that touch the store, bodies or disk are `async` and run on the blocking pool (`run_blocking` in `commands.rs`): a sync command runs on the main thread. MCP runs every sync tool on the blocking pool (`call_sync` in `tools.rs`).
 
 Targets:
 - 100k rows scroll at 60 fps.
