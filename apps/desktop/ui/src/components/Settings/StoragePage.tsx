@@ -13,6 +13,7 @@ import { autosaveSettingsKey, queryClient, recordingSettingsKey, storageSettings
 import { useStorage } from "@/store/storage";
 
 import { ListEditor, Note, NumberField, Page, Section } from "./parts";
+import { queries } from "@/lib/queries";
 
 const nf = new Intl.NumberFormat();
 
@@ -22,7 +23,7 @@ const nf = new Intl.NumberFormat();
  */
 export function StoragePage() {
   const status = useStorage((s) => s.status);
-  const { data: settings } = useQuery({ queryKey: storageSettingsKey, queryFn: () => backend.getStorageSettings() });
+  const { data: settings } = useQuery(queries.storageSettings());
   return (
     <Page testId="settings-storage">
       <Section title="Live capture" description="Bodies and details are kept in files that are deleted on Clear and on quit.">
@@ -65,7 +66,7 @@ export function StoragePage() {
 
 /** Hosts left out of the capture (M21): still proxied, never recorded. */
 function RecordingLists() {
-  const { data: lists } = useQuery({ queryKey: recordingSettingsKey, queryFn: () => backend.getRecordingSettings() });
+  const { data: lists } = useQuery(queries.recordingSettings());
   const [error, setError] = useState<string | null>(null);
   if (!lists) return null;
   const save = async (next: RecordingSettings_Serialize) => {
@@ -111,7 +112,7 @@ const timeFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", tim
 
 /** Saves the live capture every N minutes as a rotating `.proxymate` (M21). */
 function AutoSave() {
-  const { data: settings } = useQuery({ queryKey: autosaveSettingsKey, queryFn: () => backend.getAutosaveSettings() });
+  const { data: settings } = useQuery(queries.autosaveSettings());
   if (!settings) return null;
   return <AutoSaveForm key={JSON.stringify(settings)} settings={settings} />;
 }

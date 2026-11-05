@@ -15,11 +15,10 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { decideDevice, forgetDevice, setLanAccess, setLanInterface } from "@/lib/actions";
-import { backend } from "@/lib/backend";
-import { deviceAccessKey } from "@/lib/query";
 import { cn } from "@/lib/utils";
 import { useDevices } from "@/store/devices";
 import { useUi, type DeviceTab } from "@/store/ui";
+import { queries } from "@/lib/queries";
 
 const TABS: { id: DeviceTab; label: string }[] = [
   { id: "simulator", label: "iOS Simulator" },
@@ -89,7 +88,7 @@ export function DeviceSetupSheet() {
 
 /** "Allow devices on your network", the interface, and the proxy address. */
 function AccessBar() {
-  const { data: access } = useQuery({ queryKey: deviceAccessKey, queryFn: () => backend.getDeviceAccess() });
+  const { data: access } = useQuery(queries.deviceAccess());
   const [busy, setBusy] = useState(false);
   const toggle = (on: boolean) => {
     setBusy(true);

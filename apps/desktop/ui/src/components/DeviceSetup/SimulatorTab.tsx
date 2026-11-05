@@ -10,9 +10,10 @@ import { ContextMenuItem } from "@/components/ui/context-menu";
 import { setSystemProxy } from "@/lib/actions";
 import { backend } from "@/lib/backend";
 import { progress } from "@/lib/devices";
-import { queryClient, simulatorKey, systemProxyKey } from "@/lib/query";
+import { queryClient, simulatorKey } from "@/lib/query";
 import { cn } from "@/lib/utils";
 import { useDevices } from "@/store/devices";
+import { queries } from "@/lib/queries";
 
 /**
  * The iOS Simulator uses this Mac's network settings, so it needs the
@@ -21,12 +22,11 @@ import { useDevices } from "@/store/devices";
  */
 export function SimulatorTab() {
   const { data: sim, isFetching } = useQuery({
-    queryKey: simulatorKey,
-    queryFn: () => backend.getSimulatorStatus(),
+    ...queries.simulator(),
     refetchInterval: 4000,
     staleTime: 0,
   });
-  const { data: sysproxy } = useQuery({ queryKey: systemProxyKey, queryFn: () => backend.getSystemProxyStatus() });
+  const { data: sysproxy } = useQuery(queries.systemProxy());
   const activity = useDevices((s) => s.snapshot.simulator);
   const [busy, setBusy] = useState<"install" | "proxy" | null>(null);
   const [results, setResults] = useState<SimInstallResult_Serialize[] | null>(null);

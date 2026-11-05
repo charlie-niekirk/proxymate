@@ -2,9 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 
 import { CopyMenu } from "@/components/menus/items";
 import { Button } from "@/components/ui/button";
-import { backend } from "@/lib/backend";
-import { proxyStatusKey } from "@/lib/query";
 import { useUi } from "@/store/ui";
+import { queries } from "@/lib/queries";
 
 /** The view couldn't be opened: say why, rather than waiting for traffic that can't arrive. */
 export function ViewError({ error, retry }: { error: string; retry: () => void }) {
@@ -28,7 +27,7 @@ export function ViewError({ error, retry }: { error: string; retry: () => void }
 export function EmptyState() {
   const total = useUi((s) => s.stats.total);
   const deep = useUi((s) => s.deep);
-  const { data: status } = useQuery({ queryKey: proxyStatusKey, queryFn: () => backend.getProxyStatus() });
+  const { data: status } = useQuery(queries.proxyStatus());
   const proxy = status?.listening ?? "127.0.0.1:9090";
   return (
     <div className="text-muted-foreground absolute inset-0 top-[22px] flex flex-col items-center justify-center gap-2 text-sm">

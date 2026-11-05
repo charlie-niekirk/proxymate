@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 
 import { Bar, Centered, Note } from "./parts";
 import { formatLabel } from "./util";
+import { fontKey, imageMetaKey } from "@/lib/query";
 
 const CHECKER = {
   backgroundColor: "var(--checker-b)",
@@ -58,7 +59,7 @@ export function ImageView({ url, mime, size, onSave }: { url: string; mime: stri
   const [failed, setFailed] = useState(false);
   const img = useRef<HTMLImageElement>(null);
   const meta = useQuery({
-    queryKey: ["image-meta", url],
+    queryKey: imageMetaKey(url),
     enabled: size < 16 * 1024 * 1024,
     queryFn: async () => {
       const bytes = new Uint8Array(await (await fetch(url)).arrayBuffer());
@@ -228,7 +229,7 @@ export function FontView({ url, mime, size, id }: { url: string; mime: string; s
   const family = `pm-preview-${id.replace(/[^a-z0-9-]/gi, "-")}`;
   const [sample, setSample] = useState("The quick brown fox jumps over the lazy dog");
   const font = useQuery({
-    queryKey: ["font", url],
+    queryKey: fontKey(url),
     queryFn: async () => {
       const face = new FontFace(family, await (await fetch(url)).arrayBuffer());
       await face.load();

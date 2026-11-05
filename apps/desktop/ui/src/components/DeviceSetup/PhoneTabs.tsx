@@ -3,13 +3,12 @@ import { Smartphone } from "lucide-react";
 
 import type { DeviceAccess_Serialize } from "@/bindings";
 import { CopyField, Path, ProgressCheck, QrCard, Section, Steps } from "@/components/DeviceSetup/parts";
-import { backend } from "@/lib/backend";
 import { activeDevices, MANIFEST_ATTRIBUTE, NETWORK_SECURITY_CONFIG, progress, splitProxy } from "@/lib/devices";
-import { deviceAccessKey } from "@/lib/query";
 import { useDevices } from "@/store/devices";
+import { queries } from "@/lib/queries";
 
 function useAccess() {
-  return useQuery({ queryKey: deviceAccessKey, queryFn: () => backend.getDeviceAccess() }).data;
+  return useQuery(queries.deviceAccess()).data;
 }
 
 /** Server and port to type into the phone's Wi-Fi proxy settings. */

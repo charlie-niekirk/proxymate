@@ -7,13 +7,14 @@ import { usePagedList } from "@/hooks/usePagedList";
 import { backend } from "@/lib/backend";
 import { sseWire } from "@/lib/copyFormats";
 import { formatTime } from "@/lib/flow";
-import { streamKey } from "@/lib/query";
 import { useUi } from "@/store/ui";
 
 import { KvTable, Placeholder, type Kv } from "./KvTable";
 import { PayloadView } from "./PayloadView";
 import { LiveStatus, MessageList, SearchBox, StreamShell } from "./StreamShell";
 import { listHeaderClass, rowClass } from "./streamStyles";
+import { ssePagesKey } from "@/lib/query";
+import { queries } from "@/lib/queries";
 
 const GRID = "grid-cols-[40px_84px_96px_64px_minmax(0,1fr)]";
 
@@ -27,13 +28,12 @@ export function SsePanel({ id }: { id: number }) {
   const store = useUi((st) => st.store);
 
   const { data: head } = useQuery({
-    queryKey: [...streamKey(store, id), "sse", text],
-    queryFn: () => backend.getSseEvents(store, id, text, 0, 0),
+    ...queries.sseHead(store, id, text),
     placeholderData: keepPreviousData,
   });
   const len = head?.len ?? 0;
   const [[first, last], setRange] = useState<[number, number]>([0, -1]);
-  const event = usePagedList(["sse-page", store, id, text], len, first, last, async (start, count) =>
+  const event = usePagedList(ssePagesKey(store, id, text), len, first, last, async (start, count) =>
     (await backend.getSseEvents(store, id, text, start, count)).events,
   );
 

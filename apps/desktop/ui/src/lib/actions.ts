@@ -8,7 +8,6 @@ import type {
   InterceptTarget,
   PresetKind,
   RequestSpec_Deserialize,
-  Rule_Serialize,
   SaveProgress_Serialize,
   ScriptKind,
 } from "@/bindings";
@@ -34,6 +33,8 @@ import {
   sslSettingsKey,
   systemProxyKey,
   trustStatusKey,
+  storeBodiesKey,
+  storeFlowsKey,
 } from "@/lib/query";
 import { GLOBAL_THROTTLE_RULE_ID, normalizeRule, withThrottle, type Rule, type ThrottlePreset } from "@/lib/rules";
 import { KIND_LABELS, newScript, normalizeScript, type Script } from "@/lib/scripts";
@@ -43,8 +44,8 @@ import { LIVE_STORE, useUi } from "@/store/ui";
 export async function clearFlows() {
   if (useUi.getState().store === LIVE_STORE) useUi.getState().select(null);
   await backend.clearFlows();
-  queryClient.removeQueries({ queryKey: ["body", LIVE_STORE] });
-  queryClient.removeQueries({ queryKey: ["flow", LIVE_STORE] });
+  queryClient.removeQueries({ queryKey: storeBodiesKey(LIVE_STORE) });
+  queryClient.removeQueries({ queryKey: storeFlowsKey(LIVE_STORE) });
 }
 
 /** An error's message, for display. */
@@ -76,7 +77,7 @@ export function currentSelection(): FlowSelection_Deserialize {
 
 /** Summaries and details of `store` may have changed: refetch them. */
 function flowsChanged(store: number) {
-  void queryClient.invalidateQueries({ queryKey: ["flow", store] });
+  void queryClient.invalidateQueries({ queryKey: storeFlowsKey(store) });
 }
 
 export async function pinSelection(pinned: boolean, selection = currentSelection(), store = useUi.getState().store) {
@@ -99,8 +100,8 @@ export async function commentFlow(store: number, id: number, comment: string) {
 export async function deleteSelection(selection = currentSelection(), store = useUi.getState().store) {
   const n = await backend.removeFlows(store, selection);
   useUi.getState().select(null);
-  queryClient.removeQueries({ queryKey: ["flow", store] });
-  queryClient.removeQueries({ queryKey: ["body", store] });
+  queryClient.removeQueries({ queryKey: storeFlowsKey(store) });
+  queryClient.removeQueries({ queryKey: storeBodiesKey(store) });
   if (n > 1) toast.success(`Deleted ${n.toLocaleString()} flows`);
   return n;
 }
@@ -273,7 +274,7 @@ export async function deleteRule(id: string) {
  */
 export async function setRuleEnabled(id: string, enabled: boolean) {
   await queryClient.cancelQueries({ queryKey: rulesKey });
-  queryClient.setQueryData<Rule_Serialize[]>(rulesKey, (rules) => rules?.map((r) => (r.id === id ? { ...r, enabled } : r)));
+  queryClient.setQueryData(rulesKey, (rules) => rules?.map((r) => (r.id === id ? { ...r, enabled } : r)));
   try {
     await backend.setRuleEnabled(id, enabled);
   } finally {
@@ -357,8 +358,8 @@ export async function openDocument(path: string | null = null, har = false) {
 export async function closeDocument(store: number) {
   await backend.closeDocument(store);
   if (useUi.getState().store === store) useUi.getState().setStore(LIVE_STORE);
-  queryClient.removeQueries({ queryKey: ["body", store] });
-  queryClient.removeQueries({ queryKey: ["flow", store] });
+  queryClient.removeQueries({ queryKey: storeBodiesKey(store) });
+  queryClient.removeQueries({ queryKey: storeFlowsKey(store) });
   await refreshDocuments();
 }
 

@@ -16,11 +16,9 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { bridge } from "@/dev/bridge";
 import { reportError, resolveBreakpoint } from "@/lib/actions";
-import { backend } from "@/lib/backend";
 import { languageFor } from "@/lib/compose";
 import { base64, hexBytes } from "@/lib/copyFormats";
 import { bodyText, headerValue } from "@/lib/http";
-import { breakpointBodyKey } from "@/lib/query";
 import { parseHex } from "@/lib/stream";
 import { cleanHeaders } from "@/lib/rules";
 import { cn } from "@/lib/utils";
@@ -28,6 +26,7 @@ import { useUndoable } from "@/hooks/useUndoable";
 import { align, parseDoc, toJson, type JNode } from "@/lib/json/doc";
 import { useBreakpoints } from "@/store/breakpoints";
 import { useUi } from "@/store/ui";
+import { queries } from "@/lib/queries";
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -339,8 +338,7 @@ function BreakpointForm({ bp }: { bp: BreakpointInfo_Serialize }) {
  */
 const breakpointBody = (id: number) =>
   queryOptions({
-    queryKey: breakpointBodyKey(id),
-    queryFn: async () => new Uint8Array(await backend.getBreakpointBody(id)),
+    ...queries.breakpointBody(id),
     staleTime: Infinity,
     gcTime: 0,
   });

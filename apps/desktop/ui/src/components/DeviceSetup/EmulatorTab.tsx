@@ -10,9 +10,10 @@ import { Switch } from "@/components/ui/switch";
 import { setAndroidProxy } from "@/lib/actions";
 import { backend } from "@/lib/backend";
 import { emulatorCommands, progress } from "@/lib/devices";
-import { androidKey, deviceAccessKey, queryClient } from "@/lib/query";
+import { androidKey, queryClient } from "@/lib/query";
 import { cn } from "@/lib/utils";
 import { useDevices } from "@/store/devices";
+import { queries } from "@/lib/queries";
 
 /**
  * The Android emulator reaches this Mac's loopback at 10.0.2.2, so it
@@ -21,12 +22,11 @@ import { useDevices } from "@/store/devices";
  */
 export function EmulatorTab() {
   const { data: status, isFetching } = useQuery({
-    queryKey: androidKey,
-    queryFn: () => backend.getAndroidStatus(),
+    ...queries.android(),
     refetchInterval: 4000,
     staleTime: 0,
   });
-  const { data: access } = useQuery({ queryKey: deviceAccessKey, queryFn: () => backend.getDeviceAccess() });
+  const { data: access } = useQuery(queries.deviceAccess());
   const activity = useDevices((s) => s.snapshot.emulator);
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);

@@ -1,13 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 
-import { backend } from "@/lib/backend";
-import { scriptsKey } from "@/lib/query";
 import { normalizeScript, type Script } from "@/lib/scripts";
+import { queries } from "@/lib/queries";
 
 /** Every script; the engine pushes changes (`store/mcp.ts`). */
 export function useScripts(): Script[] {
-  const { data } = useQuery({ queryKey: scriptsKey, queryFn: () => backend.listScripts() });
+  const { data } = useQuery(queries.scripts());
   return useMemo(() => (data ?? []).map(normalizeScript), [data]);
 }
 

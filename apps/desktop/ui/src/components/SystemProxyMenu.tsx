@@ -6,9 +6,8 @@ import { CopyMenu } from "@/components/menus/items";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { copyTerminalEnv, setSystemProxy } from "@/lib/actions";
-import { backend } from "@/lib/backend";
-import { proxyStatusKey, systemProxyKey } from "@/lib/query";
 import { cn } from "@/lib/utils";
+import { queries } from "@/lib/queries";
 
 /**
  * Toolbar popover for the macOS system proxy (web + secure web on every
@@ -16,8 +15,8 @@ import { cn } from "@/lib/utils";
  * it. The previous settings are always put back on quit or crash.
  */
 export function SystemProxyMenu() {
-  const { data: status } = useQuery({ queryKey: systemProxyKey, queryFn: () => backend.getSystemProxyStatus() });
-  const { data: proxy } = useQuery({ queryKey: proxyStatusKey, queryFn: () => backend.getProxyStatus() });
+  const { data: status } = useQuery(queries.systemProxy());
+  const { data: proxy } = useQuery(queries.proxyStatus());
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   const enabled = status?.enabled ?? false;

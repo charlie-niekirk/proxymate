@@ -25,7 +25,6 @@ import { copyBodyText } from "@/lib/clipboard";
 import { bodySearchTerms } from "@/lib/dsl";
 import { formatSize } from "@/lib/flow";
 import { headerValue } from "@/lib/http";
-import { flowViewsKey } from "@/lib/query";
 import { chooseViewer, isScriptValue, scriptErrors, scriptViewMime, scriptViewOptions } from "@/lib/scripts";
 import { useUi } from "@/store/ui";
 
@@ -36,6 +35,7 @@ import { BodySearchContext } from "./searchTerms";
 import { pickViewer, VIEWERS, viewersFor, type ViewerId } from "./registry";
 import { HIGHLIGHT_LIMIT, LOAD_LIMIT, suggestedFileName } from "./util";
 import { Viewer } from "./Viewer";
+import { queries } from "@/lib/queries";
 
 const Operations = lazy(() => loadViewers().then((m) => ({ default: m.Operations })));
 const DecodedView = lazy(() => loadViewers().then((m) => ({ default: m.DecodedView })));
@@ -87,8 +87,7 @@ export function BodyViewer({
   useEffect(() => preloadViewer(viewer, def.code), [viewer, def.code]);
   const scripts = useViewScriptsVersion();
   const views = useQuery({
-    queryKey: flowViewsKey(store, id, part, scripts),
-    queryFn: () => backend.getFlowViews(store, id, part),
+    ...queries.flowViews(store, id, part, scripts),
     enabled: finished && scripts !== "",
   });
   const results = useMemo(() => (scripts === "" ? [] : (views.data ?? [])), [scripts, views.data]);

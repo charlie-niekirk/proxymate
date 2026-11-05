@@ -8,12 +8,13 @@ import { backend } from "@/lib/backend";
 import { proxySettingsKey, queryClient, ruleSettingsKey, scriptSettingsKey } from "@/lib/query";
 
 import { Note, NumberField, Page, Section } from "./parts";
+import { queries } from "@/lib/queries";
 
 /** Settings › Advanced: how long breakpoints wait and scripts may run, and the upstream connection pool. */
 export function AdvancedPage() {
-  const { data: rules } = useQuery({ queryKey: ruleSettingsKey, queryFn: () => backend.getRuleSettings() });
-  const { data: proxy } = useQuery({ queryKey: proxySettingsKey, queryFn: () => backend.getProxySettings() });
-  const { data: scripts } = useQuery({ queryKey: scriptSettingsKey, queryFn: () => backend.getScriptSettings() });
+  const { data: rules } = useQuery(queries.ruleSettings());
+  const { data: proxy } = useQuery(queries.proxySettings());
+  const { data: scripts } = useQuery(queries.scriptSettings());
   return (
     <Page testId="settings-advanced">
       {rules && <BreakpointForm key={JSON.stringify(rules)} settings={rules} />}

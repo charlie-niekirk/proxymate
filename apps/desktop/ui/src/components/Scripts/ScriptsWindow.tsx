@@ -31,7 +31,6 @@ import {
   setScriptEnabled,
 } from "@/lib/actions";
 import { backend } from "@/lib/backend";
-import { rulesKey } from "@/lib/query";
 import { normalizeRule } from "@/lib/rules";
 import {
   KIND_HELP,
@@ -48,6 +47,7 @@ import { useUi } from "@/store/ui";
 import { ScriptConsole } from "./ScriptConsole";
 import { ScriptEditor } from "./ScriptEditor";
 import { ScriptTestPanel } from "./ScriptTestPanel";
+import { queries } from "@/lib/queries";
 
 /**
  * The Scripts window (M14): scripts grouped by kind beside the selected
@@ -491,7 +491,7 @@ function ViewSettings({ script, onChange }: { script: Script; onChange: (s: Scri
 
 /** The rules that run a rewrite or mock script, and a quick way to add one. */
 function UsedByRules({ script, store, flow }: { script: Script; store: number; flow: number | null }) {
-  const { data: rules = [] } = useQuery({ queryKey: rulesKey, queryFn: () => backend.listRules() });
+  const { data: rules = [] } = useQuery(queries.rules());
   const openRules = useUi((s) => s.openRulesEditor);
   const users = rules
     .map(normalizeRule)

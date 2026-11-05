@@ -30,6 +30,8 @@ import { Placeholder } from "./KvTable";
 import { PayloadView } from "./PayloadView";
 import { LiveStatus, MessageList, SearchBox, StreamShell } from "./StreamShell";
 import { listHeaderClass, rowClass } from "./streamStyles";
+import { wsPagesKey, wsPayloadKey } from "@/lib/query";
+import { queries } from "@/lib/queries";
 
 const GRID = "grid-cols-[14px_40px_84px_48px_60px_minmax(0,1fr)]";
 
@@ -51,13 +53,12 @@ export function WebSocketPanel({ id }: { id: number }) {
   const store = useUi((st) => st.store);
 
   const { data: head } = useQuery({
-    queryKey: [...streamKey(store, id), "ws", query],
-    queryFn: () => backend.getWebsocketMessages(store, id, query, 0, 0),
+    ...queries.wsHead(store, id, query),
     placeholderData: keepPreviousData,
   });
   const len = head?.len ?? 0;
   const [[first, last], setRange] = useState<[number, number]>([0, -1]);
-  const message = usePagedList(["ws-page", store, id, query], len, first, last, async (start, count) =>
+  const message = usePagedList(wsPagesKey(store, id, query), len, first, last, async (start, count) =>
     (await backend.getWebsocketMessages(store, id, query, start, count)).messages,
   );
 
@@ -174,7 +175,7 @@ export function WebSocketPanel({ id }: { id: number }) {
 /** Refetches the list after a send or close, ahead of the next delta. */
 function refresh(store: number, id: number) {
   void queryClient.invalidateQueries({ queryKey: streamKey(store, id) });
-  void queryClient.invalidateQueries({ queryKey: ["ws-page", store, id] });
+  void queryClient.invalidateQueries({ queryKey: wsPagesKey(store, id) });
 }
 
 async function resend(id: number, m: WsMessage_Serialize) {
@@ -338,10 +339,12 @@ function MessageDetail({ id, message, sendable }: { id: number; message: WsMessa
   const [original, setOriginal] = useState(false);
   const showOriginal = original && message.edited;
   const payload = useQuery({
-    queryKey: ["ws-payload", store, id, message.index, showOriginal],
-    queryFn: async () =>
+    queryKey: wsPayloadKey(store, id, message.index, showOriginal),
+    queryFn: async ({ signal }) =>
       new Uint8Array(
-        await (showOriginal ? backend.getWebsocketOriginal(store, id, message.index) : backend.getWebsocketPayload(store, id, message.index)),
+        await (showOriginal
+          ? backend.getWebsocketOriginal(store, id, message.index, signal)
+          : backend.getWebsocketPayload(store, id, message.index, signal)),
       ),
   });
   const who = message.injected

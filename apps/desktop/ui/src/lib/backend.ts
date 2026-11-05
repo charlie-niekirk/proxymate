@@ -86,6 +86,7 @@ import {
   type WsQuery_Deserialize,
   type WsSend,
 } from "@/bindings";
+import { withSignals } from "@/lib/abort";
 import { createMockBackend } from "@/lib/mockBackend";
 
 /**
@@ -93,6 +94,12 @@ import { createMockBackend } from "@/lib/mockBackend";
  *
  * Flow ids are per store: `store` is 0 (`LIVE_STORE`) for the live
  * capture, or an opened document's. View ids already name their store.
+ *
+ * Reads that queries make take an optional trailing `AbortSignal` (R4;
+ * `SIGNAL_ARG` in `lib/abort.ts` says where): an aborted read rejects with
+ * the signal's reason, and one aborted before it starts never reaches the
+ * engine. TanStack Query passes its signal when a query is cancelled or
+ * nobody observes it any more.
  */
 export interface Backend {
   createView(store: number, filter: FilterSpec_Deserialize, sort: SortSpec): Promise<ViewInfo_Serialize>;
@@ -100,14 +107,21 @@ export interface Backend {
   setSort(view: number, sort: SortSpec): Promise<ViewInfo_Serialize>;
   dropView(view: number): Promise<void>;
   getRows(view: number, start: number, count: number): Promise<RowsPage_Serialize>;
-  getFlow(store: number, id: number): Promise<FlowSummary_Serialize | null>;
+  getFlow(store: number, id: number, signal?: AbortSignal): Promise<FlowSummary_Serialize | null>;
   subscribe(view: number, onDelta: (delta: ViewDelta_Serialize) => void): Promise<void>;
-  getFlowDetail(store: number, id: number): Promise<FlowDetail_Serialize | null>;
+  getFlowDetail(store: number, id: number, signal?: AbortSignal): Promise<FlowDetail_Serialize | null>;
   /**
    * Body bytes; with `decoded`, content-encoding undone (rejects if that
    * fails). With `max`, only the first `max` bytes.
    */
-  getBody(store: number, id: number, part: BodyPart, decoded: boolean, max?: number | null): Promise<ArrayBuffer>;
+  getBody(
+    store: number,
+    id: number,
+    part: BodyPart,
+    decoded: boolean,
+    max?: number | null,
+    signal?: AbortSignal,
+  ): Promise<ArrayBuffer>;
   /**
    * A URL serving the body with its detected Content-Type, for `<img>`,
    * `<video>`, PDF frames and fonts (`pmbody://` in the app).
@@ -122,17 +136,25 @@ export interface Backend {
     query: WsQuery_Deserialize,
     start: number,
     count: number,
+    signal?: AbortSignal,
   ): Promise<WsPage_Serialize>;
   /** One message's recorded payload (at most 1 MB). */
-  getWebsocketPayload(store: number, id: number, index: number): Promise<ArrayBuffer>;
+  getWebsocketPayload(store: number, id: number, index: number, signal?: AbortSignal): Promise<ArrayBuffer>;
   /** What arrived for an edited message (M19). */
-  getWebsocketOriginal(store: number, id: number, index: number): Promise<ArrayBuffer>;
+  getWebsocketOriginal(store: number, id: number, index: number, signal?: AbortSignal): Promise<ArrayBuffer>;
   /** Sends a message into an open WebSocket of the live capture. */
   wsSend(id: number, message: WsSend): Promise<void>;
   /** Closes an open WebSocket of the live capture. */
   wsClose(id: number): Promise<void>;
   /** A window of an event-stream response's events matching `text`. */
-  getSseEvents(store: number, id: number, text: string, start: number, count: number): Promise<SsePage_Serialize>;
+  getSseEvents(
+    store: number,
+    id: number,
+    text: string,
+    start: number,
+    count: number,
+    signal?: AbortSignal,
+  ): Promise<SsePage_Serialize>;
   clearFlows(): Promise<void>;
   setRecording(on: boolean): Promise<ProxyStatus_Serialize>;
   getProxyStatus(): Promise<ProxyStatus_Serialize>;
@@ -191,7 +213,7 @@ export interface Backend {
   /** The paused-flow queue, pushed now and whenever it changes. */
   subscribeBreakpoints(onQueue: (queue: BreakpointInfo_Serialize[]) => void): Promise<void>;
   /** A paused message's decoded body. */
-  getBreakpointBody(id: number): Promise<ArrayBuffer>;
+  getBreakpointBody(id: number, signal?: AbortSignal): Promise<ArrayBuffer>;
   /** Continue (with edits), abort or answer; the first resolution wins. */
   resolveBreakpoint(id: number, resolution: BreakpointResolution_Deserialize): Promise<void>;
 
@@ -228,7 +250,7 @@ export interface Backend {
   /** A new token; clients using the old one are refused from then on. */
   regenerateMcpToken(): Promise<string>;
   /** Tool calls older than `before` (newest first). */
-  getMcpAudit(before: number | null, limit: number): Promise<McpAuditPage_Serialize>;
+  getMcpAudit(before: number | null, limit: number, signal?: AbortSignal): Promise<McpAuditPage_Serialize>;
   clearMcpAudit(): Promise<void>;
 
   // ---- Replay, compose, cURL (M8) ----
@@ -334,9 +356,9 @@ export interface Backend {
   /** Dry run of a script (saved, or unsaved source) against a recorded flow. */
   testScript(store: number, flow: number, spec: ScriptTestSpec_Deserialize): Promise<ScriptTestResult_Serialize>;
   /** What the enabled view scripts make of one body; empty when none applies. */
-  getFlowViews(store: number, flow: number, part: BodyPart): Promise<ViewResult_Serialize[]>;
+  getFlowViews(store: number, flow: number, part: BodyPart, signal?: AbortSignal): Promise<ViewResult_Serialize[]>;
   /** A gRPC, protobuf, MessagePack or CBOR body as JSON trees (M16); live flows too. */
-  decodeBody(store: number, flow: number, part: BodyPart): Promise<DecodedBody_Serialize>;
+  decodeBody(store: number, flow: number, part: BodyPart, signal?: AbortSignal): Promise<DecodedBody_Serialize>;
   listProtoSchemas(): Promise<ProtoSchema[]>;
   /** `.proto` files or one descriptor set; asks with a file dialog without `paths`. Null if cancelled. */
   importProtoSchema(paths: string[] | null): Promise<ProtoSchema | null>;
@@ -361,9 +383,9 @@ export interface Backend {
   /** "Generate mocks": saves one disabled Map Local rule per operation. */
   generateOpenApiMocks(id: number): Promise<Rule_Serialize[]>;
   /** The OpenAPI operation a flow's method and path match, if any. */
-  flowOperation(store: number, flow: number): Promise<OperationMatch_Serialize | null>;
+  flowOperation(store: number, flow: number, signal?: AbortSignal): Promise<OperationMatch_Serialize | null>;
   /** Console entries newer than `since`, oldest first, at most `limit`. */
-  getScriptConsole(since: number | null, limit: number): Promise<ConsoleEntry_Serialize[]>;
+  getScriptConsole(since: number | null, limit: number, signal?: AbortSignal): Promise<ConsoleEntry_Serialize[]>;
   clearScriptConsole(): Promise<void>;
   /** The newest console sequence number, pushed whenever entries are added. */
   subscribeScriptConsole(onSeq: (seq: number) => void): Promise<void>;
@@ -680,15 +702,15 @@ function unavailableBackend(): Backend {
 }
 
 function pickBackend(): Backend {
-  if (isTauri()) return tauriBackend;
+  if (isTauri()) return withSignals(tauriBackend);
   // A constant `false` in release builds, so the mock is left out of the bundle.
   if (!import.meta.env.DEV) return unavailableBackend();
   // `?zoo` serves the body-viewer fixtures (crates/pm-testkit/fixtures/zoo)
   // instead of synthetic rows, for the Playwright viewer tests.
   if (new URLSearchParams(window.location.search).has("zoo")) {
-    return createMockBackend(0, import("@/dev/zoo").then((m) => m.loadZoo()));
+    return withSignals(createMockBackend(0, import("@/dev/zoo").then((m) => m.loadZoo())));
   }
-  return createMockBackend(100_000);
+  return withSignals(createMockBackend(100_000));
 }
 
 /**

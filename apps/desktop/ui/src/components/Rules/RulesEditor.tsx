@@ -22,7 +22,7 @@ import {
   setRuleEnabled,
 } from "@/lib/actions";
 import { backend } from "@/lib/backend";
-import { queryClient, ruleSettingsKey, rulesKey } from "@/lib/query";
+import { queryClient, ruleSettingsKey } from "@/lib/query";
 import { isVisual } from "@/lib/rewrite/diff";
 import { actionSummary, isBuiltin, matcherSummary, newRule, normalizeRule, type Rule } from "@/lib/rules";
 import { cn } from "@/lib/utils";
@@ -35,6 +35,7 @@ import { NumberInput } from "./fields";
 import { MatcherBuilder } from "./MatcherBuilder";
 import { RuleOriginBadge } from "./RuleOriginBadge";
 import { RuleTestPanel } from "./RuleTestPanel";
+import { queries } from "@/lib/queries";
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -46,7 +47,7 @@ const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 export function RulesEditor() {
   const { open, ruleId, draft, seq } = useUi((s) => s.rulesEditor);
   const close = useUi((s) => s.closeRulesEditor);
-  const { data: rules = [] } = useQuery({ queryKey: rulesKey, queryFn: () => backend.listRules(), enabled: open });
+  const { data: rules = [] } = useQuery({ ...queries.rules(), enabled: open });
   const userRules = rules.filter((r) => !isBuiltin(r)).map(normalizeRule);
   const current = draft ?? userRules.find((r) => r.id === ruleId) ?? null;
 
@@ -273,7 +274,7 @@ function RuleList({ rules, selected, hasDraft }: { rules: Rule[]; selected: stri
 }
 
 function BreakpointTimeout() {
-  const { data: settings } = useQuery({ queryKey: ruleSettingsKey, queryFn: () => backend.getRuleSettings() });
+  const { data: settings } = useQuery(queries.ruleSettings());
   if (!settings) return null;
   return (
     <div className="text-muted-foreground flex items-center gap-1.5 border-t p-2 text-xs" title="0 waits forever">

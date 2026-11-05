@@ -25,6 +25,7 @@ import { networkSettingsKey, proxyStatusKey, queryClient } from "@/lib/query";
 import { cn } from "@/lib/utils";
 
 import { ListEditor, Page, Section } from "./parts";
+import { queries } from "@/lib/queries";
 
 /**
  * Settings › Network (M18): upstream proxies, the SOCKS5 listener, reverse
@@ -33,14 +34,14 @@ import { ListEditor, Page, Section } from "./parts";
  * the keychain and are never shown again, only "saved".
  */
 export function NetworkPage() {
-  const { data: settings } = useQuery({ queryKey: networkSettingsKey, queryFn: () => backend.getNetworkSettings() });
+  const { data: settings } = useQuery(queries.networkSettings());
   if (!settings) return null;
   // Remounted on every save, so the draft starts from what the engine kept.
   return <NetworkForm key={JSON.stringify(settings)} saved={settings} />;
 }
 
 function NetworkForm({ saved }: { saved: NetworkSettings_Serialize }) {
-  const { data: status } = useQuery({ queryKey: proxyStatusKey, queryFn: () => backend.getProxyStatus() });
+  const { data: status } = useQuery(queries.proxyStatus());
   const [draft, setDraft] = useState<NetworkSettings_Deserialize>(() => structuredClone(saved));
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);

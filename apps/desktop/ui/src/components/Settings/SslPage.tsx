@@ -8,6 +8,7 @@ import { queryClient, sslSettingsKey } from "@/lib/query";
 import { useSidebar } from "@/store/sidebar";
 
 import { ListEditor, Note, Page, Section } from "./parts";
+import { queries } from "@/lib/queries";
 
 type ListKey = "include" | "exclude" | "bypass" | "insecure_upstream" | "exclude_apps";
 
@@ -48,7 +49,7 @@ const LISTS: { key: ListKey; title: string; description: string; placeholder: st
  * use the lists straight away.
  */
 export function SslPage() {
-  const { data: settings } = useQuery({ queryKey: sslSettingsKey, queryFn: () => backend.getSslSettings() });
+  const { data: settings } = useQuery(queries.sslSettings());
   const apps = useSidebar((s) => s.snapshot.apps);
   const [error, setError] = useState<string | null>(null);
   if (!settings) return null;

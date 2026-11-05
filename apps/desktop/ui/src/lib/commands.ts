@@ -79,7 +79,7 @@ export function shortcutLabel(key: string, mods: { alt?: boolean; bare?: boolean
  * the default before it has answered.
  */
 function isRecording(): boolean {
-  return queryClient.getQueryData<{ recording: boolean }>(proxyStatusKey)?.recording ?? true;
+  return queryClient.getQueryData(proxyStatusKey)?.recording ?? true;
 }
 
 /** The selected flow's summary, if one is selected. */
@@ -322,7 +322,7 @@ export const COMMANDS: AppCommand[] = [
       keywords: ["intercept", "launch", t.terminal ? "terminal shell node python curl" : "browser"],
       // Hidden once the app is known not to be installed.
       enabled: () =>
-        queryClient.getQueryData<{ target: string; installed: boolean }[]>(interceptAppsKey)?.find((a) => a.target === t.target)
+        queryClient.getQueryData(interceptAppsKey)?.find((a) => a.target === t.target)
           ?.installed !== false,
       run: () => intercept(t.target),
     }),

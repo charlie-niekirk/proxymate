@@ -18,15 +18,15 @@ import { clearFlows, setRecording } from "@/lib/actions";
 import { backend } from "@/lib/backend";
 import { shortcutLabel } from "@/lib/commands";
 import { useDevices } from "@/store/devices";
-import { proxyStatusKey } from "@/lib/query";
 import { LIVE_STORE, useUi } from "@/store/ui";
+import { queries } from "@/lib/queries";
 
 /**
  * The toolbar, drawn in the overlay title bar area. Empty space drags the
  * window.
  */
 export function Toolbar() {
-  const { data: status } = useQuery({ queryKey: proxyStatusKey, queryFn: () => backend.getProxyStatus() });
+  const { data: status } = useQuery(queries.proxyStatus());
   const recording = status?.recording ?? true;
   const openCompose = useUi((s) => s.openCompose);
   const live = useUi((s) => s.store === LIVE_STORE);

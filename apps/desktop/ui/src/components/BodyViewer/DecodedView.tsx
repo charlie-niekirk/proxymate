@@ -10,12 +10,13 @@ import { backend } from "@/lib/backend";
 import { parseLossless } from "@/lib/body/losslessJson";
 import { formatSize } from "@/lib/flow";
 import { badgeMap, mappingFor, preview, withMapping } from "@/lib/proto/decoded";
-import { decodedKey, decodedRootKey, protoMappingsKey, protoTypesKey, queryClient } from "@/lib/query";
+import { decodedRootKey, protoMappingsKey, queryClient } from "@/lib/query";
 import { cn } from "@/lib/utils";
 import { useUi } from "@/store/ui";
 
 import { Tree } from "./JsonViews";
 import { Bar, Centered, Note } from "./parts";
+import { queries } from "@/lib/queries";
 
 const AUTO = "__auto";
 /** A live stream is decoded again this often while it lasts. */
@@ -45,8 +46,7 @@ export function DecodedView({
 }) {
   const store = useUi((s) => s.store);
   const decoded = useQuery({
-    queryKey: decodedKey(store, id, part, size, finished),
-    queryFn: () => backend.decodeBody(store, id, part),
+    ...queries.decoded(store, id, part, size, finished),
     refetchInterval: finished ? false : LIVE_REFRESH_MS,
     placeholderData: (previous) => previous,
   });
@@ -189,8 +189,8 @@ function Trailers({ status, trailers }: { status: GrpcStatus | null; trailers: {
 
 /** "Decode as…": picks a message type for this flow's body, saved as a mapping. */
 function DecodeAs({ part, url }: { part: BodyPart; url: string }) {
-  const types = useQuery({ queryKey: protoTypesKey, queryFn: () => backend.listProtoMessageTypes() });
-  const mappings = useQuery({ queryKey: protoMappingsKey, queryFn: () => backend.listProtoMappings() });
+  const types = useQuery(queries.protoTypes());
+  const mappings = useQuery(queries.protoMappings());
   const current = mappings.data ? mappingFor(mappings.data, url, part) : undefined;
   if (!types.data?.length) return null;
   const choose = async (value: string) => {

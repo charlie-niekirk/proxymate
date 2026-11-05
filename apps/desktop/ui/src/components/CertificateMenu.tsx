@@ -8,10 +8,9 @@ import { useTrustStatus } from "@/hooks/useTrustStatus";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
 import { regenerateCa } from "@/lib/actions";
-import { backend } from "@/lib/backend";
 import { copy } from "@/lib/clipboard";
-import { caInfoKey, proxyStatusKey } from "@/lib/query";
 import { useUi } from "@/store/ui";
+import { queries } from "@/lib/queries";
 
 /**
  * Toolbar popover for the root CA: whether the OS trusts it (the wizard
@@ -19,8 +18,8 @@ import { useUi } from "@/store/ui";
  * "Regenerate".
  */
 export function CertificateMenu() {
-  const { data: ca } = useQuery({ queryKey: caInfoKey, queryFn: () => backend.getCaInfo() });
-  const { data: status } = useQuery({ queryKey: proxyStatusKey, queryFn: () => backend.getProxyStatus() });
+  const { data: ca } = useQuery(queries.caInfo());
+  const { data: status } = useQuery(queries.proxyStatus());
   const { data: trust } = useTrustStatus();
   const openWizard = useUi((s) => s.setCertWizardOpen);
   const [open, setOpen] = useState(false);

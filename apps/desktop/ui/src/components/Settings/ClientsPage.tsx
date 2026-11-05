@@ -7,13 +7,12 @@ import { DeviceMenu } from "@/components/DeviceSetup/parts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { decideDevice, errorText, forgetDevice } from "@/lib/actions";
-import { backend } from "@/lib/backend";
-import { deviceAccessKey } from "@/lib/query";
 import { cn } from "@/lib/utils";
 import { useDevices } from "@/store/devices";
 import { useUi } from "@/store/ui";
 
 import { Note, Page, Section } from "./parts";
+import { queries } from "@/lib/queries";
 
 const LABEL: Record<DeviceClient_Deserialize["decision"], string> = {
   pending: "Waiting for an answer",
@@ -28,7 +27,7 @@ const LABEL: Record<DeviceClient_Deserialize["decision"], string> = {
  */
 export function ClientsPage() {
   const devices = useDevices((s) => s.snapshot.devices);
-  const { data: access } = useQuery({ queryKey: deviceAccessKey, queryFn: () => backend.getDeviceAccess() });
+  const { data: access } = useQuery(queries.deviceAccess());
   const openSettings = useUi((s) => s.openSettings);
   const [error, setError] = useState<string | null>(null);
   const run = (p: Promise<unknown>) => {

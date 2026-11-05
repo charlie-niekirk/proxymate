@@ -7,10 +7,9 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { commentFlow, errorText } from "@/lib/actions";
-import { backend } from "@/lib/backend";
-import { flowKey } from "@/lib/query";
 import { MAX_HEADER_COLUMNS, usePrefs } from "@/store/prefs";
 import { useUi } from "@/store/ui";
+import { queries } from "@/lib/queries";
 
 /** "Comment…": a flow's note, kept with it in saved sessions and HAR exports. */
 export function CommentDialog() {
@@ -30,7 +29,7 @@ export function CommentDialog() {
 }
 
 function CommentForm({ store, flow, onDone }: { store: number; flow: number; onDone: () => void }) {
-  const { data: summary, isPending } = useQuery({ queryKey: [...flowKey(store, flow), "summary"], queryFn: () => backend.getFlow(store, flow) });
+  const { data: summary, isPending } = useQuery(queries.flowSummary(store, flow));
   if (isPending) return null;
   return <CommentEditor store={store} flow={flow} initial={summary?.comment ?? ""} onDone={onDone} />;
 }

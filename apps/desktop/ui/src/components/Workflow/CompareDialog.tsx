@@ -12,10 +12,11 @@ import { backend } from "@/lib/backend";
 import { changedCount, diffHeaders, type KvDiffRow } from "@/lib/compare";
 import { flowUrl, formatMs, formatSize } from "@/lib/flow";
 import { bodyText } from "@/lib/http";
-import { flowKey } from "@/lib/query";
 import { lineDiff, prettyForDiff } from "@/lib/rewrite/lines";
 import { cn } from "@/lib/utils";
 import { useUi, type FlowRef } from "@/store/ui";
+import { compareBodyKey } from "@/lib/query";
+import { queries } from "@/lib/queries";
 
 /** Bodies are compared up to this size. */
 const BODY_MAX = 2 * 1024 * 1024;
@@ -54,16 +55,18 @@ interface Side {
 }
 
 function useSide(ref: FlowRef): Side {
-  const { data: summary } = useQuery({ queryKey: [...flowKey(ref.store, ref.id), "summary"], queryFn: () => backend.getFlow(ref.store, ref.id) });
-  const { data: detail } = useQuery({ queryKey: [...flowKey(ref.store, ref.id), "detail"], queryFn: () => backend.getFlowDetail(ref.store, ref.id) });
+  const { data: summary } = useQuery(queries.flowSummary(ref.store, ref.id));
+  const { data: detail } = useQuery(queries.flowDetail(ref.store, ref.id));
   return { summary, detail };
 }
 
 function useBody(ref: FlowRef, part: BodyPart, enabled: boolean) {
   return useQuery({
-    queryKey: ["body", ref.store, ref.id, part, "compare"],
-    queryFn: async () => {
-      const bytes = new Uint8Array(await backend.getBody(ref.store, ref.id, part, true, BODY_MAX).catch(() => new ArrayBuffer(0)));
+    queryKey: compareBodyKey(ref.store, ref.id, part),
+    queryFn: async ({ signal }) => {
+      const bytes = new Uint8Array(
+        await backend.getBody(ref.store, ref.id, part, true, BODY_MAX, signal).catch(() => new ArrayBuffer(0)),
+      );
       return { size: bytes.length, text: bodyText(bytes) };
     },
     enabled,

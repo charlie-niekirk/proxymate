@@ -9,17 +9,18 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { setLanAccess, setLanInterface, setSystemProxy, errorText } from "@/lib/actions";
 import { backend } from "@/lib/backend";
-import { deviceAccessKey, proxySettingsKey, proxyStatusKey, queryClient, systemProxyKey } from "@/lib/query";
+import { deviceAccessKey, proxySettingsKey, proxyStatusKey, queryClient, terminalEnvKey } from "@/lib/query";
 
 import { Note, NumberField, Page, Section } from "./parts";
+import { queries } from "@/lib/queries";
 
 /** Settings › Proxy: the port, LAN access, the system proxy and a proxied terminal. */
 export function ProxyPage() {
-  const { data: settings } = useQuery({ queryKey: proxySettingsKey, queryFn: () => backend.getProxySettings() });
-  const { data: status } = useQuery({ queryKey: proxyStatusKey, queryFn: () => backend.getProxyStatus() });
-  const { data: access } = useQuery({ queryKey: deviceAccessKey, queryFn: () => backend.getDeviceAccess() });
-  const { data: sysproxy } = useQuery({ queryKey: systemProxyKey, queryFn: () => backend.getSystemProxyStatus() });
-  const { data: env } = useQuery({ queryKey: ["terminal-env"], queryFn: () => backend.getTerminalEnv() });
+  const { data: settings } = useQuery(queries.proxySettings());
+  const { data: status } = useQuery(queries.proxyStatus());
+  const { data: access } = useQuery(queries.deviceAccess());
+  const { data: sysproxy } = useQuery(queries.systemProxy());
+  const { data: env } = useQuery(queries.terminalEnv());
   const lanIp = access?.interfaces.find((i) => i.name === access.interface)?.ip ?? null;
   const [error, setError] = useState<string | null>(null);
   const [lanError, setLanError] = useState<string | null>(null);
@@ -132,7 +133,7 @@ function PortForm({ settings, onError }: { settings: ProxySettings_Serialize; on
       setBusy(false);
       await queryClient.invalidateQueries({ queryKey: proxyStatusKey });
       await queryClient.invalidateQueries({ queryKey: deviceAccessKey });
-      await queryClient.invalidateQueries({ queryKey: ["terminal-env"] });
+      await queryClient.invalidateQueries({ queryKey: terminalEnvKey });
     }
   };
   return (

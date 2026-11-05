@@ -46,6 +46,7 @@ import { useUi } from "@/store/ui";
 import { KvEditor } from "./KvEditor";
 import { MatcherChips, type MatchChoice } from "./MatcherChips";
 import { Preview } from "./Preview";
+import { rewriteKey } from "@/lib/query";
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -146,7 +147,7 @@ export function RewriteDialog() {
   const { open, store, flow, rule, seq } = useUi((s) => s.rewrite);
   const close = useUi((s) => s.closeRewrite);
   const loaded = useQuery({
-    queryKey: ["rewrite", seq],
+    queryKey: rewriteKey(seq),
     enabled: open && flow !== null,
     queryFn: () => load(store, flow!, rule),
     gcTime: 0,

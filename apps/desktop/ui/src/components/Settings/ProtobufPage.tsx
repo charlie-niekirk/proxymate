@@ -8,6 +8,7 @@ import { backend } from "@/lib/backend";
 import { decodedRootKey, protoMappingsKey, protoSchemasKey, protoTypesKey, queryClient } from "@/lib/query";
 
 import { Note, Page, Section } from "./parts";
+import { queries } from "@/lib/queries";
 
 /** Schemas and mappings changed: everything decoded with them is stale. */
 async function refresh() {
@@ -22,8 +23,8 @@ async function refresh() {
  * for protobuf that isn't gRPC.
  */
 export function ProtobufPage() {
-  const schemas = useQuery({ queryKey: protoSchemasKey, queryFn: () => backend.listProtoSchemas() });
-  const mappings = useQuery({ queryKey: protoMappingsKey, queryFn: () => backend.listProtoMappings() });
+  const schemas = useQuery(queries.protoSchemas());
+  const mappings = useQuery(queries.protoMappings());
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const run = async (action: () => Promise<unknown>) => {

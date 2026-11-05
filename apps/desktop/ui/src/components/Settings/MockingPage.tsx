@@ -7,10 +7,11 @@ import { useMockSources } from "@/hooks/useMocking";
 import { errorText, generateOpenApiMocks, importOpenApiSpec, mockFromFile, removeOpenApiSpec } from "@/lib/actions";
 import { backend } from "@/lib/backend";
 import { formatSize } from "@/lib/flow";
-import { mockSourcesKey, openApiSpecsKey, queryClient } from "@/lib/query";
+import { mockSourcesKey, queryClient } from "@/lib/query";
 import { useUi } from "@/store/ui";
 
 import { Note, Page, Section } from "./parts";
+import { queries } from "@/lib/queries";
 
 /**
  * Settings › Mocking (M20): the mock library that "Serve from recording"
@@ -19,7 +20,7 @@ import { Note, Page, Section } from "./parts";
  */
 export function MockingPage() {
   const sources = useMockSources();
-  const specs = useQuery({ queryKey: openApiSpecsKey, queryFn: () => backend.listOpenApiSpecs() });
+  const specs = useQuery(queries.openApiSpecs());
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const run = async (action: () => Promise<unknown>) => {

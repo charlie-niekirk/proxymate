@@ -1,9 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { backend } from "@/lib/backend";
-import { trustStatusKey } from "@/lib/query";
+import { queries } from "@/lib/queries";
 
 /** CA trust, checked once at launch and again whenever asked. */
 export function useTrustStatus() {
-  return useQuery({ queryKey: trustStatusKey, queryFn: () => backend.getTrustStatus() });
+  return useQuery(queries.trustStatus());
 }

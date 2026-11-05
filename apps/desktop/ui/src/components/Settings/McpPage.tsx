@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import { useMcp } from "@/store/mcp";
 
 import { Section } from "./parts";
+import { queries } from "@/lib/queries";
 
 /**
  * Settings › MCP: the server on/off, read-only mode, how to connect an
@@ -101,7 +102,7 @@ function ServingLine({ status }: { status: McpStatus_Serialize }) {
 }
 
 function ConnectSection({ url }: { url: string }) {
-  const { data: token } = useQuery({ queryKey: mcpTokenKey, queryFn: () => backend.getMcpToken() });
+  const { data: token } = useQuery(queries.mcpToken());
   const [confirm, setConfirm] = useState(false);
   const regenerate = async () => {
     queryClient.setQueryData(mcpTokenKey, await backend.regenerateMcpToken());
@@ -206,8 +207,7 @@ const OUTCOME_STYLE: Record<McpCallOutcome, { color: string; bg: string }> = {
 function AuditSection() {
   const [limit, setLimit] = useState(50);
   const { data, isFetching, refetch } = useQuery({
-    queryKey: [...mcpAuditKey, limit],
-    queryFn: () => backend.getMcpAudit(null, limit),
+    ...queries.mcpAudit(limit),
     // Calls keep arriving while agents work.
     refetchInterval: 2000,
   });
