@@ -44,7 +44,7 @@ export function DeviceSetupSheet() {
         side="right"
         className="w-[480px] gap-0 text-xs sm:max-w-[480px]"
         data-testid="device-setup"
-        onOpenAutoFocus={(e) => e.preventDefault()}
+        initialFocus="content"
       >
         <SheetHeader className="gap-1 border-b p-3 pr-10">
           <SheetTitle className="flex items-center gap-2 text-sm">

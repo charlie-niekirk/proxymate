@@ -51,6 +51,7 @@ function CommandDialog({
       <DialogContent
         className={cn("top-[20%] translate-y-0 overflow-hidden p-0", className)}
         showCloseButton={showCloseButton}
+        initialFocus="[cmdk-input]"
       >
         <Command className="**:data-[slot=command-input-wrapper]:h-9 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group]]:px-1.5 [&_[cmdk-input]]:h-9 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-1.5">
           {children}

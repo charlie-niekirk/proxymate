@@ -351,8 +351,10 @@ export function JsonEditor({
       </div>
       <ContextMenu>
         <ContextMenuTrigger asChild>
+          {/* eslint-disable-next-line jsx-a11y-x/no-static-element-interactions -- the editor's keys (↩ F2 ⌘↩ ⌫ arrows) live on its scroller; tree roles are an R4 follow-up */}
           <div
             ref={scroller}
+            // eslint-disable-next-line jsx-a11y-x/no-noninteractive-tabindex -- focusable so its keys work; see above
             tabIndex={0}
             className="min-h-0 flex-1 overflow-auto font-mono text-[11.5px] outline-none"
             onKeyDown={onKeyDown}
@@ -490,6 +492,7 @@ const Line = memo(function Line({
   const Caret = row.expanded ? ChevronDown : ChevronRight;
   const expandable = isContainer(row.node) && children(row.node).length > 0;
   return (
+    // eslint-disable-next-line jsx-a11y-x/no-static-element-interactions -- rows are picked by pointer; the scroller takes the keys
     <div
       data-row={index}
       data-status={row.status}
@@ -597,6 +600,7 @@ function InlineInput({
   const invalid = error ?? validate?.(text) ?? null;
   return (
     <input
+      // eslint-disable-next-line jsx-a11y-x/no-autofocus -- the inline editor opens on the user's own ↩ or F2
       autoFocus
       value={text}
       spellCheck={false}

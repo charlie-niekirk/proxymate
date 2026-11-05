@@ -79,6 +79,7 @@ export function SsePanel({ id }: { id: number }) {
             const e = event(index);
             if (!e) return null;
             return (
+              // eslint-disable-next-line jsx-a11y-x/click-events-have-key-events, jsx-a11y-x/no-static-element-interactions -- a pointer shortcut; keyboard list navigation is an R4 follow-up
               <div
                 className={`${rowClass(shown?.index === e.index, index)} ${GRID}`}
                 onClick={() => setSelected(e)}

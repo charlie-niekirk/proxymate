@@ -65,7 +65,7 @@ export function ScriptsWindow() {
     <Dialog open={open} onOpenChange={(o) => !o && close()}>
       <DialogContent
         className="flex h-[88vh] flex-col gap-0 p-0 sm:max-w-[1240px]"
-        onOpenAutoFocus={(e) => e.preventDefault()}
+        initialFocus="content"
         // Escape closes the editor's completion list first, not the window.
         onEscapeKeyDown={(e) => document.querySelector(".cm-tooltip-autocomplete") && e.preventDefault()}
         data-testid="scripts-window"
@@ -242,6 +242,7 @@ function ScriptList({ scripts, selected, hasDraft }: { scripts: Script[]; select
                       {KIND_LABELS[kind]}
                     </div>
                     {group.map((script) => (
+                      // eslint-disable-next-line jsx-a11y-x/click-events-have-key-events, jsx-a11y-x/no-static-element-interactions -- a pointer shortcut; keyboard list navigation is an R4 follow-up
                       <div
                         key={script.id}
                         onClick={() => openScripts({ scriptId: script.id })}

@@ -86,7 +86,14 @@ export function CopyField({
     <CopyMenu items={[{ label: label ?? "Copy", text: value, testId: testId && `${testId}-menu` }, ...more]}>
       <div className="bg-muted/50 flex items-start gap-1 rounded-md border px-2 py-1">
         {multiline ? (
-          <pre className="min-w-0 flex-1 overflow-x-auto py-0.5 font-mono text-[11px] leading-4">{display ?? value}</pre>
+          <pre
+            // A long line scrolls sideways: reachable by keyboard (WCAG 2.1.1).
+            // eslint-disable-next-line jsx-a11y-x/no-noninteractive-tabindex
+            tabIndex={0}
+            className="focus-visible:ring-ring/70 min-w-0 flex-1 overflow-x-auto rounded-sm py-0.5 font-mono text-[11px] leading-4 outline-none focus-visible:ring-1"
+          >
+            {display ?? value}
+          </pre>
         ) : (
           <code className="min-w-0 flex-1 truncate py-0.5 font-mono text-[11px]">{display ?? value}</code>
         )}

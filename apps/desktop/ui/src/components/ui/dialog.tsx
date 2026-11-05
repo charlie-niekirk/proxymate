@@ -45,13 +45,32 @@ function DialogOverlay({
   )
 }
 
+/**
+ * Where focus lands when a dialog or sheet opens (R4): `"content"` is the
+ * dialog itself (its keys work, no field shows a ring), anything else is a
+ * selector inside it, falling back to the dialog when nothing matches yet.
+ * Every dialog names one: focus left behind on the window would close it on
+ * the next focus change, and a screen reader would stay on the trigger.
+ */
+export type InitialFocus = "content" | (string & {})
+
+export function focusInitial(e: Event, initialFocus: InitialFocus) {
+  e.preventDefault()
+  const root = e.currentTarget instanceof HTMLElement ? e.currentTarget : null
+  if (!root) return
+  const target = initialFocus === "content" ? root : (root.querySelector<HTMLElement>(initialFocus) ?? root)
+  target.focus({ preventScroll: true })
+}
+
 function DialogContent({
   className,
   children,
   showCloseButton = true,
+  initialFocus,
   ...props
-}: React.ComponentProps<typeof DialogPrimitive.Content> & {
+}: Omit<React.ComponentProps<typeof DialogPrimitive.Content>, "onOpenAutoFocus"> & {
   showCloseButton?: boolean
+  initialFocus: InitialFocus
 }) {
   return (
     <DialogPortal data-slot="dialog-portal">
@@ -63,6 +82,7 @@ function DialogContent({
           className
         )}
         {...props}
+        onOpenAutoFocus={(e) => focusInitial(e, initialFocus)}
       >
         {children}
         {showCloseButton && (

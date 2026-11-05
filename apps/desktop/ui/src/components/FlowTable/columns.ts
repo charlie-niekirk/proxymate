@@ -90,6 +90,9 @@ export function columnsById(headers: readonly HeaderColumn[]): Map<ColumnId, Col
 
 export const ROW_HEIGHT = 22;
 
+/** A row's DOM id: the grid's `aria-activedescendant` names the focused one. */
+export const rowDomId = (id: number) => `flow-row-${id}`;
+
 /** A visible column with its current width. */
 export interface PlacedColumn extends Column {
   px: number;

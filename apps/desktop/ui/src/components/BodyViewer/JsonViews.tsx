@@ -306,6 +306,7 @@ const TreeLine = memo(function TreeLine({
   const Caret = row.expanded ? ChevronDown : ChevronRight;
   const expandable = row.container !== null && row.size > 0;
   return (
+    // eslint-disable-next-line jsx-a11y-x/click-events-have-key-events, jsx-a11y-x/no-static-element-interactions -- a pointer shortcut; keyboard tree navigation is an R4 follow-up
     <div
       data-row={index}
       data-menu-key={index}

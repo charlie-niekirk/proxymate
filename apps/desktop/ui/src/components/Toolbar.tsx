@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Circle, FileCode2, ListChecks, Plus, Settings, ShieldAlert, Smartphone, Trash2 } from "lucide-react";
+import { FileCode2, ListChecks, Play, Plus, Settings, ShieldAlert, Smartphone, Square, Trash2 } from "lucide-react";
 
 import type { ProxyStatus_Serialize } from "@/bindings";
 import { BreakpointBadge } from "@/components/Breakpoints/BreakpointBadge";
@@ -40,15 +40,21 @@ export function Toolbar() {
           <Button
             variant="ghost"
             size="icon"
-            aria-label={recording ? "Pause recording" : "Resume recording"}
-            aria-pressed={recording}
+            aria-label={recording ? "Stop recording" : "Start recording"}
+            data-testid="record-button"
+            data-recording={recording}
             onClick={() => void setRecording(!recording)}
           >
-            <Circle className={recording ? "fill-[var(--m-delete)] text-[var(--m-delete)]" : "text-muted-foreground"} />
+            {recording ? (
+              <Square className="fill-[var(--record-stop)] text-[var(--record-stop)]" />
+            ) : (
+              <Play className="fill-[var(--record-start)] text-[var(--record-start)]" />
+            )}
           </Button>
         </TooltipTrigger>
         <TooltipContent>
-          {recording ? "Recording · click to pause" : "Paused · traffic is forwarded but not recorded"} · {shortcutLabel("e")}
+          {recording ? "Stop recording · traffic is still forwarded" : "Start recording · traffic is forwarded either way"} ·{" "}
+          {shortcutLabel("e")}
         </TooltipContent>
       </Tooltip>
       <Tooltip>

@@ -12,6 +12,8 @@ export interface CodeEditorProps {
   readOnly?: boolean;
   className?: string;
   testId?: string;
+  /** What a screen reader calls the editor (default "Body"). */
+  label?: string;
 }
 
 const CodeMirrorEditor = lazy(() => loadCodeEditor().then((m) => ({ default: m.CodeMirrorEditor })));

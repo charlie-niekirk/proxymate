@@ -41,8 +41,8 @@
   --destructive-solid: oklch(0.54 0.19 25);
   /* Behind modal dialogs and sheets. */
   --overlay: oklch(0 0 0 / 50%);
-  /* A pill's background on the blue selected row. */
-  --pill-on-selection: oklch(1 0 0 / 20%);
+  /* A pill's background on the blue selected row: a darker tint, so white text keeps 4.5:1. */
+  --pill-on-selection: oklch(0 0 0 / 22%);
   /* Paper for previews that need a known background: HTML documents and
    * QR codes (scanners want dark on light). */
   --paper: oklch(1 0 0);
@@ -117,6 +117,10 @@
   --s-blocked-bg: oklch(0.7 0.01 270 / 14%);
   --s-tunnel: var(--s-blocked);
   --s-tunnel-bg: var(--s-blocked-bg);
+
+  /* ---- the toolbar's record button: Start (Play) and Stop; 3:1 on the toolbar ---- */
+  --record-start: oklch(0.74 0.17 150);
+  --record-stop: oklch(0.68 0.2 25);
 
   /* ---- GraphQL operation badge (URL column) ---- */
   --graphql: oklch(0.74 0.15 330);
@@ -269,7 +273,7 @@
   --s-1xx-bg: oklch(0.5 0.03 250 / 12%);
   --s-2xx: oklch(0.47 0.13 150);
   --s-2xx-bg: oklch(0.47 0.13 150 / 12%);
-  --s-3xx: oklch(0.5 0.1 210);
+  --s-3xx: oklch(0.48 0.1 210);
   --s-3xx-bg: oklch(0.5 0.1 210 / 12%);
   --s-4xx: oklch(0.5 0.12 65);
   --s-4xx-bg: oklch(0.5 0.12 65 / 13%);
@@ -279,6 +283,8 @@
   --s-active-bg: oklch(0.5 0.12 65 / 13%);
   --s-paused: oklch(0.5 0.17 300);
   --s-paused-bg: oklch(0.5 0.17 300 / 12%);
+  --record-start: oklch(0.56 0.15 150);
+  --record-stop: oklch(0.55 0.21 27);
   --s-failed: oklch(0.52 0.2 25);
   --s-blocked: oklch(0.5 0.01 270);
   --s-blocked-bg: oklch(0.5 0.01 270 / 10%);

@@ -3,6 +3,7 @@ import reactHooks from "eslint-plugin-react-hooks";
 import reactRefresh from "eslint-plugin-react-refresh";
 import { defineConfig, globalIgnores } from "eslint/config";
 import globals from "globals";
+import jsxA11y from "eslint-plugin-jsx-a11y-x";
 import tseslint from "typescript-eslint";
 
 export default defineConfig([
@@ -26,6 +27,19 @@ export default defineConfig([
     files: ["src/**/*.{ts,tsx}"],
     languageOptions: { parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname } },
     rules: { "@typescript-eslint/no-floating-promises": "error" },
+  },
+  {
+    // R4: accessibility. The jsx-a11y-x fork is the upstream rule set with
+    // ESLint 10 support (eslint-plugin-jsx-a11y's peer range stops at 9).
+    files: ["src/**/*.tsx"],
+    extends: [jsxA11y.configs.recommended],
+    rules: {
+      // Our switches, selects and inputs are labelable controls inside a <label>.
+      "jsx-a11y-x/label-has-associated-control": [
+        "error",
+        { assert: "either", controlComponents: ["Switch", "Select", "Input", "PathInput"], depth: 4 },
+      ],
+    },
   },
   {
     // shadcn/ui components export variants next to components by design.

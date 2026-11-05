@@ -196,8 +196,10 @@ export function MediaView({ url, mime, size, kind }: { url: string; mime: string
       ) : (
         <div className="flex min-h-0 flex-1 items-center justify-center bg-[var(--pane-table)] p-3">
           {kind === "video" ? (
+            // eslint-disable-next-line jsx-a11y-x/media-has-caption -- captured bodies come with no captions to offer
             <video ref={media} src={url} controls preload="metadata" onLoadedMetadata={onMeta} onError={onError} className="max-h-full max-w-full" />
           ) : (
+            // eslint-disable-next-line jsx-a11y-x/media-has-caption -- captured bodies come with no captions to offer
             <audio ref={media} src={url} controls preload="metadata" onLoadedMetadata={onMeta} onError={onError} className="w-full max-w-md" />
           )}
         </div>

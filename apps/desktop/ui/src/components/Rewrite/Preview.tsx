@@ -152,7 +152,17 @@ export function Lines({ lines, testId = "preview-body" }: { lines: DiffLine[]; t
     if (first >= 0) virtualizer.scrollToIndex(Math.max(0, first - 3), { align: "start" });
   }, [first, virtualizer]);
   return (
-    <div ref={scroller} className="h-full overflow-auto font-mono text-[11px]" data-testid={testId} data-selectable>
+    <div
+      ref={scroller}
+      // Scrolls: reachable by keyboard (WCAG 2.1.1).
+      // eslint-disable-next-line jsx-a11y-x/no-noninteractive-tabindex
+      tabIndex={0}
+      role="region"
+      aria-label="Diff"
+      className="h-full overflow-auto font-mono text-[11px] outline-none"
+      data-testid={testId}
+      data-selectable
+    >
       <div style={{ height: virtualizer.getTotalSize(), position: "relative", minWidth: "100%" }}>
         {virtualizer.getVirtualItems().map((item) => {
           const line = lines[item.index]!;
