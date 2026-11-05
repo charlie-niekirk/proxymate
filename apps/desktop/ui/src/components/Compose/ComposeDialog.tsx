@@ -1,5 +1,5 @@
 import { Binary, Plus, Send, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import type { Header, RequestSpec_Serialize } from "@/bindings";
 import { CodeEditor } from "@/components/Compose/CodeEditor";
@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { bridge } from "@/dev/bridge";
+import { useBridge } from "@/dev/bridge";
 import { sendComposed } from "@/lib/actions";
 import {
   CONTENT_TYPES,
@@ -82,12 +82,7 @@ function ComposeForm({ spec, onSent }: { spec: RequestSpec_Serialize | null; onS
   };
 
   // Lets dev/remote.ts press Send in the real app.
-  useEffect(() => {
-    bridge.sendCompose = send;
-    return () => {
-      bridge.sendCompose = undefined;
-    };
-  });
+  useBridge({ sendCompose: send });
 
   return (
     // eslint-disable-next-line jsx-a11y-x/no-static-element-interactions -- ⌘↩ anywhere in the form sends; not a control

@@ -10,7 +10,7 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator,
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { bridge } from "@/dev/bridge";
+import { useBridge } from "@/dev/bridge";
 import {
   deleteAgentRules,
   deleteRule,
@@ -355,14 +355,7 @@ function RuleForm({ initial }: { initial: Rule }) {
   };
 
   // Lets dev/remote.ts press Save and Test in the real app.
-  useEffect(() => {
-    bridge.saveRule = save;
-    bridge.testRule = runTest;
-    return () => {
-      bridge.saveRule = undefined;
-      bridge.testRule = undefined;
-    };
-  });
+  useBridge({ saveRule: save, testRule: runTest });
 
   return (
     <div className="flex h-full flex-col" data-testid="rule-form">

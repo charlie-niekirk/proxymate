@@ -14,7 +14,7 @@ import { ContextMenuItem, ContextMenuSeparator } from "@/components/ui/context-m
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { bridge } from "@/dev/bridge";
+import { useBridge } from "@/dev/bridge";
 import { reportError, resolveBreakpoint } from "@/lib/actions";
 import { languageFor } from "@/lib/compose";
 import { base64, hexBytes } from "@/lib/copyFormats";
@@ -233,14 +233,7 @@ function BreakpointForm({ bp }: { bp: BreakpointInfo_Serialize }) {
     resolve({ action: "respond", status: answer.status ?? 200, headers: cleanHeaders(answer.headers), body: answer.body });
 
   // Lets dev/remote.ts press Execute and Abort in the real app.
-  useEffect(() => {
-    bridge.executeBreakpoint = execute;
-    bridge.abortBreakpoint = abort;
-    return () => {
-      bridge.executeBreakpoint = undefined;
-      bridge.abortBreakpoint = undefined;
-    };
-  });
+  useBridge({ executeBreakpoint: execute, abortBreakpoint: abort });
 
   return (
     <div className="flex h-full flex-col" data-testid="breakpoint-form">
@@ -410,14 +403,7 @@ function MessageForm({ bp }: { bp: BreakpointInfo_Serialize }) {
   };
   const drop = () => resolve({ action: "abort" });
 
-  useEffect(() => {
-    bridge.executeBreakpoint = send;
-    bridge.abortBreakpoint = drop;
-    return () => {
-      bridge.executeBreakpoint = undefined;
-      bridge.abortBreakpoint = undefined;
-    };
-  });
+  useBridge({ executeBreakpoint: send, abortBreakpoint: drop });
 
   const modes: MessageMode[] = originalText === null ? ["hex"] : isJson ? ["text", "tree", "hex"] : ["text", "hex"];
   return (
