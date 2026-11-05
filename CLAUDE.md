@@ -151,7 +151,7 @@ Targets:
 
 **Colours and themes**
 - Every colour is a token in `src/styles/tokens.css`: shadcn variables plus `--m-*` (methods), `--s-*` (status and state), `--url-*`, `--selection-*` and the rest. Don't hard-code colours in components (not even `bg-white` or `bg-black/50`: there are `--paper` and `--overlay`).
-- Both themes are first-class. `src/styles/contrast.test.ts` checks 4.5:1 for every text token on its surface (pills composited over the table) in dark and light; add a pair there when you add a text token.
+- Both themes are first-class. `src/styles/contrast.test.ts` checks 4.5:1 for every text token on its surface (pills composited over the table) in dark and light, and 3:1 for icon-only colours (`GRAPHICS`: the record button's `--record-start`/`--record-stop`). It scans `tokens.css` (R4): a new token fails it until it has a pair, or is a surface or line listed in `NOT_TEXT`.
 - Settings › Appearance (System/Light/Dark) lives in `store/prefs.ts` (local storage) with the column layout and sort; `lib/theme.ts` applies it and syncs the native window theme. `?theme=light` pins a theme in dev (Playwright).
 
 **Body viewers** (`src/components/BodyViewer/`)
@@ -163,7 +163,13 @@ Targets:
 **The flow table**
 - It is a custom div grid virtualised with TanStack Virtual, at a fixed 22 px row height. Do not swap in shadcn's DataTable.
 - Keep row components memoised, with stable callbacks.
-- Columns are defined in `FlowTable/columns.ts`; a new one also needs a `RowCell` case and a place in `DEFAULT_LAYOUT` (saved layouts pick it up at its default position).
+- Columns are defined in `FlowTable/columns.ts`; a new one also needs a `RowCell` case (`FlowRow.tsx`) and a place in `DEFAULT_LAYOUT` (saved layouts pick it up at its default position).
+- (R4) The table is an ARIA grid: rows of `gridcell`s, the header's row is `aria-rowindex` 1, the grid keeps the focus and names the focused row with `aria-activedescendant`. A sortable header's title is a button; resize handles are focusable separators (←/→, Home/End, ↩). Its keys are the pure `FlowTable/keys.ts` (tested in `keys.test.ts`); the grid ignores keys aimed at the header's controls.
+
+**Accessibility (R4)**
+- `eslint-plugin-jsx-a11y-x` lints (`recommended`; the ESLint 10 fork of jsx-a11y). A disable says why on the same line.
+- `DialogContent` and `SheetContent` require `initialFocus`: `"content"` (the dialog itself) or a selector inside it (`[data-autofocus]` on the field). Never `autoFocus`, and never leave focus on the window.
+- `e2e/a11y.spec.ts` runs axe (WCAG 2.1 A/AA) on the main window, the zoo and every dialog in both themes. A new dialog gets a case there. `PM_A11Y_DUMP=<file>` appends full reports while fixing.
 
 **Context menus and copying (M15)**
 - Copy through `lib/clipboard.ts` (`copy`, `copyLater` for text that is fetched first, `copyImage`); never call `navigator.clipboard` directly. Text formats (header lines, cookies, hex, Base64, filter terms) live in `lib/copyFormats.ts` with their tests.
