@@ -144,6 +144,10 @@ Targets:
 - Zustand (`store/ui.ts`) holds UI state; `store/prefs.ts` holds what persists across launches (appearance, columns, sort).
 - Row data lives in the non-reactive `RowCache`, never in React state.
 - TanStack Query holds server state (flow detail, bodies, rules, settings): one `QueryClient` and the key factories in `lib/query.ts`. Keep one shape per key.
+- (R4) Every query key lives in `lib/query.ts`, one root per shape (`query.test.ts` checks it). Keys of engine data are typed with `DataTag`, so `getQueryData`/`setQueryData` need no type arguments. Fetch through `lib/queries.ts` (`useQuery(queries.proxyStatus())`, or spread it and add `enabled`): one fetcher per key, passing TanStack's `signal`.
+- (R4) Writes that change cached state are `lib/mutations.ts` entries with their cache effect (a setter stores its answer, the rest invalidate what they made stale). Components run them with `useMutation`, non-React code with `runMutation`. Don't call `setQueryData`/`invalidateQueries` after a backend write by hand.
+- (R4) `Backend` reads that queries make take an optional trailing `AbortSignal`; `lib/abort.ts` (`withSignals`, `SIGNAL_ARG`) applies it to both backends. A new read that a query makes gets a `signal?` parameter and a `SIGNAL_ARG` entry.
+- (R4) Dev-only setup lives in `src/dev/`: `harness.ts` (env vars, URL parameters, the remote, the perf probe; `main.tsx` calls it only in dev) and `bridge.ts`, where editors register buttons for `remote.ts` with `useBridge({ … })`.
 
 **Design system: shadcn/ui** (Radix + Tailwind v4)
 - The components are copied into `src/components/ui/` and restyled to a compact density: 12–13 px text and 24–28 px controls. Add more with `npx shadcn@latest add <name>` from `apps/desktop/ui`.
