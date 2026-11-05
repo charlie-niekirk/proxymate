@@ -16,28 +16,10 @@ import { copyLater } from "@/lib/clipboard";
 import { withTerm } from "@/lib/copyFormats";
 import { CODE_LANGUAGES, flowUrl } from "@/lib/flow";
 import { toFlowSelection } from "@/lib/selection";
-import {
-  androidKey,
-  caInfoKey,
-  deviceAccessKey,
-  documentsKey,
-  interceptsKey,
-  mockSourcesKey,
-  openApiSpecsKey,
-  operationRootKey,
-  proxyStatusKey,
-  queryClient,
-  recordingSettingsKey,
-  rulesKey,
-  scriptsKey,
-  sslSettingsKey,
-  systemProxyKey,
-  trustStatusKey,
-  storeBodiesKey,
-  storeFlowsKey,
-} from "@/lib/query";
+import { documentsKey, interceptsKey, queryClient, rulesKey, scriptsKey, storeBodiesKey, storeFlowsKey } from "@/lib/query";
 import { GLOBAL_THROTTLE_RULE_ID, normalizeRule, withThrottle, type Rule, type ThrottlePreset } from "@/lib/rules";
 import { KIND_LABELS, newScript, normalizeScript, type Script } from "@/lib/scripts";
+import { mutations, runMutation } from "@/lib/mutations";
 import { LIVE_STORE, useUi } from "@/store/ui";
 
 /** Clears every live flow. The view's structural delta then empties the table. */
@@ -159,17 +141,17 @@ export async function copyFlowCode(store: number, flow: number, language: CodeLa
 
 /** Pauses or resumes recording; traffic is forwarded either way. */
 export async function setRecording(on: boolean) {
-  queryClient.setQueryData(proxyStatusKey, await backend.setRecording(on));
+  await runMutation(mutations.setRecording, on);
 }
 
 /** Stops decrypting `host`; its next CONNECTs are tunnelled. */
 export async function addSslBypass(host: string) {
-  queryClient.setQueryData(sslSettingsKey, await backend.addSslBypass(host));
+  await runMutation(mutations.addSslBypass, host);
 }
 
 /** Accepts (or stops accepting) `host`'s upstream certificate unverified. */
 export async function setInsecureUpstream(host: string, allow: boolean) {
-  queryClient.setQueryData(sslSettingsKey, await backend.setInsecureUpstream(host, allow));
+  await runMutation(mutations.setInsecureUpstream, { host, allow });
 }
 
 /**
@@ -177,32 +159,26 @@ export async function setInsecureUpstream(host: string, allow: boolean) {
  * `removeOldTrust`, the old CA is also removed from the keychain.
  */
 export async function regenerateCa(removeOldTrust = false) {
-  try {
-    queryClient.setQueryData(caInfoKey, await backend.regenerateCa(removeOldTrust));
-  } finally {
-    // A failure to untrust the old CA still leaves the new one in place.
-    await queryClient.invalidateQueries({ queryKey: caInfoKey });
-    await queryClient.invalidateQueries({ queryKey: trustStatusKey });
-  }
+  await runMutation(mutations.regenerateCa, removeOldTrust);
 }
 
 /** Installs and trusts the CA (macOS prompts), then re-checks trust. */
 export async function installCaTrust() {
-  queryClient.setQueryData(trustStatusKey, await backend.installCaTrust());
+  await runMutation(mutations.installCaTrust, undefined);
 }
 
 export async function uninstallCaTrust() {
-  queryClient.setQueryData(trustStatusKey, await backend.uninstallCaTrust());
+  await runMutation(mutations.uninstallCaTrust, undefined);
 }
 
 /** Turns the system proxy on or off; the status says if it failed. */
 export async function setSystemProxy(on: boolean) {
-  queryClient.setQueryData(systemProxyKey, await backend.setSystemProxy(on));
+  await runMutation(mutations.setSystemProxy, on);
 }
 
 /** Stops (or resumes) decrypting everything `app` sends. */
 export async function setAppSslExcluded(app: string, excluded: boolean) {
-  queryClient.setQueryData(sslSettingsKey, await backend.setAppSslExcluded(app, excluded));
+  await runMutation(mutations.setAppSslExcluded, { app, excluded });
 }
 
 /**
@@ -283,7 +259,7 @@ export async function setRuleEnabled(id: string, enabled: boolean) {
 }
 
 export async function reorderRules(ids: string[]) {
-  queryClient.setQueryData(rulesKey, await backend.reorderRules(ids));
+  await runMutation(mutations.reorderRules, ids);
 }
 
 export async function deleteAgentRules(): Promise<number> {
@@ -418,16 +394,14 @@ async function runSave(label: string, start: (onProgress: (p: SaveProgress_Seria
  * in the Rules Editor.
  */
 export async function mockFromStore(store: number) {
-  const source = await backend.createMockSource(store, null);
-  await queryClient.invalidateQueries({ queryKey: mockSourcesKey });
+  const source = await runMutation(mutations.createMockSource, { store, name: null });
   await openServeFrom(source.id);
 }
 
 /** "Mock from file…": the same for a session, HAR or Charles file that isn't open. */
 export async function mockFromFile(path: string | null = null) {
-  const source = await backend.createMockSourceFromFile(path);
+  const source = await runMutation(mutations.createMockSourceFromFile, path);
   if (!source) return;
-  await queryClient.invalidateQueries({ queryKey: mockSourcesKey });
   await openServeFrom(source.id);
 }
 
@@ -438,14 +412,11 @@ async function openServeFrom(source: string) {
 
 /** Imports an OpenAPI spec (asking for the file without `path`). */
 export async function importOpenApiSpec(path: string | null = null) {
-  const spec = await backend.importOpenApiSpec(path);
-  await refreshOpenApi();
-  return spec;
+  return runMutation(mutations.importOpenApiSpec, path);
 }
 
 export async function removeOpenApiSpec(id: number) {
-  await backend.removeOpenApiSpec(id);
-  await refreshOpenApi();
+  await runMutation(mutations.removeOpenApiSpec, id);
 }
 
 /** "Generate mocks": the spec's rules are saved disabled; the Rules Editor opens on the first. */
@@ -454,10 +425,6 @@ export async function generateOpenApiMocks(id: number) {
   await refreshRules();
   toast.success(`${rules.length} mock rule${rules.length === 1 ? "" : "s"} added, turned off until you review them`);
   if (rules[0]) useUi.getState().openRulesEditor({ ruleId: rules[0].id });
-}
-
-async function refreshOpenApi() {
-  await Promise.all([openApiSpecsKey, operationRootKey].map((queryKey) => queryClient.invalidateQueries({ queryKey })));
 }
 
 // ---- Breakpoints ----
@@ -481,19 +448,17 @@ export async function forgetDevice(ip: string) {
 
 /** Listens on every interface (or loopback only); the toolbar address follows. */
 export async function setLanAccess(on: boolean) {
-  queryClient.setQueryData(deviceAccessKey, await backend.setLanAccess(on));
-  await queryClient.invalidateQueries({ queryKey: proxyStatusKey });
+  await runMutation(mutations.setLanAccess, on);
 }
 
 /** Picks the interface the toolbar and the QR codes use. */
 export async function setLanInterface(name: string) {
-  queryClient.setQueryData(deviceAccessKey, await backend.setLanInterface(name));
-  await queryClient.invalidateQueries({ queryKey: proxyStatusKey });
+  await runMutation(mutations.setLanInterface, name);
 }
 
 /** Points an emulator's proxy at us, or clears it. */
 export async function setAndroidProxy(serial: string, on: boolean) {
-  queryClient.setQueryData(androidKey, await backend.setAndroidProxy(serial, on));
+  await runMutation(mutations.setAndroidProxy, { serial, on });
 }
 
 // ---- Scripts (M14) ----
@@ -625,7 +590,7 @@ export async function toggleBuiltinRule(id: string) {
 /** The flow table's "Never record this host". */
 export async function neverRecordHost(host: string) {
   try {
-    queryClient.setQueryData(recordingSettingsKey, await backend.neverRecordHost(host));
+    await runMutation(mutations.neverRecordHost, host);
     toast.success(`Not recording ${host}`, {
       description: "Its traffic is still proxied. Settings › Storage lists the hosts that aren't recorded.",
       action: { label: "Settings", onClick: () => useUi.getState().openSettings("storage") },

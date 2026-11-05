@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 
 import type { BodyPart, DecodedBody_Serialize, DecodedMessage_Serialize, GrpcStatus } from "@/bindings";
@@ -6,17 +6,16 @@ import { StatusPill } from "@/components/FlowTable/cells";
 import { KvTable } from "@/components/Inspector/KvTable";
 import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { reportError } from "@/lib/actions";
-import { backend } from "@/lib/backend";
 import { parseLossless } from "@/lib/body/losslessJson";
 import { formatSize } from "@/lib/flow";
 import { badgeMap, mappingFor, preview, withMapping } from "@/lib/proto/decoded";
-import { decodedRootKey, protoMappingsKey, queryClient } from "@/lib/query";
 import { cn } from "@/lib/utils";
 import { useUi } from "@/store/ui";
 
 import { Tree } from "./JsonViews";
 import { Bar, Centered, Note } from "./parts";
 import { queries } from "@/lib/queries";
+import { mutations } from "@/lib/mutations";
 
 const AUTO = "__auto";
 /** A live stream is decoded again this often while it lasts. */
@@ -191,20 +190,16 @@ function Trailers({ status, trailers }: { status: GrpcStatus | null; trailers: {
 function DecodeAs({ part, url }: { part: BodyPart; url: string }) {
   const types = useQuery(queries.protoTypes());
   const mappings = useQuery(queries.protoMappings());
+  const setMappings = useMutation({
+    ...mutations.setProtoMappings,
+    onError: (e) => reportError("Couldn't set the message type", e),
+  });
   const current = mappings.data ? mappingFor(mappings.data, url, part) : undefined;
   if (!types.data?.length) return null;
-  const choose = async (value: string) => {
-    try {
-      const next = withMapping(mappings.data ?? [], url, part, value === AUTO ? null : value, crypto.randomUUID());
-      await backend.setProtoMappings(next);
-      await queryClient.invalidateQueries({ queryKey: protoMappingsKey });
-      await queryClient.invalidateQueries({ queryKey: decodedRootKey });
-    } catch (e) {
-      reportError("Couldn't set the message type", e);
-    }
-  };
+  const choose = (value: string) =>
+    setMappings.mutate(withMapping(mappings.data ?? [], url, part, value === AUTO ? null : value, crypto.randomUUID()));
   return (
-    <Select value={current?.message_type ?? AUTO} onValueChange={(v) => void choose(v)}>
+    <Select value={current?.message_type ?? AUTO} onValueChange={choose}>
       <SelectTrigger className="h-5 max-w-56 px-1.5 text-[11px]" aria-label="Decode as" data-testid="decode-as">
         <SelectValue />
       </SelectTrigger>
