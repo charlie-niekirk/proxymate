@@ -20,7 +20,7 @@ Releases aren't notarised by Apple yet, so macOS blocks the first launch. Open t
 ## Develop
 
 Requirements:
-- Rust (stable, edition 2024).
+- Rust: the version pinned in `rust-toolchain.toml` (rustup installs it), edition 2024.
 - Node 22 or newer, with npm.
 - The [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your OS.
 

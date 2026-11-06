@@ -1,0 +1,7 @@
+# The one Rust toolchain for CI, releases and rustup users (R0). Bump it in its
+# own PR: a new stable brings new clippy lints, and the release must build with
+# the same compiler CI tested. Dependabot does not update this file.
+[toolchain]
+channel = "1.99.1"
+profile = "minimal"
+components = ["rustfmt", "clippy"]

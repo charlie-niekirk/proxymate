@@ -712,6 +712,7 @@ After M21 the user asked for an architecture, performance, UI and CI/CD review. 
 - Pin the Rust toolchain in `rust-toolchain.toml`. Give `ci.yml` `permissions: contents: read`, a `timeout-minutes` on every job, and `cancel-in-progress` for pull requests only.
 - fmt and clippy on Ubuntu only. Tests on macOS and Linux (per-test timeouts with `cargo nextest`). Skip docs-only changes.
 - Actions pinned by SHA, Dependabot for cargo, npm and Actions, `cargo-deny` (advisories, licences, duplicates) and `npm audit --omit=dev`.
+- As built: one `ci` gate job is the required check (a skipped job counts as passed, so docs-only pull requests still report). Rust jobs share `.github/actions/setup-rust` (the pinned toolchain, Tauri's Linux libraries, the cargo cache). nextest kills a test after 2 minutes. cargo-deny fails on advisories, yanked crates, licences outside the allow list and unknown sources, and only warns on duplicate versions (Tauri's Windows and gtk stacks can't be unified from here). The first run fixed tokio 1.54.0 (yanked, RUSTSEC-2026-0384), zip via `tauri-plugin-updater` 2.14.1 and zstd-safe 7.4.0; the unmaintained `paste` (via specta) and `proc-macro-error` (via gtk 0.18) are ignored with reasons in `deny.toml`.
 
 ### R1: Quick fixes and safety nets (`r1-ui-fixes`, `r1-format-pins`)
 - UI:
