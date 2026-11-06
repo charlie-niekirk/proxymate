@@ -48,7 +48,7 @@ export function CertWizard() {
         className="sm:max-w-[480px]"
         data-testid="cert-wizard"
         // Don't ring the first button (Copy terminal env) on open.
-        onOpenAutoFocus={(e) => e.preventDefault()}
+        initialFocus="content"
       >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">

@@ -61,7 +61,7 @@ export function DeviceAllowPrompt() {
 
   return (
     <Dialog open={!!pending} onOpenChange={(open) => !open && dismiss()}>
-      <DialogContent className="sm:max-w-[400px]" data-testid="device-allow-prompt">
+      <DialogContent className="sm:max-w-[400px]" initialFocus="[data-autofocus]" data-testid="device-allow-prompt">
         <DialogHeader>
           <CopyMenu items={[pending && { label: "Copy IP address", text: pending.ip, what: "IP address" }]}>
             <DialogTitle className="flex items-center gap-2">
@@ -86,7 +86,7 @@ export function DeviceAllowPrompt() {
           </label>
           <Input
             id="device-nickname"
-            autoFocus
+            data-autofocus
             placeholder="e.g. Charlie's iPhone"
             value={nickname}
             onChange={(e) => setNickname(e.target.value)}

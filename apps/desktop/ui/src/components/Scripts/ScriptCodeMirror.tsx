@@ -67,6 +67,7 @@ export function ScriptCodeMirror({ value, kind, onChange, testId = "script-edito
       state: EditorState.create({
         doc: value,
         extensions: [
+          EditorView.contentAttributes.of({ "aria-label": "Script" }),
           lineNumbers(),
           history(),
           drawSelection(),

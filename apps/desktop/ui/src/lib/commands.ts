@@ -74,6 +74,14 @@ export function shortcutLabel(key: string, mods: { alt?: boolean; bare?: boolean
   return `Ctrl+${mods.alt ? "Alt+" : ""}${name}`;
 }
 
+/**
+ * Whether the proxy records, from the toolbar's status query; recording is
+ * the default before it has answered.
+ */
+function isRecording(): boolean {
+  return queryClient.getQueryData<{ recording: boolean }>(proxyStatusKey)?.recording ?? true;
+}
+
 /** The selected flow's summary, if one is selected. */
 async function selectedFlow() {
   const { store, selectedId } = useUi.getState();
@@ -282,15 +290,22 @@ export const COMMANDS: AppCommand[] = [
     run: () => clearFlows(),
   },
   {
-    id: "record",
-    title: "Pause or resume recording",
+    id: "record-start",
+    title: "Start recording",
     group: "Capture",
     key: "e",
-    keywords: ["record", "capture"],
-    run: async () => {
-      const status = queryClient.getQueryData<{ recording: boolean }>(proxyStatusKey) ?? (await backend.getProxyStatus());
-      await setRecording(!status.recording);
-    },
+    keywords: ["record", "capture", "resume"],
+    enabled: () => !isRecording(),
+    run: () => setRecording(true),
+  },
+  {
+    id: "record-stop",
+    title: "Stop recording",
+    group: "Capture",
+    key: "e",
+    keywords: ["record", "capture", "pause"],
+    enabled: isRecording,
+    run: () => setRecording(false),
   },
   {
     id: "auto-select",
@@ -487,7 +502,12 @@ export function isEditable(target: EventTarget | null): boolean {
 }
 
 function inFlowTable(target: EventTarget | null): boolean {
-  return target instanceof HTMLElement && target.closest(`#${FLOW_TABLE_ID}`) !== null;
+  // Not on the header's sort buttons and resize handles: ⌫ there isn't "delete the selection".
+  return (
+    target instanceof HTMLElement &&
+    target.closest(`#${FLOW_TABLE_ID}`) !== null &&
+    target.closest('[role="columnheader"]') === null
+  );
 }
 
 /** The command `e` triggers, if any (the palette's own ⌘K aside). */
@@ -496,10 +516,15 @@ export function commandForKey(e: KeyboardEvent): AppCommand | undefined {
   const modified = e.metaKey || e.ctrlKey;
   // ⌥ turns letters into symbols on a Mac keyboard: match the physical key.
   const key = e.key.length === 1 ? (e.altKey && /^Key[A-Z]$/.test(e.code) ? e.code.slice(3) : e.key).toLowerCase() : e.key;
+  // Two commands may share a key when only one is enabled at a time (⌘E
+  // starts or stops recording).
   const command = COMMANDS.find(
-    (c) => c.key === key && (c.bare ? !modified && !e.altKey : modified && Boolean(c.alt) === e.altKey),
+    (c) =>
+      c.key === key &&
+      (c.bare ? !modified && !e.altKey : modified && Boolean(c.alt) === e.altKey) &&
+      c.enabled?.() !== false,
   );
-  if (!command || command.enabled?.() === false) return undefined;
+  if (!command) return undefined;
   if ((command.bare || command.inTable) && !inFlowTable(e.target)) return undefined;
   // In text, ⌘⌫ deletes to the start of the line; in a body viewer ⌘F
   // searches the body.

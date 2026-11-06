@@ -51,7 +51,7 @@ export function BreakpointEditor() {
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent
         className="flex h-[80vh] flex-col gap-0 p-0 sm:max-w-[1080px]"
-        onOpenAutoFocus={(e) => e.preventDefault()}
+        initialFocus="content"
         onEscapeKeyDown={keepEscapeInEditor}
         data-testid="breakpoint-editor"
       >
@@ -134,15 +134,15 @@ function QueueItem({ bp, selected, onSelect }: { bp: BreakpointInfo_Serialize; s
         type="button"
         onClick={onSelect}
         data-selected={selected}
-        className="hover:bg-accent data-[selected=true]:bg-selection data-[selected=true]:text-selection-foreground flex w-full min-w-0 flex-col gap-0.5 rounded-sm px-2 py-1 text-left text-xs"
+        className="group/row hover:bg-accent data-[selected=true]:bg-selection data-[selected=true]:text-selection-foreground flex w-full min-w-0 flex-col gap-0.5 rounded-sm px-2 py-1 text-left text-xs"
       >
         <div className="flex items-center gap-1.5">
           <PhasePill phase={bp.phase} />
           {bp.message ? <MessagePill direction={bp.message.direction} /> : <MethodPill method={bp.request.method} />}
-          <span className="ml-auto font-mono text-2xs opacity-70">{bp.flow_id !== null ? `#${bp.flow_id + 1}` : ""}</span>
+          <span className="text-muted-foreground group-data-[selected=true]/row:text-selection-foreground ml-auto font-mono text-2xs">{bp.flow_id !== null ? `#${bp.flow_id + 1}` : ""}</span>
         </div>
         <span className="truncate font-mono text-2xs">{bp.request.url}</span>
-        <span className="flex items-center gap-1 text-2xs opacity-70">
+        <span className="text-muted-foreground group-data-[selected=true]/row:text-selection-foreground flex items-center gap-1 text-2xs">
           <span className="truncate">{bp.rule_name}</span>
           <Countdown deadline={bp.deadline_ms} />
         </span>
@@ -154,7 +154,7 @@ function QueueItem({ bp, selected, onSelect }: { bp: BreakpointInfo_Serialize; s
 function PhasePill({ phase }: { phase: "request" | "response" }) {
   return (
     <span
-      className="inline-flex h-4 items-center rounded-sm px-1 text-2xs font-semibold"
+      className="inline-flex h-4 items-center rounded-sm px-1 text-2xs font-semibold group-data-[selected=true]/row:!bg-[var(--pill-on-selection)] group-data-[selected=true]/row:!text-selection-foreground"
       style={{ color: "var(--s-paused)", backgroundColor: "var(--s-paused-bg)" }}
     >
       {phase === "request" ? "Request" : "Response"}
@@ -164,7 +164,7 @@ function PhasePill({ phase }: { phase: "request" | "response" }) {
 
 function MessagePill({ direction }: { direction: "sent" | "received" }) {
   return (
-    <span className="text-muted-foreground inline-flex items-center gap-0.5 text-2xs font-semibold">
+    <span className="text-muted-foreground group-data-[selected=true]/row:text-selection-foreground inline-flex items-center gap-0.5 text-2xs font-semibold">
       {direction === "sent" ? (
         <ArrowUp className="size-3 text-[var(--ws-sent)]" />
       ) : (
@@ -596,8 +596,18 @@ function HeaderTable({ rows, onChange }: { rows: Header[]; onChange: (rows: Head
       <span className="text-muted-foreground font-semibold">Headers</span>
       {rows.map((h, i) => (
         <div key={i} className="flex items-center gap-1">
-          <Input value={h.name} onChange={(e) => update(i, { name: e.target.value })} className="h-6 w-56 shrink-0 font-mono text-xs" />
-          <Input value={h.value} onChange={(e) => update(i, { value: e.target.value })} className="h-6 font-mono text-xs" />
+          <Input
+            value={h.name}
+            onChange={(e) => update(i, { name: e.target.value })}
+            className="h-6 w-56 shrink-0 font-mono text-xs"
+            aria-label={`Header ${i + 1} name`}
+          />
+          <Input
+            value={h.value}
+            onChange={(e) => update(i, { value: e.target.value })}
+            className="h-6 font-mono text-xs"
+            aria-label={`Header ${i + 1} value`}
+          />
           <Button variant="ghost" size="icon-xs" aria-label="Remove header" onClick={() => onChange(rows.filter((_, j) => j !== i))}>
             <X />
           </Button>

@@ -54,7 +54,7 @@ export function SettingsDialog() {
     <Dialog open={open} onOpenChange={(o) => !o && close()}>
       <DialogContent
         className="flex h-[80vh] flex-col gap-0 p-0 sm:max-w-[880px]"
-        onOpenAutoFocus={(e) => e.preventDefault()}
+        initialFocus="content"
         data-testid="settings"
       >
         <DialogHeader className="border-b px-4 py-2.5">

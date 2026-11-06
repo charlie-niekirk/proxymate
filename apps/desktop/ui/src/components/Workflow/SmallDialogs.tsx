@@ -18,7 +18,7 @@ export function CommentDialog() {
   const close = useUi((s) => s.closeComment);
   return (
     <Dialog open={open} onOpenChange={(o) => !o && close()}>
-      <DialogContent className="sm:max-w-[440px]" data-testid="comment-dialog">
+      <DialogContent className="sm:max-w-[440px]" initialFocus="[data-autofocus]" data-testid="comment-dialog">
         <DialogHeader>
           <DialogTitle className="text-sm">Comment</DialogTitle>
           <DialogDescription>Saved with the flow in sessions and HAR exports. Find commented flows with is:commented.</DialogDescription>
@@ -55,7 +55,7 @@ function CommentEditor({ store, flow, initial, onDone }: { store: number; flow: 
       className="flex flex-col gap-3"
     >
       <textarea
-        autoFocus
+        data-autofocus
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
@@ -91,7 +91,7 @@ export function AddColumnDialog() {
   const setOpen = useUi((s) => s.setAddColumnOpen);
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="sm:max-w-[400px]" data-testid="add-column-dialog">
+      <DialogContent className="sm:max-w-[400px]" initialFocus="[data-autofocus]" data-testid="add-column-dialog">
         <DialogHeader>
           <DialogTitle className="text-sm">Add header column</DialogTitle>
           <DialogDescription>
@@ -140,7 +140,7 @@ function AddColumnForm({ onDone }: { onDone: () => void }) {
           </SelectContent>
         </Select>
         <Input
-          autoFocus
+          data-autofocus
           value={name}
           onChange={(e) => {
             setName(e.target.value);

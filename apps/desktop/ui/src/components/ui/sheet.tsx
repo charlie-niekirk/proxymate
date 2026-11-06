@@ -3,6 +3,8 @@ import { cn } from "@/lib/utils"
 import { XIcon } from "lucide-react"
 import { Dialog as SheetPrimitive } from "radix-ui"
 
+import { focusInitial, type InitialFocus } from "@/components/ui/dialog"
+
 function Sheet({ ...props }: React.ComponentProps<typeof SheetPrimitive.Root>) {
   return <SheetPrimitive.Root data-slot="sheet" {...props} />
 }
@@ -46,10 +48,12 @@ function SheetContent({
   children,
   side = "right",
   showCloseButton = true,
+  initialFocus,
   ...props
-}: React.ComponentProps<typeof SheetPrimitive.Content> & {
+}: Omit<React.ComponentProps<typeof SheetPrimitive.Content>, "onOpenAutoFocus"> & {
   side?: "top" | "right" | "bottom" | "left"
   showCloseButton?: boolean
+  initialFocus: InitialFocus
 }) {
   return (
     <SheetPortal>
@@ -69,6 +73,7 @@ function SheetContent({
           className
         )}
         {...props}
+        onOpenAutoFocus={(e) => focusInitial(e, initialFocus)}
       >
         {children}
         {showCloseButton && (

@@ -40,7 +40,7 @@ export function ComposeDialog() {
     <Dialog open={open} onOpenChange={(o) => !o && close()}>
       <DialogContent
         className="flex h-[78vh] flex-col gap-0 p-0 sm:max-w-[920px]"
-        onOpenAutoFocus={(e) => e.preventDefault()}
+        initialFocus="content"
         data-testid="compose"
       >
         <DialogHeader className="border-b px-4 py-2.5">
@@ -90,6 +90,7 @@ function ComposeForm({ spec, onSent }: { spec: RequestSpec_Serialize | null; onS
   });
 
   return (
+    // eslint-disable-next-line jsx-a11y-x/no-static-element-interactions -- ⌘↩ anywhere in the form sends; not a control
     <div
       className="flex min-h-0 flex-1 flex-col"
       onKeyDown={(e) => {

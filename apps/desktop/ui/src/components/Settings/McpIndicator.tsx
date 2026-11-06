@@ -36,7 +36,7 @@ export function McpIndicator() {
         <Button
           variant="ghost"
           size={clients.length ? "sm" : "icon"}
-          aria-label="MCP server"
+          aria-label={clients.length > 0 ? `MCP server: ${clients.length} connected` : "MCP server"}
           onClick={() => openSettings("mcp")}
           data-testid="mcp-indicator"
           className={color}

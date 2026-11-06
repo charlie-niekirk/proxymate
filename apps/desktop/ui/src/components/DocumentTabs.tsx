@@ -28,22 +28,26 @@ export function DocumentTabs() {
       </TabMenu>
       {documents.map((doc) => (
         <TabMenu key={doc.store} store={doc.store} name={doc.name} path={doc.path}>
-          <Tab active={store === doc.store} onClick={() => setStore(doc.store)} title={doc.path} testId={`tab-${doc.store}`}>
+          <Tab
+            active={store === doc.store}
+            onClick={() => setStore(doc.store)}
+            title={doc.path}
+            testId={`tab-${doc.store}`}
+            close={
+              <button
+                type="button"
+                aria-label={`Close ${doc.name}`}
+                data-testid={`close-${doc.store}`}
+                className="hover:bg-accent focus-visible:ring-ring -mr-1 rounded-sm p-0.5 opacity-60 outline-none hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-1"
+                onClick={() => void closeDocument(doc.store)}
+              >
+                <X className="size-3" />
+              </button>
+            }
+          >
             {doc.kind === "session" ? <Archive className="size-3" /> : <FileJson className="size-3" />}
             <span className="max-w-48 truncate">{doc.name}</span>
             <span className="text-muted-foreground text-2xs tabular-nums">{formatCount(doc.flows)}</span>
-            <span
-              role="button"
-              aria-label={`Close ${doc.name}`}
-              data-testid={`close-${doc.store}`}
-              className="hover:bg-accent -mr-1 rounded-sm p-0.5 opacity-60 hover:opacity-100"
-              onClick={(e) => {
-                e.stopPropagation();
-                void closeDocument(doc.store);
-              }}
-            >
-              <X className="size-3" />
-            </span>
           </Tab>
         </TabMenu>
       ))}
@@ -88,24 +92,29 @@ function TabMenu({ store, name, path, children }: { store: number; name?: string
   );
 }
 
+/**
+ * A tab: its look on a wrapper, so the close button sits beside the tab's
+ * button rather than inside it (a button can't hold another).
+ */
 function Tab({
   active,
   onClick,
   title,
   testId,
+  close,
   children,
   ...rest
-}: Omit<ComponentProps<"button">, "onClick"> & {
+}: Omit<ComponentProps<"div">, "onClick"> & {
   active: boolean;
   onClick: () => void;
   title?: string;
   testId?: string;
+  close?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
-    <button
+    <div
       {...rest}
-      onClick={onClick}
       title={title}
       data-active={active}
       data-testid={testId}
@@ -114,7 +123,15 @@ function Tab({
         active && "bg-background text-foreground border-border",
       )}
     >
-      {children}
-    </button>
+      <button
+        type="button"
+        aria-current={active ? "page" : undefined}
+        onClick={onClick}
+        className="flex items-center gap-1.5 self-stretch outline-none focus-visible:underline"
+      >
+        {children}
+      </button>
+      {close}
+    </div>
   );
 }

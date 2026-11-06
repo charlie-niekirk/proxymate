@@ -30,7 +30,11 @@ export function CompareDialog() {
   const close = useUi((s) => s.closeCompare);
   return (
     <Dialog open={open} onOpenChange={(o) => !o && close()}>
-      <DialogContent className="flex h-[86vh] flex-col gap-0 p-0 sm:max-w-[1180px]" data-testid="compare">
+      <DialogContent
+        className="flex h-[86vh] flex-col gap-0 p-0 sm:max-w-[1180px]"
+        initialFocus='[role="tab"][data-state="active"]'
+        data-testid="compare"
+      >
         <DialogHeader className="border-b px-4 py-2.5">
           <DialogTitle className="flex items-center gap-2 text-sm">
             <Columns2 className="size-4" />

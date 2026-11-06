@@ -12,7 +12,15 @@ import { cn } from "@/lib/utils";
 import type { CodeEditorProps } from "./CodeEditor";
 
 /** The CodeMirror behind `CodeEditor` (which loads this module lazily). */
-export function CodeMirrorEditor({ value, language, onChange, readOnly = false, className, testId = "code-editor" }: CodeEditorProps) {
+export function CodeMirrorEditor({
+  value,
+  language,
+  onChange,
+  readOnly = false,
+  className,
+  testId = "code-editor",
+  label = "Body",
+}: CodeEditorProps) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const lang = useRef(new Compartment());
@@ -30,6 +38,7 @@ export function CodeMirrorEditor({ value, language, onChange, readOnly = false, 
       state: EditorState.create({
         doc: value,
         extensions: [
+          EditorView.contentAttributes.of({ "aria-label": label }),
           lineNumbers(),
           history(),
           drawSelection(),

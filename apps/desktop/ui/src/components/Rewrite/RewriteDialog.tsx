@@ -157,12 +157,8 @@ export function RewriteDialog() {
     <Dialog open={open} onOpenChange={(o) => !o && close()}>
       <DialogContent
         className="flex h-[88vh] flex-col gap-0 p-0 sm:max-w-[1320px]"
-        // Focus the dialog itself, not its first field: focus left outside
-        // (on the flow table) would close it on the next focus change.
-        onOpenAutoFocus={(e) => {
-          e.preventDefault();
-          (e.currentTarget as HTMLElement | null)?.focus();
-        }}
+        // The dialog itself, not its first field: the editors take keys.
+        initialFocus="content"
         onEscapeKeyDown={keepEscapeInEditor}
         data-testid="rewrite-dialog"
       >

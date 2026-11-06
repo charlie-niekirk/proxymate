@@ -54,7 +54,7 @@ export function RulesEditor() {
     <Dialog open={open} onOpenChange={(o) => !o && close()}>
       <DialogContent
         className="flex h-[84vh] flex-col gap-0 p-0 sm:max-w-[1180px]"
-        onOpenAutoFocus={(e) => e.preventDefault()}
+        initialFocus="content"
         data-testid="rules-editor"
       >
         <DialogHeader className="border-b px-4 py-2.5">
@@ -195,6 +195,7 @@ function RuleList({ rules, selected, hasDraft }: { rules: Rule[]; selected: stri
               )}
               {rules.length === 0 && !hasDraft && <div className="text-muted-foreground p-2 text-xs">No rules yet.</div>}
               {rules.map((rule) => (
+                // eslint-disable-next-line jsx-a11y-x/click-events-have-key-events, jsx-a11y-x/no-static-element-interactions -- a pointer shortcut; keyboard list navigation is an R4 follow-up
                 <div
                   key={rule.id}
                   draggable
@@ -280,6 +281,7 @@ function BreakpointTimeout() {
       <NumberInput
         value={settings.breakpoint_timeout_secs}
         className="w-16"
+        aria-label="Breakpoint timeout in seconds"
         onChange={(secs) => {
           void backend
             .setRuleSettings({ breakpoint_timeout_secs: secs ?? 0 })

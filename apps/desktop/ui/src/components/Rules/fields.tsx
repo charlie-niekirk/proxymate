@@ -161,6 +161,7 @@ export function NumberInput({
   max,
   className,
   placeholder,
+  "aria-label": ariaLabel,
 }: {
   value: number | null;
   onChange: (value: number | null) => void;
@@ -168,10 +169,12 @@ export function NumberInput({
   max?: number;
   className?: string;
   placeholder?: string;
+  "aria-label"?: string;
 }) {
   return (
     <Input
       type="number"
+      aria-label={ariaLabel}
       min={min}
       max={max}
       value={value ?? ""}

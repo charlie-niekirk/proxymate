@@ -25,7 +25,7 @@ export function RepeatDialog() {
   const close = useUi((s) => s.closeRepeat);
   return (
     <Dialog open={open} onOpenChange={(o) => !o && close()}>
-      <DialogContent className="sm:max-w-[460px]" data-testid="repeat-dialog">
+      <DialogContent className="sm:max-w-[460px]" initialFocus='[data-testid="repeat-iterations"]' data-testid="repeat-dialog">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-sm">
             <Repeat className="size-4" />
@@ -144,7 +144,7 @@ function Field({ label, hint, children }: { label: string; hint: string; childre
   return (
     <label className="flex flex-col gap-1">
       <span className="text-muted-foreground">
-        {label} <span className="opacity-70">({hint})</span>
+        {label} <span>({hint})</span>
       </span>
       {children}
     </label>

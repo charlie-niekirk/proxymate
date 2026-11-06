@@ -9,8 +9,12 @@ const css = readFileSync(path.resolve(process.cwd(), "src/styles/tokens.css"), "
 
 /**
  * Every text colour token must reach 4.5:1 (WCAG AA) against what it is drawn
- * on, in both themes. Pills are a translucent tint over the table, so the
- * tint is composited first. Values come straight from tokens.css.
+ * on, in both themes, and every icon-only control colour 3:1 (non-text, WCAG
+ * 1.4.11). Pills are a translucent tint over the table, so the tint is
+ * composited first. Values come straight from tokens.css, and the file is
+ * scanned so a new token can't skip the check: it is either a text token with
+ * a pair below, a graphic with a pair in `GRAPHICS`, or a surface/line that
+ * `NOT_TEXT` names.
  */
 
 type Rgba = [number, number, number, number];
@@ -96,6 +100,11 @@ const PAIRS: [string, string[]][] = [
   ["--destructive", ["--background"]],
   ["--destructive-foreground", ["--destructive-solid"]],
   ["--selection-fg", ["--selection-bg"]],
+  // Pills on a selected row (R4: axe).
+  ["--selection-fg", ["--selection-bg", "--pill-on-selection"]],
+  ["--sidebar-foreground", ["--sidebar"]],
+  ["--sidebar-accent-foreground", ["--sidebar", "--sidebar-accent"]],
+  ["--sidebar-primary-foreground", ["--sidebar-primary"]],
   ["--muted-foreground", ALT_ROW],
   ["--url-scheme", ALT_ROW],
   ["--url-host", ALT_ROW],
@@ -152,6 +161,45 @@ const PAIRS: [string, string[]][] = [
   ["--foreground", ["--background", "--code-match-current"]],
 ];
 
+/** Icon-only controls: 3:1 on what they sit on (R4: the record button). */
+const GRAPHICS: [string, string[]][] = [
+  ["--record-start", ["--pane-toolbar"]],
+  ["--record-stop", ["--pane-toolbar"]],
+];
+
+/**
+ * Tokens that are not drawn as text: surfaces, tints, lines, chart and timing
+ * bars (labelled elsewhere) and non-colours. Anything else in tokens.css is a
+ * text colour and needs a pair.
+ */
+const NOT_TEXT: RegExp[] = [
+  /-bg$/,
+  /^--(background|card|popover|primary|secondary|muted|accent|destructive-solid|paper|overlay|radius)$/,
+  /^--(border|input|ring)$/,
+  /^--sidebar(-accent|-primary|-border|-ring)?$/,
+  /^--pane-/,
+  /^--pill-on-selection$/,
+  /^--code-(gutter|active-line|selection|match|match-current|guide|row-hover)$/,
+  /^--checker-/,
+  /^--chart-\d$/,
+  /^--timing-/,
+];
+
+const declared = [...new Set([...dark.keys(), ...light.keys()])];
+
+describe("tokens.css", () => {
+  it("names no text token without a contrast pair", () => {
+    const checked = new Set([...PAIRS, ...GRAPHICS].map(([fg]) => fg));
+    const unchecked = declared.filter((t) => !checked.has(t) && !NOT_TEXT.some((re) => re.test(t)));
+    expect(unchecked, "add a pair to PAIRS (or GRAPHICS), or list a surface in NOT_TEXT").toEqual([]);
+  });
+
+  it("lists no pair or exemption for a token it doesn't declare", () => {
+    const names = [...PAIRS, ...GRAPHICS].flatMap(([fg, bg]) => [fg, ...bg]);
+    expect(names.filter((n) => !declared.includes(n))).toEqual([]);
+  });
+});
+
 describe.each([
   ["dark", dark],
   ["light", light],
@@ -159,5 +207,9 @@ describe.each([
   it.each(PAIRS.map(([fg, bg]) => [fg, bg.join(" + ")] as const))("%s on %s reaches 4.5:1", (fg, bg) => {
     const ratio = contrast(parse(resolve(vars, fg)), surface(vars, bg.split(" + ")));
     expect(ratio, `${theme}: ${fg} on ${bg}: ${ratio.toFixed(2)}`).toBeGreaterThanOrEqual(4.5);
+  });
+  it.each(GRAPHICS.map(([fg, bg]) => [fg, bg.join(" + ")] as const))("%s on %s reaches 3:1", (fg, bg) => {
+    const ratio = contrast(parse(resolve(vars, fg)), surface(vars, bg.split(" + ")));
+    expect(ratio, `${theme}: ${fg} on ${bg}: ${ratio.toFixed(2)}`).toBeGreaterThanOrEqual(3);
   });
 });

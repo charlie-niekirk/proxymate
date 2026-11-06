@@ -67,6 +67,8 @@ export function CodeMirrorView({ text, language, highlight = true, wrap = false,
     const highlighted = highlight && language !== "text";
     const extensions: Extension[] = [
       EditorState.readOnly.of(true),
+      // Named and reachable by keyboard (axe: aria-input-field-name, scrollable-region-focusable).
+      EditorView.contentAttributes.of({ "aria-label": "Body", "aria-readonly": "true", tabindex: "0" }),
       lineNumbers(),
       drawSelection(),
       highlightSelectionMatches(),
