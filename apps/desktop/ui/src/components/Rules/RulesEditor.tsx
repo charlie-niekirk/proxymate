@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { Bot, GripVertical, ListChecks, PencilLine, Plus, Save, Trash2 } from "lucide-react";
 import { useEffect, useState, type DragEvent, type ReactNode } from "react";
 
@@ -10,7 +10,7 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator,
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { bridge } from "@/dev/bridge";
+import { useBridge } from "@/dev/bridge";
 import {
   deleteAgentRules,
   deleteRule,
@@ -22,7 +22,6 @@ import {
   setRuleEnabled,
 } from "@/lib/actions";
 import { backend } from "@/lib/backend";
-import { queryClient, ruleSettingsKey, rulesKey } from "@/lib/query";
 import { isVisual } from "@/lib/rewrite/diff";
 import { actionSummary, isBuiltin, matcherSummary, newRule, normalizeRule, type Rule } from "@/lib/rules";
 import { cn } from "@/lib/utils";
@@ -35,6 +34,8 @@ import { NumberInput } from "./fields";
 import { MatcherBuilder } from "./MatcherBuilder";
 import { RuleOriginBadge } from "./RuleOriginBadge";
 import { RuleTestPanel } from "./RuleTestPanel";
+import { queries } from "@/lib/queries";
+import { mutations } from "@/lib/mutations";
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -46,7 +47,7 @@ const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 export function RulesEditor() {
   const { open, ruleId, draft, seq } = useUi((s) => s.rulesEditor);
   const close = useUi((s) => s.closeRulesEditor);
-  const { data: rules = [] } = useQuery({ queryKey: rulesKey, queryFn: () => backend.listRules(), enabled: open });
+  const { data: rules = [] } = useQuery({ ...queries.rules(), enabled: open });
   const userRules = rules.filter((r) => !isBuiltin(r)).map(normalizeRule);
   const current = draft ?? userRules.find((r) => r.id === ruleId) ?? null;
 
@@ -273,7 +274,8 @@ function RuleList({ rules, selected, hasDraft }: { rules: Rule[]; selected: stri
 }
 
 function BreakpointTimeout() {
-  const { data: settings } = useQuery({ queryKey: ruleSettingsKey, queryFn: () => backend.getRuleSettings() });
+  const { data: settings } = useQuery(queries.ruleSettings());
+  const save = useMutation({ ...mutations.setRuleSettings, onError: (e) => reportError("Couldn't set the timeout", e) });
   if (!settings) return null;
   return (
     <div className="text-muted-foreground flex items-center gap-1.5 border-t p-2 text-xs" title="0 waits forever">
@@ -282,11 +284,7 @@ function BreakpointTimeout() {
         value={settings.breakpoint_timeout_secs}
         className="w-16"
         aria-label="Breakpoint timeout in seconds"
-        onChange={(secs) => {
-          void backend
-            .setRuleSettings({ breakpoint_timeout_secs: secs ?? 0 })
-            .then((s) => queryClient.setQueryData(ruleSettingsKey, s));
-        }}
+        onChange={(secs) => save.mutate({ breakpoint_timeout_secs: secs ?? 0 })}
       />
       s
     </div>
@@ -357,14 +355,7 @@ function RuleForm({ initial }: { initial: Rule }) {
   };
 
   // Lets dev/remote.ts press Save and Test in the real app.
-  useEffect(() => {
-    bridge.saveRule = save;
-    bridge.testRule = runTest;
-    return () => {
-      bridge.saveRule = undefined;
-      bridge.testRule = undefined;
-    };
-  });
+  useBridge({ saveRule: save, testRule: runTest });
 
   return (
     <div className="flex h-full flex-col" data-testid="rule-form">

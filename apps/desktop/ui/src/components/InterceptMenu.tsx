@@ -6,11 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { intercept, setBuiltinRule } from "@/lib/actions";
-import { backend } from "@/lib/backend";
 import { INTERCEPT_TARGETS } from "@/lib/capture";
-import { interceptAppsKey, interceptsKey, rulesKey } from "@/lib/query";
 import { NO_CACHE_RULE_ID, NO_COOKIES_RULE_ID } from "@/lib/rules";
 import { cn } from "@/lib/utils";
+import { queries } from "@/lib/queries";
 
 /**
  * "Intercept": terminals and browsers started already pointed at the
@@ -18,10 +17,9 @@ import { cn } from "@/lib/utils";
  */
 export function InterceptMenu() {
   const [open, setOpen] = useState(false);
-  const { data: apps } = useQuery({ queryKey: interceptAppsKey, queryFn: () => backend.listInterceptApps() });
+  const { data: apps } = useQuery(queries.interceptApps());
   const { data: running } = useQuery({
-    queryKey: interceptsKey,
-    queryFn: () => backend.listIntercepts(),
+    ...queries.intercepts(),
     // Launches end when their app quits.
     refetchInterval: open ? 2000 : 10_000,
   });
@@ -123,7 +121,7 @@ function Item({
  * toggles, like the throttle (M21).
  */
 export function NoiseToggles() {
-  const { data: rules } = useQuery({ queryKey: rulesKey, queryFn: () => backend.listRules() });
+  const { data: rules } = useQuery(queries.rules());
   const noCache = rules?.find((r) => r.id === NO_CACHE_RULE_ID)?.enabled ?? false;
   const noCookies = rules?.find((r) => r.id === NO_COOKIES_RULE_ID)?.enabled ?? false;
   return (

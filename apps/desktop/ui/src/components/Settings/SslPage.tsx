@@ -1,13 +1,13 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 
 import type { SslSettings } from "@/bindings";
 import { errorText } from "@/lib/actions";
-import { backend } from "@/lib/backend";
-import { queryClient, sslSettingsKey } from "@/lib/query";
 import { useSidebar } from "@/store/sidebar";
 
 import { ListEditor, Note, Page, Section } from "./parts";
+import { queries } from "@/lib/queries";
+import { mutations } from "@/lib/mutations";
 
 type ListKey = "include" | "exclude" | "bypass" | "insecure_upstream" | "exclude_apps";
 
@@ -48,14 +48,15 @@ const LISTS: { key: ListKey; title: string; description: string; placeholder: st
  * use the lists straight away.
  */
 export function SslPage() {
-  const { data: settings } = useQuery({ queryKey: sslSettingsKey, queryFn: () => backend.getSslSettings() });
+  const setSslSettingsMutation = useMutation(mutations.setSslSettings);
+  const { data: settings } = useQuery(queries.sslSettings());
   const apps = useSidebar((s) => s.snapshot.apps);
   const [error, setError] = useState<string | null>(null);
   if (!settings) return null;
   const save = async (next: SslSettings) => {
     setError(null);
     try {
-      queryClient.setQueryData(sslSettingsKey, await backend.setSslSettings(next));
+      await setSslSettingsMutation.mutateAsync(next);
     } catch (e) {
       setError(errorText(e));
     }

@@ -29,14 +29,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { addSslBypass, closeDocument, openDocument, setAppSslExcluded, setInsecureUpstream } from "@/lib/actions";
-import { backend } from "@/lib/backend";
 import { copy } from "@/lib/clipboard";
 import { formatCount } from "@/lib/flow";
-import { sslSettingsKey } from "@/lib/query";
 import { cn } from "@/lib/utils";
 import { startSidebar, useSidebar } from "@/store/sidebar";
 import { useStorage } from "@/store/storage";
 import { LIVE_STORE, useUi } from "@/store/ui";
+import { queries } from "@/lib/queries";
 
 function Section({ title, children, defaultOpen = true }: { title: string; children: ReactNode; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -255,7 +254,7 @@ const AppItem = memo(function AppItem({
   active: boolean;
   onSelect: () => void;
 }) {
-  const { data: ssl } = useQuery({ queryKey: sslSettingsKey, queryFn: () => backend.getSslSettings() });
+  const { data: ssl } = useQuery(queries.sslSettings());
   // Excluded by bundle id when there is one, else by name.
   const key = app.bundle_id ?? app.name;
   const excluded = (ssl?.exclude_apps ?? []).some((a) => a.toLowerCase() === key.toLowerCase());
@@ -363,7 +362,7 @@ function HostMenu({
   onShow: () => void;
   children: ReactNode;
 }) {
-  const { data: ssl } = useQuery({ queryKey: sslSettingsKey, queryFn: () => backend.getSslSettings() });
+  const { data: ssl } = useQuery(queries.sslSettings());
   const insecure = (ssl?.insecure_upstream ?? []).includes(host.toLowerCase());
   return (
     <ContextMenu>

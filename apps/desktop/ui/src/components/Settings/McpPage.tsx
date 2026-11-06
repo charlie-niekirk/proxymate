@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { Bot, KeyRound, LoaderCircle, RefreshCw, Trash2 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
@@ -12,11 +12,12 @@ import { Switch } from "@/components/ui/switch";
 import { errorText } from "@/lib/actions";
 import { backend } from "@/lib/backend";
 import { claudeAddCommand, mcpJsonConfig, maskToken } from "@/lib/mcp";
-import { mcpAuditKey, mcpTokenKey, queryClient } from "@/lib/query";
 import { cn } from "@/lib/utils";
 import { useMcp } from "@/store/mcp";
 
 import { Section } from "./parts";
+import { queries } from "@/lib/queries";
+import { mutations } from "@/lib/mutations";
 
 /**
  * Settings › MCP: the server on/off, read-only mode, how to connect an
@@ -101,10 +102,11 @@ function ServingLine({ status }: { status: McpStatus_Serialize }) {
 }
 
 function ConnectSection({ url }: { url: string }) {
-  const { data: token } = useQuery({ queryKey: mcpTokenKey, queryFn: () => backend.getMcpToken() });
+  const regenerateMcpTokenMutation = useMutation(mutations.regenerateMcpToken);
+  const { data: token } = useQuery(queries.mcpToken());
   const [confirm, setConfirm] = useState(false);
   const regenerate = async () => {
-    queryClient.setQueryData(mcpTokenKey, await backend.regenerateMcpToken());
+    await regenerateMcpTokenMutation.mutateAsync();
     setConfirm(false);
   };
   if (!token) return null;
@@ -206,15 +208,12 @@ const OUTCOME_STYLE: Record<McpCallOutcome, { color: string; bg: string }> = {
 function AuditSection() {
   const [limit, setLimit] = useState(50);
   const { data, isFetching, refetch } = useQuery({
-    queryKey: [...mcpAuditKey, limit],
-    queryFn: () => backend.getMcpAudit(null, limit),
+    ...queries.mcpAudit(limit),
     // Calls keep arriving while agents work.
     refetchInterval: 2000,
   });
-  const clear = async () => {
-    await backend.clearMcpAudit();
-    await queryClient.invalidateQueries({ queryKey: mcpAuditKey });
-  };
+  const clearAudit = useMutation(mutations.clearMcpAudit);
+  const clear = () => clearAudit.mutateAsync(undefined);
   const entries = data?.entries ?? [];
   const menu = useMenuTarget((key) => entries.find((e) => String(e.id) === key));
   return (

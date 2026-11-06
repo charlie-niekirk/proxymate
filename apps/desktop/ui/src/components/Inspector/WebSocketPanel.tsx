@@ -1,4 +1,4 @@
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useMutation } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, RotateCcw, Send, Unplug } from "lucide-react";
 import { useState, type KeyboardEvent } from "react";
 
@@ -11,7 +11,6 @@ import { usePagedList } from "@/hooks/usePagedList";
 import { reportError } from "@/lib/actions";
 import { backend } from "@/lib/backend";
 import { formatSize, formatTime } from "@/lib/flow";
-import { queryClient, streamKey } from "@/lib/query";
 import { LIVE_STORE, useUi } from "@/store/ui";
 import {
   OPCODE_LABEL,
@@ -30,6 +29,9 @@ import { Placeholder } from "./KvTable";
 import { PayloadView } from "./PayloadView";
 import { LiveStatus, MessageList, SearchBox, StreamShell } from "./StreamShell";
 import { listHeaderClass, rowClass } from "./streamStyles";
+import { wsPagesKey, wsPayloadKey } from "@/lib/query";
+import { queries } from "@/lib/queries";
+import { mutations, runMutation } from "@/lib/mutations";
 
 const GRID = "grid-cols-[14px_40px_84px_48px_60px_minmax(0,1fr)]";
 
@@ -48,16 +50,16 @@ export function WebSocketPanel({ id }: { id: number }) {
   const [text, setText] = useState("");
   const [selected, setSelected] = useState<WsMessage_Serialize | null>(null);
   const query: WsQuery_Deserialize = { direction: direction === "all" ? null : direction, text };
+  const closeWs = useMutation({ ...mutations.wsClose, onError: (e) => reportError("Couldn't close the connection", e) });
   const store = useUi((st) => st.store);
 
   const { data: head } = useQuery({
-    queryKey: [...streamKey(store, id), "ws", query],
-    queryFn: () => backend.getWebsocketMessages(store, id, query, 0, 0),
+    ...queries.wsHead(store, id, query),
     placeholderData: keepPreviousData,
   });
   const len = head?.len ?? 0;
   const [[first, last], setRange] = useState<[number, number]>([0, -1]);
-  const message = usePagedList(["ws-page", store, id, query], len, first, last, async (start, count) =>
+  const message = usePagedList(wsPagesKey(store, id, query), len, first, last, async (start, count) =>
     (await backend.getWebsocketMessages(store, id, query, start, count)).messages,
   );
 
@@ -108,7 +110,7 @@ export function WebSocketPanel({ id }: { id: number }) {
               variant="ghost"
               size="xs"
               title="Close the connection: a normal close frame to each side"
-              onClick={() => void backend.wsClose(id).then(() => refresh(store, id), (e: unknown) => reportError("Couldn't close the connection", e))}
+              onClick={() => closeWs.mutate({ store, id })}
               data-testid="ws-close"
             >
               <Unplug />
@@ -171,18 +173,11 @@ export function WebSocketPanel({ id }: { id: number }) {
   );
 }
 
-/** Refetches the list after a send or close, ahead of the next delta. */
-function refresh(store: number, id: number) {
-  void queryClient.invalidateQueries({ queryKey: streamKey(store, id) });
-  void queryClient.invalidateQueries({ queryKey: ["ws-page", store, id] });
-}
-
 async function resend(id: number, m: WsMessage_Serialize) {
   const store = useUi.getState().store;
   try {
     const payload = new Uint8Array(await backend.getWebsocketPayload(store, id, m.index));
-    await backend.wsSend(id, resendOf(m, payload));
-    refresh(store, id);
+    await runMutation(mutations.wsSend, { store, id, message: resendOf(m, payload) });
   } catch (e) {
     reportError("Couldn't resend the message", e);
   }
@@ -219,13 +214,13 @@ function Composer({ id }: { id: number }) {
   const [mode, setMode] = useState<ComposeMode>("text");
   const [input, setInput] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const sendWs = useMutation(mutations.wsSend);
   const send = async () => {
     const message = wsSendOf(direction, mode, input);
     if (typeof message === "string") return setError(message);
     setError(null);
     try {
-      await backend.wsSend(id, message);
-      refresh(store, id);
+      await sendWs.mutateAsync({ store, id, message });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -338,10 +333,12 @@ function MessageDetail({ id, message, sendable }: { id: number; message: WsMessa
   const [original, setOriginal] = useState(false);
   const showOriginal = original && message.edited;
   const payload = useQuery({
-    queryKey: ["ws-payload", store, id, message.index, showOriginal],
-    queryFn: async () =>
+    queryKey: wsPayloadKey(store, id, message.index, showOriginal),
+    queryFn: async ({ signal }) =>
       new Uint8Array(
-        await (showOriginal ? backend.getWebsocketOriginal(store, id, message.index) : backend.getWebsocketPayload(store, id, message.index)),
+        await (showOriginal
+          ? backend.getWebsocketOriginal(store, id, message.index, signal)
+          : backend.getWebsocketPayload(store, id, message.index, signal)),
       ),
   });
   const who = message.injected

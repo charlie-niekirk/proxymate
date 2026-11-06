@@ -24,12 +24,13 @@ import { Highlighted, MatchBar } from "./search";
 import { MATCH_LIMIT, searchRegExp, useBodySearch } from "./searchTerms";
 import { Centered, Note } from "./parts";
 import { jsonInWorker, objectId } from "./workers/client";
+import { jsonParseKey, jsonPrettyKey } from "@/lib/query";
 
 /** Pretty-printed JSON in CodeMirror; large bodies are formatted in a worker. */
 export function JsonPretty({ bytes, highlight }: { bytes: Uint8Array; highlight: boolean }) {
   const pretty = useQuery({
-    queryKey: ["json-pretty", objectId(bytes)],
-    queryFn: async () => (await jsonInWorker(bytes, "pretty")) as string,
+    queryKey: jsonPrettyKey(objectId(bytes)),
+    queryFn: async () => String(await jsonInWorker(bytes, "pretty")),
     gcTime: 0,
   });
   if (pretty.isPending) return <Centered>Formatting…</Centered>;
@@ -132,7 +133,7 @@ function expandedTo(value: unknown, depth: number, path: PathSegment[] = [], out
  */
 export function JsonTree({ bytes }: { bytes: Uint8Array }) {
   const parsed = useQuery({
-    queryKey: ["json-parse", objectId(bytes)],
+    queryKey: jsonParseKey(objectId(bytes)),
     queryFn: () => jsonInWorker(bytes, "parse"),
     gcTime: 0,
   });

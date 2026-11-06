@@ -50,7 +50,7 @@ import {
 } from "@/lib/query";
 import { NO_CACHE_RULE_ID, NO_COOKIES_RULE_ID, normalizeRule, THROTTLE_PRESETS } from "@/lib/rules";
 import { range } from "@/lib/selection";
-import type { PointerEdit } from "@/components/Rewrite/RewriteDialog";
+import type { PointerEdit } from "@/components/Rewrite/pointer";
 import { TEMPLATES, newScript } from "@/lib/scripts";
 import { forceTheme } from "@/lib/theme";
 import { usePrefs } from "@/store/prefs";

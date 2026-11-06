@@ -1,11 +1,12 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 
 import type { UpdateSettings } from "@/bindings";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { backend } from "@/lib/backend";
-import { appVersionKey, queryClient, updateSettingsKey } from "@/lib/query";
+import { queries } from "@/lib/queries";
+import { mutations } from "@/lib/mutations";
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -14,13 +15,14 @@ const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
  * menu's "Check for Updates…", answered with a native dialog).
  */
 export function UpdatesPage() {
-  const { data: version } = useQuery({ queryKey: appVersionKey, queryFn: () => backend.appVersion() });
-  const { data: settings } = useQuery({ queryKey: updateSettingsKey, queryFn: () => backend.getUpdateSettings() });
+  const setUpdateSettingsMutation = useMutation(mutations.setUpdateSettings);
+  const { data: version } = useQuery(queries.appVersion());
+  const { data: settings } = useQuery(queries.updateSettings());
   const [error, setError] = useState<string | null>(null);
   const save = async (next: UpdateSettings) => {
     setError(null);
     try {
-      queryClient.setQueryData(updateSettingsKey, await backend.setUpdateSettings(next));
+      await setUpdateSettingsMutation.mutateAsync(next);
     } catch (e) {
       setError(errorText(e));
     }

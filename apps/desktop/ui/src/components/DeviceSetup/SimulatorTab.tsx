@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { LoaderCircle, RefreshCw, ShieldPlus } from "lucide-react";
 import { useState } from "react";
 
@@ -8,11 +8,12 @@ import { CopyMenu } from "@/components/menus/items";
 import { Button } from "@/components/ui/button";
 import { ContextMenuItem } from "@/components/ui/context-menu";
 import { setSystemProxy } from "@/lib/actions";
-import { backend } from "@/lib/backend";
 import { progress } from "@/lib/devices";
-import { queryClient, simulatorKey, systemProxyKey } from "@/lib/query";
+import { queryClient, simulatorKey } from "@/lib/query";
 import { cn } from "@/lib/utils";
 import { useDevices } from "@/store/devices";
+import { queries } from "@/lib/queries";
+import { mutations } from "@/lib/mutations";
 
 /**
  * The iOS Simulator uses this Mac's network settings, so it needs the
@@ -21,13 +22,14 @@ import { useDevices } from "@/store/devices";
  */
 export function SimulatorTab() {
   const { data: sim, isFetching } = useQuery({
-    queryKey: simulatorKey,
-    queryFn: () => backend.getSimulatorStatus(),
+    ...queries.simulator(),
     refetchInterval: 4000,
     staleTime: 0,
   });
-  const { data: sysproxy } = useQuery({ queryKey: systemProxyKey, queryFn: () => backend.getSystemProxyStatus() });
+  const { data: sysproxy } = useQuery(queries.systemProxy());
   const activity = useDevices((s) => s.snapshot.simulator);
+  // Refetches the simulators afterwards, installed or not.
+  const installCert = useMutation(mutations.installSimulatorCert);
   const [busy, setBusy] = useState<"install" | "proxy" | null>(null);
   const [results, setResults] = useState<SimInstallResult_Serialize[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -38,14 +40,11 @@ export function SimulatorTab() {
   const install = (udids: string[] = []) => {
     setBusy("install");
     setError(null);
-    backend
-      .installSimulatorCert(udids)
+    installCert
+      .mutateAsync(udids)
       .then(setResults)
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
-      .finally(() => {
-        setBusy(null);
-        void queryClient.invalidateQueries({ queryKey: simulatorKey });
-      });
+      .finally(() => setBusy(null));
   };
   const proxyOn = () => {
     setBusy("proxy");

@@ -7,10 +7,10 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useTrustStatus } from "@/hooks/useTrustStatus";
 import { copyTerminalEnv, installCaTrust, uninstallCaTrust } from "@/lib/actions";
-import { backend } from "@/lib/backend";
-import { caInfoKey, queryClient, trustStatusKey } from "@/lib/query";
+import { queryClient, trustStatusKey } from "@/lib/query";
 import { cn } from "@/lib/utils";
 import { useUi } from "@/store/ui";
+import { queries } from "@/lib/queries";
 
 type Busy = "install" | "uninstall" | "check" | null;
 
@@ -23,7 +23,7 @@ export function CertWizard() {
   const open = useUi((s) => s.certWizardOpen);
   const setOpen = useUi((s) => s.setCertWizardOpen);
   const { data: trust } = useTrustStatus();
-  const { data: ca } = useQuery({ queryKey: caInfoKey, queryFn: () => backend.getCaInfo() });
+  const { data: ca } = useQuery(queries.caInfo());
   const [busy, setBusy] = useState<Busy>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);

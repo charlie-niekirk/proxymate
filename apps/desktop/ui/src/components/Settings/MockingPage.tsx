@@ -1,16 +1,16 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { FileBox, FileCode2, Trash2, Wand2 } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { useMockSources } from "@/hooks/useMocking";
 import { errorText, generateOpenApiMocks, importOpenApiSpec, mockFromFile, removeOpenApiSpec } from "@/lib/actions";
-import { backend } from "@/lib/backend";
 import { formatSize } from "@/lib/flow";
-import { mockSourcesKey, openApiSpecsKey, queryClient } from "@/lib/query";
 import { useUi } from "@/store/ui";
 
 import { Note, Page, Section } from "./parts";
+import { queries } from "@/lib/queries";
+import { mutations } from "@/lib/mutations";
 
 /**
  * Settings › Mocking (M20): the mock library that "Serve from recording"
@@ -19,9 +19,10 @@ import { Note, Page, Section } from "./parts";
  */
 export function MockingPage() {
   const sources = useMockSources();
-  const specs = useQuery({ queryKey: openApiSpecsKey, queryFn: () => backend.listOpenApiSpecs() });
+  const specs = useQuery(queries.openApiSpecs());
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const removeSource = useMutation(mutations.removeMockSource);
   const run = async (action: () => Promise<unknown>) => {
     setError(null);
     setBusy(true);
@@ -84,10 +85,7 @@ export function MockingPage() {
                   aria-label={`Remove ${s.name}`}
                   disabled={busy}
                   onClick={() =>
-                    void run(async () => {
-                      await backend.removeMockSource(s.id);
-                      await queryClient.invalidateQueries({ queryKey: mockSourcesKey });
-                    })
+                    void run(() => removeSource.mutateAsync(s.id))
                   }
                 >
                   <Trash2 />

@@ -1,19 +1,19 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 
 import type { ProxySettings_Serialize, RuleSettings, ScriptSettings_Serialize } from "@/bindings";
 import { Button } from "@/components/ui/button";
 import { errorText } from "@/lib/actions";
-import { backend } from "@/lib/backend";
-import { proxySettingsKey, queryClient, ruleSettingsKey, scriptSettingsKey } from "@/lib/query";
 
 import { Note, NumberField, Page, Section } from "./parts";
+import { queries } from "@/lib/queries";
+import { mutations } from "@/lib/mutations";
 
 /** Settings › Advanced: how long breakpoints wait and scripts may run, and the upstream connection pool. */
 export function AdvancedPage() {
-  const { data: rules } = useQuery({ queryKey: ruleSettingsKey, queryFn: () => backend.getRuleSettings() });
-  const { data: proxy } = useQuery({ queryKey: proxySettingsKey, queryFn: () => backend.getProxySettings() });
-  const { data: scripts } = useQuery({ queryKey: scriptSettingsKey, queryFn: () => backend.getScriptSettings() });
+  const { data: rules } = useQuery(queries.ruleSettings());
+  const { data: proxy } = useQuery(queries.proxySettings());
+  const { data: scripts } = useQuery(queries.scriptSettings());
   return (
     <Page testId="settings-advanced">
       {rules && <BreakpointForm key={JSON.stringify(rules)} settings={rules} />}
@@ -24,12 +24,13 @@ export function AdvancedPage() {
 }
 
 function BreakpointForm({ settings }: { settings: RuleSettings }) {
+  const setRuleSettingsMutation = useMutation(mutations.setRuleSettings);
   const [timeout, setTimeoutSecs] = useState(settings.breakpoint_timeout_secs);
   const [error, setError] = useState<string | null>(null);
   const save = async () => {
     setError(null);
     try {
-      queryClient.setQueryData(ruleSettingsKey, await backend.setRuleSettings({ breakpoint_timeout_secs: timeout }));
+      await setRuleSettingsMutation.mutateAsync({ breakpoint_timeout_secs: timeout });
     } catch (e) {
       setError(errorText(e));
     }
@@ -57,13 +58,14 @@ function BreakpointForm({ settings }: { settings: RuleSettings }) {
 }
 
 function ScriptTimeoutsForm({ settings }: { settings: ScriptSettings_Serialize }) {
+  const setScriptSettingsMutation = useMutation(mutations.setScriptSettings);
   const [draft, setDraft] = useState(settings);
   const [error, setError] = useState<string | null>(null);
   const changed = JSON.stringify(draft) !== JSON.stringify(settings);
   const save = async () => {
     setError(null);
     try {
-      queryClient.setQueryData(scriptSettingsKey, await backend.setScriptSettings(draft));
+      await setScriptSettingsMutation.mutateAsync(draft);
     } catch (e) {
       setError(errorText(e));
     }
@@ -110,13 +112,14 @@ function ScriptTimeoutsForm({ settings }: { settings: ScriptSettings_Serialize }
 }
 
 function PoolForm({ settings }: { settings: ProxySettings_Serialize }) {
+  const setProxySettingsMutation = useMutation(mutations.setProxySettings);
   const [draft, setDraft] = useState(settings);
   const [error, setError] = useState<string | null>(null);
   const changed = JSON.stringify(draft) !== JSON.stringify(settings);
   const save = async () => {
     setError(null);
     try {
-      queryClient.setQueryData(proxySettingsKey, await backend.setProxySettings(draft));
+      await setProxySettingsMutation.mutateAsync(draft);
     } catch (e) {
       setError(errorText(e));
     }

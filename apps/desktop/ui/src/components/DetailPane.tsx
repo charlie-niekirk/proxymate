@@ -24,9 +24,10 @@ import { backend } from "@/lib/backend";
 import { explainFailure, type FailureHelp } from "@/lib/errors";
 import { flowUrl, formatDuration, formatSize } from "@/lib/flow";
 import { displayHeaderName, queryPairs } from "@/lib/http";
-import { flowKey, operationKey, sslSettingsKey } from "@/lib/query";
 import { streamKind } from "@/lib/stream";
 import { useUi } from "@/store/ui";
+import { queries } from "@/lib/queries";
+import type { InspectedFlow } from "@/lib/query";
 
 /**
  * The imported OpenAPI operation the flow's method and path match (M20):
@@ -34,8 +35,7 @@ import { useUi } from "@/store/ui";
  */
 function OperationLine({ store, flow }: { store: number; flow: FlowSummary_Serialize }) {
   const { data: op } = useQuery({
-    queryKey: operationKey(store, flow.id),
-    queryFn: () => backend.flowOperation(store, flow.id),
+    ...queries.operation(store, flow.id),
     enabled: flow.method !== "CONNECT",
   });
   if (!op) return null;
@@ -56,24 +56,11 @@ function OperationLine({ store, flow }: { store: number; flow: FlowSummary_Seria
   );
 }
 
-interface Inspected {
-  flow: FlowSummary_Serialize;
-  /** Null for synthetic flows, which have no recorded messages. */
-  detail: FlowDetail_Serialize | null;
-}
-
 /** Inspector for the selected flow: URL bar over a Request | Response split. */
 export function DetailPane() {
   const id = useUi((s) => s.selectedId);
   const store = useUi((s) => s.store);
-  const { data, error, refetch } = useQuery({
-    queryKey: flowKey(store, id),
-    enabled: id !== null,
-    queryFn: async (): Promise<Inspected | null> => {
-      const [flow, detail] = await Promise.all([backend.getFlow(store, id!), backend.getFlowDetail(store, id!)]);
-      return flow ? { flow, detail } : null;
-    },
-  });
+  const { data, error, refetch } = useQuery(queries.inspected(store, id));
 
   if (id === null) return <PaneMessage>Select a flow to inspect it</PaneMessage>;
   if (error) {
@@ -197,7 +184,7 @@ export function DetailPane() {
   );
 }
 
-function RequestPane({ flow, detail }: Inspected & { detail: FlowDetail_Serialize }) {
+function RequestPane({ flow, detail }: InspectedFlow & { detail: FlowDetail_Serialize }) {
   const tab = useUi((s) => s.requestTab);
   const setTab = useUi((s) => s.setRequestTab);
   const { request, request_body: info } = detail;
@@ -237,7 +224,7 @@ function RequestPane({ flow, detail }: Inspected & { detail: FlowDetail_Serializ
   );
 }
 
-function ResponsePane({ flow, detail }: Inspected & { detail: FlowDetail_Serialize }) {
+function ResponsePane({ flow, detail }: InspectedFlow & { detail: FlowDetail_Serialize }) {
   const tab = useUi((s) => s.responseTab);
   const setTab = useUi((s) => s.setResponseTab);
   const { response, response_body: info, error } = detail;
@@ -323,7 +310,7 @@ function ResponsePane({ flow, detail }: Inspected & { detail: FlowDetail_Seriali
  * The URL bar's menu: the URL and its parts, method, status, cURL, and
  * filters for this flow's host, method, status and app.
  */
-function UrlBarMenu({ flow, detail, children }: Inspected & { children: ReactElement }) {
+function UrlBarMenu({ flow, detail, children }: InspectedFlow & { children: ReactElement }) {
   const store = useUi((s) => s.store);
   const status = detail?.response ? `${detail.response.status} ${detail.response.reason}`.trim() : flow.status !== null ? String(flow.status) : null;
   const pathQuery = `${flow.path}${flow.query ? `?${flow.query}` : ""}`;
@@ -348,7 +335,7 @@ function UrlBarMenu({ flow, detail, children }: Inspected & { children: ReactEle
 
 /** "Add to SSL bypass": stop decrypting the host from its next connection. */
 function BypassButton({ host, compact = false }: { host: string; compact?: boolean }) {
-  const { data: settings } = useQuery({ queryKey: sslSettingsKey, queryFn: () => backend.getSslSettings() });
+  const { data: settings } = useQuery(queries.sslSettings());
   const [error, setError] = useState<string | null>(null);
   const bypassed = settings?.bypass.includes(host.toLowerCase()) ?? false;
   const label = bypassed ? "In SSL bypass" : compact ? "Bypass SSL" : `Add ${host} to SSL bypass`;
@@ -435,7 +422,7 @@ function CertWizardButton() {
 }
 
 function InsecureUpstreamButton({ host }: { host: string }) {
-  const { data: settings } = useQuery({ queryKey: sslSettingsKey, queryFn: () => backend.getSslSettings() });
+  const { data: settings } = useQuery(queries.sslSettings());
   const allowed = settings?.insecure_upstream.includes(host.toLowerCase()) ?? false;
   return (
     <Button

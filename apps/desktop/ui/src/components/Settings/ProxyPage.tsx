@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 
 import type { ProxySettings_Serialize } from "@/bindings";
@@ -8,18 +8,18 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { setLanAccess, setLanInterface, setSystemProxy, errorText } from "@/lib/actions";
-import { backend } from "@/lib/backend";
-import { deviceAccessKey, proxySettingsKey, proxyStatusKey, queryClient, systemProxyKey } from "@/lib/query";
 
 import { Note, NumberField, Page, Section } from "./parts";
+import { queries } from "@/lib/queries";
+import { mutations } from "@/lib/mutations";
 
 /** Settings › Proxy: the port, LAN access, the system proxy and a proxied terminal. */
 export function ProxyPage() {
-  const { data: settings } = useQuery({ queryKey: proxySettingsKey, queryFn: () => backend.getProxySettings() });
-  const { data: status } = useQuery({ queryKey: proxyStatusKey, queryFn: () => backend.getProxyStatus() });
-  const { data: access } = useQuery({ queryKey: deviceAccessKey, queryFn: () => backend.getDeviceAccess() });
-  const { data: sysproxy } = useQuery({ queryKey: systemProxyKey, queryFn: () => backend.getSystemProxyStatus() });
-  const { data: env } = useQuery({ queryKey: ["terminal-env"], queryFn: () => backend.getTerminalEnv() });
+  const { data: settings } = useQuery(queries.proxySettings());
+  const { data: status } = useQuery(queries.proxyStatus());
+  const { data: access } = useQuery(queries.deviceAccess());
+  const { data: sysproxy } = useQuery(queries.systemProxy());
+  const { data: env } = useQuery(queries.terminalEnv());
   const lanIp = access?.interfaces.find((i) => i.name === access.interface)?.ip ?? null;
   const [error, setError] = useState<string | null>(null);
   const [lanError, setLanError] = useState<string | null>(null);
@@ -119,20 +119,19 @@ export function ProxyPage() {
 }
 
 function PortForm({ settings, onError }: { settings: ProxySettings_Serialize; onError: (e: string | null) => void }) {
+  const setProxySettingsMutation = useMutation(mutations.setProxySettings);
   const [port, setPort] = useState(settings.port);
   const [busy, setBusy] = useState(false);
   const apply = async () => {
     onError(null);
     setBusy(true);
     try {
-      queryClient.setQueryData(proxySettingsKey, await backend.setProxySettings({ ...settings, port }));
+      await setProxySettingsMutation.mutateAsync({ ...settings, port });
     } catch (e) {
       onError(errorText(e));
     } finally {
+      // The mutation refetches what the port moves (status, device access, the terminal env).
       setBusy(false);
-      await queryClient.invalidateQueries({ queryKey: proxyStatusKey });
-      await queryClient.invalidateQueries({ queryKey: deviceAccessKey });
-      await queryClient.invalidateQueries({ queryKey: ["terminal-env"] });
     }
   };
   return (

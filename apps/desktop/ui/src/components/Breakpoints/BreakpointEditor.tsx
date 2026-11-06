@@ -14,13 +14,11 @@ import { ContextMenuItem, ContextMenuSeparator } from "@/components/ui/context-m
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { bridge } from "@/dev/bridge";
+import { useBridge } from "@/dev/bridge";
 import { reportError, resolveBreakpoint } from "@/lib/actions";
-import { backend } from "@/lib/backend";
 import { languageFor } from "@/lib/compose";
 import { base64, hexBytes } from "@/lib/copyFormats";
 import { bodyText, headerValue } from "@/lib/http";
-import { breakpointBodyKey } from "@/lib/query";
 import { parseHex } from "@/lib/stream";
 import { cleanHeaders } from "@/lib/rules";
 import { cn } from "@/lib/utils";
@@ -28,6 +26,7 @@ import { useUndoable } from "@/hooks/useUndoable";
 import { align, parseDoc, toJson, type JNode } from "@/lib/json/doc";
 import { useBreakpoints } from "@/store/breakpoints";
 import { useUi } from "@/store/ui";
+import { queries } from "@/lib/queries";
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -234,14 +233,7 @@ function BreakpointForm({ bp }: { bp: BreakpointInfo_Serialize }) {
     resolve({ action: "respond", status: answer.status ?? 200, headers: cleanHeaders(answer.headers), body: answer.body });
 
   // Lets dev/remote.ts press Execute and Abort in the real app.
-  useEffect(() => {
-    bridge.executeBreakpoint = execute;
-    bridge.abortBreakpoint = abort;
-    return () => {
-      bridge.executeBreakpoint = undefined;
-      bridge.abortBreakpoint = undefined;
-    };
-  });
+  useBridge({ executeBreakpoint: execute, abortBreakpoint: abort });
 
   return (
     <div className="flex h-full flex-col" data-testid="breakpoint-form">
@@ -339,8 +331,7 @@ function BreakpointForm({ bp }: { bp: BreakpointInfo_Serialize }) {
  */
 const breakpointBody = (id: number) =>
   queryOptions({
-    queryKey: breakpointBodyKey(id),
-    queryFn: async () => new Uint8Array(await backend.getBreakpointBody(id)),
+    ...queries.breakpointBody(id),
     staleTime: Infinity,
     gcTime: 0,
   });
@@ -412,14 +403,7 @@ function MessageForm({ bp }: { bp: BreakpointInfo_Serialize }) {
   };
   const drop = () => resolve({ action: "abort" });
 
-  useEffect(() => {
-    bridge.executeBreakpoint = send;
-    bridge.abortBreakpoint = drop;
-    return () => {
-      bridge.executeBreakpoint = undefined;
-      bridge.abortBreakpoint = undefined;
-    };
-  });
+  useBridge({ executeBreakpoint: send, abortBreakpoint: drop });
 
   const modes: MessageMode[] = originalText === null ? ["hex"] : isJson ? ["text", "tree", "hex"] : ["text", "hex"];
   return (

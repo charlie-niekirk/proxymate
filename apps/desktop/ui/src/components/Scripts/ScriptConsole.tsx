@@ -12,6 +12,7 @@ import { backend } from "@/lib/backend";
 import { cn } from "@/lib/utils";
 import { startScriptConsole, useScriptConsole } from "@/store/scriptConsole";
 import { useUi } from "@/store/ui";
+import { queries } from "@/lib/queries";
 
 const LEVEL_COLORS: Record<ConsoleLevel, string> = {
   debug: "text-muted-foreground",
@@ -27,8 +28,7 @@ export function ScriptConsole({ scriptId }: { scriptId: string | null }) {
   const latest = useScriptConsole((s) => s.latest);
   const [onlyThis, setOnlyThis] = useState(scriptId !== null);
   const { data: entries = [] } = useQuery({
-    queryKey: ["script-console", latest],
-    queryFn: () => backend.getScriptConsole(null, 2000),
+    ...queries.scriptConsole(latest),
     placeholderData: (previous) => previous,
   });
   const shown = onlyThis && scriptId ? entries.filter((e) => e.script_id === scriptId) : entries;

@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { Plus, Trash2 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
@@ -20,11 +20,11 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { errorText } from "@/lib/actions";
-import { backend } from "@/lib/backend";
-import { networkSettingsKey, proxyStatusKey, queryClient } from "@/lib/query";
 import { cn } from "@/lib/utils";
 
 import { ListEditor, Page, Section } from "./parts";
+import { queries } from "@/lib/queries";
+import { mutations } from "@/lib/mutations";
 
 /**
  * Settings › Network (M18): upstream proxies, the SOCKS5 listener, reverse
@@ -33,14 +33,15 @@ import { ListEditor, Page, Section } from "./parts";
  * the keychain and are never shown again, only "saved".
  */
 export function NetworkPage() {
-  const { data: settings } = useQuery({ queryKey: networkSettingsKey, queryFn: () => backend.getNetworkSettings() });
+  const { data: settings } = useQuery(queries.networkSettings());
   if (!settings) return null;
   // Remounted on every save, so the draft starts from what the engine kept.
   return <NetworkForm key={JSON.stringify(settings)} saved={settings} />;
 }
 
 function NetworkForm({ saved }: { saved: NetworkSettings_Serialize }) {
-  const { data: status } = useQuery({ queryKey: proxyStatusKey, queryFn: () => backend.getProxyStatus() });
+  const setNetworkSettingsMutation = useMutation(mutations.setNetworkSettings);
+  const { data: status } = useQuery(queries.proxyStatus());
   const [draft, setDraft] = useState<NetworkSettings_Deserialize>(() => structuredClone(saved));
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -56,12 +57,11 @@ function NetworkForm({ saved }: { saved: NetworkSettings_Serialize }) {
     setError(null);
     setBusy(true);
     try {
-      queryClient.setQueryData(networkSettingsKey, await backend.setNetworkSettings(draft));
+      await setNetworkSettingsMutation.mutateAsync(draft);
     } catch (e) {
       setError(errorText(e));
     } finally {
       setBusy(false);
-      await queryClient.invalidateQueries({ queryKey: proxyStatusKey });
     }
   };
   const socks = status?.listeners.find((l) => l.kind === "socks5")?.addr ?? status?.listening ?? null;

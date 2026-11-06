@@ -1,20 +1,13 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { FileCode2, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { errorText } from "@/lib/actions";
-import { backend } from "@/lib/backend";
-import { decodedRootKey, protoMappingsKey, protoSchemasKey, protoTypesKey, queryClient } from "@/lib/query";
 
 import { Note, Page, Section } from "./parts";
-
-/** Schemas and mappings changed: everything decoded with them is stale. */
-async function refresh() {
-  await Promise.all(
-    [protoSchemasKey, protoTypesKey, protoMappingsKey, decodedRootKey].map((queryKey) => queryClient.invalidateQueries({ queryKey })),
-  );
-}
+import { queries } from "@/lib/queries";
+import { mutations } from "@/lib/mutations";
 
 /**
  * Settings › Protobuf (M16): imported `.proto` files and descriptor sets,
@@ -22,8 +15,12 @@ async function refresh() {
  * for protobuf that isn't gRPC.
  */
 export function ProtobufPage() {
-  const schemas = useQuery({ queryKey: protoSchemasKey, queryFn: () => backend.listProtoSchemas() });
-  const mappings = useQuery({ queryKey: protoMappingsKey, queryFn: () => backend.listProtoMappings() });
+  const schemas = useQuery(queries.protoSchemas());
+  const mappings = useQuery(queries.protoMappings());
+  // Each refetches the schemas, types, mappings and decoded bodies it makes stale.
+  const importSchema = useMutation(mutations.importProtoSchema);
+  const removeSchema = useMutation(mutations.removeProtoSchema);
+  const setMappings = useMutation(mutations.setProtoMappings);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const run = async (action: () => Promise<unknown>) => {
@@ -31,7 +28,6 @@ export function ProtobufPage() {
     setBusy(true);
     try {
       await action();
-      await refresh();
     } catch (e) {
       setError(errorText(e));
     } finally {
@@ -50,7 +46,7 @@ export function ProtobufPage() {
           </>
         }
         aside={
-          <Button variant="outline" size="sm" disabled={busy} onClick={() => void run(() => backend.importProtoSchema(null))} data-testid="import-proto">
+          <Button variant="outline" size="sm" disabled={busy} onClick={() => void run(() => importSchema.mutateAsync(null))} data-testid="import-proto">
             Import…
           </Button>
         }
@@ -76,7 +72,7 @@ export function ProtobufPage() {
                   size="icon-xs"
                   aria-label={`Remove ${s.name}`}
                   disabled={busy}
-                  onClick={() => void run(() => backend.removeProtoSchema(s.id))}
+                  onClick={() => void run(() => removeSchema.mutateAsync(s.id))}
                 >
                   <Trash2 />
                 </Button>
@@ -107,7 +103,7 @@ export function ProtobufPage() {
                   size="icon-xs"
                   aria-label="Remove mapping"
                   disabled={busy}
-                  onClick={() => void run(() => backend.setProtoMappings(mappings.data.filter((x) => x.id !== m.id)))}
+                  onClick={() => void run(() => setMappings.mutateAsync(mappings.data.filter((x) => x.id !== m.id)))}
                 >
                   <Trash2 />
                 </Button>

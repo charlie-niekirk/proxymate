@@ -10,6 +10,7 @@ import { CodeView } from "./CodeView";
 import { Bar, Centered, Note } from "./parts";
 import { useText } from "./util";
 import { beautify, objectId } from "./workers/client";
+import { beautifyKey } from "@/lib/query";
 
 /** Bodies above this aren't re-indented: the formatter is a single pass, but 2 MB of tags is plenty. */
 const FORMAT_MAX = 2 * 1024 * 1024;
@@ -74,7 +75,7 @@ export function ScriptView({ bytes, lang, highlight }: { bytes: Uint8Array; lang
   const minified = useMemo(() => text !== null && text.length < 512 * 1024 && averageLineLength(text) > 200, [text]);
   const [pretty, setPretty] = useState(minified);
   const beautified = useQuery({
-    queryKey: ["beautify", lang, objectId(bytes)],
+    queryKey: beautifyKey(lang, objectId(bytes)),
     enabled: pretty && text !== null,
     queryFn: () => beautify(text!, lang),
     gcTime: 0,

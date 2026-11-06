@@ -2,12 +2,11 @@ import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 
 import type { MockSource } from "@/bindings";
-import { backend } from "@/lib/backend";
-import { mockSourcesKey } from "@/lib/query";
+import { queries } from "@/lib/queries";
 
 /** The mock library (M20). */
 export function useMockSources(): MockSource[] {
-  const { data } = useQuery({ queryKey: mockSourcesKey, queryFn: () => backend.listMockSources() });
+  const { data } = useQuery(queries.mockSources());
   return data ?? [];
 }
 

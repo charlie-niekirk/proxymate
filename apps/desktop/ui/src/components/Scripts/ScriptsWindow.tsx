@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Bot, ClipboardCopy, FileCode2, FileDown, FileUp, ListChecks, Plus, Save, Trash2 } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 import type { BodyPart, ContentKind, ScriptKind, ScriptTestResult_Serialize } from "@/bindings";
 import { Checkbox, Choice } from "@/components/Rules/fields";
@@ -15,7 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { bridge } from "@/dev/bridge";
+import { useBridge } from "@/dev/bridge";
 import { useScripts } from "@/hooks/useScripts";
 import {
   copyScriptTypes,
@@ -31,7 +31,6 @@ import {
   setScriptEnabled,
 } from "@/lib/actions";
 import { backend } from "@/lib/backend";
-import { rulesKey } from "@/lib/query";
 import { normalizeRule } from "@/lib/rules";
 import {
   KIND_HELP,
@@ -48,6 +47,7 @@ import { useUi } from "@/store/ui";
 import { ScriptConsole } from "./ScriptConsole";
 import { ScriptEditor } from "./ScriptEditor";
 import { ScriptTestPanel } from "./ScriptTestPanel";
+import { queries } from "@/lib/queries";
 
 /**
  * The Scripts window (M14): scripts grouped by kind beside the selected
@@ -338,14 +338,7 @@ function ScriptForm({ initial }: { initial: Script }) {
   };
 
   // Lets dev/remote.ts press Save and Test in the real app.
-  useEffect(() => {
-    bridge.saveScript = save;
-    bridge.testScript = runTest;
-    return () => {
-      bridge.saveScript = undefined;
-      bridge.testScript = undefined;
-    };
-  });
+  useBridge({ saveScript: save, testScript: runTest });
 
   return (
     <div className="flex h-full flex-col" data-testid="script-form" data-kind={script.kind}>
@@ -491,7 +484,7 @@ function ViewSettings({ script, onChange }: { script: Script; onChange: (s: Scri
 
 /** The rules that run a rewrite or mock script, and a quick way to add one. */
 function UsedByRules({ script, store, flow }: { script: Script; store: number; flow: number | null }) {
-  const { data: rules = [] } = useQuery({ queryKey: rulesKey, queryFn: () => backend.listRules() });
+  const { data: rules = [] } = useQuery(queries.rules());
   const openRules = useUi((s) => s.openRulesEditor);
   const users = rules
     .map(normalizeRule)

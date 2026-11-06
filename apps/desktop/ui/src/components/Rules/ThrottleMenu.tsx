@@ -5,10 +5,9 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { setThrottle } from "@/lib/actions";
-import { backend } from "@/lib/backend";
-import { rulesKey } from "@/lib/query";
 import { GLOBAL_THROTTLE_RULE_ID, THROTTLE_PRESETS, activeThrottle, normalizeRule, type ThrottlePreset } from "@/lib/rules";
 import { cn } from "@/lib/utils";
+import { queries } from "@/lib/queries";
 
 const kbps = (n: number) => (n >= 1000 ? `${n / 1000} Mbps` : `${n} kbps`);
 
@@ -17,7 +16,7 @@ const kbps = (n: number) => (n >= 1000 ? `${n / 1000} Mbps` : `${n} kbps`);
  * matches everything and is off until a profile is picked here.
  */
 export function ThrottleMenu() {
-  const { data: rules } = useQuery({ queryKey: rulesKey, queryFn: () => backend.listRules() });
+  const { data: rules } = useQuery(queries.rules());
   const rule = rules?.find((r) => r.id === GLOBAL_THROTTLE_RULE_ID);
   const active = activeThrottle(rule ? normalizeRule(rule) : undefined);
   const [open, setOpen] = useState(false);

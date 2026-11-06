@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 
 import type { AutoSaveSettings_Serialize, RecordingSettings_Serialize, StorageSettings_Serialize } from "@/bindings";
@@ -9,10 +9,11 @@ import { Switch } from "@/components/ui/switch";
 import { autosaveNow, clearFlows, errorText } from "@/lib/actions";
 import { backend } from "@/lib/backend";
 import { formatSize } from "@/lib/flow";
-import { autosaveSettingsKey, queryClient, recordingSettingsKey, storageSettingsKey } from "@/lib/query";
 import { useStorage } from "@/store/storage";
 
 import { ListEditor, Note, NumberField, Page, Section } from "./parts";
+import { queries } from "@/lib/queries";
+import { mutations } from "@/lib/mutations";
 
 const nf = new Intl.NumberFormat();
 
@@ -22,7 +23,7 @@ const nf = new Intl.NumberFormat();
  */
 export function StoragePage() {
   const status = useStorage((s) => s.status);
-  const { data: settings } = useQuery({ queryKey: storageSettingsKey, queryFn: () => backend.getStorageSettings() });
+  const { data: settings } = useQuery(queries.storageSettings());
   return (
     <Page testId="settings-storage">
       <Section title="Live capture" description="Bodies and details are kept in files that are deleted on Clear and on quit.">
@@ -65,13 +66,14 @@ export function StoragePage() {
 
 /** Hosts left out of the capture (M21): still proxied, never recorded. */
 function RecordingLists() {
-  const { data: lists } = useQuery({ queryKey: recordingSettingsKey, queryFn: () => backend.getRecordingSettings() });
+  const setRecordingSettingsMutation = useMutation(mutations.setRecordingSettings);
+  const { data: lists } = useQuery(queries.recordingSettings());
   const [error, setError] = useState<string | null>(null);
   if (!lists) return null;
   const save = async (next: RecordingSettings_Serialize) => {
     setError(null);
     try {
-      queryClient.setQueryData(recordingSettingsKey, await backend.setRecordingSettings(next));
+      await setRecordingSettingsMutation.mutateAsync(next);
     } catch (e) {
       setError(errorText(e));
     }
@@ -111,12 +113,13 @@ const timeFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", tim
 
 /** Saves the live capture every N minutes as a rotating `.proxymate` (M21). */
 function AutoSave() {
-  const { data: settings } = useQuery({ queryKey: autosaveSettingsKey, queryFn: () => backend.getAutosaveSettings() });
+  const { data: settings } = useQuery(queries.autosaveSettings());
   if (!settings) return null;
   return <AutoSaveForm key={JSON.stringify(settings)} settings={settings} />;
 }
 
 function AutoSaveForm({ settings }: { settings: AutoSaveSettings_Serialize }) {
+  const setAutosaveSettingsMutation = useMutation(mutations.setAutosaveSettings);
   const status = useStorage((s) => s.status?.autosave ?? null);
   const [draft, setDraft] = useState(settings);
   const [error, setError] = useState<string | null>(null);
@@ -125,7 +128,7 @@ function AutoSaveForm({ settings }: { settings: AutoSaveSettings_Serialize }) {
   const save = async (next: AutoSaveSettings_Serialize) => {
     setError(null);
     try {
-      queryClient.setQueryData(autosaveSettingsKey, await backend.setAutosaveSettings(next));
+      await setAutosaveSettingsMutation.mutateAsync(next);
     } catch (e) {
       setError(errorText(e));
     }
@@ -225,6 +228,7 @@ function AutoSaveForm({ settings }: { settings: AutoSaveSettings_Serialize }) {
 }
 
 function Limits({ settings }: { settings: StorageSettings_Serialize }) {
+  const setStorageSettingsMutation = useMutation(mutations.setStorageSettings);
   const [draft, setDraft] = useState(settings);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
@@ -234,7 +238,7 @@ function Limits({ settings }: { settings: StorageSettings_Serialize }) {
     setError(null);
     setSaved(null);
     try {
-      queryClient.setQueryData(storageSettingsKey, await backend.setStorageSettings(draft));
+      await setStorageSettingsMutation.mutateAsync(draft);
       setSaved("Saved. The capture was trimmed to the new limits.");
     } catch (e) {
       setError(errorText(e));
