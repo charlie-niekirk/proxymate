@@ -1,0 +1,36 @@
+{
+  "brand": "Proxymate",
+  "tagline": "See every request.",
+  "brief": "A fast, native desktop HTTP(S) debugging proxy for developers, in the vein of Proxyman and Charles. The mark should feel fast, precise and trustworthy, with a friendly 'mate' side, sit naturally in the macOS Dock, and avoid the category's magnifiers, eyes, padlocks, globes, arrows and brackets.",
+  "adjectives": ["fast", "precise", "trustworthy", "friendly", "native"],
+  "criteria": "Success: distinct from other debugging-proxy marks, recognisable at 16 px, works in one colour, at home in the macOS Dock and a README.",
+  "industry": "software",
+  "nav": ["Features", "Docs", "Download"],
+  "brand_color": "#101820",
+  "tile_color": "#101820",
+  "greyscale": false,
+  "final": true,
+  "designer": "Proxymate",
+  "concepts": [
+    {
+      "name": "Detour",
+      "symbol": "../svg/proxymate-symbol-ink.svg",
+      "lockup": "../svg/proxymate-horizontal-ink.svg",
+      "stacked": "../svg/proxymate-stacked-ink.svg",
+      "avatar": "../svg/proxymate-symbol-small-ink.svg",
+      "symbol_on_tile": "../svg/proxymate-symbol-small-signal.svg",
+      "symbol_on_dark": "../svg/proxymate-symbol-signal.svg",
+      "lockup_on_dark": "../svg/proxymate-horizontal-on-ink.svg",
+      "stacked_on_dark": "../svg/proxymate-stacked-on-ink.svg",
+      "stacked_on_tile": "../svg/proxymate-stacked-on-ink.svg",
+      "idea": "One line loops back through itself: every request takes a detour through Proxymate.",
+      "rationale": [
+        "One unbroken line: fast and continuous, like traffic in flight",
+        "The over/under crossing is the moment Proxymate steps in, and the x in the wordmark repeats it",
+        "Signal lime on ink reads as 'live' and stands apart from the category's blues",
+        "A heavier small-size cut keeps the crossing visible at 16–32 px"
+      ]
+    }
+  ],
+  "recommendation": "Detour on an ink tile with a Signal line: a quiet, native-feeling Dock icon with one bright, ownable detail."
+}
