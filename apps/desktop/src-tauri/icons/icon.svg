@@ -1,11 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
-  <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#ff9f43"/>
-      <stop offset="1" stop-color="#e8590c"/>
-    </linearGradient>
-  </defs>
-  <rect x="64" y="64" width="896" height="896" rx="200" fill="url(#g)"/>
-  <path d="M300 300h260a150 150 0 0 1 0 300H420v124h-120z M420 400v100h130a50 50 0 0 0 0-100z" fill="#fff" fill-rule="evenodd"/>
-  <circle cx="690" cy="690" r="54" fill="#fff"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img"><title>Proxymate</title><rect x="100" y="100" width="824" height="824" rx="185" fill="#101820"/><g fill="#C8F04B" transform="translate(512 506) scale(2.35) translate(-128 -128)"><path d="M20 223.6L73.43 223.6A52 52 0 0 0 110.2 208.37L122.34 196.23L105.37 179.25L93.23 191.4A28 28 0 0 1 73.43 199.6L20 199.6A12 12 0 0 0 20 223.6Z"/><path d="M150.63 167.94L176.08 142.49A68 68 0 1 0 79.92 142.49L145.8 208.37A52 52 0 0 0 182.57 223.6L236 223.6A12 12 0 0 0 236 199.6L182.57 199.6A28 28 0 0 1 162.77 191.4L96.89 125.51A44 44 0 1 1 159.11 125.51L133.66 150.97L150.63 167.94Z"/></g></svg>
