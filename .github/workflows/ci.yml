@@ -59,7 +59,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Like the tests: a cold cache plus a slow apt mirror (the Tauri libraries)
+    # has taken over 30 minutes.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
