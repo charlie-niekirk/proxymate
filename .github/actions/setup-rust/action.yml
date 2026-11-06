@@ -1,0 +1,54 @@
+name: Set up Rust
+description: >-
+  Installs the toolchain pinned in rust-toolchain.toml, optionally the Tauri
+  system libraries (Linux), and restores the cargo cache.
+inputs:
+  tauri-deps:
+    description: Install the Tauri system libraries on Linux (anything that builds proxymate-desktop).
+    default: "false"
+  cache:
+    description: Restore and save the cargo cache.
+    default: "true"
+runs:
+  using: composite
+  steps:
+    # The runners' apt mirror is sometimes very slow (35 minutes for the webkit
+    # packages), so the downloaded .debs are cached. The key changes weekly, so
+    # security updates arrive within a week; a new week starts from the last
+    # one's debs and downloads only what changed.
+    - name: apt cache key
+      id: apt
+      if: runner.os == 'Linux' && inputs.tauri-deps == 'true'
+      shell: bash
+      # ImageOS (ubuntu24, …) is the runner's environment, not the env context.
+      run: echo "key=tauri-debs-$ImageOS-$(uname -m)" >> "$GITHUB_OUTPUT"; echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+    - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      if: runner.os == 'Linux' && inputs.tauri-deps == 'true'
+      with:
+        path: ~/apt-archives
+        key: ${{ steps.apt.outputs.key }}-${{ steps.apt.outputs.week }}
+        restore-keys: ${{ steps.apt.outputs.key }}-
+    - name: Install Tauri system dependencies
+      if: runner.os == 'Linux' && inputs.tauri-deps == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p ~/apt-archives/partial
+        apt=(sudo apt-get -o Acquire::Retries=3 -o APT::Keep-Downloaded-Packages=true
+          -o Dir::Cache::Archives="$HOME/apt-archives")
+        "${apt[@]}" update
+        "${apt[@]}" install -y libwebkit2gtk-4.1-dev build-essential libxdo-dev libssl-dev \
+          libayatana-appindicator3-dev librsvg2-dev
+        # Drop debs that were superseded, then let the cache step read the rest.
+        "${apt[@]}" autoclean
+        sudo chown -R "$(id -u):$(id -g)" ~/apt-archives
+        du -sh ~/apt-archives
+    # With no argument, rustup installs the toolchain rust-toolchain.toml names,
+    # with its components.
+    - name: Rust toolchain
+      shell: bash
+      run: |
+        rustup toolchain install
+        rustc --version
+    - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      if: inputs.cache == 'true'

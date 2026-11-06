@@ -1,0 +1,39 @@
+# Dependabot (R0): weekly version updates, grouped so each ecosystem opens one
+# pull request for minor and patch bumps. Security updates still come as soon
+# as an advisory is published. Every update goes through CI like any change.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      cargo-minor:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    ignore:
+      # Pinned to the Playwright Docker image CI's ui job runs in
+      # (mcr.microsoft.com/playwright:vX-noble); bump both by hand, with the
+      # Linux pixel baselines the new browsers produce.
+      - dependency-name: "@playwright/test"
+      - dependency-name: playwright
+      - dependency-name: playwright-core
+    groups:
+      npm-minor:
+        update-types: [minor, patch]
+
+  # Actions are pinned by commit SHA with the version in a comment; Dependabot
+  # updates both.
+  - package-ecosystem: github-actions
+    directories: [/, /.github/actions/*]
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
