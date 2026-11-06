@@ -5,37 +5,95 @@ on:
   push:
     branches: [main]
 
+# Nothing here writes to the repository. A job that needs more asks for it.
+permissions:
+  contents: read
+
+# A new push to a pull request cancels its older run; runs on main never
+# cancel each other, so every merge gets a full result.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
 
 jobs:
-  rust:
-    name: rust (${{ matrix.os }})
+  # A pull request that only touches docs skips the build jobs. Skipped jobs
+  # count as passed, and the `ci` job below reports either way, so it is the
+  # one check branch protection requires.
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        if: github.event_name == 'pull_request'
+        with:
+          # The pull request's merge commit and its first parent (the base).
+          fetch-depth: 2
+          persist-credentials: false
+      - id: filter
+        name: Code or docs only
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ $GITHUB_EVENT_NAME != pull_request ]]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git diff --name-only HEAD^1 HEAD | tee "$RUNNER_TEMP/changed.txt"
+          # Docs: docs/, Markdown at the root, LICENSE files. Anything else is code.
+          if grep -qvE '^(docs/.*|[^/]+\.md|LICENSE[^/]*)$' "$RUNNER_TEMP/changed.txt"; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Docs-only change: the build jobs are skipped."
+            echo "code=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  lint:
+    name: fmt + clippy
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+        with:
+          tauri-deps: "true"
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  test:
+    name: test (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     strategy:
       fail-fast: false
       matrix:
         os: [macos-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - name: Install Tauri system dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libxdo-dev libssl-dev \
-            libayatana-appindicator3-dev librsvg2-dev
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test --workspace
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+        with:
+          tauri-deps: "true"
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+        with:
+          tool: cargo-nextest
+      # Per-test timeouts live in .config/nextest.toml. The workspace has no
+      # doctests, so nextest (which skips them) covers everything `cargo test` did.
+      - run: cargo nextest run --workspace --locked --profile ci
+      # The proxymate-desktop export_bindings test rewrites bindings.ts.
       - name: TypeScript bindings are up to date
         run: git diff --exit-code -- apps/desktop/ui/src/bindings.ts
 
@@ -44,33 +102,69 @@ jobs:
   # measured on a laptop, so they catch the regressions R2 fixed, not noise.
   bench:
     name: bench budget
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
       - name: Hot path benches (quick)
-        run: cargo bench -p pm-core --bench ingest
+        run: cargo bench -p pm-core --bench ingest --locked
         env:
           PM_BENCH_QUICK: "1"
       - name: Within budget
         run: python3 scripts/bench-budget.py
 
+  # Known advisories, licences, duplicate crates and sources (deny.toml), and
+  # advisories in the npm packages that ship in the app.
+  audit:
+    name: audit
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache: "false"
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+        with:
+          tool: cargo-deny
+      - run: cargo deny --locked check
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+      # Reads package-lock.json only: no install needed.
+      - run: npm audit --omit=dev
+
   ui:
     name: ui
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     # The Playwright image pins the browsers and fonts, so the Linux pixel
     # baselines (e2e/__snapshots__/*-linux.png) are made and checked in the
     # same environment. Missing baselines are written and fail the run; they
-    # come back in the playwright-report artifact to be committed.
+    # come back in the playwright-report artifact to be committed. Its tag
+    # must match @playwright/test in apps/desktop/ui/package.json (bumped by
+    # hand together: see .github/dependabot.yml).
     container:
       image: mcr.microsoft.com/playwright:v1.64.1-noble
       options: --ipc=host
     env:
       HOME: /root
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
           cache: npm
@@ -83,7 +177,7 @@ jobs:
       # against the mock backend.
       - name: Playwright
         run: npm run e2e -w @proxymate/ui
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: failure()
         with:
           name: playwright-report
@@ -92,3 +186,24 @@ jobs:
             apps/desktop/ui/test-results/
             apps/desktop/ui/e2e/__snapshots__/*-linux.png
           retention-days: 7
+
+  # The one check to require on main. It passes when every job above passed or
+  # was skipped (a docs-only pull request), and fails otherwise.
+  ci:
+    name: ci
+    needs: [changes, lint, test, bench, audit, ui]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every job passed or was skipped
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Results: $RESULTS"
+          for r in $RESULTS; do
+            if [[ $r != success && $r != skipped ]]; then
+              echo "::error::A required job ended with: $r"
+              exit 1
+            fi
+          done

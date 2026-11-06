@@ -1,0 +1,61 @@
+# cargo-deny (R0): CI's audit job runs `cargo deny --locked check`.
+# Locally: `cargo install --locked cargo-deny`, then the same command.
+# A finding is fixed (usually `cargo update -p <crate>`) or allowed here with
+# its reason.
+
+[graph]
+# Every target, so Windows- and Linux-only crates (Tauri's, the updater's zip)
+# are checked from a Mac too.
+all-features = true
+
+[advisories]
+# Yanked crates fail too (cargo-deny's default for `yanked` is a warning).
+yanked = "deny"
+ignore = [
+  # paste is unmaintained (archived), not vulnerable. It is a proc macro that
+  # only specta (our IPC bindings, pm-model) uses; nothing to replace it with
+  # until specta does.
+  { id = "RUSTSEC-2024-0436", reason = "unmaintained build-time macro via specta, no vulnerability" },
+  # proc-macro-error is unmaintained, not vulnerable: a build-time macro of the
+  # gtk-rs 0.18 crates Tauri uses on Linux. Goes away when Tauri moves to gtk4.
+  { id = "RUSTSEC-2024-0370", reason = "unmaintained build-time macro via Tauri's Linux gtk 0.18 stack" },
+]
+
+[licenses]
+# The app ships closed (UNLICENSED), so copyleft beyond MPL's file-level terms
+# is not allowed. MPL-2.0 (Tauri's Linux HTML stack, unmodified) is fine.
+allow = [
+  "0BSD",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "CC0-1.0",
+  "CDLA-Permissive-2.0",
+  "ISC",
+  "MIT",
+  "MIT-0",
+  "MPL-2.0",
+  "Unicode-3.0",
+  "Unlicense",
+  "Zlib",
+]
+confidence-threshold = 0.9
+
+[licenses.private]
+# Our own crates are `publish = false` and UNLICENSED.
+ignore = true
+
+[bans]
+# Warn, don't fail: Tauri, its Windows and gtk stacks and the tonic test
+# upstream bring many versions of the same crates (windows-sys, hashbrown,
+# syn, …) that we can't unify from here. The warnings stay visible in the
+# audit job's log.
+multiple-versions = "warn"
+wildcards = "deny"
+# Path dependencies between our own crates have no version.
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

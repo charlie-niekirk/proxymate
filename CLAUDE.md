@@ -53,7 +53,8 @@ Run these from the repo root unless noted.
 | Allow prompt in the browser UI | `npm run dev`, then open `http://localhost:1420/?devicePrompt=192.168.1.42` (mock LAN client waiting to be allowed) |
 | Run the app as the system proxy | `PROXYMATE_SYSTEM_PROXY=1 npm run tauri dev`. Changes the real macOS proxy settings: restored on quit, on signals, and by the guardian after `kill -9` |
 | UI only, in a browser | `npm run dev` (http://localhost:1420, in-memory mock backend) |
-| Rust format / lint / test | `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` |
+| Rust format / lint / test | `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` (CI runs `cargo nextest run --workspace --profile ci`: per-test timeouts in `.config/nextest.toml`) |
+| Dependency audit (CI's `audit` job) | `cargo deny --locked check` (`deny.toml`; `cargo install --locked cargo-deny`) and `npm audit --omit=dev` |
 | UI typecheck / lint / test / build | `npm run typecheck`, `npm run lint`, `npm run test`, `npm run build` |
 | Regenerate TS bindings | `cargo test -p proxymate-desktop export_bindings`. Debug app launches also regenerate them |
 | Engine micro-bench | `cargo run --release -p proxymate-cli -- bench [FLOWS]` |
@@ -65,8 +66,11 @@ Run these from the repo root unless noted.
 | Updater end to end | Debug bundle (`npm run tauri -- build --debug`) launched with `PROXYMATE_UPDATE_TEST=1`: checks at launch and installs without asking. Recipe in `docs/RELEASING.md` |
 
 CI (`.github/workflows/ci.yml`):
-- Rust: `fmt --check`, `clippy -D warnings`, `test` and a bindings-drift check, on macOS and Linux.
-- UI: `typecheck`, `lint`, `vitest`, `build` and Playwright (`e2e`), in the Playwright Docker image with pixel diffs on. Linux baselines (`*-linux.png`) are made there: a missing one fails the run and comes back in the `playwright-report` artifact to commit.
+- Rust: `fmt --check` and `clippy -D warnings` on Linux (`fmt + clippy`); `cargo nextest` and the bindings-drift check on macOS and Linux (`test (…)`); the R2 `bench budget` on Linux.
+- Audit: `cargo deny check` (advisories, yanked crates, licences, duplicates as warnings, sources) and `npm audit --omit=dev`. A finding is fixed (`cargo update -p <crate>`) or ignored in `deny.toml` with its reason.
+- UI: `typecheck`, `lint`, `vitest`, `build` and Playwright (`e2e`), in the Playwright Docker image with pixel diffs on. Linux baselines (`*-linux.png`) are made there: a missing one fails the run and comes back in the `playwright-report` artifact to commit. The image tag and `@playwright/test` move together, by hand (Dependabot ignores Playwright).
+- `ci` is the one required check: it passes when every job passed or was skipped. A pull request that only touches `docs/`, root `*.md` or `LICENSE*` skips the build jobs.
+- (R0) The toolchain is pinned in `rust-toolchain.toml` (CI and releases install it with `rustup toolchain install`); bump it in its own PR, since a new stable brings new clippy lints. Actions are pinned by commit SHA with the version in a comment; Dependabot (`.github/dependabot.yml`) updates them, cargo and npm weekly. Workflows get `contents: read` and every job a `timeout-minutes`; a new push cancels a pull request's older run, never main's.
 
 Run the same checks locally before pushing.
 
