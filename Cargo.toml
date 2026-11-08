@@ -71,7 +71,7 @@ postcard = { version = "1", default-features = false, features = ["use-std"] }
 moka = { version = "0.12", features = ["sync"] }
 uuid = { version = "1", features = ["v4"] }
 flate2 = "1"
-brotli = "8"
+brotli = "9"
 zstd = { version = "0.13", default-features = false }
 
 criterion = { version = "0.5", default-features = false }
