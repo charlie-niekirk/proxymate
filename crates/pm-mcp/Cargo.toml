@@ -22,7 +22,7 @@ tokio-util = "0.7"
 rustls.workspace = true
 # Pinned: the server, the stdio bridge and the tests all speak through it.
 # No TLS feature for reqwest: every connection is plain HTTP to loopback.
-rmcp = { version = "=3.6.0", default-features = false, features = [
+rmcp = { version = "=3.9.0", default-features = false, features = [
   "server",
   "client",
   "transport-streamable-http-server",
