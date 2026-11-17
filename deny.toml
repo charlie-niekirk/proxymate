@@ -19,6 +19,11 @@ ignore = [
   # proc-macro-error is unmaintained, not vulnerable: a build-time macro of the
   # gtk-rs 0.18 crates Tauri uses on Linux. Goes away when Tauri moves to gtk4.
   { id = "RUSTSEC-2024-0370", reason = "unmaintained build-time macro via Tauri's Linux gtk 0.18 stack" },
+  # chrono is unmaintained, not vulnerable, and has no safe upgrade. We don't
+  # depend on it: rmcp (and schemars' chrono04 feature, which rmcp turns on)
+  # use it for timestamps in MCP model types. Goes away when rmcp moves to
+  # jiff or time.
+  { id = "RUSTSEC-2026-0543", reason = "unmaintained, no vulnerability; only via rmcp's model types" },
 ]
 
 [licenses]
