@@ -1,3 +1,6 @@
+> [!WARNING]
+> Almost 100% Claude slop
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="brand/svg/proxymate-horizontal-white.svg">
