@@ -18,7 +18,8 @@ use base64::Engine as _;
 use pm_core::{Engine, FlowPage};
 use pm_model::{
     Action, BodyPart, BreakpointId, BreakpointResolution, FlowDetail, FlowId, FlowSummary, Header, MapLocalSource,
-    Matcher, Pattern, Phase, PresetKind, Rule, RuleOrigin, RulePatch, Scheme, SearchScope, WsDirection, WsQuery,
+    Matcher, Pattern, Phase, PresetKind, Rule, RuleGroup, RuleGroupPatch, RuleOrigin, RulePatch, Scheme, SearchScope,
+    WsDirection, WsQuery,
 };
 use pm_model::{CodeLanguage, FlowSelection, LIVE_STORE, RepeatOpts, RequestSpec, SendOpts, SendOrigin, StoreId};
 use pm_model::{Script, ScriptKind, ScriptTestSpec, ServeKey, ServeMiss, ServePick, ViewConfig};
@@ -176,7 +177,43 @@ fn defs() -> Vec<Def> {
             "list_rules",
             Read,
             ListRules,
-            "List rules in evaluation order (every matching rule runs, top to bottom). Agent-created rules have origin.kind = agent."
+            "List rules in evaluation order (every matching rule runs, top to bottom). Agent-created rules have origin.kind = agent. A rule's `group` is its rule group's id; it runs only while it and its group are both enabled. `group` lists one group's rules."
+        ),
+        def!(
+            "list_rule_groups",
+            Read,
+            NoParams,
+            "List rule groups in order: named sets of rules (say, one per ticket being tested) that turn on and off together, with their rule counts. Ungrouped rules run first, then each group's rules, group by group."
+        ),
+        def!(
+            "create_rule_group",
+            Write,
+            CreateRuleGroup,
+            "Create a rule group (added last, tagged as yours), optionally moving existing rules into it. Create rules straight into a group with the `group` parameter of create_rule, create_map_local, create_rewrite, create_breakpoint or create_serve_from."
+        ),
+        def!(
+            "set_rule_group_enabled",
+            Write,
+            SetRuleGroupEnabled,
+            "Turn every rule of a group on or off at once. Each rule keeps its own enabled flag, so turning the group back on restores exactly the rules that ran before."
+        ),
+        def!(
+            "update_rule_group",
+            Write,
+            UpdateRuleGroup,
+            "Rename a rule group or turn it on or off (fields left out stay as they are)."
+        ),
+        def!(
+            "move_rules_to_group",
+            Write,
+            MoveRulesToGroup,
+            "Move rules to the end of a group, keeping their relative order, or out of any group (leave `group` out)."
+        ),
+        def!(
+            "delete_rule_group",
+            Destructive,
+            DeleteRuleGroup,
+            "Delete a rule group. Its rules stay, ungrouped, unless delete_rules is true."
         ),
         def!("get_rule", Read, RuleIdParam, "One rule by id."),
         def!(
@@ -195,13 +232,13 @@ fn defs() -> Vec<Def> {
             "create_rule",
             Write,
             CreateRule,
-            "Create a rule: a matcher plus ordered actions (SetHeader, AddHeader, RemoveHeader, ReplaceHeaderValue, SetQuery, RemoveQuery, ReplaceBody, SetBody, JsonSet, JsonRemove, FormSet, FormRemove, SetStatus, MapLocal, MapRemote, Breakpoint, Delay, Throttle, Block, Script, WsMessage, ServeFrom, Comment). It is added last, enabled, and tagged as yours. Prefer create_map_local, create_rewrite or create_breakpoint for the common cases. A WebSocket's handshake goes through the rules like a request (header and query actions, Map Remote, Block, request breakpoints; response header actions on the 101); WsMessage {direction?, filter?, op: Drop | Replace | JsonSet | JsonRemove | Delay | Breakpoint} acts on its text and binary messages. Comment {text} puts a comment on every flow the rule matches (after its response matches, if the matcher has `response`), which list_flows finds with `comment:`."
+            "Create a rule: a matcher plus ordered actions (SetHeader, AddHeader, RemoveHeader, ReplaceHeaderValue, SetQuery, RemoveQuery, ReplaceBody, SetBody, JsonSet, JsonRemove, FormSet, FormRemove, SetStatus, MapLocal, MapRemote, Breakpoint, Delay, Throttle, Block, Script, WsMessage, ServeFrom, Comment). It is added last (of its `group`, if given), enabled, and tagged as yours. Prefer create_map_local, create_rewrite or create_breakpoint for the common cases. A WebSocket's handshake goes through the rules like a request (header and query actions, Map Remote, Block, request breakpoints; response header actions on the 101); WsMessage {direction?, filter?, op: Drop | Replace | JsonSet | JsonRemove | Delay | Breakpoint} acts on its text and binary messages. Comment {text} puts a comment on every flow the rule matches (after its response matches, if the matcher has `response`), which list_flows finds with `comment:`."
         ),
         def!(
             "update_rule",
             Destructive,
             UpdateRule,
-            "Change a rule's name, enabled flag, matcher or actions (fields left out stay as they are). Its origin is kept."
+            "Change a rule's name, enabled flag, matcher or actions (fields left out stay as they are). Its origin is kept; move_rules_to_group changes its group."
         ),
         def!("set_rule_enabled", Write, SetRuleEnabled, "Turn a rule on or off."),
         def!("delete_rule", Destructive, RuleIdParam, "Delete a rule."),
@@ -209,7 +246,7 @@ fn defs() -> Vec<Def> {
             "delete_agent_rules",
             Destructive,
             NoParams,
-            "Delete every rule created by an agent (any MCP client). Returns how many."
+            "Delete every rule created by an agent (any MCP client), then the agent-created rule groups left empty. Returns how many rules."
         ),
         def!(
             "create_map_local",
@@ -532,6 +569,12 @@ fn call_sync(ctx: &Ctx<'_>, name: &str, args: JsonObject) -> ToolResult {
             Ok(json!({ "deleted": p.id }))
         }
         "delete_agent_rules" => Ok(json!({ "deleted": ctx.engine.delete_agent_rules()? })),
+        "list_rule_groups" => list_rule_groups(ctx),
+        "create_rule_group" => create_rule_group(ctx, parse(args)?),
+        "set_rule_group_enabled" => set_rule_group_enabled(ctx, parse(args)?),
+        "update_rule_group" => update_rule_group(ctx, parse(args)?),
+        "move_rules_to_group" => move_rules_to_group(ctx, parse(args)?),
+        "delete_rule_group" => delete_rule_group(ctx, parse(args)?),
         "create_map_local" => create_map_local(ctx, parse(args)?),
         "create_serve_from" => create_serve_from(ctx, parse(args)?),
         "list_mock_sources" => Ok(json!({ "sources": ctx.engine.mock_sources() })),

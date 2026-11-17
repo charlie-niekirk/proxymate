@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use http::HeaderMap;
 use http::header::HeaderName;
-use pm_model::{Action, AppliedRule, KvMatch, Pattern, PatternKind, Phase, Rule, Scheme, StatusRange, WsOp};
+use pm_model::{Action, AppliedRule, KvMatch, Pattern, PatternKind, Phase, Rule, RuleGroup, Scheme, StatusRange, WsOp};
 use regex::bytes::{Regex, RegexBuilder, RegexSet, RegexSetBuilder};
 
 use super::RuleError;
@@ -578,8 +578,13 @@ impl CompiledRuleSet {
     }
 
     /// Compiles every rule (so a broken one is reported even if disabled)
-    /// and keeps the enabled ones.
-    pub(crate) fn compile(rules: &[Rule], scripts: &ScriptMap, mocks: &MockMap) -> Result<CompiledRuleSet, RuleError> {
+    /// and keeps the active ones: enabled, in an enabled group or none.
+    pub(crate) fn compile(
+        rules: &[Rule],
+        groups: &[RuleGroup],
+        scripts: &ScriptMap,
+        mocks: &MockMap,
+    ) -> Result<CompiledRuleSet, RuleError> {
         let mut sorted: Vec<&Rule> = rules.iter().collect();
         sorted.sort_by(|a, b| a.order.cmp(&b.order).then_with(|| a.id.cmp(&b.id)));
         let mut compiled = Vec::new();
@@ -588,7 +593,7 @@ impl CompiledRuleSet {
         let mut any_host = Vec::new();
         for rule in sorted {
             let c = CompiledRule::compile(rule, scripts, mocks)?;
-            if !rule.enabled {
+            if !rule.is_active(groups) {
                 continue;
             }
             let index = compiled.len();

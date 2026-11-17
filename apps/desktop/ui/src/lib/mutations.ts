@@ -12,6 +12,7 @@ import type {
   ProtoMapping_Deserialize,
   ProxySettings_Serialize,
   RecordingSettings_Deserialize,
+  RuleGroupPatch,
   RuleSettings,
   ScriptSettings_Deserialize,
   SslSettings,
@@ -39,6 +40,7 @@ import {
   proxyStatusKey,
   queryClient,
   recordingSettingsKey,
+  ruleGroupsKey,
   ruleSettingsKey,
   rulesKey,
   scriptSettingsKey,
@@ -122,6 +124,24 @@ export const mutations = {
 
   // ---- rules and scripts ----
   reorderRules: setter(rulesKey, (ids: string[]) => backend.reorderRules(ids)),
+  // Groups order the rule list, and creating or deleting one moves rules: refetch both.
+  createRuleGroup: changer("createRuleGroup", (name: string) => backend.createRuleGroup(name), [ruleGroupsKey]),
+  updateRuleGroup: changer(
+    "updateRuleGroup",
+    ({ id, patch }: { id: string; patch: RuleGroupPatch }) => backend.updateRuleGroup(id, patch),
+    [ruleGroupsKey],
+  ),
+  deleteRuleGroup: changer(
+    "deleteRuleGroup",
+    ({ id, deleteRules }: { id: string; deleteRules: boolean }) => backend.deleteRuleGroup(id, deleteRules),
+    [ruleGroupsKey, rulesKey],
+  ),
+  reorderRuleGroups: setter(ruleGroupsKey, (ids: string[]) => backend.reorderRuleGroups(ids), [rulesKey]),
+  moveRulesToGroup: changer(
+    "moveRulesToGroup",
+    ({ ids, group }: { ids: string[]; group: string | null }) => backend.moveRulesToGroup(ids, group),
+    [rulesKey],
+  ),
   setRuleSettings: setter(ruleSettingsKey, (s: RuleSettings) => backend.setRuleSettings(s)),
   setScriptSettings: setter(scriptSettingsKey, (s: ScriptSettings_Deserialize) => backend.setScriptSettings(s)),
 

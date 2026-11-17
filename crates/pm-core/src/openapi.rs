@@ -652,6 +652,7 @@ impl Engine {
                     origin: RuleOrigin::Preset {
                         preset: PresetKind::OpenApi,
                     },
+                    group: None,
                     matcher: Matcher {
                         methods: vec![op.method.clone()],
                         host: host.clone().map(Pattern::exact),

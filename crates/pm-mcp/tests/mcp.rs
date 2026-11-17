@@ -276,6 +276,76 @@ async fn agents_mock_endpoints_with_tagged_rules() {
     h.stop().await;
 }
 
+#[tokio::test]
+async fn agents_group_rules_and_switch_them_together() {
+    let h = Harness::start().await;
+    let upstream = Upstream::start().await;
+    let (client, _) = h.client().await;
+    let url = format!("http://127.0.0.1:{}/users/*", upstream.addr().port());
+
+    let made = ok(&client, "create_rule_group", json!({ "name": "PROJ-7" })).await;
+    let group = made["group"]["id"].as_str().unwrap().to_owned();
+    assert_eq!(made["group"]["origin"]["kind"], "agent");
+    // Rules go straight into a group, by name or by id.
+    let mock = ok(
+        &client,
+        "create_map_local",
+        json!({ "url": url, "body": "mocked", "group": "PROJ-7" }),
+    )
+    .await;
+    assert_eq!(mock["group"], group.as_str());
+    let rewrite = ok(
+        &client,
+        "create_rewrite",
+        json!({ "url": url, "set_response_headers": [{ "name": "x-ticket", "value": "7" }], "group": group }),
+    )
+    .await;
+    assert_eq!(rewrite["group"], group.as_str());
+    let listed = ok(&client, "list_rule_groups", json!({})).await;
+    assert_eq!(listed["groups"][0]["rules"], 2);
+    assert_eq!(
+        ok(&client, "list_rules", json!({ "group": "PROJ-7" })).await["total"],
+        2
+    );
+    assert_eq!(ok(&client, "list_rules", json!({ "group": "none" })).await["total"], 3);
+
+    let (_, body) = client::get(h.proxy, &upstream.url("/users/1")).await;
+    assert_eq!(&body[..], b"mocked");
+    let off = ok(
+        &client,
+        "set_rule_group_enabled",
+        json!({ "group": "PROJ-7", "enabled": false }),
+    )
+    .await;
+    assert_eq!(off["enabled"], false);
+    let (_, body) = client::get(h.proxy, &upstream.url("/users/1")).await;
+    assert_ne!(&body[..], b"mocked");
+    assert!(h.engine.rule(mock["id"].as_str().unwrap()).unwrap().enabled);
+
+    let unknown = call(
+        &client,
+        "set_rule_group_enabled",
+        json!({ "group": "PROJ-8", "enabled": true }),
+    )
+    .await;
+    assert_eq!(unknown.is_error, Some(true));
+
+    let moved = ok(&client, "move_rules_to_group", json!({ "rule_ids": [mock["id"]] })).await;
+    assert_eq!(moved["rules"][0]["group"], Value::Null);
+    let deleted = ok(
+        &client,
+        "delete_rule_group",
+        json!({ "group": group, "delete_rules": true }),
+    )
+    .await;
+    assert_eq!(deleted["deleted_rules"], 1);
+    assert_eq!(h.engine.rules().len(), 4);
+    assert!(h.engine.rule_groups().is_empty());
+
+    client.cancel().await.unwrap();
+    h.stop().await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn agents_serve_offline_from_a_recording() {
     let h = Harness::start().await;

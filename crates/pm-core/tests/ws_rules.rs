@@ -58,6 +58,7 @@ impl Proxy {
                 enabled: true,
                 order: 0,
                 origin: RuleOrigin::User,
+                group: None,
                 matcher: Matcher {
                     path: Some(Pattern::exact("/ws")),
                     ..Matcher::default()

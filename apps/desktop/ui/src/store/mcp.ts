@@ -2,7 +2,7 @@ import { create } from "zustand";
 
 import type { McpStatus_Serialize } from "@/bindings";
 import { backend } from "@/lib/backend";
-import { queryClient, rulesKey, scriptsKey } from "@/lib/query";
+import { queryClient, ruleGroupsKey, rulesKey, scriptsKey } from "@/lib/query";
 
 interface McpState {
   /** As the engine last pushed it; null until the first push. */
@@ -23,6 +23,9 @@ export function startMcp() {
   if (started) return;
   started = true;
   void backend.subscribeMcp((status) => useMcp.setState({ status }));
-  void backend.subscribeRules((rules) => queryClient.setQueryData(rulesKey, rules));
+  void backend.subscribeRules((book) => {
+    queryClient.setQueryData(rulesKey, book.rules);
+    queryClient.setQueryData(ruleGroupsKey, book.groups);
+  });
   void backend.subscribeScripts((scripts) => queryClient.setQueryData(scriptsKey, scripts));
 }

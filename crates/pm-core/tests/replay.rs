@@ -143,6 +143,7 @@ async fn rules_apply_only_when_asked() {
             enabled: true,
             order: 0,
             origin: RuleOrigin::User,
+            group: None,
             matcher: Matcher::default(),
             actions: vec![Action::SetHeader {
                 phase: Phase::Request,

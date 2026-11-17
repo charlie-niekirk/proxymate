@@ -1,8 +1,8 @@
 //! Rules and breakpoints (M5).
 
 use pm_model::{
-    BreakpointId, BreakpointInfo, BreakpointResolution, FlowId, IpcError, PresetKind, Rule, RuleId, RuleSettings,
-    RuleTestResult, StoreId,
+    BreakpointId, BreakpointInfo, BreakpointResolution, FlowId, IpcError, PresetKind, Rule, RuleBook, RuleGroup,
+    RuleGroupId, RuleGroupPatch, RuleId, RuleOrigin, RuleSettings, RuleTestResult, StoreId,
 };
 use tauri::ipc::Channel;
 
@@ -16,7 +16,59 @@ pub fn list_rules(engine: EngineState<'_>) -> Vec<Rule> {
     engine.rules()
 }
 
-/// Saves a new rule at the end of the list (a fresh id is assigned).
+/// Every rule group, in order.
+#[tauri::command]
+#[specta::specta]
+pub fn list_rule_groups(engine: EngineState<'_>) -> Vec<RuleGroup> {
+    engine.rule_groups()
+}
+
+/// Saves a new, enabled group after the others.
+#[tauri::command]
+#[specta::specta]
+pub fn create_rule_group(engine: EngineState<'_>, name: String) -> Result<RuleGroup, IpcError> {
+    engine.create_rule_group(&name, true, RuleOrigin::User).map_err(ipc)
+}
+
+/// Renames a group or turns all of its rules on or off together.
+#[tauri::command]
+#[specta::specta]
+pub fn update_rule_group(
+    engine: EngineState<'_>,
+    id: RuleGroupId,
+    patch: RuleGroupPatch,
+) -> Result<RuleGroup, IpcError> {
+    engine.patch_rule_group(&id, patch).map_err(ipc)
+}
+
+/// Deletes a group, and its rules with `delete_rules` (else they stay,
+/// ungrouped). Returns how many rules it held.
+#[tauri::command]
+#[specta::specta]
+pub fn delete_rule_group(engine: EngineState<'_>, id: RuleGroupId, delete_rules: bool) -> Result<u32, IpcError> {
+    engine.delete_rule_group(&id, delete_rules).map_err(ipc)
+}
+
+/// Puts the listed groups first, in that order.
+#[tauri::command]
+#[specta::specta]
+pub fn reorder_rule_groups(engine: EngineState<'_>, ids: Vec<RuleGroupId>) -> Result<Vec<RuleGroup>, IpcError> {
+    engine.reorder_rule_groups(&ids).map_err(ipc)
+}
+
+/// Moves rules to the end of a group, or out of any with `null`.
+#[tauri::command]
+#[specta::specta]
+pub fn move_rules_to_group(
+    engine: EngineState<'_>,
+    ids: Vec<RuleId>,
+    group: Option<RuleGroupId>,
+) -> Result<Vec<Rule>, IpcError> {
+    engine.move_rules_to_group(&ids, group.as_deref()).map_err(ipc)
+}
+
+/// Saves a new rule at the end of its group, or of the ungrouped rules (a
+/// fresh id is assigned).
 #[tauri::command]
 #[specta::specta]
 pub fn create_rule(engine: EngineState<'_>, rule: Rule) -> Result<Rule, IpcError> {
@@ -154,9 +206,10 @@ pub fn resolve_breakpoint(
     engine.resolve_breakpoint(id, resolution).map_err(ipc)
 }
 
-/// Streams the rule list whenever anyone (the UI or an agent) changes it.
+/// Streams the rules and groups whenever anyone (the UI or an agent)
+/// changes them.
 #[tauri::command]
 #[specta::specta]
-pub fn subscribe_rules(engine: EngineState<'_>, on_rules: Channel<Vec<Rule>>) {
-    engine.subscribe_rules(Box::new(move |rules| on_rules.send(rules).is_ok()));
+pub fn subscribe_rules(engine: EngineState<'_>, on_rules: Channel<RuleBook>) {
+    engine.subscribe_rules(Box::new(move |book| on_rules.send(book).is_ok()));
 }

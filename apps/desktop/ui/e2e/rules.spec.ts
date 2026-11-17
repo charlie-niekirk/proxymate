@@ -36,6 +36,57 @@ test("agent rules carry the AI badge and can be removed together", async ({ page
   await expect(editor.getByTestId("rule-agent-badge")).toHaveCount(0);
 });
 
+test("rule groups switch their rules together, take new groups and moved rules", async ({ page }) => {
+  await page.goto("/?rules&ruleGroups");
+  const editor = page.getByTestId("rules-editor");
+  const groups = editor.getByTestId("rule-group");
+  await expect(groups).toHaveCount(2);
+  const checkout = groups.filter({ hasText: "PROJ-142" });
+  const banner = groups.filter({ hasText: "PROJ-150" });
+  // Two of its three rules are on; the banner group is off with its rule still checked.
+  await expect(checkout.getByTestId("rule-group-count")).toHaveText("2/3");
+  await expect(banner.getByTestId("rule-group-enabled")).not.toBeChecked();
+  await expect(banner.getByTestId("rule-enabled")).toBeChecked();
+  await expect(banner.getByTestId("rule-enabled")).toHaveAttribute("title", /group is off/);
+
+  await banner.getByTestId("rule-group-enabled").check();
+  await expect(banner.getByTestId("rule-group-enabled")).toBeChecked();
+  await expect(banner.getByTestId("rule-enabled")).toBeChecked();
+
+  // Collapsing hides a group's rules, not the group.
+  await checkout.getByTestId("rule-group-toggle-open").click();
+  await expect(checkout.getByTestId("rule-row")).toHaveCount(0);
+  await checkout.getByTestId("rule-group-toggle-open").click();
+  await expect(checkout.getByTestId("rule-row")).toHaveCount(3);
+
+  // A new group starts in rename mode.
+  await editor.getByTestId("new-rule-group").click();
+  const name = editor.getByTestId("rule-group-name-input");
+  await expect(name).toBeFocused();
+  await name.fill("PROJ-200 · Login");
+  await name.press("Enter");
+  const login = groups.filter({ hasText: "PROJ-200 · Login" });
+  await expect(login).toBeVisible();
+
+  // A rule moves in from its menu; the editor's group picker follows.
+  const loose = editor.getByTestId("rule-row").filter({ hasText: "Add debug header" });
+  await loose.click({ button: "right" });
+  await page.getByTestId("rule-menu-move-to-group").click();
+  await page.getByTestId("rule-menu-group").filter({ hasText: "PROJ-200" }).click();
+  await expect(login.getByTestId("rule-row")).toHaveCount(1);
+  await expect(editor.getByTestId("rule-section-ungrouped")).toHaveCount(0);
+  await login.getByTestId("rule-row").click();
+  await expect(editor.getByTestId("rule-group-picker")).toHaveText("PROJ-200 · Login");
+  await expect(editor.getByTestId("save-rule")).toBeDisabled();
+
+  // Deleting a group can keep its rules.
+  await login.getByTestId("rule-group-header").click({ button: "right" });
+  await page.getByTestId("rule-group-menu-ungroup").click();
+  await expect(groups).toHaveCount(2);
+  await expect(editor.getByTestId("rule-section-ungrouped")).toBeVisible();
+  await expect(editor.getByTestId("rule-row").filter({ hasText: "Add debug header" })).toBeVisible();
+});
+
 test("the throttle menu switches the global network conditions", async ({ page }) => {
   await page.goto("/");
   await page.getByTestId("throttle-menu").click();

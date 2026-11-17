@@ -5,6 +5,11 @@
 //!
 //! Each flow takes a snapshot of the rule set when it starts, so editing
 //! rules never changes a flow halfway through.
+//!
+//! Rules can belong to a [`RuleGroup`]: a rule runs while it and its group
+//! are both enabled. The list is kept in evaluation order, section by
+//! section (ungrouped rules, then each group's), by `arrange` after
+//! every change.
 
 mod breakpoints;
 pub mod compile;
@@ -23,7 +28,8 @@ use parking_lot::{Mutex, RwLock};
 use pm_model::{
     Action, BodyPart, BreakpointId, BreakpointInfo, BreakpointResolution, FlowId, GLOBAL_THROTTLE_RULE_ID,
     MapLocalSource, Matcher, NO_CACHE_RULE_ID, NO_COOKIES_RULE_ID, Pattern, Phase, PresetKind, RequestHead,
-    ResponseHead, Rule, RuleId, RuleOrigin, RulePatch, RuleSettings, RuleTestResult, StoreId, WsDirection, WsOpcode,
+    ResponseHead, Rule, RuleBook, RuleGroup, RuleGroupPatch, RuleId, RuleOrigin, RulePatch, RuleSettings,
+    RuleTestResult, StoreId, WsDirection, WsOpcode,
 };
 
 pub use breakpoints::BreakpointSink;
@@ -60,6 +66,12 @@ pub enum RuleError {
     Unknown(RuleId),
     #[error("the built-in rule {0} can't be deleted")]
     Builtin(RuleId),
+    #[error("no rule group with id {0}")]
+    UnknownGroup(String),
+    #[error("the built-in rule {0} can't be put in a group")]
+    BuiltinGroup(RuleId),
+    #[error("a rule group needs a name")]
+    GroupName,
     #[error("breakpoint {0} was already resolved")]
     AlreadyResolved(BreakpointId),
     #[error("no breakpoint {0}")]
@@ -89,19 +101,20 @@ impl RuleError {
 /// Rules state owned by the engine.
 pub(crate) struct Rules {
     db: Mutex<AppDb>,
-    /// Write-locked across a whole change: validate, persist, swap.
-    list: RwLock<Vec<Rule>>,
+    /// The rules and groups, kept arranged. Write-locked across a whole
+    /// change: validate, persist, swap.
+    book: RwLock<RuleBook>,
     compiled: ArcSwap<CompiledRuleSet>,
     settings: RwLock<RuleSettings>,
     pub breakpoints: BreakpointManager,
     /// The Rules Editor and MCP sessions, told when anyone (the UI or an
-    /// agent) changes the list.
-    changes: Notifier<Vec<Rule>>,
+    /// agent) changes the rules or groups.
+    changes: Notifier<RuleBook>,
 }
 
-/// Receives the rule list (in evaluation order) whenever it changes.
-/// Returning `false` unsubscribes.
-pub type RulesSink = crate::notify::Sink<Vec<Rule>>;
+/// Receives the rules and groups (in evaluation order) whenever either
+/// changes. Returning `false` unsubscribes.
+pub type RulesSink = crate::notify::Sink<RuleBook>;
 
 impl Rules {
     /// The app database, for settings that aren't the rules' (`updates.rs`).
@@ -120,32 +133,40 @@ impl Rules {
                 AppDb::in_memory()
             })
             .expect("in-memory SQLite");
-        let mut rules = db.rules().unwrap_or_else(|err| {
-            eprintln!("proxymate: can't read rules: {err}");
-            Vec::new()
-        });
+        let mut book = RuleBook {
+            rules: db.rules().unwrap_or_else(|err| {
+                eprintln!("proxymate: can't read rules: {err}");
+                Vec::new()
+            }),
+            groups: db.rule_groups().unwrap_or_else(|err| {
+                eprintln!("proxymate: can't read rule groups: {err}");
+                Vec::new()
+            }),
+        };
         for builtin in [global_throttle_rule(), no_cache_rule(), no_cookies_rule()] {
-            if !rules.iter().any(|r| r.id == builtin.id) {
-                rules.push(builtin);
+            if !book.rules.iter().any(|r| r.id == builtin.id) {
+                book.rules.push(builtin);
             }
         }
+        arrange(&mut book);
         // One broken rule must not take the others down: drop it from the
         // compiled set (it stays listed, disabled).
-        let map = mocks.map_for(rules.iter().filter(|r| r.enabled));
-        let compiled = CompiledRuleSet::compile(&rules, scripts, &map).unwrap_or_else(|err| {
+        let map = mocks.map_for(book.rules.iter().filter(|r| r.is_active(&book.groups)));
+        let compiled = CompiledRuleSet::compile(&book.rules, &book.groups, scripts, &map).unwrap_or_else(|err| {
             eprintln!("proxymate: {err}; disabling rules that don't compile");
-            for rule in &mut rules {
+            for rule in &mut book.rules {
                 if CompiledRule::compile(rule, scripts, &map).is_err() {
                     rule.enabled = false;
                 }
             }
-            CompiledRuleSet::compile(&rules, scripts, &map).unwrap_or_else(|_| CompiledRuleSet::empty())
+            CompiledRuleSet::compile(&book.rules, &book.groups, scripts, &map)
+                .unwrap_or_else(|_| CompiledRuleSet::empty())
         });
         let settings = db.rule_settings().unwrap_or_default();
         Rules {
             breakpoints: BreakpointManager::new(settings.breakpoint_timeout_secs),
             db: Mutex::new(db),
-            list: RwLock::new(rules),
+            book: RwLock::new(book),
             compiled: ArcSwap::from_pointee(compiled),
             settings: RwLock::new(settings),
             changes: Notifier::new(),
@@ -154,7 +175,7 @@ impl Rules {
 
     /// Part of the publisher tick.
     pub fn publish(&self) {
-        self.changes.publish(|| sorted(self.list.read().clone()));
+        self.changes.publish(|| self.book.read().clone());
     }
 }
 
@@ -169,6 +190,7 @@ fn global_throttle_rule() -> Rule {
         origin: RuleOrigin::Preset {
             preset: PresetKind::Throttle,
         },
+        group: None,
         matcher: Matcher::default(),
         actions: vec![Action::Throttle {
             download_kbps: 780,
@@ -198,6 +220,7 @@ fn no_cache_rule() -> Rule {
         enabled: false,
         order: i64::MIN / 2 + 1,
         origin: RuleOrigin::User,
+        group: None,
         matcher: Matcher::default(),
         actions: vec![
             remove(Phase::Request, "If-None-Match"),
@@ -221,6 +244,7 @@ fn no_cookies_rule() -> Rule {
         enabled: false,
         order: i64::MIN / 2 + 2,
         origin: RuleOrigin::User,
+        group: None,
         matcher: Matcher::default(),
         actions: vec![
             Action::RemoveHeader {
@@ -248,16 +272,95 @@ fn sorted(mut rules: Vec<Rule>) -> Vec<Rule> {
     rules
 }
 
+fn is_builtin(rule: &Rule) -> bool {
+    rule.id.starts_with("builtin-")
+}
+
+/// Puts the book in evaluation order and renumbers it, so `order` alone
+/// says where a rule runs: the built-in rules first, then the ungrouped
+/// rules, then each group's rules, group by group. Within a section rules
+/// keep their relative order. A rule naming a group that isn't there (or
+/// a built-in rule naming any) loses it.
+fn arrange(book: &mut RuleBook) {
+    let RuleBook { rules, groups } = book;
+    groups.sort_by(|a, b| a.order.cmp(&b.order).then_with(|| a.id.cmp(&b.id)));
+    for (i, group) in groups.iter_mut().enumerate() {
+        group.order = i as i64 + 1;
+    }
+    let section = |rule: &Rule| -> usize {
+        if is_builtin(rule) {
+            return 0;
+        }
+        match rule
+            .group
+            .as_deref()
+            .and_then(|id| groups.iter().position(|g| g.id == id))
+        {
+            None => 1,
+            Some(i) => i + 2,
+        }
+    };
+    for rule in rules.iter_mut() {
+        if section(rule) < 2 {
+            rule.group = None;
+        }
+    }
+    rules.sort_by(|a, b| {
+        section(a)
+            .cmp(&section(b))
+            .then_with(|| a.order.cmp(&b.order))
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    for (i, rule) in rules.iter_mut().filter(|r| !is_builtin(r)).enumerate() {
+        rule.order = i as i64 + 1;
+    }
+}
+
+/// The saved rule `id`, as arranged.
+fn saved(book: &RuleBook, id: &str) -> Rule {
+    book.rules
+        .iter()
+        .find(|r| r.id == id)
+        .cloned()
+        .expect("a rule the change just saved")
+}
+
+fn saved_group(book: &RuleBook, id: &str) -> RuleGroup {
+    book.groups
+        .iter()
+        .find(|g| g.id == id)
+        .cloned()
+        .expect("a group the change just saved")
+}
+
+fn group_name(name: &str) -> Result<String, RuleError> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(RuleError::GroupName);
+    }
+    Ok(name.to_owned())
+}
+
 impl Engine {
     // ---- Rules ----
 
     /// Every rule, in evaluation order.
     pub fn rules(&self) -> Vec<Rule> {
-        sorted(self.rules.list.read().clone())
+        self.rules.book.read().rules.clone()
     }
 
     pub fn rule(&self, id: &str) -> Option<Rule> {
-        self.rules.list.read().iter().find(|r| r.id == id).cloned()
+        self.rules.book.read().rules.iter().find(|r| r.id == id).cloned()
+    }
+
+    /// Every rule group, in order.
+    pub fn rule_groups(&self) -> Vec<RuleGroup> {
+        self.rules.book.read().groups.clone()
+    }
+
+    /// The rules and groups together, as one consistent snapshot.
+    pub fn rule_book(&self) -> RuleBook {
+        self.rules.book.read().clone()
     }
 
     /// Checks that `rule` compiles, without saving it.
@@ -266,84 +369,104 @@ impl Engine {
         Ok(())
     }
 
-    /// Saves a new rule at the end of the list. It gets a fresh id; the
-    /// `id` and `order` passed in are ignored.
+    /// Saves a new rule at the end of its section (its group's, or the
+    /// ungrouped rules'). It gets a fresh id; the `id` and `order` passed
+    /// in are ignored.
     pub fn create_rule(&self, mut rule: Rule) -> Result<Rule, Error> {
         rule.id = uuid::Uuid::new_v4().to_string();
-        self.change_rules(|rules| {
-            rule.order = rules.iter().map(|r| r.order).max().unwrap_or(0).max(0) + 1;
-            rules.push(rule.clone());
-            Ok(rule)
-        })
+        self.change(
+            |book| {
+                rule.order = next_order(&book.rules);
+                let id = rule.id.clone();
+                book.rules.push(rule);
+                Ok(id)
+            },
+            |id, book| saved(book, &id),
+        )
     }
 
-    /// Saves several new rules at the end of the list in one change (so
-    /// either all are saved or none). Ids and orders are assigned.
-    pub fn create_rules(&self, mut new: Vec<Rule>) -> Result<Vec<Rule>, Error> {
-        self.change_rules(|rules| {
-            let mut order = rules.iter().map(|r| r.order).max().unwrap_or(0).max(0);
-            for rule in &mut new {
-                order += 1;
-                rule.id = uuid::Uuid::new_v4().to_string();
-                rule.order = order;
-                rules.push(rule.clone());
-            }
-            Ok(new)
-        })
+    /// Saves several new rules at the end of their sections in one change
+    /// (so either all are saved or none). Ids and orders are assigned.
+    pub fn create_rules(&self, new: Vec<Rule>) -> Result<Vec<Rule>, Error> {
+        self.change(
+            |book| {
+                let mut ids = Vec::with_capacity(new.len());
+                for (order, mut rule) in (next_order(&book.rules)..).zip(new) {
+                    rule.id = uuid::Uuid::new_v4().to_string();
+                    rule.order = order;
+                    ids.push(rule.id.clone());
+                    book.rules.push(rule);
+                }
+                Ok(ids)
+            },
+            |ids, book| ids.iter().map(|id| saved(book, id)).collect(),
+        )
     }
 
-    /// Replaces the rule with the same id.
-    pub fn update_rule(&self, rule: Rule) -> Result<Rule, Error> {
-        self.change_rules(|rules| {
-            let slot = rules
-                .iter_mut()
-                .find(|r| r.id == rule.id)
-                .ok_or_else(|| RuleError::Unknown(rule.id.clone()))?;
-            *slot = rule.clone();
-            Ok(rule)
-        })
+    /// Replaces the rule with the same id. A changed `group` moves it to
+    /// the end of that group.
+    pub fn update_rule(&self, mut rule: Rule) -> Result<Rule, Error> {
+        self.change(
+            |book| {
+                let max = next_order(&book.rules);
+                let slot = book
+                    .rules
+                    .iter_mut()
+                    .find(|r| r.id == rule.id)
+                    .ok_or_else(|| RuleError::Unknown(rule.id.clone()))?;
+                if slot.group != rule.group {
+                    rule.order = max;
+                }
+                *slot = rule.clone();
+                Ok(rule.id)
+            },
+            |id, book| saved(book, &id),
+        )
     }
 
     /// Changes the fields `patch` sets on the rule `id`, in one change: an
     /// edit made meanwhile (by the UI or another agent) to the other fields
     /// is kept, unlike reading the rule and writing it back.
     pub fn patch_rule(&self, id: &str, patch: RulePatch) -> Result<Rule, Error> {
-        self.change_rules(|rules| {
-            let rule = rules
-                .iter_mut()
-                .find(|r| r.id == id)
-                .ok_or_else(|| RuleError::Unknown(id.to_owned()))?;
-            let RulePatch {
-                name,
-                enabled,
-                matcher,
-                actions,
-            } = patch;
-            if let Some(name) = name {
-                rule.name = name;
-            }
-            if let Some(enabled) = enabled {
-                rule.enabled = enabled;
-            }
-            if let Some(matcher) = matcher {
-                rule.matcher = matcher;
-            }
-            if let Some(actions) = actions {
-                rule.actions = actions;
-            }
-            Ok(rule.clone())
-        })
+        self.change(
+            |book| {
+                let rule = book
+                    .rules
+                    .iter_mut()
+                    .find(|r| r.id == id)
+                    .ok_or_else(|| RuleError::Unknown(id.to_owned()))?;
+                let RulePatch {
+                    name,
+                    enabled,
+                    matcher,
+                    actions,
+                } = patch;
+                if let Some(name) = name {
+                    rule.name = name;
+                }
+                if let Some(enabled) = enabled {
+                    rule.enabled = enabled;
+                }
+                if let Some(matcher) = matcher {
+                    rule.matcher = matcher;
+                }
+                if let Some(actions) = actions {
+                    rule.actions = actions;
+                }
+                Ok(())
+            },
+            |(), book| saved(book, id),
+        )
     }
 
     pub fn set_rule_enabled(&self, id: &str, enabled: bool) -> Result<Rule, Error> {
-        self.change_rules(|rules| {
-            let rule = rules
-                .iter_mut()
-                .find(|r| r.id == id)
-                .ok_or_else(|| RuleError::Unknown(id.to_owned()))?;
-            rule.enabled = enabled;
-            Ok(rule.clone())
-        })
+        self.patch_rule(
+            id,
+            RulePatch {
+                enabled: Some(enabled),
+                ..RulePatch::default()
+            },
+        )
     }
 
     pub fn delete_rule(&self, id: &str) -> Result<(), Error> {
@@ -360,33 +483,178 @@ impl Engine {
         })
     }
 
-    /// Deletes every rule an agent created; returns how many.
+    /// Deletes every rule an agent created, and then every group an agent
+    /// created that has no rules left; returns how many rules.
     pub fn delete_agent_rules(&self) -> Result<u32, Error> {
-        self.change_rules(|rules| {
-            let before = rules.len();
-            rules.retain(|r| !matches!(r.origin, RuleOrigin::Agent { .. }));
-            Ok((before - rules.len()) as u32)
-        })
+        self.change(
+            |book| {
+                let before = book.rules.len();
+                book.rules.retain(|r| !matches!(r.origin, RuleOrigin::Agent { .. }));
+                let RuleBook { rules, groups } = book;
+                groups.retain(|g| {
+                    !matches!(g.origin, RuleOrigin::Agent { .. })
+                        || rules.iter().any(|r| r.group.as_deref() == Some(g.id.as_str()))
+                });
+                Ok((before - book.rules.len()) as u32)
+            },
+            |n, _| n,
+        )
     }
 
     /// Puts the listed rules first, in that order; the others follow in
-    /// their current order. The built-in rules stay ahead of everything.
+    /// their current order. The built-in rules stay ahead of everything,
+    /// and each rule stays in its section (ungrouped, or its group): the
+    /// order applies within each.
     pub fn reorder_rules(&self, ids: &[RuleId]) -> Result<Vec<Rule>, Error> {
-        self.change_rules(|rules| {
-            let current = sorted(std::mem::take(rules));
-            let (builtin, user): (Vec<Rule>, Vec<Rule>) =
-                current.into_iter().partition(|r| r.id.starts_with("builtin-"));
-            let mut ordered: Vec<Rule> = ids
-                .iter()
-                .filter_map(|id| user.iter().find(|r| &r.id == id).cloned())
-                .collect();
-            ordered.extend(user.into_iter().filter(|r| !ids.contains(&r.id)));
-            for (i, rule) in ordered.iter_mut().enumerate() {
-                rule.order = i as i64 + 1;
-            }
-            *rules = builtin.into_iter().chain(ordered).collect();
-            Ok(sorted(rules.clone()))
-        })
+        self.change(
+            |book| {
+                let current = sorted(std::mem::take(&mut book.rules));
+                let (builtin, user): (Vec<Rule>, Vec<Rule>) = current.into_iter().partition(is_builtin);
+                let mut ordered: Vec<Rule> = ids
+                    .iter()
+                    .filter_map(|id| user.iter().find(|r| &r.id == id).cloned())
+                    .collect();
+                ordered.extend(user.into_iter().filter(|r| !ids.contains(&r.id)));
+                for (i, rule) in ordered.iter_mut().enumerate() {
+                    rule.order = i as i64 + 1;
+                }
+                book.rules = builtin.into_iter().chain(ordered).collect();
+                Ok(())
+            },
+            |(), book| book.rules.clone(),
+        )
+    }
+
+    // ---- Rule groups ----
+
+    /// Saves a new group after the others.
+    pub fn create_rule_group(&self, name: &str, enabled: bool, origin: RuleOrigin) -> Result<RuleGroup, Error> {
+        let group = RuleGroup {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: group_name(name)?,
+            enabled,
+            order: i64::MAX,
+            origin,
+        };
+        self.change(
+            |book| {
+                let id = group.id.clone();
+                book.groups.push(group);
+                Ok(id)
+            },
+            |id, book| saved_group(book, &id),
+        )
+    }
+
+    /// Renames a group or turns it (and so all of its rules) on or off.
+    /// The rules' own on/off states are kept.
+    pub fn patch_rule_group(&self, id: &str, patch: RuleGroupPatch) -> Result<RuleGroup, Error> {
+        let name = patch.name.as_deref().map(group_name).transpose()?;
+        self.change(
+            |book| {
+                let group = book
+                    .groups
+                    .iter_mut()
+                    .find(|g| g.id == id)
+                    .ok_or_else(|| RuleError::UnknownGroup(id.to_owned()))?;
+                if let Some(name) = name {
+                    group.name = name;
+                }
+                if let Some(enabled) = patch.enabled {
+                    group.enabled = enabled;
+                }
+                Ok(())
+            },
+            |(), book| saved_group(book, id),
+        )
+    }
+
+    pub fn set_rule_group_enabled(&self, id: &str, enabled: bool) -> Result<RuleGroup, Error> {
+        self.patch_rule_group(
+            id,
+            RuleGroupPatch {
+                enabled: Some(enabled),
+                ..RuleGroupPatch::default()
+            },
+        )
+    }
+
+    /// Deletes a group. Its rules are deleted too with `delete_rules`;
+    /// otherwise they stay, ungrouped, at the end of the ungrouped rules
+    /// with their own on/off state. Returns how many rules it held.
+    pub fn delete_rule_group(&self, id: &str, delete_rules: bool) -> Result<u32, Error> {
+        self.change(
+            |book| {
+                let before = book.groups.len();
+                book.groups.retain(|g| g.id != id);
+                if book.groups.len() == before {
+                    return Err(RuleError::UnknownGroup(id.to_owned()).into());
+                }
+                let held = book.rules.iter().filter(|r| r.group.as_deref() == Some(id)).count();
+                if delete_rules {
+                    book.rules.retain(|r| r.group.as_deref() != Some(id));
+                } else {
+                    let first = next_order(&book.rules);
+                    let members = book.rules.iter_mut().filter(|r| r.group.as_deref() == Some(id));
+                    for (order, rule) in (first..).zip(members) {
+                        rule.group = None;
+                        rule.order = order;
+                    }
+                }
+                Ok(held as u32)
+            },
+            |n, _| n,
+        )
+    }
+
+    /// Puts the listed groups first, in that order; the others follow in
+    /// their current order. Their rules move with them.
+    pub fn reorder_rule_groups(&self, ids: &[String]) -> Result<Vec<RuleGroup>, Error> {
+        self.change(
+            |book| {
+                let rank = |g: &RuleGroup| ids.iter().position(|id| *id == g.id).unwrap_or(ids.len());
+                book.groups
+                    .sort_by(|a, b| rank(a).cmp(&rank(b)).then_with(|| a.order.cmp(&b.order)));
+                for (i, group) in book.groups.iter_mut().enumerate() {
+                    group.order = i as i64 + 1;
+                }
+                Ok(())
+            },
+            |(), book| book.groups.clone(),
+        )
+    }
+
+    /// Moves rules into a group (or out of any, with `None`), at the end
+    /// of it, keeping their relative order. Returns the moved rules.
+    pub fn move_rules_to_group(&self, ids: &[RuleId], group: Option<&str>) -> Result<Vec<Rule>, Error> {
+        self.change(
+            |book| {
+                if let Some(group) = group
+                    && !book.groups.iter().any(|g| g.id == group)
+                {
+                    return Err(RuleError::UnknownGroup(group.to_owned()).into());
+                }
+                for id in ids {
+                    if id.starts_with("builtin-") {
+                        return Err(RuleError::BuiltinGroup(id.clone()).into());
+                    }
+                    if !book.rules.iter().any(|r| &r.id == id) {
+                        return Err(RuleError::Unknown(id.clone()).into());
+                    }
+                }
+                let mut order = next_order(&book.rules);
+                // `book.rules` is arranged, so this keeps their order.
+                for rule in book.rules.iter_mut().filter(|r| ids.contains(&r.id)) {
+                    if rule.group.as_deref() != group {
+                        rule.group = group.map(str::to_owned);
+                        rule.order = order;
+                        order += 1;
+                    }
+                }
+                Ok(())
+            },
+            |(), book| book.rules.iter().filter(|r| ids.contains(&r.id)).cloned().collect(),
+        )
     }
 
     pub fn rule_settings(&self) -> RuleSettings {
@@ -407,39 +675,58 @@ impl Engine {
         Ok(settings)
     }
 
-    /// Validates, saves and swaps in a changed rule list. New flows use it
-    /// straight away; flows in flight keep the set they started with.
+    /// [`Engine::change`] for an edit of the rule list alone.
     fn change_rules<T>(&self, change: impl FnOnce(&mut Vec<Rule>) -> Result<T, Error>) -> Result<T, Error> {
-        let mut list = self.rules.list.write();
-        let mut next = list.clone();
-        let out = change(&mut next)?;
-        let mocks = self.mock_map(next.iter().filter(|r| r.enabled));
-        let compiled = CompiledRuleSet::compile(&next, &self.script_map(), &mocks)?;
-        self.rules.db.lock().save_rules(&next).map_err(RuleError::from)?;
-        *list = next;
-        self.rules.compiled.store(Arc::new(compiled));
-        self.rules.changes.changed();
-        Ok(out)
+        self.change(|book| change(&mut book.rules), |out, _| out)
     }
 
-    /// The rule list, write-locked, for a script change (which must check
-    /// and then recompile the rules).
-    pub(crate) fn rules_write(&self) -> parking_lot::RwLockWriteGuard<'_, Vec<Rule>> {
-        self.rules.list.write()
+    /// Validates, arranges, saves and swaps in changed rules and groups;
+    /// `done` reads the result from the book as saved. New flows use it
+    /// straight away; flows in flight keep the set they started with.
+    fn change<T, R>(
+        &self,
+        edit: impl FnOnce(&mut RuleBook) -> Result<T, Error>,
+        done: impl FnOnce(T, &RuleBook) -> R,
+    ) -> Result<R, Error> {
+        let mut book = self.rules.book.write();
+        let mut next = book.clone();
+        let out = edit(&mut next)?;
+        for rule in &next.rules {
+            if let Some(group) = &rule.group
+                && !is_builtin(rule)
+                && !next.groups.iter().any(|g| &g.id == group)
+            {
+                return Err(RuleError::UnknownGroup(group.clone()).into());
+            }
+        }
+        arrange(&mut next);
+        let mocks = self.mock_map(next.rules.iter().filter(|r| r.is_active(&next.groups)));
+        let compiled = CompiledRuleSet::compile(&next.rules, &next.groups, &self.script_map(), &mocks)?;
+        self.rules.db.lock().save_rule_book(&next).map_err(RuleError::from)?;
+        *book = next;
+        self.rules.compiled.store(Arc::new(compiled));
+        self.rules.changes.changed();
+        Ok(done(out, &book))
+    }
+
+    /// The rules and groups, write-locked, for a script change (which must
+    /// check and then recompile the rules).
+    pub(crate) fn rules_write(&self) -> parking_lot::RwLockWriteGuard<'_, RuleBook> {
+        self.rules.book.write()
     }
 
     /// Recompiles the rules against the current scripts, so they run the
     /// new versions.
-    pub(crate) fn recompile_rules(&self, list: parking_lot::RwLockWriteGuard<'_, Vec<Rule>>) {
-        let mocks = self.mock_map(list.iter().filter(|r| r.enabled));
-        match CompiledRuleSet::compile(&list, &self.script_map(), &mocks) {
+    pub(crate) fn recompile_rules(&self, book: parking_lot::RwLockWriteGuard<'_, RuleBook>) {
+        let mocks = self.mock_map(book.rules.iter().filter(|r| r.is_active(&book.groups)));
+        match CompiledRuleSet::compile(&book.rules, &book.groups, &self.script_map(), &mocks) {
             Ok(compiled) => self.rules.compiled.store(Arc::new(compiled)),
             Err(err) => eprintln!("proxymate: rules no longer compile after a script change: {err}"),
         }
     }
 
-    /// Sends the rule list to `sink` on the next tick and whenever it
-    /// changes, so an open Rules Editor follows edits made by agents.
+    /// Sends the rules and groups to `sink` on the next tick and whenever
+    /// they change, so an open Rules Editor follows edits made by agents.
     pub fn subscribe_rules(&self, sink: RulesSink) {
         self.rules.changes.subscribe(sink);
     }
@@ -536,6 +823,7 @@ impl Engine {
             enabled: true,
             order: 0,
             origin: RuleOrigin::Preset { preset },
+            group: None,
             matcher,
             actions,
         })
@@ -902,6 +1190,11 @@ impl Engine {
     pub(crate) fn breakpoint_manager(&self) -> &BreakpointManager {
         &self.rules.breakpoints
     }
+}
+
+/// The `order` that puts a rule last in whichever section it lands in.
+fn next_order(rules: &[Rule]) -> i64 {
+    rules.iter().map(|r| r.order).max().unwrap_or(0).max(0) + 1
 }
 
 /// A held WebSocket message is sent on (maybe edited) or dropped; it

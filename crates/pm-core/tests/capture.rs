@@ -107,6 +107,7 @@ async fn a_never_recorded_host_is_proxied_but_makes_no_flow() {
             enabled: true,
             order: 0,
             origin: RuleOrigin::User,
+            group: None,
             matcher: Matcher::default(),
             actions: vec![Action::SetHeader {
                 phase: Phase::Response,

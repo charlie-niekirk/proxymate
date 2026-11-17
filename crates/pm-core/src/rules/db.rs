@@ -10,7 +10,7 @@
 use std::net::IpAddr;
 use std::path::Path;
 
-use pm_model::{Rule, RuleSettings, Script};
+use pm_model::{Rule, RuleBook, RuleGroup, RuleSettings, Script};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -51,6 +51,7 @@ impl AppDb {
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS rules (id TEXT PRIMARY KEY, json TEXT NOT NULL);
+             CREATE TABLE IF NOT EXISTS rule_groups (id TEXT PRIMARY KEY, json TEXT NOT NULL);
              CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, json TEXT NOT NULL);
              CREATE TABLE IF NOT EXISTS devices (ip TEXT PRIMARY KEY, nickname TEXT, allowed INTEGER NOT NULL);
              CREATE TABLE IF NOT EXISTS scripts (id TEXT PRIMARY KEY, json TEXT NOT NULL);",
@@ -66,29 +67,50 @@ impl AppDb {
     /// Every stored rule. Rows that no longer parse are skipped (and
     /// reported), not fatal.
     pub fn rules(&self) -> rusqlite::Result<Vec<Rule>> {
-        let mut stmt = self.conn.prepare("SELECT id, json FROM rules")?;
+        self.json_rows("rules", "rule")
+    }
+
+    /// Every stored rule group, skipping (and reporting) unreadable rows.
+    pub fn rule_groups(&self) -> rusqlite::Result<Vec<RuleGroup>> {
+        self.json_rows("rule_groups", "rule group")
+    }
+
+    fn json_rows<T: DeserializeOwned>(&self, table: &str, what: &str) -> rusqlite::Result<Vec<T>> {
+        let mut stmt = self.conn.prepare(&format!("SELECT id, json FROM {table}"))?;
         let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?;
-        let mut rules = Vec::new();
+        let mut out = Vec::new();
         for row in rows {
             let (id, json) = row?;
             match serde_json::from_str(&json) {
-                Ok(rule) => rules.push(rule),
-                Err(err) => eprintln!("proxymate: skipping unreadable rule {id}: {err}"),
+                Ok(value) => out.push(value),
+                Err(err) => eprintln!("proxymate: skipping unreadable {what} {id}: {err}"),
             }
         }
-        Ok(rules)
+        Ok(out)
     }
 
-    /// Replaces the stored rules with `rules` in one transaction.
-    pub fn save_rules(&mut self, rules: &[Rule]) -> rusqlite::Result<()> {
+    /// Replaces the stored rules and groups with `book`'s in one
+    /// transaction, so a rule never points at a group that wasn't saved.
+    pub fn save_rule_book(&mut self, book: &RuleBook) -> rusqlite::Result<()> {
         let tx = self.conn.transaction()?;
-        tx.execute("DELETE FROM rules", [])?;
-        {
-            let mut insert = tx.prepare("INSERT INTO rules (id, json) VALUES (?1, ?2)")?;
-            for rule in rules {
-                let json =
-                    serde_json::to_string(rule).map_err(|e| rusqlite::Error::ToSqlConversionFailure(e.into()))?;
-                insert.execute(params![rule.id, json])?;
+        for (table, rows) in [
+            (
+                "rules",
+                book.rules
+                    .iter()
+                    .map(|r| (&r.id, serde_json::to_string(r)))
+                    .collect::<Vec<_>>(),
+            ),
+            (
+                "rule_groups",
+                book.groups.iter().map(|g| (&g.id, serde_json::to_string(g))).collect(),
+            ),
+        ] {
+            tx.execute(&format!("DELETE FROM {table}"), [])?;
+            let mut insert = tx.prepare(&format!("INSERT INTO {table} (id, json) VALUES (?1, ?2)"))?;
+            for (id, json) in rows {
+                let json = json.map_err(|e| rusqlite::Error::ToSqlConversionFailure(e.into()))?;
+                insert.execute(params![id, json])?;
             }
         }
         tx.commit()

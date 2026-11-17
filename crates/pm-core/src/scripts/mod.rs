@@ -306,6 +306,7 @@ fn matcher_rule(script: &Script) -> Rule {
         enabled: true,
         order: 0,
         origin: script.origin.clone(),
+        group: None,
         matcher: script.view.clone().unwrap_or_default().matcher,
         actions: Vec::new(),
     }
@@ -505,7 +506,7 @@ impl Engine {
         let rules = self.rules_write();
         let mut list = self.scripts.list.write();
         let mut next = list.clone();
-        let out = change(&mut next, &rules)?;
+        let out = change(&mut next, &rules.rules)?;
         let previous = self.scripts.map();
         let mut map = ScriptMap::new();
         let mut view_scripts = Vec::new();

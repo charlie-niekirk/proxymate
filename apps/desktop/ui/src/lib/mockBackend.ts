@@ -12,6 +12,7 @@ import type {
   FlowSelection_Deserialize,
   FlowRow_Serialize,
   HeaderColumn,
+  RuleGroup_Serialize,
   SortSpec_Deserialize,
   FlowSummary_Serialize,
   ProxyStatus_Serialize,
@@ -222,6 +223,7 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
       enabled: false,
       order: -1_000_000,
       origin: { kind: "preset", preset: "throttle" },
+      group: null,
       matcher: emptyMatcher(),
       actions: [{ type: "Throttle", download_kbps: 780, upload_kbps: 330, latency_ms: 100 }],
     },
@@ -231,6 +233,7 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
       enabled: false,
       order: -999_999,
       origin: { kind: "user" },
+      group: null,
       matcher: emptyMatcher(),
       actions: [
         { type: "RemoveHeader", phase: "request", name: "If-None-Match" },
@@ -250,6 +253,7 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
       enabled: false,
       order: -999_998,
       origin: { kind: "user" },
+      group: null,
       matcher: emptyMatcher(),
       actions: [
         { type: "RemoveHeader", phase: "request", name: "Cookie" },
@@ -262,10 +266,38 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
       enabled: true,
       order: 1,
       origin: { kind: "agent", client: "claude-code", session: null, created_at_ms: now },
+      group: null,
       matcher: { ...emptyMatcher(), host: { kind: "exact", value: "api.stripe.com", case_insensitive: false } },
       actions: [{ type: "SetStatus", status: 503 }],
     },
   ];
+  // Dev only: `?ruleGroups` seeds two groups (one off) holding the agent rule and a ticket's rules.
+  const seedGroups = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("ruleGroups");
+  let ruleGroups: RuleGroup_Serialize[] = seedGroups
+    ? [
+        { id: "mock-group-checkout", name: "PROJ-142 · Checkout errors", enabled: true, order: 1, origin: { kind: "user" } },
+        { id: "mock-group-banner", name: "PROJ-150 · Promo banner", enabled: false, order: 2, origin: { kind: "user" } },
+      ]
+    : [];
+  if (seedGroups) {
+    const seeded = (id: string, name: string, group: string | null, enabled: boolean, path: string): Rule => ({
+      id,
+      name,
+      enabled,
+      order: 10,
+      origin: { kind: "user" },
+      group,
+      matcher: { ...emptyMatcher(), path: { kind: "glob", value: path, case_insensitive: false } },
+      actions: [{ type: "SetStatus", status: 500 }],
+    });
+    rules = [
+      ...rules.map((r) => (r.id === "mock-agent-rule" ? { ...r, group: "mock-group-checkout" } : r)),
+      seeded("mock-checkout-500", "Fail the basket", "mock-group-checkout", true, "/basket*"),
+      seeded("mock-checkout-slow", "Slow payment", "mock-group-checkout", false, "/pay*"),
+      seeded("mock-banner", "Promo banner JSON", "mock-group-banner", true, "/promo*"),
+      seeded("mock-loose", "Add debug header", null, true, "/*"),
+    ];
+  }
   let ruleSettings = { breakpoint_timeout_secs: 300 };
   // Dev only: `?breakpoint` seeds a paused request, `?breakpoint=ws` a held
   // WebSocket message, for the Breakpoint Editor.
@@ -281,6 +313,30 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
   let onBreakpoints: ((q: BreakpointInfo_Serialize[]) => void) | null = null;
   const pushBreakpoints = () => onBreakpoints?.(breakpoints);
   const sorted = () => [...rules].sort((a, b) => a.order - b.order);
+  /** The engine's `arrange`: built-ins, then ungrouped rules, then group by group; renumbered. */
+  const arrange = () => {
+    ruleGroups = [...ruleGroups].sort((a, b) => a.order - b.order).map((g, i) => ({ ...g, order: i + 1 }));
+    const section = (r: Rule) => {
+      if (r.id.startsWith("builtin-")) return 0;
+      const i = ruleGroups.findIndex((g) => g.id === r.group);
+      return i < 0 ? 1 : i + 2;
+    };
+    const ordered = rules
+      .map((r) => (section(r) < 2 ? { ...r, group: null } : r))
+      .sort((a, b) => section(a) - section(b) || a.order - b.order || a.id.localeCompare(b.id));
+    let n = 0;
+    rules = ordered.map((r) => (r.id.startsWith("builtin-") ? r : { ...r, order: ++n }));
+  };
+  const nextOrder = () => Math.max(0, ...rules.map((r) => r.order)) + 1;
+  const findGroup = (id: string) => {
+    const group = ruleGroups.find((g) => g.id === id);
+    if (!group) throw new Error(`no rule group with id ${id}`);
+    return group;
+  };
+  const checkGroup = (id: string | null | undefined) => {
+    if (id) findGroup(id);
+  };
+  arrange();
   const findRule = (id: string) => {
     const rule = rules.find((r) => r.id === id);
     if (!rule) throw new Error(`no rule with id ${id}`);
@@ -750,20 +806,64 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
     async listRules() {
       return sorted();
     },
+    async listRuleGroups() {
+      return ruleGroups;
+    },
+    async createRuleGroup(name) {
+      if (!name.trim()) throw new Error("a rule group needs a name");
+      const group: RuleGroup_Serialize = { id: crypto.randomUUID(), name: name.trim(), enabled: true, order: 1e9, origin: { kind: "user" } };
+      ruleGroups = [...ruleGroups, group];
+      arrange();
+      return findGroup(group.id);
+    },
+    async updateRuleGroup(id, patch) {
+      const group = findGroup(id);
+      if (patch.name != null && !patch.name.trim()) throw new Error("a rule group needs a name");
+      const updated = { ...group, name: patch.name?.trim() ?? group.name, enabled: patch.enabled ?? group.enabled };
+      ruleGroups = ruleGroups.map((g) => (g.id === id ? updated : g));
+      return updated;
+    },
+    async deleteRuleGroup(id, deleteRules) {
+      findGroup(id);
+      const held = rules.filter((r) => r.group === id);
+      ruleGroups = ruleGroups.filter((g) => g.id !== id);
+      let order = nextOrder();
+      rules = deleteRules ? rules.filter((r) => r.group !== id) : rules.map((r) => (r.group === id ? { ...r, group: null, order: order++ } : r));
+      arrange();
+      return held.length;
+    },
+    async reorderRuleGroups(ids) {
+      const rank = (g: RuleGroup_Serialize) => (ids.includes(g.id) ? ids.indexOf(g.id) : ids.length);
+      ruleGroups = [...ruleGroups].sort((a, b) => rank(a) - rank(b) || a.order - b.order).map((g, i) => ({ ...g, order: i + 1 }));
+      arrange();
+      return ruleGroups;
+    },
+    async moveRulesToGroup(ids, group) {
+      checkGroup(group);
+      for (const id of ids) {
+        if (id.startsWith("builtin-")) throw new Error(`the built-in rule ${id} can't be put in a group`);
+        findRule(id);
+      }
+      let order = nextOrder();
+      rules = rules.map((r) => (ids.includes(r.id) && r.group !== group ? { ...r, group, order: order++ } : r));
+      arrange();
+      return rules.filter((r) => ids.includes(r.id));
+    },
     async createRule(rule) {
-      const created = normalizeRule({
-        ...(rule as Rule),
-        id: crypto.randomUUID(),
-        order: Math.max(0, ...rules.map((r) => r.order)) + 1,
-      });
-      rules = [...rules, created];
-      return created;
+      checkGroup(rule.group);
+      const id = crypto.randomUUID();
+      rules = [...rules, normalizeRule({ ...(rule as Rule), id, order: nextOrder() })];
+      arrange();
+      return findRule(id);
     },
     async updateRule(rule) {
-      findRule(rule.id);
+      const old = findRule(rule.id);
+      checkGroup(rule.group);
       const updated = normalizeRule(rule as Rule);
+      if ((old.group ?? null) !== (updated.group ?? null)) updated.order = nextOrder();
       rules = rules.map((r) => (r.id === rule.id ? updated : r));
-      return updated;
+      arrange();
+      return findRule(rule.id);
     },
     async setRuleEnabled(id, enabled) {
       const updated = { ...findRule(id), enabled };
@@ -778,12 +878,14 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
     async deleteAgentRules() {
       const before = rules.length;
       rules = rules.filter((r) => r.origin.kind !== "agent");
+      ruleGroups = ruleGroups.filter((g) => g.origin.kind !== "agent" || rules.some((r) => r.group === g.id));
       return before - rules.length;
     },
     async reorderRules(ids) {
       const user = sorted().filter((r) => !r.id.startsWith("builtin-"));
       const ordered = [...ids.map((id) => user.find((r) => r.id === id)).filter((r): r is Rule => !!r), ...user.filter((r) => !ids.includes(r.id))];
       rules = [...rules.filter((r) => r.id.startsWith("builtin-")), ...ordered.map((r, i) => ({ ...r, order: i + 1 }))];
+      arrange();
       return sorted();
     },
     async validateRule(rule) {
@@ -808,6 +910,7 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
         enabled: true,
         order: 0,
         origin: { kind: "preset", preset },
+        group: null,
         matcher: {
           ...emptyMatcher(),
           methods: [f[3]],
@@ -885,7 +988,7 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
     },
     async subscribeRules(cb) {
       // The mock has no agents; the editor's own saves refetch the list.
-      setTimeout(() => cb(sorted()), 0);
+      setTimeout(() => cb({ rules: sorted(), groups: ruleGroups }), 0);
     },
     async subscribeBreakpoints(cb) {
       onBreakpoints = cb;
@@ -989,7 +1092,8 @@ export function createMockBackend(count: number, fixtures?: Promise<MockFlow[]>)
         let order = Math.max(0, ...rules.map((r) => r.order));
         const created = drafts.map((d) => normalizeRule({ ...(d as Rule), id: crypto.randomUUID(), order: ++order }));
         rules = [...rules, ...created];
-        return created;
+        arrange();
+        return created.map((c) => findRule(c.id));
       },
       usedBy: (source) => rules.filter((r) => r.actions.some((a) => a.type === "ServeFrom" && a.source === source)).map((r) => r.name),
     }),

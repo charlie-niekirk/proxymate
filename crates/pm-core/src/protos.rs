@@ -195,6 +195,7 @@ fn mapping_rule(m: &ProtoMapping) -> Rule {
         enabled: true,
         order: 0,
         origin: RuleOrigin::User,
+        group: None,
         matcher: m.matcher.clone(),
         actions: Vec::new(),
     }

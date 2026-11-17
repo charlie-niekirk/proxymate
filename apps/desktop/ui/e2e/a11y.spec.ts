@@ -58,7 +58,8 @@ for (const theme of ["dark", "light"] as const) {
 
     for (const id of ["settings", "rules", "scripts", "devices", "certificate", "compose"]) {
       test(`the ${id} dialog takes the focus and has no axe violations`, async ({ page }) => {
-        await page.goto(`/?theme=${theme}&select=0`);
+        // `ruleGroups` seeds rule groups, so the Rules Editor shows its sections.
+        await page.goto(`/?theme=${theme}&select=0&ruleGroups`);
         await runCommand(page, id);
         await expectDialogFocused(page);
         await scan(page, '[role="dialog"]');

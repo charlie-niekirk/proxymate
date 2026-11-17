@@ -50,6 +50,7 @@ export function newRule(): Rule {
     enabled: true,
     order: 0,
     origin: { kind: "user" },
+    group: null,
     matcher: emptyMatcher(),
     actions: [],
   };
@@ -59,6 +60,7 @@ export function newRule(): Rule {
 export function normalizeRule(rule: Rule): Rule {
   return {
     ...rule,
+    group: rule.group ?? null,
     matcher: { ...emptyMatcher(), ...rule.matcher },
   };
 }

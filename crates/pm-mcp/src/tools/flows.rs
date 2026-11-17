@@ -222,14 +222,16 @@ pub(super) fn brief(f: &FlowSummary) -> Value {
 
 pub(super) fn get_status(ctx: &Ctx<'_>) -> ToolResult {
     let engine = ctx.engine;
-    let rules = engine.rules();
+    let book = engine.rule_book();
+    let rules = &book.rules;
     let ca = engine.ca_info();
     Ok(json!({
         "proxy": engine.proxy_status(),
         "recording": engine.is_recording(),
         "flows": engine.total(),
         "rules": rules.iter().filter(|r| !r.id.starts_with("builtin-")).count(),
-        "enabled_rules": rules.iter().filter(|r| r.enabled).count(),
+        "enabled_rules": rules.iter().filter(|r| r.is_active(&book.groups)).count(),
+        "rule_groups": book.groups.len(),
         "agent_rules": rules.iter().filter(|r| matches!(r.origin, RuleOrigin::Agent { .. })).count(),
         "paused_breakpoints": engine.breakpoints().len(),
         "ca": { "common_name": ca.common_name, "cert_path": ca.cert_path },
