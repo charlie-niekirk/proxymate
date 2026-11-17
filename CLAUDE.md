@@ -203,7 +203,8 @@ Targets:
 **Rules and breakpoints (M5)**
 - One rule system: a `Matcher` plus ordered `Action`s (`pm-model/src/rules.rs`). Presets only pre-fill rules (`Engine::draft_rule`). The evaluation order is in `docs/PLAN.md` and `rules/eval.rs`; its unit matrix is `rules/tests.rs`, the end-to-end matrix `crates/pm-core/tests/rules.rs`.
 - Every non-WebSocket request goes through `proxy/exchange.rs`. With no matching rule it streams exactly as before; keep that path allocation-free.
-- Rules live in `<data dir>/app.sqlite` (in memory without a data dir, so tests never share rules). Mutations go through `Engine::change_rules`: validate, save, swap the `CompiledRuleSet`.
+- Rules and rule groups live in `<data dir>/app.sqlite` (`rules`, `rule_groups`; in memory without a data dir, so tests never share rules). Mutations go through `Engine::change` (`change_rules` for the list alone): validate, `arrange`, save both in one transaction, swap the `CompiledRuleSet`, push a `RuleBook`.
+- A rule runs while it and its group are enabled (`Rule::is_active`, never `rule.enabled` alone when compiling). `arrange` keeps the list in sections (built-ins, ungrouped, then group by group) and renumbers `order` after every change, so a saved rule's `order` can move: read it back from the change, not from what was passed in.
 - Patterns compile with a size limit; never compile a user or agent regex without `rules::compile::compile_pattern`.
 - A service error (`proxy::Reset`) is how a Block reset or a breakpoint Abort reaches the client: h1 closes, h2 resets the stream.
 

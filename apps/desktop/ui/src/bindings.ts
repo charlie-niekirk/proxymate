@@ -63,7 +63,25 @@ export const commands = {
 	getTerminalEnv: () => __TAURI_INVOKE<string>("get_terminal_env"),
 	/**  Every rule, in evaluation order. */
 	listRules: () => __TAURI_INVOKE<Rule_Serialize[]>("list_rules"),
-	/**  Saves a new rule at the end of the list (a fresh id is assigned). */
+	/**  Every rule group, in order. */
+	listRuleGroups: () => __TAURI_INVOKE<RuleGroup_Serialize[]>("list_rule_groups"),
+	/**  Saves a new, enabled group after the others. */
+	createRuleGroup: (name: string) => typedError<RuleGroup_Serialize, IpcError>(__TAURI_INVOKE("create_rule_group", { name })),
+	/**  Renames a group or turns all of its rules on or off together. */
+	updateRuleGroup: (id: string, patch: RuleGroupPatch_Deserialize) => typedError<RuleGroup_Serialize, IpcError>(__TAURI_INVOKE("update_rule_group", { id, patch })),
+	/**
+	 *  Deletes a group, and its rules with `delete_rules` (else they stay,
+	 *  ungrouped). Returns how many rules it held.
+	 */
+	deleteRuleGroup: (id: string, deleteRules: boolean) => typedError<number, IpcError>(__TAURI_INVOKE("delete_rule_group", { id, deleteRules })),
+	/**  Puts the listed groups first, in that order. */
+	reorderRuleGroups: (ids: string[]) => typedError<RuleGroup_Serialize[], IpcError>(__TAURI_INVOKE("reorder_rule_groups", { ids })),
+	/**  Moves rules to the end of a group, or out of any with `null`. */
+	moveRulesToGroup: (ids: string[], group: string | null) => typedError<Rule_Serialize[], IpcError>(__TAURI_INVOKE("move_rules_to_group", { ids, group })),
+	/**
+	 *  Saves a new rule at the end of its group, or of the ungrouped rules (a
+	 *  fresh id is assigned).
+	 */
 	createRule: (rule: Rule_Deserialize) => typedError<Rule_Serialize, IpcError>(__TAURI_INVOKE("create_rule", { rule })),
 	updateRule: (rule: Rule_Deserialize) => typedError<Rule_Serialize, IpcError>(__TAURI_INVOKE("update_rule", { rule })),
 	setRuleEnabled: (id: string, enabled: boolean) => typedError<Rule_Serialize, IpcError>(__TAURI_INVOKE("set_rule_enabled", { id, enabled })),
@@ -110,8 +128,11 @@ export const commands = {
 	setAndroidProxy: (serial: string, on: boolean) => typedError<AndroidStatus_Serialize, IpcError>(__TAURI_INVOKE("set_android_proxy", { serial, on })),
 	/**  Copies the CA to the device's Downloads; returns the path on the device. */
 	pushAndroidCert: (serial: string) => typedError<string, IpcError>(__TAURI_INVOKE("push_android_cert", { serial })),
-	/**  Streams the rule list whenever anyone (the UI or an agent) changes it. */
-	subscribeRules: (onRules: Channel<Rule_Deserialize[]>) => __TAURI_INVOKE<void>("subscribe_rules", { onRules }),
+	/**
+	 *  Streams the rules and groups whenever anyone (the UI or an agent)
+	 *  changes them.
+	 */
+	subscribeRules: (onRules: Channel<RuleBook_Deserialize>) => __TAURI_INVOKE<void>("subscribe_rules", { onRules }),
 	getMcpStatus: () => __TAURI_INVOKE<McpStatus_Serialize>("get_mcp_status"),
 	/**  Streams the MCP status (connected clients, settings, errors). */
 	subscribeMcp: (onStatus: Channel<McpStatus_Deserialize>) => __TAURI_INVOKE<void>("subscribe_mcp", { onStatus }),
@@ -2674,6 +2695,89 @@ export type RowsPage_Serialize = {
 export type Rule = Rule_Serialize | Rule_Deserialize;
 
 /**
+ *  Every rule and group, each in evaluation order: what the Rules Editor
+ *  shows, pushed whenever either changes.
+ */
+export type RuleBook = RuleBook_Serialize | RuleBook_Deserialize;
+
+/**
+ *  Every rule and group, each in evaluation order: what the Rules Editor
+ *  shows, pushed whenever either changes.
+ */
+export type RuleBook_Deserialize = {
+	rules: Rule_Deserialize[],
+	groups: RuleGroup_Deserialize[],
+};
+
+/**
+ *  Every rule and group, each in evaluation order: what the Rules Editor
+ *  shows, pushed whenever either changes.
+ */
+export type RuleBook_Serialize = {
+	rules: Rule_Serialize[],
+	groups: RuleGroup_Serialize[],
+};
+
+/**
+ *  A named set of rules turned on and off together (say, the rules for one
+ *  ticket). Turning a group off keeps each rule's own on/off state, so
+ *  turning it back on restores exactly what ran before.
+ * 
+ *  Groups also order the list: ungrouped rules run first, then each
+ *  group's rules, group by group in `order`.
+ */
+export type RuleGroup = RuleGroup_Serialize | RuleGroup_Deserialize;
+
+/**  A partial edit of a rule group: only the fields that are set change. */
+export type RuleGroupPatch = RuleGroupPatch_Serialize | RuleGroupPatch_Deserialize;
+
+/**  A partial edit of a rule group: only the fields that are set change. */
+export type RuleGroupPatch_Deserialize = {
+	name?: string | null,
+	enabled?: boolean | null,
+};
+
+/**  A partial edit of a rule group: only the fields that are set change. */
+export type RuleGroupPatch_Serialize = {
+	name: string | null,
+	enabled: boolean | null,
+};
+
+/**
+ *  A named set of rules turned on and off together (say, the rules for one
+ *  ticket). Turning a group off keeps each rule's own on/off state, so
+ *  turning it back on restores exactly what ran before.
+ * 
+ *  Groups also order the list: ungrouped rules run first, then each
+ *  group's rules, group by group in `order`.
+ */
+export type RuleGroup_Deserialize = {
+	id: string,
+	name: string,
+	enabled: boolean,
+	/**  Groups are listed (and their rules run) in ascending `order`. */
+	order: number,
+	origin: RuleOrigin_Deserialize,
+};
+
+/**
+ *  A named set of rules turned on and off together (say, the rules for one
+ *  ticket). Turning a group off keeps each rule's own on/off state, so
+ *  turning it back on restores exactly what ran before.
+ * 
+ *  Groups also order the list: ungrouped rules run first, then each
+ *  group's rules, group by group in `order`.
+ */
+export type RuleGroup_Serialize = {
+	id: string,
+	name: string,
+	enabled: boolean,
+	/**  Groups are listed (and their rules run) in ascending `order`. */
+	order: number,
+	origin: RuleOrigin_Serialize,
+};
+
+/**
  *  Who created a rule. Agent rules show an "AI · client" badge and can be
  *  removed together.
  * 
@@ -2785,6 +2889,11 @@ export type Rule_Deserialize = {
 	/**  Rules run in ascending `order`; every matching rule runs. */
 	order: number,
 	origin: RuleOrigin_Deserialize,
+	/**
+	 *  The [`RuleGroup`] the rule belongs to, if any. A rule runs only
+	 *  while it and its group are both enabled.
+	 */
+	group?: string | null,
 	matcher: Matcher_Deserialize,
 	actions: Action_Deserialize[],
 };
@@ -2796,6 +2905,11 @@ export type Rule_Serialize = {
 	/**  Rules run in ascending `order`; every matching rule runs. */
 	order: number,
 	origin: RuleOrigin_Serialize,
+	/**
+	 *  The [`RuleGroup`] the rule belongs to, if any. A rule runs only
+	 *  while it and its group are both enabled.
+	 */
+	group: string | null,
 	matcher: Matcher_Serialize,
 	actions: Action_Serialize[],
 };

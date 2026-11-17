@@ -109,6 +109,7 @@ export function createMockMocking(deps: {
         enabled: true,
         order: 0,
         origin: { kind: "preset", preset: "serve_from" },
+        group: null,
         matcher: { ...emptyMatcher(), host },
         actions: [{ type: "ServeFrom", source: id, key: { query: true, body: false }, on_miss: "pass_through", pick: "first" }],
       };
@@ -134,6 +135,7 @@ export function createMockMocking(deps: {
           enabled: false,
           order: 0,
           origin: { kind: "preset", preset: "open_api" },
+          group: null,
           matcher: {
             ...emptyMatcher(),
             methods: [op.method],

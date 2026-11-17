@@ -25,6 +25,7 @@ fn rule(name: &str, matcher: Matcher, actions: Vec<Action>) -> Rule {
         enabled: true,
         order: 0,
         origin: RuleOrigin::User,
+        group: None,
         matcher,
         actions,
     }
@@ -73,7 +74,7 @@ fn response(status: u16, content_type: &str, body: &str) -> ResponseDraft {
 }
 
 fn set(rules: Vec<Rule>) -> CompiledRuleSet {
-    CompiledRuleSet::compile(&ordered(rules), &ScriptMap::new(), &MockMap::new()).expect("rules compile")
+    CompiledRuleSet::compile(&ordered(rules), &[], &ScriptMap::new(), &MockMap::new()).expect("rules compile")
 }
 
 /// The names of the rules in `set` that match `req`.
@@ -169,7 +170,7 @@ fn disabled_rules_are_validated_but_never_match() {
     let mut broken = rule("broken", host(Pattern::regex("(")), Vec::new());
     broken.enabled = false;
     assert!(matches!(
-        CompiledRuleSet::compile(&[broken], &ScriptMap::new(), &MockMap::new()),
+        CompiledRuleSet::compile(&[broken], &[], &ScriptMap::new(), &MockMap::new()),
         Err(RuleError::Invalid { .. })
     ));
 
@@ -1011,7 +1012,7 @@ fn message_actions_compile_their_patterns() {
         Matcher::default(),
         vec![ws(None, Some(Pattern::regex("(")), WsOp::Drop)],
     );
-    let err = CompiledRuleSet::compile(&[bad], &ScriptMap::new(), &MockMap::new())
+    let err = CompiledRuleSet::compile(&[bad], &[], &ScriptMap::new(), &MockMap::new())
         .err()
         .unwrap();
     assert!(err.to_string().contains("message filter"), "{err}");
@@ -1028,7 +1029,7 @@ fn message_actions_compile_their_patterns() {
             },
         )],
     );
-    assert!(CompiledRuleSet::compile(&[bad], &ScriptMap::new(), &MockMap::new()).is_err());
+    assert!(CompiledRuleSet::compile(&[bad], &[], &ScriptMap::new(), &MockMap::new()).is_err());
     // A rule with only message actions leaves plain requests alone.
     let only = set(vec![any(vec![ws(None, None, WsOp::Drop)])]);
     let matched = only.matching(&request("http://a.test/").info(None));

@@ -1,4 +1,4 @@
-//! Rule and breakpoint tools, and the Map Local, Serve From, breakpoint and rewrite shortcuts.
+//! Rule, rule group and breakpoint tools, and the Map Local, Serve From, breakpoint and rewrite shortcuts.
 
 use super::*;
 
@@ -6,6 +6,9 @@ use super::*;
 pub(super) struct ListRules {
     #[serde(default)]
     pub(super) origin: Option<OriginFilter>,
+    /// Only the rules of this group (its id or exact name), or `none` for ungrouped rules.
+    #[serde(default)]
+    pub(super) group: Option<String>,
     /// 1–200, default 50.
     #[serde(default)]
     pub(super) limit: Option<u32>,
@@ -40,6 +43,9 @@ pub(super) struct CreateRule {
     pub(super) name: String,
     #[serde(default = "yes")]
     pub(super) enabled: bool,
+    /// Put it in this rule group (its id or exact name; see list_rule_groups).
+    #[serde(default)]
+    pub(super) group: Option<String>,
     pub(super) matcher: Matcher,
     pub(super) actions: Vec<Action>,
 }
@@ -81,6 +87,9 @@ pub(super) struct Target {
     /// Rule name; default describes the target.
     #[serde(default)]
     pub(super) name: Option<String>,
+    /// Put the rule in this rule group (its id or exact name; see list_rule_groups).
+    #[serde(default)]
+    pub(super) group: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -126,6 +135,9 @@ pub(super) struct CreateServeFrom {
     /// first (default), last or round_robin, when several recorded responses match.
     #[serde(default)]
     pub(super) pick: Option<ServePick>,
+    /// Put the rule in this rule group (its id or exact name; see list_rule_groups).
+    #[serde(default)]
+    pub(super) group: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -282,15 +294,69 @@ pub(super) struct TestRule {
 }
 
 #[derive(Deserialize, JsonSchema)]
+pub(super) struct CreateRuleGroup {
+    /// e.g. the ticket it is for: `PROJ-123 empty basket banner`.
+    pub(super) name: String,
+    /// Default true. A disabled group's rules don't run, whatever their own enabled flags.
+    #[serde(default = "yes")]
+    pub(super) enabled: bool,
+    /// Existing rules to move into it, in this order.
+    #[serde(default)]
+    pub(super) rule_ids: Vec<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub(super) struct UpdateRuleGroup {
+    /// The group's id or exact name.
+    pub(super) group: String,
+    #[serde(default)]
+    pub(super) name: Option<String>,
+    #[serde(default)]
+    pub(super) enabled: Option<bool>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub(super) struct SetRuleGroupEnabled {
+    /// The group's id or exact name.
+    pub(super) group: String,
+    pub(super) enabled: bool,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub(super) struct DeleteRuleGroup {
+    /// The group's id or exact name.
+    pub(super) group: String,
+    /// Also delete its rules (default false: they stay, ungrouped).
+    #[serde(default)]
+    pub(super) delete_rules: bool,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub(super) struct MoveRulesToGroup {
+    pub(super) rule_ids: Vec<String>,
+    /// The group (id or exact name) to move them to the end of; leave it out to ungroup them.
+    #[serde(default)]
+    pub(super) group: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
 pub(super) struct ResolveBreakpoint {
     pub(super) id: BreakpointId,
     pub(super) resolution: BreakpointResolution,
 }
 
 pub(super) fn list_rules(ctx: &Ctx<'_>, p: ListRules) -> ToolResult {
-    let rules: Vec<Rule> = ctx
-        .engine
-        .rules()
+    let book = ctx.engine.rule_book();
+    let group = match p.group.as_deref() {
+        None => None,
+        Some(g) => Some(match find_group(&book.groups, g) {
+            Ok(group) => Some(group.id.clone()),
+            Err(_) if g.eq_ignore_ascii_case("none") => None,
+            Err(err) => return Err(err),
+        }),
+    };
+    let rules: Vec<Rule> = book
+        .rules
         .into_iter()
         .filter(|r| match p.origin {
             None => true,
@@ -298,6 +364,7 @@ pub(super) fn list_rules(ctx: &Ctx<'_>, p: ListRules) -> ToolResult {
             Some(OriginFilter::Preset) => matches!(r.origin, RuleOrigin::Preset { .. }),
             Some(OriginFilter::Agent) => matches!(r.origin, RuleOrigin::Agent { .. }),
         })
+        .filter(|r| group.as_ref().is_none_or(|g| &r.group == g))
         .collect();
     let (page, next) = window(&rules, &p.cursor, limit(p.limit, 50, 200))?;
     Ok(json!({ "rules": page, "total": rules.len(), "next_cursor": next }))
@@ -334,17 +401,59 @@ pub(super) fn get_breakpoint(ctx: &Ctx<'_>, p: GetBreakpoint) -> ToolResult {
     Ok(out)
 }
 
-/// Saves a new rule as the agent's.
-pub(super) fn save(ctx: &Ctx<'_>, name: String, matcher: Matcher, actions: Vec<Action>) -> ToolResult {
+/// A rule group by id, or else by exact name (which must be unique).
+pub(super) fn find_group<'a>(groups: &'a [RuleGroup], group: &str) -> Result<&'a RuleGroup, ToolError> {
+    if let Some(g) = groups.iter().find(|g| g.id == group) {
+        return Ok(g);
+    }
+    let named: Vec<&RuleGroup> = groups.iter().filter(|g| g.name == group.trim()).collect();
+    match named.as_slice() {
+        [g] => Ok(g),
+        [] => Err(ToolError(format!(
+            "no rule group with id or name {group:?}; see list_rule_groups"
+        ))),
+        _ => Err(ToolError(format!(
+            "several rule groups are named {group:?}; give the id (list_rule_groups)"
+        ))),
+    }
+}
+
+/// [`find_group`]'s id, for a group given by id or name.
+pub(super) fn group_id(ctx: &Ctx<'_>, group: Option<&str>) -> Result<Option<String>, ToolError> {
+    group
+        .map(|g| find_group(&ctx.engine.rule_groups(), g).map(|g| g.id.clone()))
+        .transpose()
+}
+
+/// Saves a new rule as the agent's, in `group` (an id or name) if given.
+pub(super) fn save(
+    ctx: &Ctx<'_>,
+    name: String,
+    matcher: Matcher,
+    actions: Vec<Action>,
+    group: Option<&str>,
+) -> ToolResult {
+    save_as(ctx, name, true, matcher, actions, group)
+}
+
+fn save_as(
+    ctx: &Ctx<'_>,
+    name: String,
+    enabled: bool,
+    matcher: Matcher,
+    actions: Vec<Action>,
+    group: Option<&str>,
+) -> ToolResult {
     if actions.is_empty() {
         return Err(ToolError("a rule needs at least one action".into()));
     }
     let rule = ctx.engine.create_rule(Rule {
         id: String::new(),
         name,
-        enabled: true,
+        enabled,
         order: 0,
         origin: agent_origin(ctx),
+        group: group_id(ctx, group)?,
         matcher,
         actions,
     })?;
@@ -352,13 +461,72 @@ pub(super) fn save(ctx: &Ctx<'_>, name: String, matcher: Matcher, actions: Vec<A
 }
 
 pub(super) fn create_rule(ctx: &Ctx<'_>, p: CreateRule) -> ToolResult {
-    let mut rule = save(ctx, p.name, p.matcher, p.actions)?;
-    if !p.enabled
-        && let Some(id) = rule["id"].as_str()
-    {
-        rule = json!(ctx.engine.set_rule_enabled(id, false)?);
+    save_as(ctx, p.name, p.enabled, p.matcher, p.actions, p.group.as_deref())
+}
+
+pub(super) fn list_rule_groups(ctx: &Ctx<'_>) -> ToolResult {
+    let book = ctx.engine.rule_book();
+    let count = |id: Option<&str>, only_enabled: bool| {
+        book.rules
+            .iter()
+            .filter(|r| !r.id.starts_with("builtin-") && r.group.as_deref() == id && (!only_enabled || r.enabled))
+            .count()
+    };
+    let groups: Vec<Value> = book
+        .groups
+        .iter()
+        .map(|g| {
+            let mut v = json!(g);
+            v["rules"] = json!(count(Some(&g.id), false));
+            v["enabled_rules"] = json!(count(Some(&g.id), true));
+            v
+        })
+        .collect();
+    Ok(json!({ "groups": groups, "ungrouped_rules": count(None, false) }))
+}
+
+pub(super) fn create_rule_group(ctx: &Ctx<'_>, p: CreateRuleGroup) -> ToolResult {
+    for id in &p.rule_ids {
+        if ctx.engine.rule(id).is_none() {
+            return Err(ToolError(format!("no rule with id {id}")));
+        }
     }
-    Ok(rule)
+    let group = ctx.engine.create_rule_group(&p.name, p.enabled, agent_origin(ctx))?;
+    if p.rule_ids.is_empty() {
+        return Ok(json!({ "group": group, "rules": [] }));
+    }
+    let rules = ctx.engine.move_rules_to_group(&p.rule_ids, Some(&group.id))?;
+    Ok(json!({ "group": group, "rules": rules }))
+}
+
+pub(super) fn update_rule_group(ctx: &Ctx<'_>, p: UpdateRuleGroup) -> ToolResult {
+    let id = find_group(&ctx.engine.rule_groups(), &p.group)?.id.clone();
+    let patch = RuleGroupPatch {
+        name: p.name,
+        enabled: p.enabled,
+    };
+    Ok(json!(ctx.engine.patch_rule_group(&id, patch)?))
+}
+
+pub(super) fn set_rule_group_enabled(ctx: &Ctx<'_>, p: SetRuleGroupEnabled) -> ToolResult {
+    let id = find_group(&ctx.engine.rule_groups(), &p.group)?.id.clone();
+    Ok(json!(ctx.engine.set_rule_group_enabled(&id, p.enabled)?))
+}
+
+pub(super) fn delete_rule_group(ctx: &Ctx<'_>, p: DeleteRuleGroup) -> ToolResult {
+    let id = find_group(&ctx.engine.rule_groups(), &p.group)?.id.clone();
+    let rules = ctx.engine.delete_rule_group(&id, p.delete_rules)?;
+    let key = if p.delete_rules {
+        "deleted_rules"
+    } else {
+        "ungrouped_rules"
+    };
+    Ok(json!({ "deleted": id, key: rules }))
+}
+
+pub(super) fn move_rules_to_group(ctx: &Ctx<'_>, p: MoveRulesToGroup) -> ToolResult {
+    let group = group_id(ctx, p.group.as_deref())?;
+    Ok(json!({ "rules": ctx.engine.move_rules_to_group(&p.rule_ids, group.as_deref())? }))
 }
 
 pub(super) fn update_rule(ctx: &Ctx<'_>, p: UpdateRule) -> ToolResult {
@@ -506,7 +674,7 @@ pub(super) fn create_map_local(ctx: &Ctx<'_>, p: CreateMapLocal) -> ToolResult {
         headers: p.headers,
         content_type,
     };
-    save(ctx, name, matcher, vec![action])
+    save(ctx, name, matcher, vec![action], p.target.group.as_deref())
 }
 
 pub(super) fn create_serve_from(ctx: &Ctx<'_>, p: CreateServeFrom) -> ToolResult {
@@ -530,7 +698,7 @@ pub(super) fn create_serve_from(ctx: &Ctx<'_>, p: CreateServeFrom) -> ToolResult
         on_miss: p.on_miss.unwrap_or_default(),
         pick: p.pick.unwrap_or_default(),
     }];
-    let rule = save(ctx, draft.name, draft.matcher, draft.actions)?;
+    let rule = save(ctx, draft.name, draft.matcher, draft.actions, p.group.as_deref())?;
     Ok(json!({ "rule": rule, "source": source }))
 }
 
@@ -547,6 +715,7 @@ pub(super) fn create_breakpoint(ctx: &Ctx<'_>, p: CreateBreakpoint) -> ToolResul
             request: p.request,
             response: p.response,
         }],
+        p.target.group.as_deref(),
     )
 }
 
@@ -617,7 +786,7 @@ pub(super) fn create_rewrite(ctx: &Ctx<'_>, p: CreateRewrite) -> ToolResult {
     }));
     actions.extend(p.comment.map(|text| Action::Comment { text }));
     actions.extend(p.actions);
-    save(ctx, name, matcher, actions)
+    save(ctx, name, matcher, actions, p.target.group.as_deref())
 }
 
 pub(super) async fn test_rule(ctx: &Ctx<'_>, p: TestRule) -> ToolResult {
@@ -632,6 +801,7 @@ pub(super) async fn test_rule(ctx: &Ctx<'_>, p: TestRule) -> ToolResult {
             enabled: true,
             order: 0,
             origin: agent_origin(ctx),
+            group: None,
             matcher: draft.matcher,
             actions: draft.actions,
         },

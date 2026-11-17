@@ -541,6 +541,7 @@ impl Engine {
             origin: RuleOrigin::Preset {
                 preset: PresetKind::ServeFrom,
             },
+            group: None,
             matcher: pm_model::Matcher {
                 host: hosts_pattern(&info.hosts),
                 ..Default::default()

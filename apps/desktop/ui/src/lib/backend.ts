@@ -36,6 +36,10 @@ import {
   type PresetKind,
   type Rule_Deserialize,
   type Rule_Serialize,
+  type RuleBook_Deserialize,
+  type RuleBook_Serialize,
+  type RuleGroup_Serialize,
+  type RuleGroupPatch,
   type RuleSettings,
   type RuleTestResult_Serialize,
   type CaInfo,
@@ -185,7 +189,19 @@ export interface Backend {
   // ---- Rules (M5) ----
   /** Every rule, in evaluation order (built-in ones included). */
   listRules(): Promise<Rule_Serialize[]>;
-  /** Saves a new rule at the end; the id is assigned by the engine. */
+  /** Every rule group, in order (M5 follow-up: groups switch their rules together). */
+  listRuleGroups(): Promise<RuleGroup_Serialize[]>;
+  /** A new, enabled group after the others. */
+  createRuleGroup(name: string): Promise<RuleGroup_Serialize>;
+  /** Renames a group or turns all of its rules on or off. */
+  updateRuleGroup(id: string, patch: RuleGroupPatch): Promise<RuleGroup_Serialize>;
+  /** Deletes a group, and its rules with `deleteRules` (else they stay, ungrouped); resolves to how many it held. */
+  deleteRuleGroup(id: string, deleteRules: boolean): Promise<number>;
+  /** Puts the listed groups first, in that order. */
+  reorderRuleGroups(ids: string[]): Promise<RuleGroup_Serialize[]>;
+  /** Moves rules to the end of a group, or out of any with `null`. */
+  moveRulesToGroup(ids: string[], group: string | null): Promise<Rule_Serialize[]>;
+  /** Saves a new rule at the end of its group (or of the ungrouped rules); the id is assigned by the engine. */
   createRule(rule: Rule_Deserialize): Promise<Rule_Serialize>;
   updateRule(rule: Rule_Deserialize): Promise<Rule_Serialize>;
   setRuleEnabled(id: string, enabled: boolean): Promise<Rule_Serialize>;
@@ -206,8 +222,8 @@ export interface Backend {
   flowsMatchingRule(store: number, rule: Rule_Deserialize, limit: number): Promise<number[]>;
   getRuleSettings(): Promise<RuleSettings>;
   setRuleSettings(settings: RuleSettings): Promise<RuleSettings>;
-  /** The rule list, pushed now and whenever the UI or an agent changes it. */
-  subscribeRules(onRules: (rules: Rule_Serialize[]) => void): Promise<void>;
+  /** The rules and groups, pushed now and whenever the UI or an agent changes them. */
+  subscribeRules(onRules: (book: RuleBook_Serialize) => void): Promise<void>;
 
   // ---- Breakpoints (M5) ----
   /** The paused-flow queue, pushed now and whenever it changes. */
@@ -507,6 +523,12 @@ const tauriBackend: Backend = {
   setSystemProxy: (on) => unwrap(commands.setSystemProxy(on)),
   getTerminalEnv: () => commands.getTerminalEnv(),
   listRules: () => commands.listRules(),
+  listRuleGroups: () => commands.listRuleGroups(),
+  createRuleGroup: (name) => unwrap(commands.createRuleGroup(name)),
+  updateRuleGroup: (id, patch) => unwrap(commands.updateRuleGroup(id, patch)),
+  deleteRuleGroup: (id, deleteRules) => unwrap(commands.deleteRuleGroup(id, deleteRules)),
+  reorderRuleGroups: (ids) => unwrap(commands.reorderRuleGroups(ids)),
+  moveRulesToGroup: (ids, group) => unwrap(commands.moveRulesToGroup(ids, group)),
   createRule: (rule) => unwrap(commands.createRule(rule)),
   updateRule: (rule) => unwrap(commands.updateRule(rule)),
   setRuleEnabled: (id, enabled) => unwrap(commands.setRuleEnabled(id, enabled)),
@@ -524,9 +546,9 @@ const tauriBackend: Backend = {
   getRuleSettings: () => commands.getRuleSettings(),
   setRuleSettings: (settings) => unwrap(commands.setRuleSettings(settings)),
   subscribeRules: async (onRules) => {
-    const channel = new Channel<Rule_Serialize[]>();
+    const channel = new Channel<RuleBook_Serialize>();
     channel.onmessage = onRules;
-    await commands.subscribeRules(channel as unknown as Channel<Rule_Deserialize[]>);
+    await commands.subscribeRules(channel as unknown as Channel<RuleBook_Deserialize>);
   },
   subscribeBreakpoints: async (onQueue) => {
     // The channel carries what Rust serializes; the binding names the other shape.

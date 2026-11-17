@@ -30,8 +30,59 @@ pub struct Rule {
     /// Rules run in ascending `order`; every matching rule runs.
     pub order: i64,
     pub origin: RuleOrigin,
+    /// The [`RuleGroup`] the rule belongs to, if any. A rule runs only
+    /// while it and its group are both enabled.
+    #[serde(default)]
+    pub group: Option<RuleGroupId>,
     pub matcher: Matcher,
     pub actions: Vec<Action>,
+}
+
+impl Rule {
+    /// Whether the rule runs: it is enabled, and so is its group. A group
+    /// id that isn't in `groups` counts as no group.
+    pub fn is_active(&self, groups: &[RuleGroup]) -> bool {
+        self.enabled
+            && self
+                .group
+                .as_deref()
+                .and_then(|id| groups.iter().find(|g| g.id == id))
+                .is_none_or(|g| g.enabled)
+    }
+}
+
+/// A rule group's id: a UUID.
+pub type RuleGroupId = String;
+
+/// A named set of rules turned on and off together (say, the rules for one
+/// ticket). Turning a group off keeps each rule's own on/off state, so
+/// turning it back on restores exactly what ran before.
+///
+/// Groups also order the list: ungrouped rules run first, then each
+/// group's rules, group by group in `order`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, JsonSchema)]
+pub struct RuleGroup {
+    pub id: RuleGroupId,
+    pub name: String,
+    pub enabled: bool,
+    /// Groups are listed (and their rules run) in ascending `order`.
+    pub order: i64,
+    pub origin: RuleOrigin,
+}
+
+/// A partial edit of a rule group: only the fields that are set change.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Type, JsonSchema)]
+pub struct RuleGroupPatch {
+    pub name: Option<String>,
+    pub enabled: Option<bool>,
+}
+
+/// Every rule and group, each in evaluation order: what the Rules Editor
+/// shows, pushed whenever either changes.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Type, JsonSchema)]
+pub struct RuleBook {
+    pub rules: Vec<Rule>,
+    pub groups: Vec<RuleGroup>,
 }
 
 /// Who created a rule. Agent rules show an "AI · client" badge and can be

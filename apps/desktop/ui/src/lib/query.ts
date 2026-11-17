@@ -133,6 +133,7 @@ export const trustStatusKey = typed<Out<"getTrustStatus">>()(["trust-status"]);
 export const systemProxyKey = typed<Out<"getSystemProxyStatus">>()(["system-proxy"]);
 export const terminalEnvKey = typed<Out<"getTerminalEnv">>()(["terminal-env"]);
 export const rulesKey = typed<Out<"listRules">>()(["rules"]);
+export const ruleGroupsKey = typed<Out<"listRuleGroups">>()(["rule-groups"]);
 export const ruleSettingsKey = typed<Out<"getRuleSettings">>()(["rule-settings"]);
 export const scriptsKey = typed<Out<"listScripts">>()(["scripts"]);
 export const scriptSettingsKey = typed<Out<"getScriptSettings">>()(["script-settings"]);

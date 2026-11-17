@@ -1,41 +1,26 @@
-import { useQuery, useMutation } from "@tanstack/react-query";
-import { Bot, GripVertical, ListChecks, PencilLine, Plus, Save, Trash2 } from "lucide-react";
-import { useEffect, useState, type DragEvent, type ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { ListChecks, PencilLine, Save, Trash2 } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import type { RuleTestResult_Serialize } from "@/bindings";
-import { CopyItem } from "@/components/menus/items";
-import { useMenuTarget } from "@/components/menus/useMenuTarget";
 import { Button } from "@/components/ui/button";
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useBridge } from "@/dev/bridge";
-import {
-  deleteAgentRules,
-  deleteRule,
-  duplicateRule,
-  openRewrite,
-  reorderRules,
-  reportError,
-  saveRule,
-  setRuleEnabled,
-} from "@/lib/actions";
+import { deleteRule, openRewrite, saveRule } from "@/lib/actions";
 import { backend } from "@/lib/backend";
 import { isVisual } from "@/lib/rewrite/diff";
-import { actionSummary, isBuiltin, matcherSummary, newRule, normalizeRule, type Rule } from "@/lib/rules";
-import { cn } from "@/lib/utils";
-import { useMockSourceNames } from "@/hooks/useMocking";
-import { useScriptNames } from "@/hooks/useScripts";
+import { isBuiltin, normalizeRule, type Rule } from "@/lib/rules";
 import { useUi } from "@/store/ui";
 
 import { ActionListEditor } from "./ActionListEditor";
-import { NumberInput } from "./fields";
+import { Choice } from "./fields";
 import { MatcherBuilder } from "./MatcherBuilder";
+import { RuleList, type RuleGroup } from "./RuleList";
 import { RuleOriginBadge } from "./RuleOriginBadge";
 import { RuleTestPanel } from "./RuleTestPanel";
 import { queries } from "@/lib/queries";
-import { mutations } from "@/lib/mutations";
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -48,6 +33,7 @@ export function RulesEditor() {
   const { open, ruleId, draft, seq } = useUi((s) => s.rulesEditor);
   const close = useUi((s) => s.closeRulesEditor);
   const { data: rules = [] } = useQuery({ ...queries.rules(), enabled: open });
+  const { data: groups = [] } = useQuery({ ...queries.ruleGroups(), enabled: open });
   const userRules = rules.filter((r) => !isBuiltin(r)).map(normalizeRule);
   const current = draft ?? userRules.find((r) => r.id === ruleId) ?? null;
 
@@ -65,14 +51,14 @@ export function RulesEditor() {
           </DialogTitle>
           <DialogDescription>
             Every matching rule runs, top to bottom. Map Local, rewrites, breakpoints, Map Remote, throttling and
-            blocking are all actions.
+            blocking are all actions. Groups turn their rules on and off together.
           </DialogDescription>
         </DialogHeader>
         <div className="flex min-h-0 flex-1">
-          <RuleList rules={userRules} selected={draft ? null : ruleId} hasDraft={!!draft} />
+          <RuleList rules={userRules} groups={groups} selected={draft ? null : ruleId} hasDraft={!!draft} />
           <div className="min-w-0 flex-1">
             {current ? (
-              <RuleForm key={`${seq}-${current.id}`} initial={current} />
+              <RuleForm key={`${seq}-${current.id}`} initial={current} groups={groups} />
             ) : (
               <div className="text-muted-foreground flex h-full items-center justify-center text-xs">
                 Select a rule, or create one from a flow&apos;s context menu.
@@ -85,213 +71,9 @@ export function RulesEditor() {
   );
 }
 
-/** A rule row's menu: what the form and the drag handle do, plus copies. */
-function RuleItems({ rule, rules }: { rule: Rule; rules: Rule[] }) {
-  const openEditor = useUi((s) => s.openRulesEditor);
-  const store = useUi((s) => s.store);
-  const fail = (what: string) => (e: unknown) => reportError(what, e);
-  const move = (to: "top" | "bottom") => {
-    const ids = rules.map((r) => r.id).filter((id) => id !== rule.id);
-    void reorderRules(to === "top" ? [rule.id, ...ids] : [...ids, rule.id]).catch(fail("Couldn't move the rule"));
-  };
-  const index = rules.findIndex((r) => r.id === rule.id);
-  return (
-    <>
-      <ContextMenuItem onSelect={() => openEditor({ ruleId: rule.id })}>Open</ContextMenuItem>
-      <ContextMenuItem onSelect={() => void setRuleEnabled(rule.id, !rule.enabled).catch(fail("Couldn't change the rule"))} data-testid="rule-menu-toggle">
-        {rule.enabled ? "Disable" : "Enable"}
-      </ContextMenuItem>
-      {(rule.actions.some(isVisual) || (rule.origin.kind === "preset" && rule.origin.preset === "rewrite")) && (
-        <ContextMenuItem onSelect={() => void openRewrite(store, null, rule)}>Edit visually…</ContextMenuItem>
-      )}
-      <ContextMenuItem
-        onSelect={() =>
-          void duplicateRule(rule)
-            .then((copy) => openEditor({ ruleId: copy.id }))
-            .catch(fail("Couldn't duplicate the rule"))
-        }
-        data-testid="rule-menu-duplicate"
-      >
-        Duplicate
-      </ContextMenuItem>
-      <ContextMenuSeparator />
-      <ContextMenuItem disabled={index === 0} onSelect={() => move("top")}>
-        Move to top
-      </ContextMenuItem>
-      <ContextMenuItem disabled={index === rules.length - 1} onSelect={() => move("bottom")}>
-        Move to bottom
-      </ContextMenuItem>
-      <ContextMenuSeparator />
-      <CopyItem text={rule.name} what="rule name">
-        Copy name
-      </CopyItem>
-      <CopyItem text={JSON.stringify(rule, null, 2)} what="rule as JSON">
-        Copy as JSON
-      </CopyItem>
-      <ContextMenuSeparator />
-      <ContextMenuItem
-        variant="destructive"
-        onSelect={() => {
-          void deleteRule(rule.id)
-            .then(() => openEditor({ ruleId: null }))
-            .catch(fail("Couldn't delete the rule"));
-        }}
-        data-testid="rule-menu-delete"
-      >
-        Delete
-      </ContextMenuItem>
-    </>
-  );
-}
+const NO_GROUP = "none";
 
-function RuleList({ rules, selected, hasDraft }: { rules: Rule[]; selected: string | null; hasDraft: boolean }) {
-  const openEditor = useUi((s) => s.openRulesEditor);
-  const [dragged, setDragged] = useState<string | null>(null);
-  const [over, setOver] = useState<string | null>(null);
-  const agentRules = rules.filter((r) => r.origin.kind === "agent").length;
-  const scriptNames = useScriptNames();
-  const mockNames = useMockSourceNames();
-
-  const menu = useMenuTarget((key) => rules.find((r) => r.id === key));
-  const onDrop = (target: string) => {
-    if (!dragged || dragged === target) return;
-    const ids = rules.map((r) => r.id);
-    const from = ids.indexOf(dragged);
-    const to = ids.indexOf(target);
-    ids.splice(from, 1);
-    ids.splice(to, 0, dragged);
-    void reorderRules(ids);
-  };
-
-  return (
-    <div className="bg-muted/20 flex w-72 shrink-0 flex-col border-r">
-      <div className="flex items-center gap-1 border-b p-1.5">
-        <Button variant="outline" size="xs" onClick={() => openEditor({ draft: newRule() })} data-testid="new-rule">
-          <Plus />
-          New rule
-        </Button>
-        {agentRules > 0 && (
-          <Button
-            variant="ghost"
-            size="xs"
-            className="text-muted-foreground ml-auto"
-            title="Delete every rule an AI agent created"
-            onClick={() => void deleteAgentRules()}
-            data-testid="remove-agent-rules"
-          >
-            <Bot />
-            Remove all agent rules
-          </Button>
-        )}
-      </div>
-      {/* A plain scroller: ScrollArea's table layout defeats truncation. */}
-      <ContextMenu>
-        <ContextMenuTrigger asChild>
-          <div className="min-h-0 flex-1 overflow-y-auto" onContextMenu={menu.onContextMenu}>
-            <div className="flex flex-col p-1" data-testid="rule-list">
-              {hasDraft && (
-                <div className="bg-selection text-selection-foreground mb-0.5 rounded-sm px-2 py-1 text-xs italic">
-                  Unsaved rule
-                </div>
-              )}
-              {rules.length === 0 && !hasDraft && <div className="text-muted-foreground p-2 text-xs">No rules yet.</div>}
-              {rules.map((rule) => (
-                // eslint-disable-next-line jsx-a11y-x/click-events-have-key-events, jsx-a11y-x/no-static-element-interactions -- a pointer shortcut; keyboard list navigation is an R4 follow-up
-                <div
-                  key={rule.id}
-                  draggable
-                  // A press on the checkbox only toggles. WebKit drops the click
-                  // once a drag has begun, even a cancelled one, so the row
-                  // stops being draggable for that press (and is again for any other).
-                  onPointerDown={(e) => {
-                    e.currentTarget.draggable = !(e.target instanceof HTMLInputElement);
-                  }}
-                  onDragStart={(e: DragEvent) => {
-                    setDragged(rule.id);
-                    e.dataTransfer.effectAllowed = "move";
-                  }}
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    setOver(rule.id);
-                  }}
-                  onDragLeave={() => setOver((o) => (o === rule.id ? null : o))}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    onDrop(rule.id);
-                    setOver(null);
-                  }}
-                  onDragEnd={() => setDragged(null)}
-                  onClick={() => openEditor({ ruleId: rule.id })}
-                  data-selected={rule.id === selected}
-                  data-menu-key={rule.id}
-                  data-testid="rule-row"
-                  className={cn(
-                    "group flex cursor-default items-start gap-1 rounded-sm px-1 py-1 text-xs",
-                    "hover:bg-accent data-[selected=true]:bg-selection data-[selected=true]:text-selection-foreground",
-                    over === rule.id && dragged !== rule.id && "ring-primary ring-1",
-                    dragged === rule.id && "opacity-50",
-                  )}
-                >
-                  <GripVertical className="text-muted-foreground mt-0.5 size-3 shrink-0 opacity-50" />
-                  <input
-                    type="checkbox"
-                    className="mt-0.5 size-3 shrink-0 accent-[var(--primary)]"
-                    checked={rule.enabled}
-                    title={rule.enabled ? "Enabled: click to turn it off" : "Disabled: click to turn it on"}
-                    aria-label={`${rule.name || "Untitled"} enabled`}
-                    // Toggles without selecting the row; the row's onPointerDown keeps a
-                    // shaky press from starting a drag.
-                    onClick={(e) => e.stopPropagation()}
-                    onChange={(e) =>
-                      void setRuleEnabled(rule.id, e.target.checked).catch((err: unknown) =>
-                        reportError("Couldn't change the rule", err),
-                      )
-                    }
-                    data-testid="rule-enabled"
-                  />
-                  <div className={cn("min-w-0 flex-1", !rule.enabled && "opacity-50")}>
-                    <div className="flex items-center gap-1">
-                      <span className="truncate font-medium">{rule.name || "Untitled"}</span>
-                      <RuleOriginBadge origin={rule.origin} />
-                    </div>
-                    <div className="truncate font-mono text-2xs opacity-70">{matcherSummary(rule.matcher)}</div>
-                    <div className="truncate text-2xs opacity-70">
-                      {rule.actions.map((a) => actionSummary(a, scriptNames, mockNames)).join(" · ") || "no actions"}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </ContextMenuTrigger>
-        <ContextMenuContent className="min-w-52" data-testid="rule-menu">
-          {menu.target && <RuleItems rule={menu.target} rules={rules} />}
-        </ContextMenuContent>
-      </ContextMenu>
-      <BreakpointTimeout />
-    </div>
-  );
-}
-
-function BreakpointTimeout() {
-  const { data: settings } = useQuery(queries.ruleSettings());
-  const save = useMutation({ ...mutations.setRuleSettings, onError: (e) => reportError("Couldn't set the timeout", e) });
-  if (!settings) return null;
-  return (
-    <div className="text-muted-foreground flex items-center gap-1.5 border-t p-2 text-xs" title="0 waits forever">
-      Breakpoint timeout
-      <NumberInput
-        value={settings.breakpoint_timeout_secs}
-        className="w-16"
-        aria-label="Breakpoint timeout in seconds"
-        onChange={(secs) => save.mutate({ breakpoint_timeout_secs: secs ?? 0 })}
-      />
-      s
-    </div>
-  );
-}
-
-function RuleForm({ initial }: { initial: Rule }) {
+function RuleForm({ initial, groups }: { initial: Rule; groups: RuleGroup[] }) {
   const openEditor = useUi((s) => s.openRulesEditor);
   const selectedFlow = useUi((s) => s.selectedId);
   const store = useUi((s) => s.store);
@@ -306,7 +88,17 @@ function RuleForm({ initial }: { initial: Rule }) {
   });
   // On/off belongs to the list's checkbox, which saves at once: the form
   // neither marks it as an edit nor saves the state it was opened with.
-  const unsaved = !rule.id || JSON.stringify({ ...rule, enabled: initial.enabled }) !== JSON.stringify(initial);
+  // Likewise the list reorders and renumbers rules and moves them between
+  // groups: the form keeps the current order, and claims the group only
+  // once its own picker changes it.
+  const [groupPicked, setGroupPicked] = useState(false);
+  const live: Rule = {
+    ...rule,
+    enabled: initial.enabled,
+    order: initial.order,
+    group: groupPicked ? rule.group : initial.group,
+  };
+  const unsaved = !rule.id || JSON.stringify(live) !== JSON.stringify(initial);
 
   // Live validation: the engine compiles the rule as it would on save.
   useEffect(() => {
@@ -327,7 +119,7 @@ function RuleForm({ initial }: { initial: Rule }) {
     setSaving(true);
     setSaveError(null);
     try {
-      const saved = await saveRule({ ...rule, enabled: initial.enabled });
+      const saved = await saveRule(live);
       openEditor({ ruleId: saved.id });
     } catch (e) {
       setSaveError(errorText(e));
@@ -373,6 +165,23 @@ function RuleForm({ initial }: { initial: Rule }) {
           </span>
         )}
         <RuleOriginBadge origin={rule.origin} />
+        {groups.length > 0 && (
+          <Choice
+            value={live.group && groups.some((g) => g.id === live.group) ? live.group : NO_GROUP}
+            options={[{ value: NO_GROUP, label: "No group" }, ...groups.map((g) => ({ value: g.id, label: g.name }))]}
+            onChange={(group) => {
+              setGroupPicked(true);
+              setRule({ ...rule, group: group === NO_GROUP ? null : group });
+            }}
+            className="h-7 max-w-48 text-xs"
+            testId="rule-group-picker"
+          />
+        )}
+        {groups.some((g) => g.id === live.group && !g.enabled) && (
+          <span className="text-muted-foreground text-xs" title="Turn the group on to run its rules" data-testid="rule-group-off">
+            Group off
+          </span>
+        )}
         {unsaved && <span className="text-muted-foreground text-xs">Unsaved</span>}
         {(rule.actions.some(isVisual) || (rule.origin.kind === "preset" && rule.origin.preset === "rewrite")) && (
           <Button

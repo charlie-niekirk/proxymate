@@ -69,6 +69,7 @@ impl Proxy {
                 enabled: true,
                 order: 0,
                 origin: RuleOrigin::User,
+                group: None,
                 matcher,
                 actions,
             })
@@ -363,6 +364,7 @@ async fn scripts_rules_use_cant_be_deleted() {
             enabled: true,
             order: 0,
             origin: RuleOrigin::User,
+            group: None,
             matcher: Matcher::default(),
             actions: vec![Action::Script { script_id: id.into() }],
         })
@@ -605,6 +607,7 @@ async fn scripts_persist_in_the_app_database() {
             enabled: true,
             order: 0,
             origin: RuleOrigin::User,
+            group: None,
             matcher: Matcher::default(),
             actions: vec![Action::Script {
                 script_id: script.id.clone(),

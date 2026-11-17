@@ -13,8 +13,8 @@ use hyper_util::rt::{TokioExecutor, TokioIo};
 use pm_core::{Engine, EngineConfig, ProxyConfig};
 use pm_model::{
     Action, BlockMode, BreakpointResolution, FlowDetail, FlowId, FlowState, FlowSummary, Header, MapLocalSource,
-    Matcher, MessageEdits, Pattern, Phase, PresetKind, ResponseMatcher, Rule, RuleOrigin, RulePatch, RuleSettings,
-    StatusRange,
+    Matcher, MessageEdits, Pattern, Phase, PresetKind, ResponseMatcher, Rule, RuleGroupPatch, RuleOrigin, RulePatch,
+    RuleSettings, StatusRange,
 };
 use pm_testkit::client::{self, eventually, tls_config, tls_through};
 use pm_testkit::upstream::{JSON_BODY, pattern_byte};
@@ -63,6 +63,7 @@ impl Proxy {
                 enabled: true,
                 order: 0,
                 origin: RuleOrigin::User,
+                group: None,
                 matcher,
                 actions,
             })
@@ -77,6 +78,7 @@ impl Proxy {
             enabled: true,
             order: 0,
             origin: RuleOrigin::User,
+            group: None,
             matcher: Matcher::default(),
             actions,
         }
@@ -789,6 +791,7 @@ async fn invalid_or_oversized_regexes_are_rejected_clearly() {
                 enabled: true,
                 order: 0,
                 origin: RuleOrigin::User,
+                group: None,
                 matcher: Matcher {
                     host: Some(Pattern::regex(pattern)),
                     ..Matcher::default()
@@ -876,6 +879,7 @@ async fn agent_rules_are_tagged_and_removed_together() {
             session: None,
             created_at_ms: 0.0,
         },
+        group: None,
         matcher: Matcher::default(),
         actions: Vec::new(),
     };
@@ -898,6 +902,177 @@ async fn agent_rules_are_tagged_and_removed_together() {
     );
     assert_eq!(proxy.engine.delete_agent_rules().unwrap(), 2);
     assert_eq!(proxy.engine.rules().len(), 4);
+}
+
+/// A group turns its rules on and off together, keeps each rule's own
+/// state, orders the list (ungrouped rules, then group by group) and is
+/// saved with them.
+#[tokio::test]
+async fn rule_groups_switch_their_rules_together() {
+    let proxy = Proxy::start(None).await;
+    let upstream = Upstream::start().await;
+    let set = |name: &str| {
+        vec![Action::SetHeader {
+            phase: Phase::Response,
+            name: name.into(),
+            value: "1".into(),
+        }]
+    };
+    let ticket = proxy
+        .engine
+        .create_rule_group("PROJ-1", true, RuleOrigin::User)
+        .unwrap();
+    let a = proxy.rule(Matcher::default(), set("x-a"));
+    let b = proxy.rule(Matcher::default(), set("x-b"));
+    let loose = proxy.rule(Matcher::default(), set("x-loose"));
+    let moved = proxy
+        .engine
+        .move_rules_to_group(&[b.id.clone(), a.id.clone()], Some(&ticket.id))
+        .unwrap();
+    // Moved in list order, not the order asked.
+    assert_eq!(
+        moved.iter().map(|r| r.id.clone()).collect::<Vec<_>>(),
+        [a.id.clone(), b.id.clone()]
+    );
+    proxy.engine.set_rule_enabled(&b.id, false).unwrap();
+    let names: Vec<String> = proxy.engine.rules().into_iter().map(|r| r.name).collect();
+    assert_eq!(names[3..], ["test rule"; 3]);
+    let ids: Vec<String> = proxy.engine.rules().into_iter().skip(3).map(|r| r.id).collect();
+    assert_eq!(
+        ids,
+        [loose.id.clone(), a.id.clone(), b.id.clone()],
+        "ungrouped first, then the group"
+    );
+
+    let reply = get(proxy.addr, &upstream.url("/json")).await;
+    assert!(reply.headers.contains_key("x-a") && reply.headers.contains_key("x-loose"));
+    assert!(
+        !reply.headers.contains_key("x-b"),
+        "a disabled rule stays off in an enabled group"
+    );
+
+    proxy.engine.set_rule_group_enabled(&ticket.id, false).unwrap();
+    let reply = get(proxy.addr, &upstream.url("/json")).await;
+    assert!(!reply.headers.contains_key("x-a"), "the group is off");
+    assert!(reply.headers.contains_key("x-loose"));
+    assert!(
+        proxy.engine.rule(&a.id).unwrap().enabled,
+        "the rule keeps its own state"
+    );
+
+    proxy
+        .engine
+        .patch_rule_group(
+            &ticket.id,
+            RuleGroupPatch {
+                name: Some("  PROJ-1 basket  ".into()),
+                enabled: Some(true),
+            },
+        )
+        .unwrap();
+    let reply = get(proxy.addr, &upstream.url("/json")).await;
+    assert!(reply.headers.contains_key("x-a") && !reply.headers.contains_key("x-b"));
+
+    // A second group ahead of the first carries its rules with it.
+    let other = proxy
+        .engine
+        .create_rule_group("PROJ-2", false, RuleOrigin::User)
+        .unwrap();
+    let c = proxy
+        .engine
+        .create_rule(Rule {
+            group: Some(other.id.clone()),
+            ..proxy.rule_draft(set("x-c"))
+        })
+        .unwrap();
+    assert_eq!(c.group.as_deref(), Some(other.id.as_str()));
+    proxy
+        .engine
+        .reorder_rule_groups(std::slice::from_ref(&other.id))
+        .unwrap();
+    let ids: Vec<String> = proxy.engine.rules().into_iter().skip(3).map(|r| r.id).collect();
+    assert_eq!(ids, [loose.id.clone(), c.id.clone(), a.id.clone(), b.id.clone()]);
+    let reply = get(proxy.addr, &upstream.url("/json")).await;
+    assert!(!reply.headers.contains_key("x-c"), "created in a disabled group");
+
+    // Unknown groups and grouping a built-in rule are refused.
+    assert!(
+        proxy
+            .engine
+            .move_rules_to_group(std::slice::from_ref(&a.id), Some("nope"))
+            .is_err()
+    );
+    assert!(
+        proxy
+            .engine
+            .move_rules_to_group(&[pm_model::GLOBAL_THROTTLE_RULE_ID.into()], Some(&other.id))
+            .is_err()
+    );
+    assert!(
+        proxy
+            .engine
+            .create_rule(Rule {
+                group: Some("nope".into()),
+                ..proxy.rule_draft(set("x-d"))
+            })
+            .is_err()
+    );
+    assert!(proxy.engine.create_rule_group("   ", true, RuleOrigin::User).is_err());
+
+    // Saved with the rules.
+    let reopened = Proxy::start_in(proxy.dir.clone(), None).await;
+    let book = reopened.engine.rule_book();
+    assert_eq!(
+        book.groups
+            .iter()
+            .map(|g| (g.name.as_str(), g.enabled))
+            .collect::<Vec<_>>(),
+        [("PROJ-2", false), ("PROJ-1 basket", true)]
+    );
+    assert_eq!(book.rules, proxy.engine.rules());
+
+    // Deleting a group keeps its rules, ungrouped, unless asked.
+    assert_eq!(proxy.engine.delete_rule_group(&ticket.id, false).unwrap(), 2);
+    let a = proxy.engine.rule(&a.id).unwrap();
+    assert_eq!(a.group, None);
+    assert!(a.enabled);
+    assert_eq!(proxy.engine.delete_rule_group(&other.id, true).unwrap(), 1);
+    assert!(proxy.engine.rule(&c.id).is_none());
+    assert!(proxy.engine.rule_groups().is_empty());
+    let reply = get(proxy.addr, &upstream.url("/json")).await;
+    assert!(reply.headers.contains_key("x-a"), "ungrouped and still enabled");
+}
+
+/// Removing an agent's rules also removes its groups that end up empty.
+#[tokio::test]
+async fn agent_groups_go_with_their_rules() {
+    let proxy = Proxy::start(None).await;
+    let agent = RuleOrigin::Agent {
+        client: "claude-code".into(),
+        session: None,
+        created_at_ms: 0.0,
+    };
+    let emptied = proxy.engine.create_rule_group("agent's", true, agent.clone()).unwrap();
+    let shared = proxy.engine.create_rule_group("shared", true, agent.clone()).unwrap();
+    let mine = proxy.engine.create_rule_group("mine", true, RuleOrigin::User).unwrap();
+    proxy
+        .engine
+        .create_rule(Rule {
+            origin: agent.clone(),
+            group: Some(emptied.id.clone()),
+            ..proxy.rule_draft(Vec::new())
+        })
+        .unwrap();
+    proxy
+        .engine
+        .create_rule(Rule {
+            group: Some(shared.id.clone()),
+            ..proxy.rule_draft(Vec::new())
+        })
+        .unwrap();
+    assert_eq!(proxy.engine.delete_agent_rules().unwrap(), 1);
+    let left: Vec<String> = proxy.engine.rule_groups().into_iter().map(|g| g.id).collect();
+    assert_eq!(left, [shared.id, mine.id]);
 }
 
 /// `patch_rule` changes only the fields it sets, so an edit made between an

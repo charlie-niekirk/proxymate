@@ -284,6 +284,7 @@ async fn a_recording_answers_byte_identically_after_the_upstream_stops() {
             enabled: true,
             order: 0,
             origin: RuleOrigin::User,
+            group: None,
             matcher: Default::default(),
             actions: vec![Action::MapLocal {
                 source: pm_model::MapLocalSource::Inline { body: "local".into() },

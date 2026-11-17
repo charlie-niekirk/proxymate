@@ -117,7 +117,7 @@ describe("rebuild", () => {
       { type: "JsonSet", phase: "response", pointer: "/missing/x", value: null, raw: "0" },
       { type: "Delay", phase: "response", ms: 100 },
     ];
-    const rule: Rule = { id: "r", name: "r", enabled: true, order: 1, origin: { kind: "preset", preset: "rewrite" }, matcher: { methods: [], scheme: null, host: null, port: null, path: null, query: [], headers: [], client_app: null, response: null }, actions };
+    const rule: Rule = { id: "r", name: "r", enabled: true, order: 1, origin: { kind: "preset", preset: "rewrite" }, group: null, matcher: { methods: [], scheme: null, host: null, port: null, path: null, query: [], headers: [], client_app: null, response: null }, actions };
     const r = rebuild(src, rule, dry(src, '{"name":"Bea","n":1,"items":[1,2],"missing":{"x":0}}'));
     const built = buildActions(src, r.edits, r.pins, r.kept).actions;
     expect(built).toEqual([actions[0], actions[2], actions[1], actions[3], actions[4], actions[5]]);
@@ -126,7 +126,7 @@ describe("rebuild", () => {
   it("keeps body actions it can't rebuild (a truncated dry run)", () => {
     const src = source('{"a":1}');
     const actions: Action[] = [{ type: "JsonSet", phase: "response", pointer: "/a", value: null, raw: "2" }];
-    const rule: Rule = { id: "r", name: "r", enabled: true, order: 1, origin: { kind: "user" }, matcher: { methods: [], scheme: null, host: null, port: null, path: null, query: [], headers: [], client_app: null, response: null }, actions };
+    const rule: Rule = { id: "r", name: "r", enabled: true, order: 1, origin: { kind: "user" }, group: null, matcher: { methods: [], scheme: null, host: null, port: null, path: null, query: [], headers: [], client_app: null, response: null }, actions };
     const r = rebuild(src, rule, dry(src, '{"a":', { response_body_truncated: true }));
     expect(r.kept).toEqual(actions);
   });
