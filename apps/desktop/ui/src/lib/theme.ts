@@ -17,6 +17,22 @@ function paint(theme: "light" | "dark") {
 }
 
 let forced: "light" | "dark" | null = null;
+let windowTheme: "light" | "dark" | null | undefined;
+
+/**
+ * The native window's appearance: what the page shows when it is pinned or
+ * the setting isn't System, else `null` so the window follows macOS again.
+ * The sidebar's vibrancy and the traffic lights follow it, not the page.
+ */
+function syncWindow() {
+  const appearance = usePrefs.getState().appearance;
+  const theme = forced ?? (appearance === "system" ? null : appearance);
+  if (theme === windowTheme) return;
+  windowTheme = theme;
+  backend.setWindowTheme(theme).catch(() => {
+    // Outside the app (a browser) there is no native window.
+  });
+}
 
 /**
  * Keeps `<html data-theme>` in step with the Appearance setting, and with
@@ -31,23 +47,18 @@ export function startTheme(force: "light" | "dark" | null = null) {
     paint(forced ?? resolveTheme(appearance));
   };
   apply();
-  const syncWindow = (appearance: Appearance) => {
-    if (forced) return;
-    backend.setWindowTheme(appearance === "system" ? null : appearance).catch(() => {
-      // Outside the app (a browser) there is no native window.
-    });
-  };
-  syncWindow(usePrefs.getState().appearance);
+  syncWindow();
   usePrefs.subscribe((s, prev) => {
     if (s.appearance === prev.appearance) return;
-    syncWindow(s.appearance);
+    syncWindow();
     apply();
   });
   darkQuery?.addEventListener("change", apply);
 }
 
-/** Dev only: switch the theme for this page without saving it. */
+/** Dev only: switch the theme for this page (and its window) without saving it. */
 export function forceTheme(theme: "light" | "dark") {
   forced = theme;
   paint(theme);
+  syncWindow();
 }

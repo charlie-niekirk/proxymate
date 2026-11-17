@@ -161,7 +161,7 @@ Targets:
 **Colours and themes**
 - Every colour is a token in `src/styles/tokens.css`: shadcn variables plus `--m-*` (methods), `--s-*` (status and state), `--url-*`, `--selection-*` and the rest. Don't hard-code colours in components (not even `bg-white` or `bg-black/50`: there are `--paper` and `--overlay`).
 - Both themes are first-class. `src/styles/contrast.test.ts` checks 4.5:1 for every text token on its surface (pills composited over the table) in dark and light, and 3:1 for icon-only colours (`GRAPHICS`: the record button's `--record-start`/`--record-stop`). It scans `tokens.css` (R4): a new token fails it until it has a pair, or is a surface or line listed in `NOT_TEXT`.
-- Settings › Appearance (System/Light/Dark) lives in `store/prefs.ts` (local storage) with the column layout and sort; `lib/theme.ts` applies it and syncs the native window theme. `?theme=light` pins a theme in dev (Playwright).
+- Settings › Appearance (System/Light/Dark) lives in `store/prefs.ts` (local storage) with the column layout and sort; `lib/theme.ts` applies it and syncs the native window theme (`setTheme`, `null` for System), which the macOS sidebar vibrancy and traffic lights follow. `?theme=light` (and the remote's `theme`) pins a theme in dev (Playwright) and sets the window theme too.
 
 **Body viewers** (`src/components/BodyViewer/`)
 - `registry.ts` maps each `ContentKind` to its viewers, best first. Add a viewer there and in `Viewer.tsx`.
