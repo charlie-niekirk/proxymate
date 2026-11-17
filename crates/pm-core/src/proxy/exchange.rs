@@ -286,6 +286,7 @@ impl Exchange<'_> {
         }
         if let Some(rec) = &rec {
             rec.rules_applied(std::mem::take(&mut fx.applied));
+            rec.rule_comments(std::mem::take(&mut fx.comments));
             for reason in &fx.body_skipped {
                 rec.rewrite_skipped(reason.clone());
             }
@@ -499,6 +500,7 @@ impl Exchange<'_> {
         let mut fx = eval::response_phase(&gated, &mut draft, run, request.as_ref()).await;
         if let Some(rec) = &rec {
             rec.rules_applied(std::mem::take(&mut fx.applied));
+            rec.rule_comments(std::mem::take(&mut fx.comments));
             for issue in fx.script_issues.drain(..) {
                 rec.script_issue(issue);
             }
@@ -580,6 +582,7 @@ impl Exchange<'_> {
         let mut fx = eval::response_phase(&gated, &mut draft, run, request.as_ref()).await;
         if let Some(rec) = &rec {
             rec.rules_applied(std::mem::take(&mut fx.applied));
+            rec.rule_comments(std::mem::take(&mut fx.comments));
             for reason in &fx.body_skipped {
                 rec.rewrite_skipped(reason.clone());
             }

@@ -55,6 +55,7 @@ pub use rules::{BreakpointSink, RuleError, RulesSink};
 pub use scripts::{ConsoleSink, ScriptError, ScriptsSink};
 pub use search::{FlowPage, SearchHit, SearchMatch, SearchPage};
 pub use settings::StorageSink;
+pub use store::FILTER_KEYS;
 pub use workflow::{MAX_REPEAT_CONCURRENCY, MAX_REPEAT_ITERATIONS, RepeatSink};
 
 /// What every engine call fails with. Adapters turn it into an

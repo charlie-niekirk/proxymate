@@ -52,6 +52,11 @@ describe("rules helpers", () => {
     expect(defaultAction("ServeFrom")).toMatchObject({ key: { query: true, body: false }, on_miss: "pass_through", pick: "first" });
   });
 
+  it("summarises a Comment action", () => {
+    expect(defaultAction("Comment")).toEqual({ type: "Comment", text: "" });
+    expect(actionSummary({ type: "Comment", text: " Config request " })).toBe("comment “Config request”");
+  });
+
   it("labels patterns and summarises matchers", () => {
     expect(patternLabel(null)).toBe("any");
     expect(patternLabel({ kind: "regex", value: "^/a", case_insensitive: true })).toBe("/^/a/i");

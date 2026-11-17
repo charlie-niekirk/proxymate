@@ -281,13 +281,13 @@ Targets:
 
 **WebSocket rules (M19)**
 - Handshakes go through `proxy/exchange.rs` like any request (`Exchange.websocket: Some(ClientSide)`); on `101` the relay in `proxy/ws.rs` takes both connections over. Don't add a second handshake path.
-- `Action::WsMessage` comes before `ServeFrom` (M20), the last `Action` variant. Message rules are evaluated in `rules::eval::ws_message_phase` (unit matrix in `rules/tests.rs`, end to end in `crates/pm-core/tests/ws_rules.rs`); the relay re-matches when the rule set changes.
+- `Action::WsMessage` comes before `ServeFrom` (M20) and `Comment`, the last `Action` variant. Message rules are evaluated in `rules::eval::ws_message_phase` (unit matrix in `rules/tests.rs`, end to end in `crates/pm-core/tests/ws_rules.rs`); the relay re-matches when the rule set changes.
 - Each direction is one ordered queue: a held message (delay, breakpoint, slow script) holds the ones behind it, and messages Proxymate sends (`Engine::ws_send`, through `proxy::ws::Registry`) join the same queue. Never write to a peer from anywhere but its direction's processor.
 - Recorded messages carry `edited`, `injected` and `dropped`; an edited one keeps what arrived (`WsEntry.original`, the `originals` table, `Engine::websocket_original_in`). Every `WsLog::push` takes a `WsEntry`.
 - A held message is a `BreakpointInfo` with `message` set; `Engine::resolve_breakpoint` refuses `Respond` and head edits for it.
 
 **Offline mocking (M20)**
-- `Action::ServeFrom { source, key, on_miss, pick }` is the last `Action` variant and `PresetKind::OpenApi` the last preset. Sources are the mock library: `<data dir>/mocks/<uuid>.proxymate` copies, listed in `app.sqlite`'s `mock_sources` table (`mocks.rs`). Never point a rule at a user's original file.
+- `Action::ServeFrom { source, key, on_miss, pick }` comes just before `Comment`, the last `Action` variant, and `PresetKind::OpenApi` is the last preset. Sources are the mock library: `<data dir>/mocks/<uuid>.proxymate` copies, listed in `app.sqlite`'s `mock_sources` table (`mocks.rs`). Never point a rule at a user's original file.
 - Rules compile with a `MockMap` beside the `ScriptMap` (`CompiledRule::compile(rule, scripts, mocks)`); `Engine::mock_map(rules)` opens and indexes (once, cached) the sources the enabled rules serve from. A disabled rule only needs its source to exist; a source a rule uses can't be removed.
 - ServeFrom is terminal like Map Local: the first answer (Map Local, a mock script, a recording) wins (`RequestEffects::answered`). A hit is read with `MockIndex::response` on a blocking thread and goes through `respond` as `Answer::Upstream`, so response-phase actions run and an untouched body reaches the client as recorded (still content-encoded). A body stored decoded (HAR, Charles `text`) loses its `Content-Encoding`.
 - The key is method, scheme, host and path (not the port), plus the query as sorted decoded pairs unless `key.query` is off, plus a hash of the decoded request body with `key.body` (which buffers the request body). A pass-through miss does nothing; 404/502 answers say what wasn't found.
@@ -295,6 +295,11 @@ Targets:
 - OpenAPI: specs are their source text in `app.sqlite`'s `openapi_specs`, compiled into an `OpIndex` snapshot (`openapi.rs`, `serde-saphyr` for YAML). Only local `$ref`s are followed. Operations match method and path under a server base path; the host isn't compared.
 - `op:` binds at parse time: `Engine::parse_query` (MCP, `find_flows`, `search_flows`) and each store's `set_operations` (view filters, via `CompiledFilter::compile_with`). An unbound `op:` matches nothing, so anything new that parses a query for flows must bind it. Views keep the snapshot they were filtered with.
 - Generated mocks are `Map Local` rules saved disabled (`Engine::create_rules`, one change), with a regex path and the spec's one absolute host if its servers agree.
+
+**Comment rules**
+- `Action::Comment { text }` is the last `Action` variant. Its text is trimmed and checked at compile time (`CompiledAction.comment`, at most `workflow::COMMENT_MAX`). The request phase collects the comments of rules without a response matcher (before a `Block` returns), the response phase those with one; the exchange sends each as `FlowEvent::RuleComment`, which the store adds to the flow's comment after "; ". Never set a rule's comment with `FlowEvent::Comment`: that replaces the user's note.
+- A comment isn't an applied rule: it doesn't set `edited` or appear in `FlowDetail.rules`.
+- MCP `filter` descriptions come from `filter_dsl!` (`pm-mcp/src/tools/flows.rs`); a new DSL key goes in `FILTER_KEYS` (`store/query.rs`) and there, or `filter_doc_lists_every_key` fails.
 
 **Workflow (M17)**
 - The table's selection is flow ids (`lib/selection.ts`: ids, or a whole view with exceptions), never positions. Bulk actions take it as a `FlowSelection` (`currentSelection()` in `lib/actions.ts`); `Engine::selected_ids` resolves one in any store.
@@ -306,7 +311,7 @@ Targets:
 - `Engine::repeat` sends through `Engine::send`; anything that sends many requests should too, so rules, recording and `sent_by` stay consistent.
 
 **Capture targets (M21)**
-- M21 adds no `Action`, `PresetKind`, `ContentKind` or `FlowDetail` change: the session `VERSION` stayed 7 (R3 made it 8). `ServeFrom` is still the last `Action` variant.
+- M21 adds no `Action`, `PresetKind`, `ContentKind` or `FlowDetail` change: the session `VERSION` stayed 7 (R3 made it 8). `ServeFrom` was still the last `Action` variant (`Comment` came after it).
 - Launchers live in `pm-platform/src/launcher.rs` behind `Launcher`; every command line goes through `command::Runner` (`spawn` for browsers, `run` for `open`), checked against the fake. **Tests never launch anything**; real launches need the user's OK.
 - A launch owns `<data dir>/intercept/<uuid>/` (profile or script, plus a `pid` file); `capture.rs` removes it when the root pid exits, and the next start sweeps ones whose pid is gone. Terminals report their shell's pid through that file.
 - Intercepted flows are named in `client.rs` by walking parent pids (`ProcessInfo::parent_pid`) to a tracked root: `<App> (Intercepted)`. `Engine::track_intercept` (hidden) tracks a pid without launching, for tests.

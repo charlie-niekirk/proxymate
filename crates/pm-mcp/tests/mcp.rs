@@ -844,6 +844,57 @@ async fn agents_dry_run_and_create_exact_rewrites() {
     h.stop().await;
 }
 
+/// The user comments a flow; the agent finds it by that comment and makes
+/// a rewrite that comments the flows it matches from then on.
+#[tokio::test]
+async fn agents_find_flows_by_comment_and_comment_with_rules() {
+    let h = Harness::start().await;
+    let upstream = Upstream::start().await;
+    let (status, _) = client::get(h.proxy, &upstream.url("/json")).await;
+    assert_eq!(status, 200);
+    h.engine.flush();
+    h.engine.comment_flow_in(0, 0, "Config request").unwrap();
+    let (client, _) = h.client().await;
+
+    let found = ok(&client, "list_flows", json!({ "filter": "comment:\"config request\"" })).await;
+    assert_eq!(found["flows"][0]["comment"], "Config request");
+    let id = found["flows"][0]["id"].as_u64().unwrap();
+
+    let rule = ok(
+        &client,
+        "create_rewrite",
+        json!({ "flow_id": id, "set_response_headers": [{ "name": "x-config", "value": "rewritten" }],
+                "comment": "Config request (rewritten)" }),
+    )
+    .await;
+    let types: Vec<&str> = rule["actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["type"].as_str().unwrap())
+        .collect();
+    assert_eq!(types, ["SetHeader", "Comment"]);
+
+    let (status, _) = client::get(h.proxy, &upstream.url("/json")).await;
+    assert_eq!(status, 200);
+    let flow = eventually(WAIT, || {
+        h.engine.flush();
+        h.engine.get_flow(1).filter(|f| f.comment.is_some())
+    })
+    .await;
+    assert_eq!(flow.comment.as_deref(), Some("Config request (rewritten)"));
+    let found = ok(
+        &client,
+        "list_flows",
+        json!({ "filter": "comment:rewritten is:edited" }),
+    )
+    .await;
+    assert_eq!(found["flows"].as_array().unwrap().len(), 1);
+
+    client.cancel().await.unwrap();
+    h.stop().await;
+}
+
 /// M16: `format: "decoded"` gives agents the inspector's decoding, and
 /// `list_proto_schemas` what was imported.
 #[tokio::test]

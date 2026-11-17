@@ -10,9 +10,33 @@ pub(super) enum Order {
     OldestFirst,
 }
 
+/// The filter DSL, as every `filter` parameter describes it: agents see
+/// the keys up front instead of learning them from a parse error.
+/// `filter_doc_lists_every_key` checks it against `pm_core::FILTER_KEYS`.
+macro_rules! filter_dsl {
+    () => {
+        "Filter DSL: space-separated terms, all of which must match; `-` in front negates one. A bare word or \"quoted phrase\" is a case-insensitive substring of host[:port]/path?query. Keys: \
+`host:` exact or a glob (`*.example.com` also matches example.com); \
+`path:` a glob over the path, `*` crosses `/`; \
+`method:` and `scheme:` comma-separated lists; \
+`status:` `404`, `4xx`, `400-499` or a list; \
+`ct:` json, form, xml, js, css, graphql, document, media, other, or a kind (html, text, image, svg, video, audio, font, pdf, binary, multipart, grpc, protobuf, msgpack, cbor, none); \
+`grpc:` a gRPC status code or name (`grpc:!0` is any failed call); \
+`app:` a substring of the client app; \
+`state:` active, paused, completed, failed, blocked or tunnel; \
+`is:` edited, pinned, labelled, commented or a state; \
+`label:` red, orange, yellow, green, blue, purple (a list), or any; \
+`comment:` a case-insensitive substring of the user's comment on the flow (quote phrases: `comment:\"config request\"`); \
+`op:` an OpenAPI operationId glob; \
+`dur` (ms, or with `s`), `size` (response), `reqsize` and `id` compare with > >= < <= = (`dur>500`, `size>1mb`, `id>=40`). \
+Deep terms read the recorded request and response: `header:`, `reqheader:`, `resheader:` (a substring of a `name: value` line) and `body:`, `reqbody:`, `resbody:` (a substring of the decoded body). \
+Example: `host:*.example.com method:POST,PUT status:4xx -path:/health/*`."
+    };
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub(super) struct ListFlows {
-    /// Filter DSL, e.g. `host:api.example.com status:5xx`. Empty lists everything.
+    #[schemars(description = concat!("Empty lists everything. ", filter_dsl!()))]
     #[serde(default)]
     pub(super) filter: String,
     /// Only flows with a larger id (newer than this one).
@@ -37,7 +61,7 @@ pub(super) struct SearchFlows {
     /// Where to look. Default: everywhere.
     #[serde(default)]
     pub(super) scopes: Vec<SearchScope>,
-    /// Only search flows matching this filter DSL.
+    #[schemars(description = concat!("Only search flows matching this filter. ", filter_dsl!()))]
     #[serde(default)]
     pub(super) filter: String,
     /// 1–100, default 20.
@@ -114,7 +138,7 @@ pub(super) struct GetFlowBody {
 
 #[derive(Deserialize, JsonSchema)]
 pub(super) struct WaitForFlow {
-    /// Filter DSL the flow must match, e.g. `host:api.example.com path:/login`.
+    #[schemars(description = concat!("What the flow must match. ", filter_dsl!()))]
     #[serde(default)]
     pub(super) filter: String,
     /// Default 30000, at most 120000.
@@ -143,7 +167,7 @@ pub(super) struct ExportHar {
     /// These flows, in this order. Without, the flows matching `filter`.
     #[serde(default)]
     pub(super) ids: Option<Vec<FlowId>>,
-    /// Filter DSL; empty exports everything (up to `limit`).
+    #[schemars(description = concat!("Empty exports everything (up to `limit`). ", filter_dsl!()))]
     #[serde(default)]
     pub(super) filter: String,
     /// 1–500, default 50.

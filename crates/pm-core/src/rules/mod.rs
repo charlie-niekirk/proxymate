@@ -239,6 +239,10 @@ fn script_note(issue: &pm_model::ScriptIssue) -> String {
     format!("Script {:?} failed: {}", issue.script_name, issue.message)
 }
 
+fn comment_note(text: &std::sync::Arc<str>) -> String {
+    format!("Comments the flow: {text:?}.")
+}
+
 fn sorted(mut rules: Vec<Rule>) -> Vec<Rule> {
     rules.sort_by(|a, b| a.order.cmp(&b.order).then_with(|| a.id.cmp(&b.id)));
     rules
@@ -589,6 +593,7 @@ impl Engine {
             let fx = eval::request_phase(&rules, &mut request, run).await;
             notes.extend(fx.body_skipped.iter().map(|s| format!("Body action skipped: {s}")));
             notes.extend(fx.script_issues.iter().map(script_note));
+            notes.extend(fx.comments.iter().map(comment_note));
             if let Some(mode) = fx.block {
                 notes.push(match mode {
                     pm_model::BlockMode::Status { status } => format!("Blocked with status {status}."),
@@ -659,6 +664,7 @@ impl Engine {
                     let fx = eval::response_phase(&gated, draft, run, sent.as_ref()).await;
                     notes.extend(fx.body_skipped.iter().map(|s| format!("Body action skipped: {s}")));
                     notes.extend(fx.script_issues.iter().map(script_note));
+                    notes.extend(fx.comments.iter().map(comment_note));
                     if fx.breakpoint.is_some() {
                         notes.push("Pauses at a response breakpoint.".into());
                     }

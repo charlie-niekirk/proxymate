@@ -91,6 +91,7 @@ export const ACTION_TYPES: { type: ActionType; label: string; group: string }[] 
   { type: "Block", label: "Block", group: "Flow control" },
   { type: "Script", label: "Run script", group: "Scripts" },
   { type: "WsMessage", label: "WebSocket message", group: "WebSocket" },
+  { type: "Comment", label: "Comment on flow", group: "Annotate" },
 ];
 
 export function actionLabel(type: ActionType): string {
@@ -144,6 +145,8 @@ export function defaultAction(type: ActionType): Action {
       return { type, direction: null, filter: null, op: { kind: "replace", pattern: newPattern("exact"), replacement: "" } };
     case "ServeFrom":
       return { type, source: "", key: { query: true, body: false }, on_miss: "pass_through", pick: "first" };
+    case "Comment":
+      return { type, text: "" };
   }
 }
 
@@ -268,6 +271,8 @@ export function actionSummary(a: Action, scripts?: ReadonlyMap<string, string>, 
       const miss = a.on_miss === "pass_through" ? "" : `, else ${a.on_miss === "not_found" ? 404 : 502}`;
       return `serve from ${name}${a.pick === "first" ? "" : ` (${a.pick.replace("_", "-")})`}${miss}`;
     }
+    case "Comment":
+      return `comment “${a.text.trim()}”`;
     case "WsMessage": {
       const where = `${a.direction ?? "ws"}${a.filter ? ` ${patternLabel(a.filter)}` : ""}`;
       const op = a.op;

@@ -166,7 +166,8 @@ We build our own engine and use hudsucker only as a reading reference. Its handl
   - Flow control: `Breakpoint{request,response}`, `Delay`, `Throttle` (token bucket, kbps down/up plus latency), `Block` (a status code or a connection reset: h1 closes the connection, h2 resets the stream).
   - (M14) Scripts: `Script{script_id}`. It names a rewrite or mock script (see "Scripting (M14)").
   - (M19) WebSocket messages: `WsMessage{direction?, filter?, op}` (see "M19").
-  - (M20) Recordings: `ServeFrom{source, key, on_miss, pick}` answers from the mock library, terminal like `MapLocal`; the last variant (see "M20").
+  - (M20) Recordings: `ServeFrom{source, key, on_miss, pick}` answers from the mock library, terminal like `MapLocal` (see "M20").
+  - Annotation: `Comment{text}` puts a comment on each flow the rule matches (the same note as a user's, found with `comment:`); the last variant. It applies once the whole rule matches: in the request phase (a blocked flow too), or in the response phase if the rule has a response matcher. Rule comments are added to the flow's comment after "; " (the `RuleComment` ingest event, skipping text the comment already holds, up to 10,000 characters). It changes no traffic, so it isn't recorded as an applied rule and doesn't set `edited`; the dry run notes it.
   - Header, body and delay actions carry a `phase` (request or response).
 - **Compilation.** Rules compile to a `CompiledRuleSet`, which is swapped in atomically with ArcSwap.
   - Every pattern becomes a byte regex (globs via globset) built with `RegexBuilder::size_limit` (256 KB compiled, 4096 characters of source). Errors name the rule, the field and the reason ("rule "x", host: invalid regex: unclosed group").
@@ -275,6 +276,8 @@ JavaScript on an embedded QuickJS (rquickjs 0.14, QuickJS-NG). Scripts get no ne
   - Every call goes into the audit log (`app.sqlite`, newest 10,000 kept) with the client name from `initialize`, the arguments (cut at 4 KB), the outcome and the time taken.
 - **Tool schemas.** Built from the parameter structs' schemars derives, which embed the `pm-model` rule and breakpoint types; nullable types and bare `true` schemas are rewritten so stricter clients accept them.
 - **Filter DSL (M7).** `pm-core/src/store/query.rs`: `host: path: method: scheme: status: ct: app: state: is:edited dur size reqsize id`, `-` negation, quoted phrases, bare words search the URL. MCP parses strictly (unknown keys are errors); the search box parses leniently (a term that doesn't parse is text). Autocomplete is M10.
+  - Every `filter` parameter (`list_flows`, `search_flows`, `wait_for_flow`, `export_har`) describes the whole DSL in its schema (`filter_dsl!` in `pm-mcp/src/tools/flows.rs`), so agents see every key, `comment:` and `label:` included, without a failed call first. A test checks it against `pm_core::FILTER_KEYS`.
+  - `create_rewrite` takes `comment`, a `Comment` action after the others.
 - **Read tools:**
   - `get_status`, `list_flows{filter?, since_id?, limit, cursor, sort}`.
   - `search_flows{query, regex?, scopes, filter?}`: URL, headers and decoded bodies (first 1 MB), newest first, 2,000 flows per call, with snippets.
@@ -545,7 +548,7 @@ The design as built is "Scripting (M14)" above (with the rules evaluation order,
 After v0.3.0 the user asked for a feature audit against Proxyman, Charles, HTTP Toolkit, mitmproxy and Fiddler (a Proxymate mobile app is out of scope). Proxymate already leads on table and filter performance, the depth of its MCP server, lossless JSON rewrites and deep search. The gaps fell into six groups, which the user put in this order: protobuf and gRPC (M16), everyday workflow (M17), network plumbing (M18), WebSocket rules (M19), offline mocking (M20), capture targets and noise (M21). M12 (Linux and Windows) stays as planned and is independent of all six.
 
 **Rules that apply to every milestone here:**
-- New `Action` variants go after the last one (`Script`, then M19's `WsMessage`, then M20's `ServeFrom`) and move CLAUDE.md's "last variant" note. (As built: `Action` isn't stored in `FlowDetail`, only `AppliedRule` is, so an action alone needs no session bump; a new `PresetKind` does, since an applied rule's origin names it. When the session `VERSION` in `store/sqlite.rs` bumps, each milestone takes the next one and every older version still opens.)
+- New `Action` variants go after the last one (`Script`, then M19's `WsMessage`, then M20's `ServeFrom`, then `Comment`) and move CLAUDE.md's "last variant" note. (As built: `Action` isn't stored in `FlowDetail`, only `AppliedRule` is, so an action alone needs no session bump; a new `PresetKind` does, since an applied rule's origin names it. When the session `VERSION` in `store/sqlite.rs` bumps, each milestone takes the next one and every older version still opens.)
 - New `ContentKind` variants go after `Binary`, for the same reason (`BodyInfo.kind` is in the detail).
 - New `FlowRow` fields are appended, with `decodeRow` and its test updated.
 - New settings are `app.sqlite` rows owned by `pm-core/src/settings.rs`, with a Settings section and Engine methods; adapters still call only `Engine`.

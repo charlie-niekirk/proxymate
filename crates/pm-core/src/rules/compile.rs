@@ -173,6 +173,9 @@ pub(crate) struct CompiledAction {
     pub script: Option<Arc<CompiledScript>>,
     /// The recording an `Action::ServeFrom` answers from.
     pub serve: Option<CompiledServe>,
+    /// An `Action::Comment`'s text, trimmed, shared by every flow it
+    /// comments.
+    pub comment: Option<Arc<str>>,
 }
 
 /// A `ServeFrom`'s source, indexed when the rule set compiled.
@@ -373,6 +376,11 @@ impl CompiledRule {
             .any(|a| !matches!(a.action, Action::WsMessage { .. }))
     }
 
+    /// The rule's `Comment` texts, in action order.
+    pub fn comments(&self) -> impl Iterator<Item = &Arc<str>> {
+        self.actions.iter().filter_map(|a| a.comment.as_ref())
+    }
+
     pub fn applied(&self, phase: Phase) -> AppliedRule {
         AppliedRule {
             phase,
@@ -418,6 +426,7 @@ fn compile_action(
         json: None,
         script: None,
         serve: None,
+        comment: None,
     };
     match action {
         Action::SetHeader { name, value, .. } | Action::AddHeader { name, value, .. } => {
@@ -527,6 +536,19 @@ fn compile_action(
                 index: mocks.resolve(source).map_err(invalid)?,
                 turns: Default::default(),
             });
+        }
+        Action::Comment { text } => {
+            let text = text.trim();
+            if text.is_empty() {
+                return Err(invalid("the comment is empty".into()));
+            }
+            if text.chars().count() > crate::workflow::COMMENT_MAX {
+                return Err(invalid(format!(
+                    "a comment can be at most {} characters",
+                    crate::workflow::COMMENT_MAX
+                )));
+            }
+            compiled.comment = Some(Arc::from(text));
         }
         _ => {}
     }

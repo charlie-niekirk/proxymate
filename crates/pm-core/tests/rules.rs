@@ -13,7 +13,8 @@ use hyper_util::rt::{TokioExecutor, TokioIo};
 use pm_core::{Engine, EngineConfig, ProxyConfig};
 use pm_model::{
     Action, BlockMode, BreakpointResolution, FlowDetail, FlowId, FlowState, FlowSummary, Header, MapLocalSource,
-    Matcher, MessageEdits, Pattern, Phase, PresetKind, Rule, RuleOrigin, RulePatch, RuleSettings,
+    Matcher, MessageEdits, Pattern, Phase, PresetKind, ResponseMatcher, Rule, RuleOrigin, RulePatch, RuleSettings,
+    StatusRange,
 };
 use pm_testkit::client::{self, eventually, tls_config, tls_through};
 use pm_testkit::upstream::{JSON_BODY, pattern_byte};
@@ -66,6 +67,19 @@ impl Proxy {
                 actions,
             })
             .expect("rule is valid")
+    }
+
+    /// An unsaved rule on every request.
+    fn rule_draft(&self, actions: Vec<Action>) -> Rule {
+        Rule {
+            id: String::new(),
+            name: "draft".into(),
+            enabled: true,
+            order: 0,
+            origin: RuleOrigin::User,
+            matcher: Matcher::default(),
+            actions,
+        }
     }
 
     fn ca(&self) -> CertificateDer<'static> {
@@ -631,6 +645,84 @@ async fn block_answers_with_a_status_or_resets() {
     let (flow, detail) = proxy.finished(1).await;
     assert_eq!(flow.state, FlowState::Blocked);
     assert!(detail.error.unwrap().contains("reset"));
+}
+
+#[tokio::test]
+async fn comment_rules_annotate_the_flows_they_match() {
+    let upstream = Upstream::start().await;
+    let proxy = Proxy::start(None).await;
+    let comment = |text: &str| Action::Comment { text: text.into() };
+    proxy.rule(on_path("/json"), vec![comment("  Config request ")]);
+    proxy.rule(on_path("/json"), vec![comment("Second"), comment("Config request")]);
+    // With a response matcher, only once the response matches.
+    proxy.rule(
+        Matcher {
+            path: Some(Pattern::glob("/status/*")),
+            response: Some(ResponseMatcher {
+                status: vec![StatusRange { from: 400, to: 499 }],
+                content_type: None,
+            }),
+            ..Matcher::default()
+        },
+        vec![comment("Client error")],
+    );
+    // A blocked flow is commented too.
+    proxy.rule(
+        on_path("/chunked"),
+        vec![
+            Action::Block {
+                mode: BlockMode::Status { status: 403 },
+            },
+            comment("Blocked here"),
+        ],
+    );
+    assert!(proxy.engine.create_rule(proxy.rule_draft(vec![comment("  ")])).is_err());
+    let long = "x".repeat(10_001);
+    assert!(
+        proxy
+            .engine
+            .create_rule(proxy.rule_draft(vec![comment(&long)]))
+            .is_err()
+    );
+
+    for path in ["/json", "/status/404", "/status/200", "/chunked"] {
+        get(proxy.addr, &upstream.url(path)).await;
+    }
+    let mut comments = Vec::new();
+    for id in 0..4 {
+        let (flow, detail) = proxy.finished(id).await;
+        comments.push(flow.comment.as_deref().map(str::to_owned));
+        if id == 0 {
+            // Commenting changes no traffic.
+            assert!(!flow.edited);
+            assert!(detail.rules.applied.is_empty());
+        }
+    }
+    assert_eq!(
+        comments,
+        [
+            Some("Config request; Second".to_owned()),
+            Some("Client error".to_owned()),
+            None,
+            Some("Blocked here".to_owned()),
+        ]
+    );
+    let found = proxy
+        .engine
+        .find_flows("comment:\"config request\"", None, None, 10, false)
+        .unwrap();
+    assert_eq!(found.flows.iter().map(|f| f.id).collect::<Vec<_>>(), [0]);
+
+    // The dry run says what it would write.
+    let rule = proxy.rule_draft(vec![comment("Config request")]);
+    let result = proxy.engine.test_rule(&rule, 0).await.unwrap();
+    assert!(
+        result
+            .notes
+            .contains(&"Comments the flow: \"Config request\".".to_owned()),
+        "{:?}",
+        result.notes
+    );
 }
 
 #[tokio::test]

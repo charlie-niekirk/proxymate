@@ -195,7 +195,7 @@ fn defs() -> Vec<Def> {
             "create_rule",
             Write,
             CreateRule,
-            "Create a rule: a matcher plus ordered actions (SetHeader, AddHeader, RemoveHeader, ReplaceHeaderValue, SetQuery, RemoveQuery, ReplaceBody, SetBody, JsonSet, JsonRemove, FormSet, FormRemove, SetStatus, MapLocal, MapRemote, Breakpoint, Delay, Throttle, Block, Script, WsMessage, ServeFrom). It is added last, enabled, and tagged as yours. Prefer create_map_local, create_rewrite or create_breakpoint for the common cases. A WebSocket's handshake goes through the rules like a request (header and query actions, Map Remote, Block, request breakpoints; response header actions on the 101); WsMessage {direction?, filter?, op: Drop | Replace | JsonSet | JsonRemove | Delay | Breakpoint} acts on its text and binary messages."
+            "Create a rule: a matcher plus ordered actions (SetHeader, AddHeader, RemoveHeader, ReplaceHeaderValue, SetQuery, RemoveQuery, ReplaceBody, SetBody, JsonSet, JsonRemove, FormSet, FormRemove, SetStatus, MapLocal, MapRemote, Breakpoint, Delay, Throttle, Block, Script, WsMessage, ServeFrom, Comment). It is added last, enabled, and tagged as yours. Prefer create_map_local, create_rewrite or create_breakpoint for the common cases. A WebSocket's handshake goes through the rules like a request (header and query actions, Map Remote, Block, request breakpoints; response header actions on the 101); WsMessage {direction?, filter?, op: Drop | Replace | JsonSet | JsonRemove | Delay | Breakpoint} acts on its text and binary messages. Comment {text} puts a comment on every flow the rule matches (after its response matches, if the matcher has `response`), which list_flows finds with `comment:`."
         ),
         def!(
             "update_rule",
@@ -239,7 +239,7 @@ fn defs() -> Vec<Def> {
             "create_rewrite",
             Write,
             CreateRewrite,
-            "Rewrite matching traffic: set, add or remove headers, change the response status, set or remove query parameters, find-and-replace in a body, set or remove JSON values by pointer (only those bytes change; `raw` keeps exact number text), or set and remove form fields. Add any other rule actions with `actions`. Try a rule on a recorded flow first with test_rule."
+            "Rewrite matching traffic: set, add or remove headers, change the response status, set or remove query parameters, find-and-replace in a body, set or remove JSON values by pointer (only those bytes change; `raw` keeps exact number text), or set and remove form fields; `comment` also comments each flow it matches. Add any other rule actions with `actions`. Try a rule on a recorded flow first with test_rule."
         ),
         def!(
             "test_rule",
@@ -698,5 +698,33 @@ mod tests {
         let read = list(true);
         assert!(read.iter().all(|t| kind(&t.name) == Some(Kind::Read)));
         assert!(read.len() < all.len());
+    }
+
+    /// Agents read the DSL from the schema, so every key the engine parses
+    /// must be in each `filter` description.
+    #[test]
+    fn filter_doc_lists_every_key() {
+        let mut with_filter = 0;
+        for tool in list(false) {
+            let Some(doc) = tool
+                .input_schema
+                .get("properties")
+                .and_then(|p| p.get("filter"))
+                .and_then(|f| f.get("description"))
+                .and_then(Value::as_str)
+            else {
+                continue;
+            };
+            with_filter += 1;
+            for key in pm_core::FILTER_KEYS {
+                assert!(
+                    doc.contains(&format!("`{key}:`")) || doc.contains(&format!("`{key}`")),
+                    "{}'s filter description doesn't mention `{key}`",
+                    tool.name
+                );
+            }
+        }
+        // list_flows, search_flows, wait_for_flow, export_har.
+        assert_eq!(with_filter, 4);
     }
 }

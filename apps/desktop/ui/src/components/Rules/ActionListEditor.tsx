@@ -331,6 +331,20 @@ function ActionForm({ action, onChange }: { action: Action; onChange: (action: A
       return <WsMessageForm action={action} onChange={onChange} />;
     case "ServeFrom":
       return <ServeFromForm action={action} onChange={onChange} />;
+    case "Comment":
+      return (
+        <>
+          <Field label="Comment">
+            <Input value={action.text} placeholder="Config request" data-testid="comment-action-text" onChange={(e) => onChange({ ...action, text: e.target.value })} />
+          </Field>
+          <Field label="">
+            <span className="text-muted-foreground text-xs">
+              Added to each flow this rule matches (once its response matches, if the rule has a response condition). Search{" "}
+              <span className={MONO}>comment:</span> to find them.
+            </span>
+          </Field>
+        </>
+      );
   }
 }
 
