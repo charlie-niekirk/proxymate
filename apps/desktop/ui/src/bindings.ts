@@ -408,11 +408,23 @@ filter?: Pattern_Deserialize | null; op: WsOp_Deserialize } |
  *  Answers from a recorded session in the mock library (M20): the
  *  recorded response whose request has the same key. Terminal like
  *  `MapLocal` (the first answer wins); response-phase actions still
- *  run on it. Keep this the last variant.
+ *  run on it.
  */
 { type: "ServeFrom"; 
 /**  A mock library entry's id (`MockSource::id`). */
-source: string; key?: ServeKey_Deserialize; on_miss?: ServeMiss; pick?: ServePick };
+source: string; key?: ServeKey_Deserialize; on_miss?: ServeMiss; pick?: ServePick } | 
+/**
+ *  Puts a comment on each flow the rule matches: the note a user can
+ *  write on a flow, found with `comment:` in a filter. It applies once
+ *  the whole rule matches: in the request phase, or when the response
+ *  arrives if the rule has a response matcher. It is added to any
+ *  comment the flow already has (joined with "; "). It doesn't change
+ *  the traffic, so on its own it doesn't mark the flow edited. Keep
+ *  this the last variant.
+ */
+{ type: "Comment"; 
+/**  Up to 10,000 characters; leading and trailing space is trimmed. */
+text: string };
 
 /**  One step of a rule. Actions of all matching rules run in rule order. */
 export type Action_Serialize = 
@@ -513,11 +525,23 @@ filter: Pattern_Serialize | null; op: WsOp_Serialize } |
  *  Answers from a recorded session in the mock library (M20): the
  *  recorded response whose request has the same key. Terminal like
  *  `MapLocal` (the first answer wins); response-phase actions still
- *  run on it. Keep this the last variant.
+ *  run on it.
  */
 { type: "ServeFrom"; 
 /**  A mock library entry's id (`MockSource::id`). */
-source: string; key: ServeKey_Serialize; on_miss: ServeMiss; pick: ServePick };
+source: string; key: ServeKey_Serialize; on_miss: ServeMiss; pick: ServePick } | 
+/**
+ *  Puts a comment on each flow the rule matches: the note a user can
+ *  write on a flow, found with `comment:` in a filter. It applies once
+ *  the whole rule matches: in the request phase, or when the response
+ *  arrives if the rule has a response matcher. It is added to any
+ *  comment the flow already has (joined with "; "). It doesn't change
+ *  the traffic, so on its own it doesn't mark the flow edited. Keep
+ *  this the last variant.
+ */
+{ type: "Comment"; 
+/**  Up to 10,000 characters; leading and trailing space is trimmed. */
+text: string };
 
 /**  A device or emulator `adb` sees. */
 export type AndroidDevice = AndroidDevice_Serialize | AndroidDevice_Deserialize;

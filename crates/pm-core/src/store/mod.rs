@@ -34,7 +34,7 @@ pub(crate) use backend::BlobBackend;
 pub(crate) use blob::Capture;
 pub(crate) use detail::{DetailStore, StoredDetail};
 pub(crate) use messages::{SseLog, WsEntry, WsLog, page_events, sse_event};
-pub use query::FlowQuery;
+pub use query::{FILTER_KEYS, FlowQuery};
 pub(crate) use segments::SegmentStore;
 pub use shared::SharedStore;
 pub(crate) use shared::Watcher;
@@ -283,6 +283,17 @@ impl Store {
                     }
                 }
                 FlowEvent::Comment { id, comment } => self.modify(id, first_new, |f| f.comment = comment),
+                FlowEvent::RuleComment { id, text } => {
+                    let joined = match self.get(id).map(|f| f.comment.as_deref()) {
+                        None => continue,
+                        Some(None) => text,
+                        Some(Some(existing)) => match append_comment(existing, &text) {
+                            Some(joined) => joined,
+                            None => continue,
+                        },
+                    };
+                    self.modify(id, first_new, |f| f.comment = Some(joined));
+                }
                 FlowEvent::Extra { generation, values } => {
                     if generation != self.extra_generation {
                         continue;
@@ -584,6 +595,16 @@ impl Store {
     }
 }
 
+/// `existing` with a rule's comment added after "; ", or `None` if it
+/// already has that text as one of its parts or would grow past the cap.
+fn append_comment(existing: &str, text: &str) -> Option<Arc<str>> {
+    if existing.split("; ").any(|part| part == text) {
+        return None;
+    }
+    let joined = format!("{existing}; {text}");
+    (joined.chars().count() <= crate::workflow::COMMENT_MAX).then(|| Arc::from(joined))
+}
+
 fn timed<T>(f: impl FnOnce() -> T) -> (T, u32) {
     let start = std::time::Instant::now();
     let out = f();
@@ -601,6 +622,30 @@ mod tests {
         let mut generator = Generator::new(7);
         store.insert((0..n).map(|_| generator.completed_flow()));
         store
+    }
+
+    #[test]
+    fn rule_comments_join_the_flows_comment_once() {
+        let mut store = store_with(1);
+        let id = store.flows[0].id;
+        let comment = |store: &Store| store.get(id).unwrap().comment.as_deref().map(str::to_owned);
+        let rule = |text: &str| FlowEvent::RuleComment { id, text: text.into() };
+        store.apply([rule("Config request")]);
+        assert_eq!(comment(&store).as_deref(), Some("Config request"));
+        store.apply([rule("Config request"), rule("Slow")]);
+        assert_eq!(comment(&store).as_deref(), Some("Config request; Slow"));
+        store.apply([FlowEvent::Comment {
+            id,
+            comment: Some("Mine".into()),
+        }]);
+        store.apply([rule("Slow")]);
+        assert_eq!(comment(&store).as_deref(), Some("Mine; Slow"));
+        // An unknown flow is ignored.
+        store.apply([FlowEvent::RuleComment {
+            id: id + 100,
+            text: "x".into(),
+        }]);
+        assert_eq!(append_comment(&"a".repeat(9_998), "bc"), None);
     }
 
     #[test]

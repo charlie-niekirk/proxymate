@@ -188,6 +188,8 @@ pub(crate) struct RequestEffects {
     pub applied: Vec<AppliedRule>,
     /// Scripts that threw, timed out or returned something unusable.
     pub script_issues: Vec<ScriptIssue>,
+    /// `Comment` texts of rules without a response matcher, in rule order.
+    pub comments: Vec<Arc<str>>,
 }
 
 #[derive(Default)]
@@ -199,6 +201,8 @@ pub(crate) struct ResponseEffects {
     pub body_skipped: Vec<String>,
     pub applied: Vec<AppliedRule>,
     pub script_issues: Vec<ScriptIssue>,
+    /// `Comment` texts of rules with a response matcher (which matched).
+    pub comments: Vec<Arc<str>>,
 }
 
 /// True if a script in `rules` runs `onResponse`, so the response phase
@@ -243,7 +247,12 @@ pub(crate) async fn request_phase(
     draft: &mut RequestDraft,
     run: ScriptRun<'_>,
 ) -> RequestEffects {
-    let mut fx = RequestEffects::default();
+    // A comment isn't a rewrite: a blocked flow gets it too. A rule with a
+    // response matcher comments once its response matches.
+    let mut fx = RequestEffects {
+        comments: whole_rule_comments(rules, false),
+        ..RequestEffects::default()
+    };
     // A block stops the flow before any rewrite.
     for rule in rules {
         if let Some(mode) = rule.actions.iter().find_map(|a| match &a.action {
@@ -481,6 +490,16 @@ impl RequestEffects {
     }
 }
 
+/// The `Comment` texts of the rules with (or without) a response matcher:
+/// a comment applies once its whole rule has matched.
+fn whole_rule_comments(rules: &[Arc<CompiledRule>], with_response: bool) -> Vec<Arc<str>> {
+    rules
+        .iter()
+        .filter(|r| r.response.is_some() == with_response)
+        .flat_map(|r| r.comments().cloned())
+        .collect()
+}
+
 /// The rules (of those that matched the request) whose response matcher
 /// matches this response.
 pub(crate) fn response_rules(rules: &[Arc<CompiledRule>], status: u16, headers: &HeaderMap) -> Vec<Arc<CompiledRule>> {
@@ -500,7 +519,10 @@ pub(crate) async fn response_phase(
     run: ScriptRun<'_>,
     request: Option<&JsRequest>,
 ) -> ResponseEffects {
-    let mut fx = ResponseEffects::default();
+    let mut fx = ResponseEffects {
+        comments: whole_rule_comments(rules, true),
+        ..ResponseEffects::default()
+    };
     for rule in rules {
         let mut applied = false;
         let mut actions = rule.actions.as_slice();

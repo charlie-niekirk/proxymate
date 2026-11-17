@@ -94,6 +94,12 @@ pub(crate) enum FlowEvent {
         id: FlowId,
         comment: Option<Arc<str>>,
     },
+    /// A rule's `Comment` action: added to the flow's comment (after
+    /// "; "), unless it already holds this text.
+    RuleComment {
+        id: FlowId,
+        text: Arc<str>,
+    },
     /// Header column values (M17): each flow's `(column, value)` pairs.
     /// Ignored unless `generation` is the store's current column set.
     Extra {

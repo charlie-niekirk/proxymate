@@ -247,6 +247,10 @@ pub(super) struct CreateRewrite {
     pub(super) form_set: Vec<FormField>,
     #[serde(default)]
     pub(super) form_remove: Vec<FormFieldName>,
+    /// Also comment each flow the rule matches (a `Comment` action), e.g.
+    /// "Config request", so the flows can be found with `comment:` later.
+    #[serde(default)]
+    pub(super) comment: Option<String>,
     /// Any further actions, run after the ones above.
     #[serde(default)]
     pub(super) actions: Vec<Action>,
@@ -611,6 +615,7 @@ pub(super) fn create_rewrite(ctx: &Ctx<'_>, p: CreateRewrite) -> ToolResult {
         phase: f.phase,
         name: f.name,
     }));
+    actions.extend(p.comment.map(|text| Action::Comment { text }));
     actions.extend(p.actions);
     save(ctx, name, matcher, actions)
 }

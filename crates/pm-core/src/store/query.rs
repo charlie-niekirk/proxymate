@@ -118,7 +118,33 @@ enum Cmp {
     Eq,
 }
 
-const KEYS: &str = "host, path, method, scheme, status, ct, grpc, app, state, is, label, comment, op, dur, size, reqsize, id, header, reqheader, resheader, body, reqbody, resbody";
+/// Every key the DSL knows (aliases aside). MCP's filter description lists
+/// them all; a test there checks it against this.
+pub const FILTER_KEYS: &[&str] = &[
+    "host",
+    "path",
+    "method",
+    "scheme",
+    "status",
+    "ct",
+    "grpc",
+    "app",
+    "state",
+    "is",
+    "label",
+    "comment",
+    "op",
+    "dur",
+    "size",
+    "reqsize",
+    "id",
+    "header",
+    "reqheader",
+    "resheader",
+    "body",
+    "reqbody",
+    "resbody",
+];
 
 impl FlowQuery {
     /// Parses a query; a term that doesn't parse is an error naming it.
@@ -347,7 +373,12 @@ fn parse_term(token: &Token) -> Result<(bool, Term), String> {
         "body" => Term::Deep(DeepTerm::body(Side::Both, value)),
         "reqbody" | "req.body" => Term::Deep(DeepTerm::body(Side::Request, value)),
         "resbody" | "respbody" | "res.body" => Term::Deep(DeepTerm::body(Side::Response, value)),
-        _ => return Err(format!("{body:?}: unknown key {key:?} (known: {KEYS})")),
+        _ => {
+            return Err(format!(
+                "{body:?}: unknown key {key:?} (known: {})",
+                FILTER_KEYS.join(", ")
+            ));
+        }
     };
     Ok((negate, term))
 }

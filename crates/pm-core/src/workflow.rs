@@ -27,8 +27,9 @@ const PROGRESS_EVERY: Duration = Duration::from_millis(100);
 pub const MAX_REPEAT_ITERATIONS: u32 = 10_000;
 pub const MAX_REPEAT_CONCURRENCY: u32 = 64;
 const MAX_REPEAT_DELAY_MS: u32 = 60_000;
-/// A comment longer than this is refused.
-const COMMENT_MAX: usize = 10_000;
+/// A comment longer than this is refused (a rule's `Comment` action too,
+/// and comments it adds to a flow stop growing here).
+pub(crate) const COMMENT_MAX: usize = 10_000;
 
 /// Receives a repeat's progress; the last update has `finished` set.
 pub type RepeatSink = Box<dyn FnMut(RepeatProgress) + Send>;

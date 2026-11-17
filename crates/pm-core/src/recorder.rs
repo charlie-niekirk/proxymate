@@ -235,6 +235,14 @@ impl FlowRecorder {
         self.send(FlowEvent::Edited { id: self.flow.id });
     }
 
+    /// Comments the flow for a rule's `Comment` actions; the store adds
+    /// each to whatever comment the flow already has.
+    pub fn rule_comments(&self, comments: Vec<Arc<str>>) {
+        for text in comments {
+            self.send(FlowEvent::RuleComment { id: self.flow.id, text });
+        }
+    }
+
     /// A body action or breakpoint couldn't touch a body; it went through
     /// unchanged.
     pub fn rewrite_skipped(&self, reason: impl Into<String>) {

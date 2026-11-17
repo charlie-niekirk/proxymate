@@ -457,7 +457,7 @@ pub enum Action {
     /// Answers from a recorded session in the mock library (M20): the
     /// recorded response whose request has the same key. Terminal like
     /// `MapLocal` (the first answer wins); response-phase actions still
-    /// run on it. Keep this the last variant.
+    /// run on it.
     ServeFrom {
         /// A mock library entry's id (`MockSource::id`).
         source: String,
@@ -467,6 +467,17 @@ pub enum Action {
         on_miss: ServeMiss,
         #[serde(default)]
         pick: ServePick,
+    },
+    /// Puts a comment on each flow the rule matches: the note a user can
+    /// write on a flow, found with `comment:` in a filter. It applies once
+    /// the whole rule matches: in the request phase, or when the response
+    /// arrives if the rule has a response matcher. It is added to any
+    /// comment the flow already has (joined with "; "). It doesn't change
+    /// the traffic, so on its own it doesn't mark the flow edited. Keep
+    /// this the last variant.
+    Comment {
+        /// Up to 10,000 characters; leading and trailing space is trimmed.
+        text: String,
     },
 }
 
