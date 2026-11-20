@@ -1,0 +1,77 @@
+# The native app's release build (G15): `cargo xtask bundle-macos` makes the
+# universal, ad-hoc signed Proxymate.app with its DMG, updater archive,
+# signature and updater-darwin.json, and checks them, as release.yml does
+# for the Tauri app. Nothing is released from here: G16 moves this build
+# into release.yml and deletes the Tauri one. Until then this keeps the
+# xtask working on the architecture this repo's machines can't build
+# locally (x86_64) and the universal `lipo`.
+#
+# Pull requests that touch the bundling, and manual runs, with a throwaway
+# updater key: no secrets are read.
+name: Native bundle
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/native-bundle.yml
+      - .cargo/config.toml
+      - xtask/**
+      - apps/native/resources/**
+      - rust-toolchain.toml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-bundle-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  macos:
+    name: macOS (universal)
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          rustc --version
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: native-universal
+      - name: Throwaway updater key
+        run: |
+          cargo xtask updater-key "$RUNNER_TEMP/throwaway.key"
+          {
+            echo "TAURI_SIGNING_PRIVATE_KEY<<EOF_KEY"
+            cat "$RUNNER_TEMP/throwaway.key"
+            echo
+            echo "EOF_KEY"
+          } >> "$GITHUB_ENV"
+      - name: Build, sign and check
+        env:
+          OUT_DIR: ${{ runner.temp }}/native
+        run: cargo xtask bundle-macos
+      - name: Summary
+        run: |
+          {
+            echo "### Native macOS bundle (throwaway updater key)"
+            echo '```'
+            ls -l "$RUNNER_TEMP/native"
+            cat "$RUNNER_TEMP/native/updater-darwin.json"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: proxymate-native-macos
+          path: ${{ runner.temp }}/native/
+          retention-days: 3
+          if-no-files-found: error

@@ -1,4 +1,5 @@
-//! Files only the current user may read, and where the app keeps its data.
+//! Files only the current user may read, where the app keeps its data, and
+//! the atomic exchange the updater swaps the app bundle with (G15).
 
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -76,6 +77,34 @@ pub fn app_data_dir() -> Option<PathBuf> {
     Some(base.join("Proxymate"))
 }
 
+/// Exchanges what `a` and `b` name in one step, so neither path is ever
+/// missing: the native updater swaps the new app bundle in with it. macOS
+/// does it with `renamex_np(RENAME_SWAP)` on APFS; a file system that can't
+/// (HFS+) fails with `ENOTSUP`. Elsewhere it is `Unsupported`, and callers
+/// fall back to two renames.
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code)] // renamex_np(2) has no std wrapper; it only reads the two C strings.
+pub fn swap(a: &Path, b: &Path) -> io::Result<()> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    let from = CString::new(a.as_os_str().as_bytes())?;
+    let to = CString::new(b.as_os_str().as_bytes())?;
+    // SAFETY: both are valid NUL-terminated strings that outlive the call,
+    // and renamex_np only reads them.
+    let rc = unsafe { libc::renamex_np(from.as_ptr(), to.as_ptr(), libc::RENAME_SWAP) };
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn swap(_a: &Path, _b: &Path) -> io::Result<()> {
+    Err(io::ErrorKind::Unsupported.into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -93,6 +122,22 @@ mod tests {
             let mode = std::fs::metadata(&path).unwrap().permissions().mode();
             assert_eq!(mode & 0o777, 0o600);
         }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn swap_exchanges_two_directories() {
+        let dir = std::env::temp_dir().join(format!("pm-platform-swap-{}", std::process::id()));
+        let (a, b) = (dir.join("a"), dir.join("b"));
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+        std::fs::write(a.join("which"), "a").unwrap();
+        std::fs::write(b.join("which"), "b").unwrap();
+        swap(&a, &b).unwrap();
+        assert_eq!(std::fs::read_to_string(a.join("which")).unwrap(), "b");
+        assert_eq!(std::fs::read_to_string(b.join("which")).unwrap(), "a");
+        assert!(swap(&a, &dir.join("missing")).is_err());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

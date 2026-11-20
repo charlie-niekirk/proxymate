@@ -29,7 +29,7 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | WM-04 | Appearance System/Light/Dark: System follows macOS live, the choice persists, and the native window theme (vibrancy, traffic lights) follows it | `lib/theme.ts`, `store/prefs.ts` | G0 | ☑ | G0: View › Appearance and dev remote `theme`; prefs in ui-prefs.json |
 | WM-05 | Layout: resizable sidebar (default 220 px, 160–360) beside the main column (min 600 px); flow table over inspector, 58/42, each at least 120 px | `components/AppShell.tsx` | G1 | ☑ | G1: `shell/mod.rs` (sidebar 160–360, main column ≥ 600 px, table 58% over the inspector, each ≥ 120 px); `tests/render.rs` checks both panes; `docs/native/g1/table-dark.png` |
 | WM-06 | Proxymate › About Proxymate | `src-tauri/src/menu.rs` | G0 | ☑ | G0: apps/native/src/menus.rs |
-| WM-07 | Proxymate › Check for Updates… (Help › Check for Updates… off macOS) | `src-tauri/src/menu.rs` | G15 | ☐ | |
+| WM-07 | Proxymate › Check for Updates… (Help › Check for Updates… off macOS) | `src-tauri/src/menu.rs` | G15 | ☑ | G15: `menus.rs` `CheckForUpdates` → `updater::check_now`; its prompts in `docs/native/g15/` |
 | WM-08 | Proxymate › Services submenu | `src-tauri/src/menu.rs` | G0 | ☑ | G0: apps/native/src/menus.rs |
 | WM-09 | Proxymate › Hide Proxymate ⌘H, Hide Others ⌥⌘H, Show All | `src-tauri/src/menu.rs` | G0 | ☑ | G0: apps/native/src/menus.rs |
 | WM-10 | Proxymate › Quit Proxymate ⌘Q | `src-tauri/src/menu.rs` | G0 | ☑ | G0: apps/native/src/menus.rs |
@@ -638,8 +638,8 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | ID | Behaviour | Source | Phase | Status | Evidence |
 |---|---|---|---|---|---|
 | SE-UP-01 | Updates page: "Proxymate <version>" and where updates come from | `components/Settings/UpdatesPage.tsx` | G12 | ☐ | |
-| SE-UP-02 | Check Now | `components/Settings/UpdatesPage.tsx` | G15 | ☐ | |
-| SE-UP-03 | "Check for updates at launch" switch | `components/Settings/UpdatesPage.tsx` | G15 | ☐ | |
+| SE-UP-02 | Check Now | `components/Settings/UpdatesPage.tsx` | G12 | ☐ | G15 moved it to G12, which builds the page: the button calls `updater::check_now` (G15) |
+| SE-UP-03 | "Check for updates at launch" switch | `components/Settings/UpdatesPage.tsx` | G12 | ☐ | G15 moved it to G12, which builds the page: the switch sets `Engine::set_update_settings`, which the launch check reads (G15) |
 
 ## macOS integration
 
@@ -668,10 +668,10 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 
 | ID | Behaviour | Source | Phase | Status | Evidence |
 |---|---|---|---|---|---|
-| UP-01 | Check for Updates…: "You're up to date" or "Can't check for updates" | `src-tauri/src/updater.rs` | G15 | ☐ | |
-| UP-02 | "Update available": "Proxymate X is available. You have Y." with Install and Restart / Later | `src-tauri/src/updater.rs` | G15 | ☐ | |
-| UP-03 | "Can't install the update" on failure | `src-tauri/src/updater.rs` | G15 | ☐ | |
-| UP-04 | Quiet check at launch when enabled; only speaks when an update exists | `src-tauri/src/updater.rs` | G15 | ☐ | |
+| UP-01 | Check for Updates…: "You're up to date" or "Can't check for updates" | `src-tauri/src/updater.rs` | G15 | ☑ | G15: `updater.rs` `check`; `docs/native/g15/alert-up-to-date.png`, `alert-cant-check.png` (`PROXYMATE_UPDATE_TEST=check`); `feed::tests::check_reads_the_feed_over_http` |
+| UP-02 | "Update available": "Proxymate X is available. You have Y." with Install and Restart / Later | `src-tauri/src/updater.rs` | G15 | ☑ | G15: `updater.rs` `offer`; `docs/native/g15/alert-update-available.png`; install and restart from a Tauri 0.6.0 install and native to native in the G15 PR |
+| UP-03 | "Can't install the update" on failure | `src-tauri/src/updater.rs` | G15 | ☑ | G15: `updater.rs` `install`; `docs/native/g15/alert-cant-install.png` (a tampered archive); `feed::tests::a_bad_signature_is_refused`, `install::tests::an_archive_without_one_bundle_changes_nothing` |
+| UP-04 | Quiet check at launch when enabled; only speaks when an update exists | `src-tauri/src/updater.rs` | G15 | ☑ | G15: `updater::init` (5 s, `Engine::update_settings().check_at_launch`, release builds; errors only logged); ran at launch in the PR's end-to-end test |
 
 ## Dev tooling
 
@@ -721,8 +721,8 @@ Rows per owning phase. G14 also audits every row; its own row is the browser-onl
 | G9 | 19 | 0 |
 | G10 | 23 | 0 |
 | G11 | 36 | 0 |
-| G12 | 51 | 0 |
+| G12 | 53 | 0 |
 | G13 | 29 | 0 |
 | G14 | 1 | 0 |
-| G15 | 7 | 0 |
-| **Total** | **524** | **46** |
+| G15 | 5 | 5 |
+| **Total** | **524** | **51** |
