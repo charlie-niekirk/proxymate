@@ -1,4 +1,6 @@
-//! The main window's shell with the flow table (G1), rendered by gpui's real
+//! The main window's shell with the flow table (G1) and its chrome (G2:
+//! toolbar, sidebar, document tabs, filter bar, footer; the ⌘K palette),
+//! rendered by gpui's real
 //! offscreen renderer (Metal on macOS, WGPU on Linux; CI uses Mesa's
 //! lavapipe) in both themes, from injected snapshots: no engine, no proxy.
 //! The pane and row pixels must be their tokens, and each capture is
@@ -23,13 +25,15 @@ mod render {
     use gpui_kit::test::TestWindowExt as _;
     use gpui_kit::{AppContext as _, HeadlessAppContext, WindowBounds, WindowOptions, point, px, size};
     use pm_model::{
-        ContentKind, FlowLabel, FlowRow, FlowState, HttpVersion, ProxyStatus, Scheme, SentBy, StorageStatus, TlsStatus,
+        AppCount, ContentGroup, ContentKind, DocumentInfo, DocumentKind, DomainNode, FlowLabel, FlowRow, FlowState,
+        HostCount, HttpVersion, ProxyStatus, SaveProgress, Scheme, SentBy, SidebarSnapshot, StorageStatus, TlsStatus,
     };
     use pm_theme::{Mode, Rgba};
     use pm_view::columns::{HEADER_HEIGHT, ROW_HEIGHT};
     use proxymate_native::bridge::stream::Latest;
     use proxymate_native::features::flow_table::FlowTable;
-    use proxymate_native::shell::{self, MainWindow};
+    use proxymate_native::shell::{self, MainWindow, Parts, filter_bar, tabs};
+    use proxymate_native::workspace::{SaveJob, Workspace};
 
     const SIZE: (f32, f32) = (1200., 760.);
 
@@ -101,6 +105,43 @@ mod render {
             .collect()
     }
 
+    /// Apps and domains like a browsing session's.
+    fn sidebar() -> SidebarSnapshot {
+        let app = |name: &str, count| AppCount {
+            name: name.into(),
+            bundle_id: None,
+            has_icon: false,
+            remote: false,
+            count,
+        };
+        SidebarSnapshot {
+            store: 0,
+            total: 60,
+            apps: vec![app("Firefox", 20), app("node", 20), app("Safari", 20)],
+            domains: vec![
+                DomainNode {
+                    domain: "example.com".into(),
+                    count: 45,
+                    hosts: vec![
+                        HostCount {
+                            host: "api.example.com".into(),
+                            count: 30,
+                        },
+                        HostCount {
+                            host: "cdn.example.net".into(),
+                            count: 15,
+                        },
+                    ],
+                },
+                DomainNode {
+                    domain: "localhost".into(),
+                    count: 15,
+                    hosts: vec![],
+                },
+            ],
+        }
+    }
+
     fn snapshot_dir() -> PathBuf {
         // `target/tmp` is Cargo's scratch dir for integration tests; its
         // sibling holds the captures (CARGO_TARGET_DIR is honoured).
@@ -146,15 +187,45 @@ mod render {
                 let storage = cx.new(|_| Latest {
                     value: Some(StorageStatus {
                         flows: 1234,
+                        pinned: 3,
                         disk_bytes: 5 << 20,
+                        unrecorded: 12,
                         ..Default::default()
                     }),
                 });
+                let sidebar = cx.new(|_| Latest { value: Some(sidebar()) });
                 let proxy = ProxyStatus {
                     listening: Some("127.0.0.1:9090".into()),
                     recording: true,
                     ..Default::default()
                 };
+                let workspace = cx.new(|cx| {
+                    let mut ws = Workspace::new(None, proxy, cx);
+                    ws.documents = vec![DocumentInfo {
+                        store: 1,
+                        kind: DocumentKind::Har,
+                        name: "checkout.har".into(),
+                        path: "/tmp/checkout.har".into(),
+                        flows: 42,
+                    }];
+                    ws.filter.content = vec![ContentGroup::Json];
+                    ws.filter.client = Some("Safari".into());
+                    ws.set_save(
+                        Some(SaveJob::new(
+                            "Saving session",
+                            SaveProgress {
+                                done: 60,
+                                total: 60,
+                                finished: true,
+                                error: None,
+                                path: "/tmp/Proxymate 2026-11-20 10.00.proxymate".into(),
+                            },
+                        )),
+                        cx,
+                    );
+                    ws
+                });
+                Workspace::set_global(workspace.clone(), cx);
                 let options = WindowOptions {
                     window_bounds: Some(WindowBounds::Windowed(gpui_kit::Bounds {
                         origin: point(px(0.), px(0.)),
@@ -166,7 +237,13 @@ mod render {
                 };
                 cx.open_window(options, |window, cx| {
                     let table = cx.new(|cx| FlowTable::snapshot(rows(), 60, cx));
-                    let view = cx.new(|cx| MainWindow::new(storage, proxy, table, window, cx));
+                    let parts = Parts {
+                        workspace,
+                        storage,
+                        sidebar,
+                        engine: None,
+                    };
+                    let view = cx.new(|cx| MainWindow::new(parts, table, window, cx));
                     cx.new(|cx| shell::root(view, window, cx))
                 })
             })
@@ -198,7 +275,26 @@ mod render {
         assert_pixel(&image, scale, (main_x, 8.), t.pane_toolbar, "toolbar");
         // The table: its header, then rows 0 (plain), 1 (selected) and 3 (odd),
         // sampled in the # column's empty left part.
-        let top = shell::TOOLBAR_HEIGHT;
+        // The document tabs (a document is open) and the filter bar.
+        let tabs_y = shell::TOOLBAR_HEIGHT;
+        assert_pixel(
+            &image,
+            scale,
+            (main_x + 400., tabs_y + 4.),
+            t.pane_toolbar,
+            "document tabs",
+        );
+        let bar_y = tabs_y + tabs::TABS_HEIGHT;
+        assert_pixel(&image, scale, (main_x + 380., bar_y + 4.), t.pane_toolbar, "filter bar");
+        // The All protocol chip is on; JSON is the content chip on.
+        assert_pixel(
+            &image,
+            scale,
+            (shell::SIDEBAR_WIDTH + 11., bar_y + filter_bar::BAR_HEIGHT / 2.),
+            over(t.primary_chip_bg, t.pane_toolbar),
+            "the All protocol chip",
+        );
+        let top = bar_y + filter_bar::BAR_HEIGHT;
         let row_y = |i: f32| top + HEADER_HEIGHT + ROW_HEIGHT * i + ROW_HEIGHT / 2.;
         let x = shell::SIDEBAR_WIDTH + 6.;
         assert_pixel(
@@ -232,11 +328,44 @@ mod render {
             t.background,
             "inspector",
         );
-        assert_pixel(&image, scale, (main_x + 300., SIZE.1 - 4.), t.pane_toolbar, "footer");
+        assert_pixel(&image, scale, (main_x + 300., SIZE.1 - 3.), t.pane_toolbar, "footer");
         if !cfg!(target_os = "macos") {
             // macOS leaves the sidebar clear for the vibrancy behind the window.
             assert_pixel(&image, scale, (8., SIZE.1 - 20.), t.sidebar, "sidebar");
         }
+
+        // The ⌘K palette over the shell, with the commands G2 registers.
+        cx.update_window(handle.into(), |_, window, cx| {
+            proxymate_native::features::commands::open_palette(window, cx)
+        })
+        .unwrap();
+        for _ in 0..30 {
+            cx.run_until_parked();
+            cx.update_window(handle.into(), |_, window, cx| window.render_frame(cx))
+                .unwrap();
+        }
+        let image = cx.capture_screenshot(handle.into()).expect("a palette frame");
+        let path = snapshot_dir().join(format!("palette-{name}.png"));
+        image.save(&path).unwrap();
+        println!("wrote {}", path.display());
+        palette_checks(&image, scale, &t);
+    }
+
+    /// The palette's panel is drawn in the popover colour, centred under
+    /// the toolbar.
+    fn palette_checks(image: &image::RgbaImage, scale: f32, t: &pm_theme::Tokens) {
+        // The panel's left padding (520 px wide, centred, 80 px down).
+        let x = (SIZE.0 - 520.) / 2. + 6.;
+        let px = image.get_pixel((x * scale) as u32, (300. * scale) as u32).0;
+        let close = |want: pm_theme::Rgba| {
+            let want = [want.r, want.g, want.b].map(|c| (c * 255.0).round() as i32);
+            (0..3).all(|i| (px[i] as i32 - want[i]).abs() <= 3)
+        };
+        assert!(
+            close(t.background) || close(t.popover),
+            "palette panel at ({x}, 300): got {:?}, want the background or popover token",
+            &px[..3]
+        );
     }
 
     pub fn run() {

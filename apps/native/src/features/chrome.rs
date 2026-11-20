@@ -1,0 +1,114 @@
+//! The shell chrome's actions (toolbar, sidebar, filter bar, footer):
+//! the sidebar's scopes and SSL toggles, and the targets that belong to
+//! later phases (Compose: G8; Settings: G12; Device setup: G13), which say
+//! so in a toast until those phases replace the handlers.
+
+use gpui_kit::{App, SharedString};
+
+use crate::features::clipboard::info;
+use crate::features::documents::with_workspace;
+
+/// Scopes the table to one app (`None`: all traffic).
+#[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
+#[action(namespace = proxymate, no_json)]
+pub struct ShowApp {
+    pub app: Option<SharedString>,
+}
+
+/// Scopes the table to one host or `*.domain` (`None`: all traffic).
+#[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
+#[action(namespace = proxymate, no_json)]
+pub struct ShowHost {
+    pub host: Option<SharedString>,
+}
+
+/// Toggles the search text between `text` and nothing (Pinned flows).
+#[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
+#[action(namespace = proxymate, no_json)]
+pub struct ToggleText {
+    pub text: SharedString,
+}
+
+#[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
+#[action(namespace = proxymate, no_json)]
+pub struct AddSslBypass {
+    pub host: SharedString,
+}
+
+#[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
+#[action(namespace = proxymate, no_json)]
+pub struct SetInsecureUpstream {
+    pub host: SharedString,
+    pub allow: bool,
+}
+
+/// "Don't decrypt HTTPS from <app>", by bundle id, else name.
+#[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
+#[action(namespace = proxymate, no_json)]
+pub struct SetAppSslExcluded {
+    pub app: SharedString,
+    pub excluded: bool,
+}
+
+/// Settings › `page` (G12 builds the window).
+#[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
+#[action(namespace = proxymate, no_json)]
+pub struct OpenSettings {
+    pub page: SharedString,
+}
+
+gpui_kit::actions!(proxymate, [OpenDeviceSetup, Compose]);
+
+pub fn register(cx: &mut App) {
+    cx.on_action(|a: &ShowApp, cx| {
+        let app = a.app.as_ref().map(ToString::to_string);
+        with_workspace(cx, |w, cx| w.set_scope(None, app, cx));
+    });
+    cx.on_action(|a: &ShowHost, cx| {
+        let host = a.host.as_ref().map(ToString::to_string);
+        with_workspace(cx, |w, cx| w.set_scope(host, None, cx));
+    });
+    cx.on_action(|a: &ToggleText, cx| {
+        let text = a.text.to_string();
+        with_workspace(cx, |w, cx| {
+            let next = if w.filter.text.trim() == text {
+                String::new()
+            } else {
+                text
+            };
+            w.set_text(next, cx);
+        });
+    });
+    cx.on_action(|a: &AddSslBypass, cx| {
+        let host = a.host.to_string();
+        with_workspace(cx, |w, cx| w.add_ssl_bypass(host, cx));
+    });
+    cx.on_action(|a: &SetInsecureUpstream, cx| {
+        let (host, allow) = (a.host.to_string(), a.allow);
+        with_workspace(cx, |w, cx| w.set_insecure_upstream(host, allow, cx));
+    });
+    cx.on_action(|a: &SetAppSslExcluded, cx| {
+        let (app, excluded) = (a.app.to_string(), a.excluded);
+        with_workspace(cx, |w, cx| w.set_app_ssl_excluded(app, excluded, cx));
+    });
+    cx.on_action(|a: &OpenSettings, cx| {
+        info(
+            &format!("Settings › {}", page_title(&a.page)),
+            Some("The Settings window arrives in G12.".into()),
+            cx,
+        );
+    });
+    cx.on_action(|_: &OpenDeviceSetup, cx| {
+        info("Device setup", Some("Device setup arrives in G13.".into()), cx);
+    });
+    cx.on_action(|_: &Compose, cx| {
+        info("Compose", Some("Compose arrives in G8.".into()), cx);
+    });
+}
+
+fn page_title(page: &str) -> &str {
+    pm_view::commands::SETTINGS_PAGES
+        .iter()
+        .find(|(id, _)| *id == page)
+        .map_or(page, |(_, title)| title)
+}

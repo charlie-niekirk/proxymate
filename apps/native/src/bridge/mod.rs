@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use gpui_kit::{App, Entity, Global};
 use pm_core::Engine;
-use pm_model::StorageStatus;
+use pm_model::{SidebarSnapshot, StorageStatus};
 
 use stream::Latest;
 
@@ -58,6 +58,7 @@ impl Bridge {
 #[derive(Default)]
 pub struct Streams {
     storage: Option<Entity<Latest<StorageStatus>>>,
+    sidebar: Option<Entity<Latest<SidebarSnapshot>>>,
 }
 
 impl Global for Streams {}
@@ -71,5 +72,17 @@ pub fn storage(cx: &mut App) -> Entity<Latest<StorageStatus>> {
     let engine = Bridge::engine(cx);
     let entity = stream::latest(cx, move |sink| engine.subscribe_storage(sink));
     cx.global_mut::<Streams>().storage = Some(entity.clone());
+    entity
+}
+
+/// The sidebar's Apps and Domains, counted over the tab shown, pushed when
+/// they change (at most every 250 ms).
+pub fn sidebar(cx: &mut App) -> Entity<Latest<SidebarSnapshot>> {
+    if let Some(entity) = cx.default_global::<Streams>().sidebar.clone() {
+        return entity;
+    }
+    let engine = Bridge::engine(cx);
+    let entity = stream::latest(cx, move |sink| engine.subscribe_sidebar(sink));
+    cx.global_mut::<Streams>().sidebar = Some(entity.clone());
     entity
 }

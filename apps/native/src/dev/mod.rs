@@ -17,6 +17,20 @@
 //!   `{"filter": "api"}` (the search text), `{"autoSelect": true}` and
 //!   `{"table": true}`; each answers with the table's state (rows, total,
 //!   selection, focused flow, columns, last filter timing).
+//! - The shell chrome (G2): `{"filter": "host:x"}` types into the search
+//!   box (debounced like typing; `"filterNow": true` skips the wait),
+//!   `{"search": "ho"}` types and answers with the suggestions,
+//!   `{"protocol": "https"}`, `{"content": ["json"]}`, `{"scope": {"host": "*.x.com"}}`,
+//!   `{"keys": "cmd-k"}` (keystrokes, space-separated, as if typed),
+//!   `{"palette": true | false}` (answers with the listed commands),
+//!   `{"command": "<id>"}` (runs one), `{"store": 1}`, `{"openDocument": "/abs/x.har"}`,
+//!   `{"closeDocument": 1}`, `{"saveSession": "/abs/x.proxymate"}`,
+//!   `{"exportHar": "/abs/x.har"}`, `{"recording": false}`, `{"clear": true}`,
+//!   `{"contextMenu": "listening" | "empty" | "save" | "tab:<store>" | "sidebar:<key>",
+//!   "run": "<label>"}` (answers with the entries, and the clipboard after
+//!   running one), `{"sidebarFilter": "saf"}` and `{"workspace": true}`;
+//!   each answers with the workspace's state (store, documents, filter,
+//!   proxy, save status, last toast).
 //!
 //! Every phase adds the verbs its surfaces need (see `docs/PLAN.md`).
 
@@ -146,6 +160,9 @@ async fn run(command: Value, cx: &mut AsyncApp) -> Value {
             Err(err) => json!({ "error": err.to_string() }),
         };
     }
+    if let Some(answer) = shell_command(&command, window, cx).await {
+        return answer;
+    }
     if let Some(answer) = table_command(&command, cx) {
         return answer;
     }
@@ -153,7 +170,7 @@ async fn run(command: Value, cx: &mut AsyncApp) -> Value {
         let offscreen = command.get("offscreen").and_then(Value::as_bool).unwrap_or(false);
         return screenshot(window, PathBuf::from(path), offscreen, cx).await;
     }
-    json!({"error": "unknown command: try theme, screenshot, click, select, selectIds, selectAll, scrollTo, headerColumns, filter, autoSelect or table"})
+    json!({"error": "unknown command: try theme, screenshot, click, select, selectIds, selectAll, scrollTo, headerColumns, filter, search, protocol, content, scope, keys, palette, command, store, openDocument, closeDocument, saveSession, exportHar, recording, clear, contextMenu, sidebarFilter, workspace, autoSelect or table"})
 }
 
 async fn screenshot(window: AnyWindowHandle, path: PathBuf, offscreen: bool, cx: &mut AsyncApp) -> Value {
@@ -189,12 +206,11 @@ async fn screenshot(window: AnyWindowHandle, path: PathBuf, offscreen: bool, cx:
 
 /// The flow table's verbs; `None` when `command` has none of them.
 fn table_command(command: &Value, cx: &mut AsyncApp) -> Option<Value> {
-    const VERBS: [&str; 7] = [
+    const VERBS: [&str; 6] = [
         "select",
         "selectIds",
         "selectAll",
         "headerColumns",
-        "filter",
         "autoSelect",
         "table",
     ];
@@ -228,13 +244,6 @@ fn table_command(command: &Value, cx: &mut AsyncApp) -> Option<Value> {
                 serde_json::from_value(v.clone()).map_err(|e| format!("headerColumns: {e}"))?;
             table.update(cx, |t, cx| t.set_header_columns(columns, cx));
         }
-        if let Some(text) = command.get("filter").and_then(Value::as_str) {
-            let filter = pm_model::FilterSpec {
-                text: text.into(),
-                ..table.read(cx).filter().clone()
-            };
-            table.update(cx, |t, cx| t.set_filter(filter, cx));
-        }
         if let Some(on) = command.get("autoSelect").and_then(Value::as_bool) {
             grid.update(cx, |g, cx| g.set_auto_select(on, cx));
         }
@@ -258,5 +267,173 @@ fn table_command(command: &Value, cx: &mut AsyncApp) -> Option<Value> {
                 "engineMs": f.engine_ms, "endToEndMs": f.end_to_end_ms, "rows": f.rows
             })),
         })
+    }))
+}
+
+/// The shell's verbs (G2); `None` when `command` has none of them.
+async fn shell_command(command: &Value, window: AnyWindowHandle, cx: &mut AsyncApp) -> Option<Value> {
+    use crate::features::{capture, commands, documents};
+    use crate::shell;
+    use crate::workspace::{SaveKind, Workspace};
+
+    const VERBS: [&str; 20] = [
+        "filter",
+        "search",
+        "protocol",
+        "content",
+        "scope",
+        "keys",
+        "palette",
+        "command",
+        "store",
+        "openDocument",
+        "closeDocument",
+        "saveSession",
+        "exportHar",
+        "recording",
+        "clear",
+        "contextMenu",
+        "sidebarFilter",
+        "workspace",
+        "filterNow",
+        "run",
+    ];
+    if !VERBS.iter().any(|v| command.get(v).is_some()) {
+        return None;
+    }
+    let Some(ws) = cx.update(|cx| Workspace::global(cx)) else {
+        return Some(json!({"error": "no workspace"}));
+    };
+    let mut extra = serde_json::Map::new();
+    let result: Result<(), String> = window
+        .update(cx, |_, window, cx| -> Result<(), String> {
+            let bar = shell::parts(cx).and_then(|p| p.filter_bar.upgrade());
+            if let Some(text) = command.get("filter").and_then(Value::as_str) {
+                let bar = bar.clone().ok_or("no filter bar")?;
+                bar.update(cx, |b, cx| b.type_text(text, window, cx));
+                if command.get("filterNow").and_then(Value::as_bool) == Some(true)
+                    && let Some(table) = shell::parts(cx).and_then(|p| p.table.upgrade())
+                {
+                    let filter = ws.read(cx).filter.clone();
+                    table.update(cx, |t, cx| t.set_filter(filter, cx));
+                }
+            }
+            if let Some(text) = command.get("search").and_then(Value::as_str) {
+                let bar = bar.clone().ok_or("no filter bar")?;
+                // Typing puts the caret at the end, which focuses the box.
+                bar.update(cx, |b, cx| b.type_text(text, window, cx));
+                let labels: Vec<String> = bar.read(cx).suggestions(cx).into_iter().map(|s| s.label).collect();
+                extra.insert("suggestions".into(), json!(labels));
+            }
+            if let Some(p) = command.get("protocol") {
+                let p: pm_model::ProtocolFilter = serde_json::from_value(p.clone()).map_err(|e| e.to_string())?;
+                ws.update(cx, |w, cx| w.set_protocol(p, cx));
+            }
+            if let Some(c) = command.get("content") {
+                let groups: Vec<pm_model::ContentGroup> =
+                    serde_json::from_value(c.clone()).map_err(|e| e.to_string())?;
+                ws.update(cx, |w, cx| {
+                    w.clear_content(cx);
+                    for g in groups {
+                        w.toggle_content(g, cx);
+                    }
+                });
+            }
+            if let Some(scope) = command.get("scope") {
+                let get = |k: &str| scope.get(k).and_then(Value::as_str).map(str::to_owned);
+                ws.update(cx, |w, cx| w.set_scope(get("host"), get("client"), cx));
+            }
+            if let Some(keys) = command.get("keys").and_then(Value::as_str) {
+                for key in keys.split_whitespace() {
+                    // Dev only: a keystroke parses from a `'static` string.
+                    let key: &'static str = Box::leak(key.to_owned().into_boxed_str());
+                    let stroke = gpui_kit::Keystroke::parse(key).map_err(|e| format!("{key}: {e:?}"))?;
+                    window.dispatch_keystroke(stroke, cx);
+                }
+            }
+            if let Some(open) = command.get("palette").and_then(Value::as_bool)
+                && open != commands::is_palette_open(cx)
+            {
+                commands::toggle_palette(window, cx);
+            }
+            if let Some(id) = command.get("command").and_then(Value::as_str)
+                && !commands::run(id, window, cx)
+            {
+                return Err(format!("{id} has no handler, or doesn't apply now"));
+            }
+            if let Some(store) = command.get("store").and_then(Value::as_u64) {
+                ws.update(cx, |w, cx| w.set_store(store as pm_model::StoreId, cx));
+            }
+            if let Some(path) = command.get("openDocument").and_then(Value::as_str) {
+                documents::open_path(path.into(), cx);
+            }
+            if let Some(store) = command.get("closeDocument").and_then(Value::as_u64) {
+                ws.update(cx, |w, cx| w.close_document(store as pm_model::StoreId, cx));
+            }
+            if let Some(path) = command.get("saveSession").and_then(Value::as_str) {
+                documents::save_to(SaveKind::Session, pm_model::FlowSelection::All, path.into(), cx);
+            }
+            if let Some(path) = command.get("exportHar").and_then(Value::as_str) {
+                documents::export_shown(path.into(), cx);
+            }
+            if let Some(on) = command.get("recording").and_then(Value::as_bool) {
+                ws.update(cx, |w, cx| w.set_recording(on, cx));
+            }
+            if command.get("clear").and_then(Value::as_bool) == Some(true) {
+                capture::clear(cx);
+            }
+            if let Some(text) = command.get("sidebarFilter").and_then(Value::as_str)
+                && let Some(sidebar) = shell::parts(cx).and_then(|p| p.sidebar.upgrade())
+            {
+                sidebar.update(cx, |s, cx| s.set_filter_text(text, window, cx));
+            }
+            if let Some(name) = command.get("contextMenu").and_then(Value::as_str) {
+                let menu = match name.split_once(':') {
+                    None if name == "listening" => shell::toolbar::current_listening_menu(cx),
+                    None if name == "empty" => shell::toolbar::empty_state_menu(cx),
+                    None if name == "save" => shell::footer::current_save_menu(cx),
+                    Some(("tab", store)) => store
+                        .parse()
+                        .ok()
+                        .and_then(|store| shell::tabs::current_tab_menu(store, cx)),
+                    Some(("sidebar", key)) => shell::sidebar::menu_for(key, cx),
+                    _ => None,
+                }
+                .ok_or_else(|| format!("no menu {name:?} now"))?;
+                extra.insert("menu".into(), menu.to_json());
+                if let Some(label) = command.get("run").and_then(Value::as_str)
+                    && !menu.run(label, window, cx)
+                {
+                    return Err(format!("no entry {label:?}"));
+                }
+            }
+            Ok(())
+        })
+        .unwrap_or_else(|e| Err(e.to_string()));
+    if let Err(err) = result {
+        return Some(json!({ "error": err }));
+    }
+    // Let deferred work (a copy's toast, a palette command) land.
+    cx.background_executor().timer(Duration::from_millis(50)).await;
+    Some(cx.update(|cx| {
+        let w = ws.read(cx);
+        let mut answer = json!({
+            "store": w.store,
+            "documents": w.documents,
+            "filter": w.filter,
+            "proxy": w.proxy,
+            "save": w.save.as_ref().map(|j| json!({"label": j.label, "progress": j.progress})),
+            "paletteOpen": crate::features::commands::is_palette_open(cx),
+            "palette": crate::features::commands::palette_groups(cx)
+                .into_iter()
+                .map(|(g, c)| json!({"group": g.label(), "commands": c.into_iter().map(|c| c.title.into_owned()).collect::<Vec<_>>()}))
+                .collect::<Vec<_>>(),
+            "toast": crate::features::clipboard::Toasts::last(cx).map(|t| json!({"title": t.title, "description": t.description})),
+            "clipboard": cx.read_from_clipboard().and_then(|c| c.text()),
+        });
+        if let Value::Object(map) = &mut answer {
+            map.extend(extra);
+        }
+        answer
     }))
 }

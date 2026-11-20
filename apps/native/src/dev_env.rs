@@ -11,3 +11,11 @@ pub const fn enabled() -> bool {
 pub fn flag(name: &str) -> bool {
     enabled() && std::env::var(name).as_deref() == Ok("1")
 }
+
+/// `name=<value>` (`PROXYMATE_DEV_FILTER=host:example.com`).
+pub fn value(name: &str) -> Option<String> {
+    if !enabled() {
+        return None;
+    }
+    std::env::var(name).ok().filter(|v| !v.is_empty())
+}

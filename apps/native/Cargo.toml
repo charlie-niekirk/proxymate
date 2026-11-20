@@ -44,6 +44,8 @@ required-features = ["spikes"]
 
 [dependencies]
 async-channel = "2"
+# Local time for Save Session's suggested name (already in pm-view).
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 gpui-kit.workspace = true
 pm-app.workspace = true
 pm-core.workspace = true

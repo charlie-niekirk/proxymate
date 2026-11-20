@@ -7814,6 +7814,7 @@ name = "proxymate-native"
 version = "0.6.0"
 dependencies = [
  "async-channel",
+ "chrono",
  "gpui-kit",
  "image",
  "objc2 0.6.5",
