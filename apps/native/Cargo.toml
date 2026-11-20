@@ -49,6 +49,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 gpui-kit.workspace = true
 pm-app.workspace = true
 pm-core.workspace = true
+pm-mcp.workspace = true
 pm-model.workspace = true
 pm-platform.workspace = true
 pm-theme = { workspace = true, features = ["kit"] }
@@ -57,9 +58,22 @@ pm-widgets.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
+# The updater (G15): the feed over HTTPS (rustls with ring through
+# `pm_mcp::install_crypto_provider`, the OS trust store), Tauri-format
+# minisign signatures, and the `.app.tar.gz` it unpacks.
+base64 = "0.22"
+flate2.workspace = true
+minisign-verify = "0.3"
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
+semver = "1"
+tar = "0.4"
+tempfile = "3"
+thiserror.workspace = true
 
 [dev-dependencies]
 gpui-kit = { workspace = true, features = ["test-support"] }
+# Signs test updates in the release's format (`cargo xtask bundle-macos`).
+minisign = "0.10"
 # The type of gpui's captures (already in its tree).
 image = { version = "0.25", default-features = false }
 

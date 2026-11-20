@@ -21,7 +21,7 @@ use stream::Latest;
 
 pub struct Bridge {
     /// Kept for the app's lifetime: the proxy, MCP and engine tasks run on it.
-    _runtime: tokio::runtime::Runtime,
+    runtime: tokio::runtime::Runtime,
     engine: Arc<Engine>,
 }
 
@@ -39,10 +39,7 @@ impl Bridge {
         let engine = pm_app::start_engine(runtime.handle(), data_dir);
         pm_app::install_exit_guards(runtime.handle(), &engine);
         pm_app::spawn_mcp(runtime.handle(), engine.clone());
-        Bridge {
-            _runtime: runtime,
-            engine,
-        }
+        Bridge { runtime, engine }
     }
 
     pub fn global(cx: &App) -> &Bridge {
@@ -51,6 +48,11 @@ impl Bridge {
 
     pub fn engine(cx: &App) -> Arc<Engine> {
         Bridge::global(cx).engine.clone()
+    }
+
+    /// The tokio runtime, for async work that needs it (the updater's HTTP).
+    pub fn runtime(cx: &App) -> tokio::runtime::Handle {
+        Bridge::global(cx).runtime.handle().clone()
     }
 }
 
