@@ -35,8 +35,8 @@ use std::sync::Arc;
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    App, Context, EventEmitter, FocusHandle, Focusable, KeyBinding, KeyDownEvent, Role,
-    ScrollHandle, ScrollStrategy, SharedString, Task, UniformListScrollHandle, Window, div, px, uniform_list,
+    App, Context, EventEmitter, FocusHandle, Focusable, KeyBinding, KeyDownEvent, Role, ScrollHandle, ScrollStrategy,
+    SharedString, Task, UniformListScrollHandle, Window, div, px, uniform_list,
 };
 use pm_model::{FlowId, FlowRow, FlowSelection, SortSpec, ViewDelta, ViewId};
 use pm_theme::kit::TokensExt as _;
@@ -431,7 +431,8 @@ impl FlowGrid {
     /// Selects exactly these flows; the last one is focused.
     pub fn select_ids(&mut self, ids: &[FlowId], cx: &mut Context<Self>) {
         let focus = ids.last().copied();
-        self.selected.set(TableSelection::range(ids.iter().copied()), Some(focus));
+        self.selected
+            .set(TableSelection::range(ids.iter().copied()), Some(focus));
         self.focus_index = focus.and_then(|id| self.cache.index_of(id));
         cx.emit(FlowGridEvent::SelectionChanged);
         cx.notify();

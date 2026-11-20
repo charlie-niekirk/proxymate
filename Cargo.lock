@@ -7825,6 +7825,7 @@ dependencies = [
  "pm-model",
  "pm-platform",
  "pm-theme",
+ "pm-view",
  "pm-widgets",
  "raw-window-handle",
  "serde",

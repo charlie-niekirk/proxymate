@@ -83,8 +83,22 @@ impl Builtin {
             Builtin::Status => ("Status", "Status", 64., 48., Align::Center, Some(SortKey::Status)),
             Builtin::Time => ("Time", "Time", 92., 56., Align::Right, None),
             Builtin::Duration => ("Duration", "Duration", 72., 48., Align::Right, Some(SortKey::Duration)),
-            Builtin::Req => ("Request", "Request size", 72., 48., Align::Right, Some(SortKey::ReqSize)),
-            Builtin::Resp => ("Response", "Response size", 76., 48., Align::Right, Some(SortKey::RespSize)),
+            Builtin::Req => (
+                "Request",
+                "Request size",
+                72.,
+                48.,
+                Align::Right,
+                Some(SortKey::ReqSize),
+            ),
+            Builtin::Resp => (
+                "Response",
+                "Response size",
+                76.,
+                48.,
+                Align::Right,
+                Some(SortKey::RespSize),
+            ),
             Builtin::Proto => ("Proto", "Protocol", 42., 32., Align::Center, None),
             Builtin::Ssl => ("SSL", "SSL", 34., 28., Align::Center, None),
             Builtin::Notes => ("Notes", "Notes (label, comment, edited)", 54., 36., Align::Center, None),
@@ -200,8 +214,7 @@ pub struct Column {
 impl Column {
     /// Whether `sort` sorts by this column.
     pub fn sorted_by(&self, sort: &SortSpec) -> bool {
-        self.sort_key == Some(sort.key)
-            && (sort.key != SortKey::Extra || self.header == Some(sort.extra as usize))
+        self.sort_key == Some(sort.key) && (sort.key != SortKey::Extra || self.header == Some(sort.extra as usize))
     }
 
     /// The sort a click on this column's title asks for: ascending, or the
@@ -367,7 +380,12 @@ impl TablePrefs {
                 if !column.required && self.columns.hidden.contains(id) {
                     return None;
                 }
-                let px = self.columns.widths.get(&id.to_string()).copied().unwrap_or(column.width);
+                let px = self
+                    .columns
+                    .widths
+                    .get(&id.to_string())
+                    .copied()
+                    .unwrap_or(column.width);
                 Some(PlacedColumn {
                     px: px.max(column.min_width),
                     column,
@@ -417,11 +435,12 @@ impl TablePrefs {
     /// already, the name is empty, or there are [`MAX_HEADER_COLUMNS`].
     pub fn add_header_column(&mut self, column: HeaderColumn) -> bool {
         let name = column.name.trim().to_ascii_lowercase();
-        let column = HeaderColumn { part: column.part, name };
+        let column = HeaderColumn {
+            part: column.part,
+            name,
+        };
         let id = ColumnId::Header(column.clone());
-        if column.name.is_empty()
-            || self.header_columns.len() >= MAX_HEADER_COLUMNS
-            || self.columns.order.contains(&id)
+        if column.name.is_empty() || self.header_columns.len() >= MAX_HEADER_COLUMNS || self.columns.order.contains(&id)
         {
             return false;
         }
@@ -577,7 +596,10 @@ mod tests {
         assert_eq!((asc.key, asc.dir), (SortKey::Url, pm_model::SortDir::Asc));
         assert!(url.sorted_by(&asc));
         assert_eq!(url.next_sort(&asc).unwrap().dir, pm_model::SortDir::Desc);
-        assert_eq!(url.next_sort(&url.next_sort(&asc).unwrap()).unwrap().dir, pm_model::SortDir::Asc);
+        assert_eq!(
+            url.next_sort(&url.next_sort(&asc).unwrap()).unwrap().dir,
+            pm_model::SortDir::Asc
+        );
         assert_eq!(Builtin::Client.column().next_sort(&DEFAULT_SORT), None);
         let h1 = header_column_def(&hdr("x"), 1);
         let s = h1.next_sort(&DEFAULT_SORT).unwrap();
@@ -601,8 +623,22 @@ mod tests {
         assert_eq!(
             order,
             [
-                "url", "state", "id", "client", "method", "status", "time", "duration", "req", "resp", "proto", "ssl",
-                "notes", "tools", "hdr:request:x-a", "hdr:response:x-b"
+                "url",
+                "state",
+                "id",
+                "client",
+                "method",
+                "status",
+                "time",
+                "duration",
+                "req",
+                "resp",
+                "proto",
+                "ssl",
+                "notes",
+                "tools",
+                "hdr:request:x-a",
+                "hdr:response:x-b"
             ]
         );
         assert_eq!(p.columns.hidden, vec![ColumnId::Builtin(Builtin::Client)]);

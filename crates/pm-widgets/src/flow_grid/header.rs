@@ -11,8 +11,8 @@ use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::native_menu::NativeMenu;
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, ClickEvent, Context, DragMoveEvent, FocusHandle, FontWeight, KeyDownEvent, MouseButton,
-    MouseDownEvent, Orientation, Pixels, Point, Render, Role, SharedString, Window, div, px, svg,
+    AnyElement, ClickEvent, Context, DragMoveEvent, FocusHandle, FontWeight, KeyDownEvent, MouseButton, MouseDownEvent,
+    Orientation, Pixels, Point, Render, Role, SharedString, Window, div, px, svg,
 };
 use pm_model::{BodyPart, SortDir, SortKey};
 use pm_theme::kit::TokensExt as _;
@@ -129,7 +129,7 @@ impl FlowGrid {
             .flex_1()
             .min_w_0()
             .h_full()
-            .px(px(6.))
+            .px(px(4.))
             .flex()
             .flex_row()
             .items_center()
@@ -146,14 +146,24 @@ impl FlowGrid {
                 } else {
                     gpui_kit::assets::IconName::ArrowDown
                 };
-                d.child(svg().path(arrow.path()).flex_none().size(px(12.)).text_color(t.muted_foreground.hsla()))
+                d.child(
+                    svg()
+                        .path(arrow.path())
+                        .flex_none()
+                        .size(px(12.))
+                        .text_color(t.muted_foreground.hsla()),
+                )
             })
             .on_drag(
                 ColumnDrag {
                     id: id.clone(),
                     title: if title.is_empty() { label.clone() } else { title.clone() },
                 },
-                |drag, _, _, cx| cx.new(|_| ColumnGhost { title: drag.title.clone() }),
+                |drag, _, _, cx| {
+                    cx.new(|_| ColumnGhost {
+                        title: drag.title.clone(),
+                    })
+                },
             );
         if col.sort_key.is_some() {
             let target = id.clone();
@@ -161,7 +171,11 @@ impl FlowGrid {
                 .role(Role::Button)
                 .aria_label(SharedString::from(format!("Sort by {label}")))
                 .when(sorted, |d| {
-                    d.aria_description(if sort.dir == SortDir::Asc { "ascending" } else { "descending" })
+                    d.aria_description(if sort.dir == SortDir::Asc {
+                        "ascending"
+                    } else {
+                        "descending"
+                    })
                 })
                 .hover(|s| s.text_color(t.foreground.hsla()))
                 .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.sort_by(&target, cx)));
@@ -226,8 +240,11 @@ impl FlowGrid {
             .aria_max_numeric_value(MAX_COLUMN_WIDTH as f64)
             .aria_column_index(ix + 1)
             .track_focus(&focus)
-            .flex_none()
-            .w(px(5.))
+            // Over the column's edge, taking none of its width (`-right-1 w-2`).
+            .absolute()
+            .top_0()
+            .right(px(-3.))
+            .w(px(6.))
             .h_full()
             .cursor_col_resize()
             .hover(|s| s.bg(t.primary.hsla().opacity(0.4)))
@@ -333,6 +350,7 @@ impl FlowGrid {
                 Box::new(RemoveHeaderColumn { id: id.clone() }),
             );
         }
-        menu.menu("Reset columns", Box::new(ResetColumns)).show(position, window, cx);
+        menu.menu("Reset columns", Box::new(ResetColumns))
+            .show(position, window, cx);
     }
 }

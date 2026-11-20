@@ -4,25 +4,24 @@
 //! opaque token except the sidebar, which is transparent on macOS so the
 //! `NSVisualEffectView` shows through.
 //!
-//! G0 fills the panes with placeholders; G1 puts the flow table and the
-//! inspector in the content area, G2 the toolbar, sidebar and footer.
+//! G1 puts the flow table in the content area, over an inspector
+//! placeholder (G3 fills it), with the sidebar's width and the table's
+//! share of the column draggable; G2 fills the toolbar, sidebar and footer.
 
 mod chrome;
 
-use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::{Selectable as _, Sizable as _};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    App, Context, Entity, FontWeight, IntoElement, Render, SharedString, Subscription, TitlebarOptions, Window,
-    WindowBackgroundAppearance, WindowBounds, WindowOptions, div, point, px, size,
+    App, ClickEvent, Context, DragMoveEvent, Entity, Focusable as _, FontWeight, IntoElement, Orientation, Render,
+    Role, SharedString, Subscription, TitlebarOptions, Window, WindowBackgroundAppearance, WindowBounds, WindowOptions,
+    div, point, px, size,
 };
 use pm_model::{ProxyStatus, StorageStatus};
 use pm_theme::Tokens;
 use pm_theme::kit::TokensExt as _;
-use pm_widgets::Pill;
 
 use crate::bridge::{self, Bridge, stream::Latest};
-use crate::prefs::{self, Appearance};
+use crate::features::flow_table::FlowTable;
 
 /// `tauri.conf.json`'s window: 1440×900, at least 960×600.
 pub const DEFAULT_SIZE: (f32, f32) = (1440., 900.);
@@ -35,7 +34,14 @@ pub const TRAFFIC_LIGHTS: (f32, f32) = (16., 17.);
 /// The toolbar strip, which the traffic lights share with the sidebar.
 pub const TOOLBAR_HEIGHT: f32 = 52.;
 pub const SIDEBAR_WIDTH: f32 = 220.;
+/// How narrow and wide the sidebar can be dragged.
+pub const SIDEBAR_RANGE: (f32, f32) = (160., 360.);
 pub const FOOTER_HEIGHT: f32 = 28.;
+/// The table's share of the main column, over the inspector.
+pub const TABLE_SHARE: f32 = 0.58;
+const TABLE_SHARE_RANGE: (f32, f32) = (0.2, 0.85);
+/// A split handle's thickness.
+const HANDLE: f32 = 5.;
 
 pub fn window_options(cx: &App) -> WindowOptions {
     WindowOptions {
@@ -65,11 +71,17 @@ pub fn open_main_window(cx: &mut App) {
     let storage = bridge::storage(cx);
     // An O(1) read of the listener state, fine on the foreground thread.
     let proxy = Bridge::engine(cx).proxy_status();
+    let addr: SharedString = proxy
+        .listening
+        .clone()
+        .unwrap_or_else(|| "127.0.0.1:9090".into())
+        .into();
     let opened = cx.open_window(options, |window, cx| {
         if let Err(err) = pm_platform::window::apply_sidebar_vibrancy(window) {
             eprintln!("vibrancy unavailable: {err}");
         }
-        let view = cx.new(|cx| MainWindow::new(storage, proxy, window, cx));
+        let table = cx.new(|cx| FlowTable::live(addr, cx));
+        let view = cx.new(|cx| MainWindow::new(storage, proxy, table, window, cx));
         cx.new(|cx| root(view, window, cx))
     });
     if let Err(err) = opened {
@@ -93,33 +105,97 @@ pub fn root(
     }
 }
 
+/// A split handle being dragged.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Split {
+    Sidebar,
+    Inspector,
+}
+
+struct NoGhost;
+
+impl Render for NoGhost {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+    }
+}
+
 pub struct MainWindow {
     storage: Entity<Latest<StorageStatus>>,
     proxy: ProxyStatus,
+    table: Entity<FlowTable>,
+    sidebar_width: f32,
+    table_share: f32,
     _subscriptions: Vec<Subscription>,
 }
 
 impl MainWindow {
-    /// The window over a storage stream and the proxy's status: the bridge's
-    /// in the app, injected snapshots in tests.
+    /// The window over a storage stream, the proxy's status and a flow
+    /// table: the bridge's in the app, injected snapshots in tests.
     pub fn new(
         storage: Entity<Latest<StorageStatus>>,
         proxy: ProxyStatus,
+        table: Entity<FlowTable>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let subscriptions = vec![
             cx.observe(&storage, |_, _, cx| cx.notify()),
+            cx.observe(&table, |_, _, cx| cx.notify()),
             cx.observe_window_appearance(window, |_, window, cx| crate::appearance::window_changed(window, cx)),
         ];
+        // The table has the keyboard from the start.
+        let focus = table.read(cx).grid().focus_handle(cx);
+        window.focus(&focus, cx);
         MainWindow {
             storage,
             proxy,
+            table,
+            sidebar_width: SIDEBAR_WIDTH,
+            table_share: TABLE_SHARE,
             _subscriptions: subscriptions,
         }
     }
 
-    fn sidebar(&self, t: &Tokens) -> impl IntoElement {
+    pub fn table(&self) -> &Entity<FlowTable> {
+        &self.table
+    }
+
+    /// A split's handle: drag to resize, double-click for the default.
+    fn handle(&self, split: Split, t: &Tokens, cx: &mut Context<Self>) -> impl IntoElement {
+        let (id, label, orientation) = match split {
+            Split::Sidebar => ("sidebar-resize", "Resize the sidebar", Orientation::Vertical),
+            Split::Inspector => ("inspector-resize", "Resize the flow list", Orientation::Horizontal),
+        };
+        let value = match split {
+            Split::Sidebar => self.sidebar_width,
+            Split::Inspector => self.table_share * 100.,
+        };
+        div()
+            .id(id)
+            .role(Role::Splitter)
+            .aria_label(label)
+            .aria_orientation(orientation)
+            .aria_numeric_value(value as f64)
+            .flex_none()
+            .map(|d| match split {
+                Split::Sidebar => d.w(px(HANDLE)).h_full().cursor_col_resize(),
+                Split::Inspector => d.h(px(HANDLE)).w_full().cursor_row_resize(),
+            })
+            .hover(|s| s.bg(t.primary.hsla().opacity(0.3)))
+            .on_drag(split, |_, _, _, cx| cx.new(|_| NoGhost))
+            .on_click(cx.listener(move |this, e: &ClickEvent, _, cx| {
+                if e.click_count() >= 2 {
+                    match split {
+                        Split::Sidebar => this.sidebar_width = SIDEBAR_WIDTH,
+                        Split::Inspector => this.table_share = TABLE_SHARE,
+                    }
+                    cx.notify();
+                }
+            }))
+    }
+
+    fn sidebar(&self, t: &Tokens, cx: &mut Context<Self>) -> impl IntoElement {
         let section = |title: &'static str, item: &'static str| {
             div()
                 .flex()
@@ -150,7 +226,8 @@ impl MainWindow {
             .flex()
             .flex_col()
             .flex_none()
-            .w(px(SIDEBAR_WIDTH))
+            .relative()
+            .w(px(self.sidebar_width))
             .h_full()
             .bg(t.sidebar.hsla())
             .border_r_1()
@@ -165,6 +242,16 @@ impl MainWindow {
                     .child(section("Pinned", "Pinned"))
                     .child(section("Saved", "No saved sessions"))
                     .child(section("All", "All traffic")),
+            )
+            // Over the sidebar's right edge, so the window's vibrancy shows
+            // nowhere it shouldn't.
+            .child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .right(px(-3.))
+                    .child(self.handle(Split::Sidebar, t, cx)),
             )
     }
 
@@ -200,64 +287,76 @@ impl MainWindow {
             )
     }
 
-    fn content(&self, t: &Tokens, appearance: Appearance) -> impl IntoElement {
-        let pills = [
-            ("GET", t.m_get, t.m_get_bg),
-            ("POST", t.m_post, t.m_post_bg),
-            ("PUT", t.m_put, t.m_put_bg),
-            ("PATCH", t.m_patch, t.m_patch_bg),
-            ("DELETE", t.m_delete, t.m_delete_bg),
-            ("200", t.s_2xx, t.s_2xx_bg),
-            ("301", t.s_3xx, t.s_3xx_bg),
-            ("404", t.s_4xx, t.s_4xx_bg),
-            ("500", t.s_5xx, t.s_5xx_bg),
-        ];
-        // gpui-kit buttons: real controls with accessibility roles and names.
-        let choice = |id: &'static str, label: &'static str, value: Appearance| {
-            let button = Button::new(id)
-                .label(label)
-                .small()
-                .selected(appearance == value)
-                .on_click(move |_, _, cx| crate::appearance::set(value, cx));
-            if appearance == value {
-                button.primary()
-            } else {
-                button.ghost()
-            }
-        };
+    /// The flow table over the inspector placeholder.
+    fn content(&self, t: &Tokens, cx: &mut Context<Self>) -> impl IntoElement {
+        let share = self.table_share;
         div()
             .id("content")
             .flex_1()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .bg(t.pane_table.hsla())
+            .on_drag_move(cx.listener(|this, e: &DragMoveEvent<Split>, _, cx| {
+                if *e.drag(cx) != Split::Inspector {
+                    return;
+                }
+                let top = f32::from(e.bounds.origin.y);
+                let height = f32::from(e.bounds.size.height).max(1.);
+                let share = (f32::from(e.event.position.y) - top) / height;
+                this.table_share = share.clamp(TABLE_SHARE_RANGE.0, TABLE_SHARE_RANGE.1);
+                cx.notify();
+            }))
+            .child(
+                div()
+                    .id("flow-table-pane")
+                    .w_full()
+                    .flex_none()
+                    .h(gpui_kit::relative(share))
+                    .min_h_0()
+                    .child(self.table.clone()),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .border_t_1()
+                    .border_color(t.border.hsla())
+                    .child(self.handle(Split::Inspector, t, cx)),
+            )
+            .child(self.inspector(t, cx))
+    }
+
+    /// G3's inspector goes here; until then, what is selected.
+    fn inspector(&self, t: &Tokens, cx: &App) -> impl IntoElement {
+        let grid = self.table.read(cx).grid().read(cx);
+        let count = grid.selection_count();
+        let focused = grid.selected().focused;
+        let line: SharedString = match (count, focused) {
+            (0, _) => "No flow selected".into(),
+            (1, Some(id)) => {
+                let url = (0..grid.len())
+                    .filter_map(|i| grid.row(i))
+                    .find(|r| r.id() == id)
+                    .map(|r| format!("{} {}", r.method, r.url));
+                format!("Flow #{}{}", id + 1, url.map(|u| format!(" · {u}")).unwrap_or_default()).into()
+            }
+            (n, _) => format!("{n} flows selected").into(),
+        };
+        div()
+            .id("inspector")
+            .role(Role::Region)
+            .aria_label("Inspector")
+            .flex_1()
+            .min_h_0()
             .flex()
             .flex_col()
             .items_center()
             .justify_center()
-            .gap(px(14.))
-            .bg(t.pane_table.hsla())
-            .child(
-                div()
-                    .flex()
-                    .gap(px(6.))
-                    .children(pills.map(|(label, fg, bg)| Pill::new(label, fg, bg))),
-            )
-            .child(
-                div()
-                    .text_color(t.muted_foreground.hsla())
-                    .child("Proxymate Native — the flow table arrives in G1."),
-            )
-            .child(
-                div()
-                    .flex()
-                    .gap(px(2.))
-                    .p(px(2.))
-                    .rounded(px(6.))
-                    .border_1()
-                    .border_color(t.border.hsla())
-                    .bg(t.background.hsla())
-                    .child(choice("appearance-system", "System", Appearance::System))
-                    .child(choice("appearance-light", "Light", Appearance::Light))
-                    .child(choice("appearance-dark", "Dark", Appearance::Dark)),
-            )
+            .gap(px(6.))
+            .bg(t.background.hsla())
+            .text_color(t.muted_foreground.hsla())
+            .child(div().text_color(t.foreground.hsla()).child(line))
+            .child(div().text_size(px(12.)).child("The inspector arrives in G3."))
     }
 
     fn footer(&self, t: &Tokens, cx: &App) -> impl IntoElement {
@@ -290,7 +389,6 @@ impl MainWindow {
 impl Render for MainWindow {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = *cx.tokens();
-        let appearance = prefs::get(cx).appearance;
         div()
             .id("main-window")
             .size_full()
@@ -298,16 +396,25 @@ impl Render for MainWindow {
             .flex_row()
             .text_size(px(13.))
             .text_color(t.foreground.hsla())
-            .child(self.sidebar(&t))
+            .on_drag_move(cx.listener(|this, e: &DragMoveEvent<Split>, _, cx| {
+                if *e.drag(cx) != Split::Sidebar {
+                    return;
+                }
+                let x = f32::from(e.event.position.x) - f32::from(e.bounds.origin.x);
+                this.sidebar_width = x.clamp(SIDEBAR_RANGE.0, SIDEBAR_RANGE.1);
+                cx.notify();
+            }))
+            .child(self.sidebar(&t, cx))
             .child(
                 div()
                     .flex_1()
+                    .min_w_0()
                     .h_full()
                     .flex()
                     .flex_col()
                     .bg(t.background.hsla())
                     .child(self.toolbar(&t))
-                    .child(self.content(&t, appearance))
+                    .child(self.content(&t, cx))
                     .child(self.footer(&t, cx)),
             )
     }

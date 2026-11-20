@@ -250,8 +250,9 @@ fn pill(label: SharedString, fg: Hsla, bg: Option<Hsla>, outline: Option<Hsla>, 
         (fg, bg)
     };
     div()
-        .flex_none()
+        .flex_shrink(1.)
         .min_w_0()
+        .max_w_full()
         .h(px(16.))
         .px(px(5.))
         .flex()
@@ -263,7 +264,9 @@ fn pill(label: SharedString, fg: Hsla, bg: Option<Hsla>, outline: Option<Hsla>, 
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(fg)
         .when_some(bg, |d, bg| d.bg(bg))
-        .when_some(outline.filter(|_| !cx.look.selected), |d, c| d.border_1().border_color(c))
+        .when_some(outline.filter(|_| !cx.look.selected), |d, c| {
+            d.border_1().border_color(c)
+        })
         .child(div().truncate().child(label))
         .into_any_element()
 }
@@ -310,7 +313,9 @@ pub fn cell(row: &GridRow, column: &PlacedColumn, cx: &CellContext) -> AnyElemen
                 .items_center()
                 .gap(px(4.))
                 .text_color(cx.dim())
-                .when(r.20, |d| d.child(icon(gpui_kit::assets::IconName::Pin, cx.tint(t.primary), 10.)))
+                .when(r.20, |d| {
+                    d.child(icon(gpui_kit::assets::IconName::Pin, cx.tint(t.primary), 10.))
+                })
                 .child(row.number.clone())
                 .into_any_element(),
             Builtin::State => {
@@ -366,7 +371,9 @@ pub fn cell(row: &GridRow, column: &PlacedColumn, cx: &CellContext) -> AnyElemen
                 .when(row.comment.is_some(), |d| {
                     d.child(icon(gpui_kit::assets::IconName::MessageSquareText, cx.dim(), 12.))
                 })
-                .when(r.15, |d| d.child(icon(gpui_kit::assets::IconName::PencilLine, cx.tint(t.rule), 12.)))
+                .when(r.15, |d| {
+                    d.child(icon(gpui_kit::assets::IconName::PencilLine, cx.tint(t.rule), 12.))
+                })
                 .into_any_element(),
             // The row's "…" (its flow menu) arrives with the menu in G3.
             Builtin::Tools => div().into_any_element(),
@@ -448,7 +455,12 @@ fn url_cell(row: &GridRow, cx: &CellContext) -> AnyElement {
         .overflow_hidden()
         .when_some(sent, |d, b| d.child(b))
         .when_some(row.graphql.clone(), |d, op| {
-            d.child(pill(op, t.graphql.hsla(), Some(t.graphql_bg.hsla()), None, cx))
+            // The URL truncates first; the badge keeps its width.
+            d.child(
+                div()
+                    .flex_none()
+                    .child(pill(op, t.graphql.hsla(), Some(t.graphql_bg.hsla()), None, cx)),
+            )
         })
         .child(
             div()
@@ -574,7 +586,10 @@ mod tests {
             (row.status.as_ref(), row.status_tone, row.method_tone),
             ("404", StatusTone::S4xx, MethodTone::Get)
         );
-        assert_eq!((row.duration.as_ref(), row.resp.as_ref(), row.req.as_ref()), ("1.50 s", "1.5 KB", "—"));
+        assert_eq!(
+            (row.duration.as_ref(), row.resp.as_ref(), row.req.as_ref()),
+            ("1.50 s", "1.5 KB", "—")
+        );
         assert_eq!(row.proto.as_ref(), "h2");
         assert_eq!(row.extra, vec![Some("req-1".into()), None]);
         assert_eq!(row.element_id.as_ref(), "flow-row-6");

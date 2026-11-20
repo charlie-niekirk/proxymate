@@ -18,7 +18,7 @@ pub fn data_dir() -> Option<PathBuf> {
 pub fn run(data_dir: Option<PathBuf>, lock: Option<Lock>) {
     let bridge = Bridge::start(data_dir.clone());
     gpui_kit::application()
-        .with_assets(gpui_kit::assets::Assets)
+        .with_assets(pm_widgets::Assets)
         .run(move |cx: &mut App| {
             gpui_kit::init(cx);
             cx.set_global(bridge);
@@ -31,6 +31,7 @@ pub fn run(data_dir: Option<PathBuf>, lock: Option<Lock>) {
             crate::shell::open_main_window(cx);
             #[cfg(feature = "dev-harness")]
             crate::dev::init(cx);
+            crate::perf_probe::init(cx);
             cx.activate(true);
         });
 }
@@ -63,6 +64,7 @@ fn serve_later_launches(lock: Option<Lock>, cx: &mut App) {
 /// quit callback itself, not its future, which gpui may cut short.
 fn install_quit(data_dir: Option<PathBuf>, cx: &mut App) {
     cx.on_app_quit(move |cx| {
+        crate::prefs::flush(cx);
         pm_app::quit(&Bridge::engine(cx));
         if let Some(dir) = &data_dir {
             single_instance::release(dir);

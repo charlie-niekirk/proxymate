@@ -115,11 +115,8 @@ impl<R: CachedRow> RowCache<R> {
     /// The index of flow `id` among the loaded rows, if it is loaded.
     pub fn index_of(&self, id: FlowId) -> Option<usize> {
         [&self.pages, &self.stale].into_iter().find_map(|map| {
-            map.iter().find_map(|(p, rows)| {
-                rows.iter()
-                    .position(|r| r.flow_id() == id)
-                    .map(|i| p * PAGE_SIZE + i)
-            })
+            map.iter()
+                .find_map(|(p, rows)| rows.iter().position(|r| r.flow_id() == id).map(|i| p * PAGE_SIZE + i))
         })
     }
 
@@ -308,7 +305,12 @@ mod tests {
         fn rows(&mut self, f: Fetch) -> Vec<Row> {
             self.requests.push((f.start(), f.count()));
             let end = (f.start() + f.count()).min(self.ids.len());
-            self.ids.get(f.start()..end).unwrap_or_default().iter().map(|&id| Row(id)).collect()
+            self.ids
+                .get(f.start()..end)
+                .unwrap_or_default()
+                .iter()
+                .map(|&id| Row(id))
+                .collect()
         }
 
         /// The next frame: every scheduled fetch, answered at once.

@@ -247,7 +247,10 @@ mod tests {
 
     #[test]
     fn enter_goes_to_the_inspector_only_with_a_flow_focused() {
-        assert_eq!(table_key(TableKey::new(Key::Enter), state()), Some(TableAction::Inspect));
+        assert_eq!(
+            table_key(TableKey::new(Key::Enter), state()),
+            Some(TableAction::Inspect)
+        );
         let none = TableState {
             selected: false,
             ..state()
@@ -258,7 +261,10 @@ mod tests {
     #[test]
     fn escape_collapses_a_multi_selection_and_is_left_alone_otherwise() {
         let multi = TableState { multi: true, ..state() };
-        assert_eq!(table_key(TableKey::new(Key::Escape), multi), Some(TableAction::Collapse));
+        assert_eq!(
+            table_key(TableKey::new(Key::Escape), multi),
+            Some(TableAction::Collapse)
+        );
         assert_eq!(table_key(TableKey::new(Key::Escape), state()), None);
     }
 

@@ -6,9 +6,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use gpui_kit::{
-    Entity, Focusable as _, Modifiers, TestAppContext, VisualTestContext, point, px, size,
-};
+use gpui_kit::{Entity, Focusable as _, Modifiers, TestAppContext, VisualTestContext, point, px, size};
 use pm_model::{
     BodyPart, ContentKind, FlowRow, FlowSelection, FlowState, HeaderColumn, HttpVersion, Scheme, SortKey, TlsStatus,
     ViewDelta,
@@ -71,7 +69,12 @@ impl Fake {
             f.max_count.fetch_max(count, Ordering::SeqCst);
             let ids = f.ids.lock().unwrap();
             let end = (start + count).min(ids.len());
-            Ok(ids.get(start..end).unwrap_or_default().iter().map(|&id| flow_row(id)).collect())
+            Ok(ids
+                .get(start..end)
+                .unwrap_or_default()
+                .iter()
+                .map(|&id| flow_row(id))
+                .collect())
         })
     }
 }
@@ -100,8 +103,10 @@ fn setup<'a>(cx: &'a mut TestAppContext, fake: &Fake) -> Harness<'a> {
     let events: Arc<Mutex<Vec<FlowGridEvent>>> = Arc::default();
     let sink = events.clone();
     cx.update(|window, cx| {
-        cx.subscribe(&grid, move |_, e: &FlowGridEvent, _| sink.lock().unwrap().push(e.clone()))
-            .detach();
+        cx.subscribe(&grid, move |_, e: &FlowGridEvent, _| {
+            sink.lock().unwrap().push(e.clone())
+        })
+        .detach();
         let focus = grid.focus_handle(cx);
         window.focus(&focus, cx);
     });
@@ -168,7 +173,10 @@ fn click_cmd_click_and_shift_click_select_by_id(cx: &mut TestAppContext) {
     assert_eq!((h.focused(), h.selection()), (Some(7), Harness::ids(&[7])));
     // ⇧-click: the range from the anchor (the last plain or ⌘ click).
     h.click(10, Modifiers::shift());
-    assert_eq!((h.focused(), h.selection()), (Some(10), Harness::ids(&[3, 4, 5, 6, 7, 8, 9, 10])));
+    assert_eq!(
+        (h.focused(), h.selection()),
+        (Some(10), Harness::ids(&[3, 4, 5, 6, 7, 8, 9, 10]))
+    );
     assert!(h.took(&FlowGridEvent::SelectionChanged));
 }
 
@@ -234,7 +242,13 @@ fn a_shift_range_beyond_the_loaded_rows_is_fetched_in_steps(cx: &mut TestAppCont
     // From the first row to the last is the whole view, not 5,000 ids.
     h.keys("home");
     h.keys("shift-end");
-    assert_eq!(h.selection(), FlowSelection::View { view: 1, except: vec![] });
+    assert_eq!(
+        h.selection(),
+        FlowSelection::View {
+            view: 1,
+            except: vec![]
+        }
+    );
 }
 
 #[gpui_kit::test]
@@ -247,13 +261,28 @@ fn cmd_a_enter_and_backspace(cx: &mut TestAppContext) {
     h.keys("enter");
     assert!(h.took(&FlowGridEvent::Inspect));
     h.keys("cmd-a");
-    assert_eq!(h.selection(), FlowSelection::View { view: 1, except: vec![] });
+    assert_eq!(
+        h.selection(),
+        FlowSelection::View {
+            view: 1,
+            except: vec![]
+        }
+    );
     assert_eq!(h.focused(), Some(1), "⌘A keeps the focused flow");
     h.click(4, Modifiers::command());
-    assert_eq!(h.selection(), FlowSelection::View { view: 1, except: vec![4] });
+    assert_eq!(
+        h.selection(),
+        FlowSelection::View {
+            view: 1,
+            except: vec![4]
+        }
+    );
     assert_eq!(h.grid.read_with(h.cx, |g, _| g.selection_count()), 49);
     h.keys("backspace");
-    assert!(h.took(&FlowGridEvent::Delete(FlowSelection::View { view: 1, except: vec![4] })));
+    assert!(h.took(&FlowGridEvent::Delete(FlowSelection::View {
+        view: 1,
+        except: vec![4]
+    })));
 }
 
 #[gpui_kit::test]
@@ -318,20 +347,29 @@ fn sorting_resizing_and_hiding_change_the_prefs(cx: &mut TestAppContext) {
     // The column menu's items are actions on the focused grid.
     let client = ColumnId::Builtin(Builtin::Client);
     h.cx.dispatch_action(ToggleColumn { id: client.clone() });
-    assert!(h.grid.read_with(h.cx, |g, _| g.columns().iter().all(|c| c.id != client)));
+    assert!(
+        h.grid
+            .read_with(h.cx, |g, _| g.columns().iter().all(|c| c.id != client))
+    );
     // The time column's edge, keyed: → widens by 8 px, ↩ restores the default.
     let time = ColumnId::Builtin(Builtin::Time);
     let focus = h.grid.update(h.cx, |g, _| g.header.handles[&time].clone());
     h.cx.update(|window, cx| window.focus(&focus, cx));
     h.keys("right shift-right");
-    let px = |h: &mut Harness| h.grid.read_with(h.cx, |g, _| g.columns().iter().find(|c| c.id == time).unwrap().px);
+    let px = |h: &mut Harness| {
+        h.grid
+            .read_with(h.cx, |g, _| g.columns().iter().find(|c| c.id == time).unwrap().px)
+    };
     assert_eq!(px(&mut h), 92. + 8. + 32.);
     h.keys("enter");
     assert_eq!(px(&mut h), 92.);
     // Keys on the handle are its own: the selection didn't move.
     assert_eq!(h.focused(), None);
     h.cx.dispatch_action(ResetColumns);
-    assert!(h.grid.read_with(h.cx, |g, _| g.columns().iter().any(|c| c.id == client)));
+    assert!(
+        h.grid
+            .read_with(h.cx, |g, _| g.columns().iter().any(|c| c.id == client))
+    );
     assert!(h.took(&FlowGridEvent::PrefsChanged));
 }
 

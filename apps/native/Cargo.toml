@@ -50,6 +50,7 @@ pm-core.workspace = true
 pm-model.workspace = true
 pm-platform.workspace = true
 pm-theme = { workspace = true, features = ["kit"] }
+pm-view.workspace = true
 pm-widgets.workspace = true
 serde.workspace = true
 serde_json.workspace = true
