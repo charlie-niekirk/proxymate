@@ -3,10 +3,8 @@
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    match args.first().map(String::as_str) {
-        Some(pm_platform::sysproxy::GUARDIAN_FLAG) => std::process::exit(proxymate_desktop::run_guardian(&args[1..])),
-        Some("mcp-stdio") => std::process::exit(proxymate_desktop::run_mcp_stdio(&args[1..])),
-        _ => {}
+    if let Some(code) = pm_app::run_mode(&args) {
+        std::process::exit(code);
     }
     proxymate_desktop::run();
 }

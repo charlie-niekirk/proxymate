@@ -786,6 +786,392 @@ As built (`r2-hot-path`):
 - **Tests.** `store/ui.test.ts`, more `useFlowView` cases (deltas, the inspected flow, store switches, a late view after unmount), `query.test.ts`, `abort.test.ts`, `mutations.test.ts`. The table's key tests landed in part 1.
 - **Split.** `RewriteDialog` becomes `RewriteDialog.tsx` (the shell), `load.ts`, `RewriteEditor.tsx`, `BodyPane.tsx`, `useBody.ts`, `parts.tsx` and `pointer.ts`. The harness is `dev/harness.ts` (every dev launch hook from `main.tsx`; release builds drop it) and `useBridge` in `dev/bridge.ts` (the one way editors register buttons for the remote; nothing in release builds).
 
+## Native (gpui) track: G0–G16
+
+The user approved this plan on 2026-11-20: a pure-Rust desktop app on gpui and gpui-kit, built in phases G0–G16 beside the Tauri app, which G16 deletes. The plan is copied here as approved; "G0: as built", "G0 spike results" and "Plan changes from G0" at the end record what G0 found and what it changes. Phases follow the same delivery workflow as the milestones (one session and one PR each, branches `gN-<slug>`, PR titles `GN: <Title>`).
+
+### Context
+Proxymate (v0.6.0) is a Tauri 2 app. Its Rust engine (`pm-core`, `pm-model`, `pm-platform`, `pm-mcp`) has no Tauri dependency. The UI is about 35k lines of React/TS, with 145 Tauri commands, 12 push channels and 2 URI schemes (`pmbody://`, `pmicon://`).
+
+**Goal:** a pure-Rust desktop app built on Zed's **gpui** and Longbridge's **gpui-kit**, which was renamed from gpui-component in Sep 2026. It must match today's behaviour and features. The UI can differ from today's, but it should feel native, modern and Proxyman-dense, and be faster.
+
+The plan is phased so that an orchestrator can start each phase as its own Claude session that ends in its own PR. The existing rules in `CLAUDE.md` still apply: one session and one PR per phase, branch from latest `main`, never merge your own PR, and CI must be green.
+
+#### Decisions already made with the user
+- **Location:** a new `apps/native` crate in this workspace. It shares the engine crates. The Tauri app stays alive until the cutover phase (G16), then is deleted.
+- **Rich content:** rendered natively where possible.
+  - Images, SVG and fonts render in gpui.
+  - PDF, video and audio use PDFKit and AVKit child NSViews through objc2, on macOS.
+  - HTML Preview is a native, network-free render, plus "Open in browser". There is no webview.
+- **Platforms:** macOS first. Linux must build, pass tests and render in CI. Windows waits for M12.
+- **Editors:** the gpui-kit code editor (tree-sitter, folding, search). Completions come from our own `CompletionProvider`.
+- **Updates:** the same `latest.json` feed, the same minisign key, the same bundle id (`dev.proxymate.desktop`) and the same data dir. Installed Tauri copies update straight into the native app.
+- **Look:** the same tokens (method, status and URL colours; both themes; the contrast rules), the same three-pane layout and density, and native macOS chrome.
+
+#### Research findings that shape the plan
+- **Dependencies.** Depend on `gpui-kit = "=0.10.0"`, pinned exactly, with `Cargo.lock` committed. It re-exports a Zed snapshot (`gpui-pre`). Never add a second git `gpui`.
+  - gpui-kit makes a breaking release about every week. Upgrades are their own chore PRs: "Bump gpui-kit". They are never mixed into a phase.
+- **What gpui-kit provides:**
+  - a virtual table, tree, lists, dock and resizable panels, tabs, sidebar and title bar;
+  - dialog, sheet, popover, context menu, command palette, notifications, form controls;
+  - a `diff` module, and the code editor: a rope buffer, tree-sitter 0.26 with JSON/JS/HTML/CSS/proto/TOML grammars, folding, search, and LSP-shaped providers;
+  - AccessKit roles, which are new and not proven yet.
+- **Gaps:** no hex view, no JSON tree, and no image/PDF/media viewers. We build those ourselves.
+- **What gpui provides:**
+  - `uniform_list` for fixed-height virtualisation;
+  - `img()` (the `image` crate: PNG/JPEG/GIF/WebP/BMP/ICO) and `svg()` (resvg);
+  - a native menu bar, file dialogs and `window.prompt`, and a clipboard for text and images;
+  - transparent title bars with traffic-light placement, and multiple windows;
+  - `TestAppContext` and `VisualTestContext` for tests.
+  - macOS needs a full Xcode install. Linux uses wgpu.
+
+### Architecture
+
+#### New crates (all Rust; no npm in the native path)
+```
+crates/pm-app      host glue shared by both apps, taken out of src-tauri/lib.rs: binary-mode dispatch
+                   (--sysproxy-guardian, mcp-stdio), start_engine (EngineConfig, env vars), exit guards
+                   (panic hook, SIGINT/TERM/HUP), MCP spawn, data dir. No UI dependency.
+crates/pm-theme    tokens: build.rs parses apps/desktop/ui/src/styles/tokens.css (OKLCH) into Rust, so both
+                   apps share one source until G16; contrast test ported from contrast.test.ts; mapping onto
+                   gpui-kit's ThemeColor.
+crates/pm-view     UI logic with no gpui and no engine internals (depends on pm-model): ports of dsl.ts
+                   (autocomplete), copyFormats.ts, selection.ts, keys.ts, errors.ts, commands metadata,
+                   json/doc.ts (lossless, ordered), rewrite/{diff,session,lines,matcher}.ts, compare.ts,
+                   body/{multipart,graphql,jsonpath,exif,htmlPreview}.ts, markup formatting, JS/CSS beautify
+                   (dprint-plugin-typescript + malva in place of prettier). Each port brings its vitest table as
+                   Rust tests.
+crates/pm-widgets  reusable gpui widgets: FlowGrid, Pill, ColouredUrl, KvTable, HexView, JsonTree,
+                   CodeView/CodeEditor wrappers over the gpui-kit editor, LineDiff, Waterfall, CopyMenu helpers.
+apps/native        the app (binary `proxymate-native` until G16, then `proxymate`): bridge/, shell/, windows,
+                   features (one module per area), menus, actions, dev harness (feature `dev-harness`).
+```
+
+#### Rules for the native app (added to CLAUDE.md in G0)
+- **Engine facade.** Adapters call only `pm_core::Engine`, as before. File dialogs run in the app (`cx.prompt_for_paths` / `prompt_for_new_path`), and the chosen path goes to the Engine method.
+- **Bridge (`apps/native/src/bridge/`).**
+  - It owns one multi-thread tokio runtime and `Arc<Engine>`. Blocking engine calls go through `Engine::blocking` or `cx.background_spawn`, never on the foreground thread, except getters that are known to be O(1).
+  - Every engine sink only enqueues: a `flume` or `async-channel` sender. One foreground task per stream drains it into a gpui `Entity` and calls `cx.notify()`.
+  - The bridge subscribes once to each single-slot stream (sidebar, devices, each view) and fans it out to every window.
+- **Server state.** A small keyed `Resource<K,V>` cache replaces TanStack Query. It keeps one shape per key and puts every key in `bridge/keys.rs`. Mutations live in `bridge/mutations.rs` together with what they invalidate, which ports the R4 discipline. Push streams invalidate what they make stale.
+- **Rows** live in the non-reactive `RowCache`, ported from `lib/rowCache.ts`:
+  - 128-row pages, read-ahead by one page, eviction 16 pages out;
+  - fetches coalesced per frame on the background executor;
+  - stale rows stay visible until they are replaced.
+  - `FlowRow` decoding is done by Rust types directly; there is no tuple decoding.
+- **Feature registration.** Each feature module exposes `register(cx)`, which adds its actions, keybindings, palette commands and menu items. Central files only list modules, which keeps merge conflicts between parallel phases small. `lib/commands.ts` stays the reference list of commands and keys.
+- **Views render from `pm-model` snapshots** held in entities. gpui tests inject snapshots without an engine. This replaces the mock backend for states that tests can't produce, such as a LAN device prompt.
+- **Theme.** All colours come from `pm-theme` tokens; components never hard-code a colour. Settings › Appearance (System, Light, Dark) follows `window.appearance()`.
+- **Native chrome.**
+  - The toolbar is drawn in the transparent title bar, and drag regions use gpui's window control area.
+  - Sidebar vibrancy is an `NSVisualEffectView` through objc2 in `pm-platform/src/macos/window.rs`. That is one scoped `#[allow(unsafe_code)]` with a justification, and a no-op stub elsewhere.
+- **Preferences** (columns, sort, header columns, appearance) persist to `<data dir>/ui-prefs.json`. WebView localStorage is not migrated; the defaults apply once, and the G16 notes say so.
+- **Unsafe code / OS calls.** Anything AppKit-specific (vibrancy, PDFKit, AVKit, window capture) lives in `pm-platform` behind traits, as today.
+
+#### Testing and verification (replacing Playwright)
+- **Unit tests:** `pm-view` and `pm-theme`, with the ported vitest tables and the contrast check.
+- **Interaction tests:** `#[gpui::test]` with `VisualTestContext` in `apps/native/tests/`. They dispatch keys and actions, then check state and the test clipboard. Examples: table keys, selection, menus copying the right text, palette commands.
+- **Real app, dev remote.** `PROXYMATE_DEV_REMOTE=1 cargo run -p proxymate-native --features dev-harness` serves `127.0.0.1:<port>/__pm_remote`. It takes the same JSON verbs as `src/dev/remote.ts` (`select`, `requestTab`, `viewer`, `theme`, `click`/`contextMenu` by element id, and so on) plus `{"screenshot": "<path>"}`, which uses a window capture in pm-platform. Every phase extends it for its own surfaces.
+- **Dev environment variables** replace `VITE_PM_*`:
+  - `PROXYMATE_DEV_{AUTO_SELECT,OPEN,FILTER,RESPONSE_TAB,PERF_PROBE,REMOTE,ZOO}`.
+  - `ZOO` sends `crates/pm-testkit/fixtures/zoo` through the app's own proxy, with pm-testkit as an optional dependency of `dev-harness`.
+  - The `PROXYMATE_SYNTH_*` and `PROXYMATE_EXTRA_UPSTREAM_CA` variables behave as they do today.
+- **Visual snapshots:** depend on a G0 spike.
+  - If Linux CI can render headless through wgpu with lavapipe, there are pixel snapshots per viewer and per dialog, as Playwright has today.
+  - Otherwise a macOS job uploads screenshots as artifacts without diffing them.
+- **Parity ledger.** `docs/native-parity.md` is written in G0 from the UI inventory. It has one row per user-facing behaviour: every command and shortcut, menu item, viewer, dialog control and setting, each pointing at its source file in `apps/desktop/ui`. Each phase ticks its rows, with the test or screenshot that proves them. G14 audits the whole ledger.
+- **Performance budgets:**
+  - 100k rows scroll at 60 fps (120 on ProMotion as a stretch).
+  - A filter change repaints in under 50 ms end to end.
+  - An engine refilter takes under 10 ms.
+  - First frame comes less than 500 ms after launch.
+  - Idle CPU is about 0 with no traffic.
+  - The perf probe (`PROXYMATE_DEV_PERF_PROBE`) prints `[perf-probe]` lines as today.
+
+### Phases
+Branch names are `gN-<slug>`; PR titles are `GN: <Title>`. Every phase must also leave the Tauri app's CI green.
+
+| # | Branch | Depends on | Scope (summary) | Verify |
+|---|---|---|---|---|
+| G0 | `g0-native-foundation` | — | crates, bridge, window, theme, CI, dev remote, spikes, parity ledger | app opens themed with vibrancy; spikes written up; CI green on macOS and Linux |
+| G1 | `g1-flow-table` | G0 | AppShell splits, FlowGrid, RowCache, columns, sort, selection, keys, prefs | 100k synthetic rows at 60 fps; key and selection tests |
+| G2 | `g2-shell-chrome` | G1 | Toolbar, Sidebar, FilterBar + DSL, Footer, document tabs, palette, menus, toasts, clipboard, context-menu framework | live `curl -x` traffic; filter < 50 ms; menus copy the right text |
+| G3 | `g3-inspector` | G2 | DetailPane, URL bar, Header/Query/Raw/TLS/Timing, failure UX, rule badges, flow row menu | an HTTPS flow inspected end to end; failure fixes work |
+| G4 | `g4-text-viewers` | G3 | BodyViewer registry and the text-family viewers, CodeView/CodeEditor wrappers, hex, large bodies, body search | every text zoo fixture renders in both themes |
+| G5 | `g5-media-viewers` | G4 | image, SVG, font, PDF, video, audio, HTML preview, gRPC/Decoded | every media and binary zoo fixture renders; grpcurl decodes |
+| G6 | `g6-streams` | G3 | WebSocket panel and composer, SSE panel | ws-client and SSE testkit sessions |
+| G7 | `g7-rules` | G3 | Rules window, matcher and actions, dry run, presets, throttle and noise toggles | rules matrix scenarios driven from the UI |
+| G8 | `g8-editing` | G4 | JsonEditor, KvEditor, Breakpoint editor, Compose, Edit & Replay, Replay | edit a paused request and response; Compose sends |
+| G9 | `g9-rewrite` | G7, G8 | Rewrite dialog with diff → actions, preview | edit a captured flow, save, replay: only changed paths are patched |
+| G10 | `g10-scripts` | G7, G8 | Scripts window, completions, test, console, script views, templates moved | base64 JSON view on live and saved flows |
+| G11 | `g11-workflow` | G4 | bulk actions, labels, comments, header columns, Compare, Repeat, copy as code | 1,000-iteration repeat counts; Compare diff |
+| G12 | `g12-settings` | G3 | Settings window, all 11 pages, mocking and OpenAPI entry points | each page round-trips through the engine |
+| G13 | `g13-macos-integration` | G2 | cert wizard and menu, system proxy, device setup, LAN prompt, Intercept, MCP indicator | Safari decrypts; Simulator install; `kill -9` restores the proxy |
+| G14 | `g14-parity-polish` | G5, G6, G9–G13 | ledger audit, keyboard, accessibility, both themes, 1-hour soak, perf budgets | ledger 100% (or each gap signed off); soak RSS stable |
+| G15 | `g15-release-updater` | G0 | Rust bundling xtask, Rust updater, signing compatible with the Tauri key | a Tauri 0.6.x install updates into a native debug bundle |
+| G16 | `g16-cutover` | G14, G15 | delete Tauri and the UI, rename the binary, switch the release workflow, docs | release dry run produces the universal DMG and `latest.json` |
+
+**Parallel waves** (the orchestrator starts a phase once everything it depends on is merged):
+- Wave 1: G0
+- Wave 2: G1
+- Wave 3: G2 and G15
+- Wave 4: G3
+- Wave 5: G4, G6, G7, G12 and G13
+- Wave 6: G5, G8 and G11
+- Wave 7: G9 and G10
+- Wave 8: G14
+- Wave 9: G16
+
+**Conflict hotspots:**
+- the module list in `apps/native/src/features/mod.rs`, `docs/native-parity.md` and `docs/PLAN.md`.
+- Within a wave, merge one PR at a time. Each later PR rebases on `main` before it asks for review.
+
+#### G0 — Foundation and spikes (`g0-native-foundation`)
+1. **Toolchain.** If gpui-kit 0.10 needs a newer Rust than `rust-toolchain.toml`, first open a separate toolchain-bump PR. This follows the R0 rule. Then add `deny.toml` licence allowances for the new dependency tree.
+2. **`pm-app`.** Move `run_guardian`, `run_mcp_stdio`, `start_engine`, `install_exit_guards`, the env parsing and the MCP spawn out of `apps/desktop/src-tauri/src/lib.rs`. The Tauri app then calls `pm-app` too, with no behaviour change.
+3. **`apps/native`.**
+   - `main` dispatches binary modes before any gpui init.
+   - It builds the tokio runtime, starts the engine and runs the bridge (sinks → channels → entities).
+   - The main window is 1440×900 (minimum 960×600), with a transparent title bar and traffic lights at (16, 22).
+   - It has the native menu bar skeleton.
+   - Quit runs `restore_system_proxy` and then `engine.shutdown()`.
+   - Single instance: a second launch focuses the running copy. This is new; today a second copy starts its own engine.
+4. **`pm-theme`.** Parse tokens from CSS, map them onto gpui-kit, follow the System/Light/Dark appearance, and port the contrast test.
+5. **Vibrancy.** Behind a `pm-platform` trait.
+6. **Skeletons.** `pm-view` and `pm-widgets` as empty crates with CI wiring.
+7. **Dev harness.** The dev remote with `theme`, `screenshot` and `click`.
+8. **CI.** Native jobs: fmt, clippy and nextest on macOS and Linux. Linux needs the wgpu, xkbcommon and wayland dev packages.
+9. **Spikes.** Write each up in `docs/PLAN.md`:
+   - (a) the gpui-kit editor, read-only, on a 20 MB JSON body: open, scroll, search, selection and copy. If it falls short, use a custom virtualised CodeView.
+   - (b) PDFKit and AVKit child NSViews: clipping, scrolling, and z-order under popovers and context menus. If that fails, use `gpui-pdf` (hayro) for PDF, and metadata plus "Open with default app" for media.
+   - (c) headless Linux rendering for snapshot CI.
+   - (d) whether VoiceOver reads gpui-kit's AccessKit roles.
+   - (e) whether `uniform_list` with RowCache meets 100k rows at 60 fps (a quick prototype only; G1 builds it properly).
+10. **Docs.**
+    - A "Native (gpui) track" section in `docs/PLAN.md`: this plan, the G table and the spike results.
+    - A CLAUDE.md section with the native commands and rules.
+    - `docs/native-parity.md` built from the current UI.
+- **Done:** `cargo run -p proxymate-native` opens a themed window with vibrancy that follows the appearance setting. `proxymate-native --sysproxy-guardian` and `mcp-stdio` behave like the Tauri binary. CI is green.
+
+#### G1 — Flow table (`g1-flow-table`)
+- **AppShell:** a resizable sidebar (220 px default, 160–360) next to the main column. The main column holds the table (58%) over an inspector placeholder.
+- **FlowGrid** in `pm-widgets`:
+  - `uniform_list` with 22 px rows, memoised rows, and the 14 columns from `FlowTable/columns.ts` plus up to 8 header columns;
+  - pills, the coloured URL, the GraphQL/Replay/AI badges and app icons (`Engine::app_icon` bytes, cached as gpui images);
+  - sort, resize (double-click resets), drag to reorder, hide and show through the header menu, and Reset columns.
+- **Selection** by flow id, or a whole view with exceptions (port `lib/selection.ts`), with click, ⌘-click and ⇧-click ranges. Port the keys in `keys.ts` with their tests: arrows, PgUp/PgDn, Home/End, ⇧-extend, Enter, Escape, ⌘A, ⌫, and the column-resize keys.
+- **Auto Select;** empty and error states.
+- **Data:** `create_view_in`, `set_filter`, `set_sort`, `subscribe` deltas (structural resets the cache; changed ids invalidate) and `get_rows` in steps of 512 or fewer.
+- **Prefs:** `ui-prefs.json`.
+- **Verify:** `PROXYMATE_SYNTH_FLOWS=100000 PROXYMATE_DEV_PERF_PROBE=1` meets the scroll and filter budgets, and the gpui tests for keys and selection pass.
+
+#### G2 — Shell chrome (`g2-shell-chrome`)
+- **Toolbar:**
+  - Record (⌘E), Compose (stub until G8) and Clear.
+  - The "Listening on…" pill and its copy menu: address, curl example, SOCKS5, reverse proxies, terminal env, error.
+  - Placeholders that later phases fill.
+- **Sidebar:** Favorites placeholder, Pinned, Saved, All, Apps with icons and counts, the Domains tree, row menus, and a ⌘L filter box. It uses `subscribe_sidebar` and `set_sidebar_store`.
+- **FilterBar:**
+  - protocol and content chips;
+  - the DSL search box with autocomplete (port `dsl.ts`: keys, aliases, value suggestions, known hosts and apps) and a 120 ms debounce;
+  - the deep-search percentage.
+- **Footer:** Clear, Filter, Auto Select, row and selection counts, deep-search progress, save/export status with its menu, "Not recording bodies", "N not recorded", filter timing and throughput (`subscribe_storage`).
+- **Document tabs:** Open… (sessions, HAR, Charles), close, Save Session… and Export HAR… with `SaveProgress`, and each tab's menu.
+- **Frameworks:**
+  - the command registry (from `lib/commands.ts`) with the ⌘K palette and shortcuts;
+  - the native File menu (⌘N, ⌘O, ⇧⌘O, ⌘S, ⇧⌘E, ⇧⌘J; About; Check for Updates…);
+  - toasts and the clipboard helper ("Copied …");
+  - context-menu helpers (CopyMenu, list menus with a row key);
+  - `pm-view::copy_formats` with its tests.
+
+#### G3 — Inspector (`g3-inspector`)
+- **DetailPane:** URL bar (pills, HTTP version, duration, size, Rewrite… and Bypass SSL buttons, copy menu), notes bar, OpenAPI operation line, rule badges with their menu, and the pinned banner.
+- **Panes:**
+  - Request: Header, Query, Body placeholder and Raw.
+  - Response: Header (with trailers), Body, Raw, TLS (connection table and chain cards) and Timing (waterfall and route).
+  - The KvTable menus: name, value, line, token, cookie, all as text or JSON, and "Filter flows with this header".
+- **Failure banner:** `explain_failure` (ported from `errors.ts` and keyed on `error_kind`), with its fix actions.
+- **Focus:** Enter and Escape move focus between the table and the inspector.
+- **Flow row menu:** every item from §5 of the inventory that needs no later dialog. Items for later phases are registered by those phases.
+
+#### G4 — Text viewers (`g4-text-viewers`)
+- **BodyViewer pane:** the `BY_KIND` registry (port `registry.ts` and its test); a viewer dropdown that remembers the choice per kind; Copy and Save…; decode notes; the 2 MB "Highlight anyway" and 20 MB "Load all" limits; and the loading, streaming and no-body states.
+- **Viewers:**
+  - JSON pretty: lossless re-indent, no value parse.
+  - JSON Tree: virtualised, JSONPath and pointer filter, matches, and the copy and expand menus.
+  - XML, HTML source, JS and CSS with Beautify (dprint/malva on the background executor), Text with Wrap, Form, Multipart (with sub-viewers), GraphQL, Raw HTTP (a custom highlighter), and Hex (with its menus).
+- **Body search:** ⌘F in the viewer, plus highlighting of the filter's `body:` terms.
+- **Shared widgets:** `CodeView` and `CodeEditor` over the gpui-kit editor (read-only and editable), with Escape kept inside the editor.
+- **Dev:** `PROXYMATE_DEV_ZOO` and its snapshots.
+
+#### G5 — Media and decoded viewers (`g5-media-viewers`)
+- **Image:** checkerboard background, fit, actual size, 10–1600% zoom, dimensions, format, the animated flag and EXIF orientation; Save; copy as PNG.
+  - AVIF works only if the `image` crate's AVIF decode is acceptable. Otherwise AVIF gets metadata and "Open externally", logged as a deviation.
+- **SVG** through resvg, so scripts never run.
+- **Font:** register the bytes with gpui, editable sample text at 5 sizes, and a glyph table (`skrifa`).
+- **PDF, video and audio:** use the G0 spike result.
+- **HTML Preview:** remote URLs stripped (port `htmlPreview.ts`), rendered with gpui-kit's HTML subset renderer, with no loads of any kind, plus "Open in browser" for the stripped copy.
+- **gRPC and Decoded:** `Engine::decode_body_in`, the message list, the status pill, trailers, "Decode as…" mappings, and a 500 ms refresh while streaming.
+
+#### G6 — Streams (`g6-streams`)
+- **WebSocket panel:** a virtualised message list, the direction filter, search, and the Injected, Edited and Dropped flags.
+  - Row menu: payload as text, Base64 or hex; Resend.
+  - The composer (⌘↩) and Close.
+  - A Forwarded/Original toggle for edited messages.
+- **SSE panel:** event list, search, and the event's fields and copy items.
+- **Engine calls:** `websocket_messages_in`, `websocket_payload_in`, `websocket_original_in`, `ws_send`, `ws_close`, `sse_events_in`.
+
+#### G7 — Rules (`g7-rules`)
+- **Rules window,** a separate native window: drag to reorder, enable, origin and AI badges, and "Remove all agent rules".
+  - The row menu: Open, Enable/Disable, Edit visually…, Duplicate, Move to top/bottom, copy items, Delete.
+  - The breakpoint timeout.
+- **Rule form:**
+  - MatcherBuilder: methods, scheme, port, host and path patterns, query and header rows, app, and the response matcher.
+  - ActionListEditor: all 23 action types.
+  - Live validation (200 ms) and the "Test against selected flow" dry run.
+- **Presets** in the flow menu: Map Local… and Breakpoint… (`draft_rule_in`).
+- **Toolbar:** the Throttle presets (the built-in throttle rule), the No Caching and Block Cookies toggles, and the Breakpoints badge (opens G8's editor).
+- The rule badges in the inspector gain the "Open rule" and "Disable rule" actions.
+
+#### G8 — Editing (`g8-editing`)
+- **JsonEditor:** port `lib/json/doc.ts` and its tests. Inline edit, rename, change type, add, duplicate, remove, reset, undo/redo, and all of its keys.
+- **KvEditor:** changed-row tints, removed rows with "Put back", and read-only framing headers.
+- **Breakpoint Editor** (window):
+  - The queue with countdowns and the queue menu.
+  - Editing an HTTP head and body (code or tree), with Respond…, Abort and Execute.
+  - WebSocket messages as Text, Tree or Hex, with Send or Drop.
+  - Engine calls: `subscribe_breakpoints`, `breakpoint_body`, `resolve_breakpoint`.
+- **Compose / Edit & Replay:** method, URL, headers, a body with a content-type picker, the binary note, Apply rules, Send with ⌘↩, and selecting the new flow.
+- **Replay:** ⌘R and Replay in Order.
+
+#### G9 — Rewrite (`g9-rewrite`)
+- Port `lib/rewrite/{diff,session,lines,matcher}.ts` with their tables.
+- **Rewrite dialog:**
+  - matcher chips (and Advanced…, which opens G7's builder);
+  - the Request and Response sides with their tabs;
+  - JSON tree, form and find/replace body editors;
+  - a debounced Preview dry run (`test_rule_in`) with header and line diffs;
+  - the Actions panel, problems, and Save or Create.
+
+#### G10 — Scripts (`g10-scripts`)
+- **Templates.** Move the template files from `apps/desktop/ui/src/lib/script-templates/` to `crates/pm-core/src/scripts/templates/`. Update `scripts::tests::templates_run` and the Tauri UI's raw imports.
+- **Completions.** A Rust port of `GLOBAL_COMPLETIONS`, with a Rust test that checks it against `proxymate.d.ts` and `api_surface.txt`.
+- **Scripts window:**
+  - the list grouped by kind, templates, Import and Export (`.js` with the header), and the row menu;
+  - the editor with completions and snippets;
+  - the "Where it runs" and "Used by rules" tabs, Test, and Console (`subscribe_script_console`);
+  - Copy type definitions.
+- **Inspector:** the BodyViewer "Scripts" group (`run_view_scripts`). The flow menu gets "Script ›", and the action editor gets its script picker.
+
+#### G11 — Workflow (`g11-workflow`)
+- **Bulk menu:** Copy URLs, Copy as cURL (up to 500), Replay in Order, Pin/Unpin, Label, Export HAR, Save Session and Delete.
+- **Labels** (6 colours); the Comment… dialog; Add header column….
+- **Compare:** headers with "ignore volatile", line diffs of the bodies up to 2 MB, and timing deltas; Mark for Compare.
+- **Repeat…** (⌥⌘R): iterations, concurrency, delay, rules, progress and statistics, with `RepeatProgress`.
+- **Copy as Code:** the 7 languages, through `code_snippet`.
+
+#### G12 — Settings (`g12-settings`)
+- A Settings window (⌘,) with eleven pages:
+  - Proxy, Network (one draft, with Revert and Save), SSL Proxying, Clients, Storage (limits, recording lists, auto-save), Protobuf, Mocking (library, OpenAPI, generated mocks), Appearance, Advanced and MCP (token, copies, clients, a 2 s audit poll).
+  - Updates, which calls G15's updater once G15 has merged and is a stub until then.
+- **Elsewhere:** "Mock from session…" and "Mock from a file…" in the palette and tab menus.
+- Fix today's gap: add the Protobuf and Updates pages to the palette.
+
+#### G13 — macOS integration (`g13-macos-integration`)
+- **Cert wizard** (keychain and handshake checks, Install & Trust, Remove, Firefox notes) and the Certificate menu (details, Regenerate with the option to remove the old trust).
+- **System proxy menu.**
+- **Device setup sheet:**
+  - Simulator: install to all booted devices, with a status poll.
+  - iPhone and Android: QR codes and steps.
+  - Emulator over adb.
+  - The LAN access bar.
+- **LAN prompts:** the "Allow?" prompt with a countdown, and the "N devices waiting" toolbar button.
+- **Intercept menu** (Terminal, iTerm and browsers) and the MCP indicator.
+- **Testing rule:** real keychain, system-proxy, simctl and adb actions need the user's OK, and tests use fakes.
+
+#### G14 — Parity, polish, accessibility, performance (`g14-parity-polish`)
+- Audit every row of `docs/native-parity.md`, checking each against the Tauri app with dev-remote screenshots side by side. Fix gaps, or list them as signed-off deviations.
+- Keyboard: every action is reachable by keyboard, with visible focus rings.
+- Accessibility: AccessKit roles and names where gpui-kit supports them, plus a VoiceOver checklist.
+- Check both themes on every surface.
+- Run the 1-hour soak (`proxymate-cli bench --proxy … --pid <native pid>`) and confirm RSS is stable.
+- Measure the perf budgets and add them to CI where they can run headless.
+- Compare startup time and binary size with the Tauri app.
+
+#### G15 — Release tooling and updater (`g15-release-updater`)
+- **`xtask bundle-macos`, in Rust:**
+  - a universal binary with `lipo`, `Info.plist` (`dev.proxymate.desktop`, minimum macOS 13.3, Developer Tools category) and the icons;
+  - an empty `Entitlements.plist` and the hardened runtime, ad-hoc `codesign`, and a DMG from `hdiutil`;
+  - the `.app.tar.gz` with its `.sig`, signed by the `minisign` crate from `TAURI_SIGNING_PRIVATE_KEY` (same key and format), and the `updater-darwin.json` fragment;
+  - the same unsigned and runtime-flag checks as `macos.sh`, with the Developer ID and notarisation paths still dormant.
+- **Updater, in Rust (`apps/native/src/updater.rs`):**
+  - reqwest with no proxy and a 30 s timeout; read `latest.json` (404 means no update); verify with `minisign-verify` against the existing public key;
+  - extract next to the bundle and swap it atomically;
+  - relaunch through the normal quit path, so the system proxy is restored first;
+  - a check 5 s after launch, honouring `UpdateSettings`; a single-flight check; "Install and Restart"/"Later" prompts;
+  - debug-only `PROXYMATE_UPDATE_TEST`.
+- **Verify:** a Tauri 0.6.x install, pointed at a local test feed signed with a throwaway key, upgrades into a native debug bundle, and a bad signature is refused. Record the recipe in RELEASING.md.
+
+#### G16 — Cutover (`g16-cutover`)
+- **Removals:** `apps/desktop` (src-tauri and ui), the npm workspace and its packages, the Playwright and npm-audit jobs, the bindings drift check, the `specta`/`tauri*`/`window-vibrancy` dependencies and the specta derives in pm-model.
+- **Moves and renames:**
+  - `tokens.css` moves to `crates/pm-theme`.
+  - The binary is renamed `proxymate`, keeping the guardian and `mcp-stdio` modes and the `open -b` launch.
+  - `IpcError`'s Tauri wording is cleaned up.
+- **Release:** `release.yml` runs the xtask. `install-notes-macos.md`, RELEASING.md, README, CLAUDE.md and PLAN.md are updated. The version bump touches the workspace `Cargo.toml` and the bundle `Info.plist`.
+- **Verify:** a release dry run produces the universal DMG, the `.app.tar.gz` and `.sig`, and `latest.json`. The fresh install and the update-from-0.6.x paths both work. The `cargo deny` and `ci` checks are green.
+
+### Orchestrator kickoff (per phase)
+> Implement phase GN of the Native (gpui) track in docs/PLAN.md in this repo. Branch from the latest main as `gN-<slug>`. Follow CLAUDE.md, including its native rules. Meet the phase's scope and Done criteria, and tick its rows in docs/native-parity.md with evidence. Run the native and existing CI checks locally. Open a PR titled `GN: <Title>` that covers what shipped, verification (commands and dev-remote screenshots), deviations and follow-ups. Do not merge it, and do not start another phase.
+
+**Orchestrator rules:**
+- Start a phase only when every phase it depends on has merged.
+- Run each wave in parallel worktrees.
+- Merge PRs one at a time, then rebase the others.
+- If a G0 spike's fallback changes a later phase's scope, G0 updates this plan before wave 2 starts.
+- A phase that finds its scope is too large splits into `GNa` and `GNb` PRs, and records that in PLAN.md.
+
+### Critical files
+- **Read:** `docs/PLAN.md`, `CLAUDE.md`, `apps/desktop/src-tauri/src/{lib.rs,menu.rs,updater.rs,body_scheme.rs,window.rs,commands/*}`, `apps/desktop/ui/src/{lib/commands.ts,lib/backend.ts,lib/dsl.ts,lib/copyFormats.ts,lib/rowCache.ts,hooks/useFlowView.ts,components/**,styles/tokens.css}`, `crates/pm-core/src/engine.rs`, `crates/pm-core/src/notify.rs`, `scripts/release/macos.sh`, `.github/workflows/{ci,release}.yml`, `docs/RELEASING.md`.
+- **Created:** `crates/{pm-app,pm-theme,pm-view,pm-widgets}`, `apps/native`, `xtask`, `docs/native-parity.md`.
+
+### Verification (end to end, at G16)
+1. `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D warnings` and `cargo nextest run --workspace` are green on macOS and Linux.
+2. Run `cargo run -p pm-testkit --bin upstream -- --tls` and `--zoo`, plus the ws-client, SSE and grpcurl recipes from CLAUDE.md, through the native app. Every flow, viewer and stream panel renders correctly in both themes.
+3. Drive one scenario from each of the old Playwright specs through the dev remote, with screenshots attached to the G14 PR: rules, rewrite, scripts, replay, websocket, mocking, capture, network, devices, mcp, menus and workflow.
+4. `PROXYMATE_SYNTH_FLOWS=100000 PROXYMATE_DEV_PERF_PROBE=1`: the scroll and filter budgets hold. The 1-hour soak shows stable RSS.
+5. `claude mcp add` against the native app's MCP endpoint works; read-only mode hides the write tools.
+6. Run the system proxy with `kill -9`: the guardian restores the proxy within about 0.3 s.
+7. A Tauri 0.6.x install updates into the native build through the updater, and a tampered signature is refused.
+
+### G0: as built
+- **Toolchain.** gpui-kit `=0.10.0` builds on the pinned Rust 1.99.1: the highest `rust-version` in its 800-crate tree is 1.92, so no toolchain PR was needed.
+- **Lockfile.** gpui-kit's `test-support` feature (the dev harness, the tests) makes Cargo lock its optional `gpui-fast` tree too, and that pins `wgpu =30.0.1`; the lock holds wgpu at 30.0.1 to resolve both. Nothing of `gpui-fast` is built. A gpui-kit bump re-checks this.
+- **Crates.** `pm-app` (start-up glue, now used by both apps), `pm-theme` (tokens from `tokens.css` at build time, the contrast test ported, the gpui-kit mapping behind its `kit` feature), `pm-widgets` (starts with `Pill`), `pm-view` (empty; nothing depends on it until its first port) and `apps/native` (a library plus the `proxymate-native` binary, so `tests/` can drive views without an engine).
+- **Window.** 1440×900, at least 960×600, transparent title bar, sidebar vibrancy (`pm_platform::window`, an `NSVisualEffectView` behind gpui's Metal view). gpui-kit's root paints the theme background under everything, so the main window's root is styled transparent on macOS.
+- **Traffic lights.** The Tauri app's `trafficLightPosition` is (16, 22) in tao's terms, where `y` sets the button row's centre line (about 22–24 px from the top). gpui places the buttons' top edge at `y`, so the same on-screen position is (16, 17), measured from captures of both apps.
+- **Appearance.** System, Light, Dark in `<data dir>/ui-prefs.json`; a forced mode sets `NSApp.appearance` (`cx.set_window_appearance`), so chrome and vibrancy follow it. View › Appearance holds the setting until Settings lands (G12).
+- **Single instance.** A Unix socket, `<data dir>/native-instance.sock` (a short name in the temp dir when that path is too long for a socket). A second launch asks the first to come forward and exits; a socket nobody answers is a crash's and is taken over. Windows: every launch is the primary until M12.
+- **Quit.** ⌘Q, the menu and closing the last window run `pm_app::quit` (restore the system proxy, then `Engine::shutdown`) in gpui's quit callback; signals and panics go through `pm_app::install_exit_guards` as in the Tauri app.
+- **Data dir.** The Tauri app's. `PROXYMATE_DATA_DIR` moves it (for a dev instance beside the installed app); `pm_app::data_dir()`, and so `mcp-stdio`, honours it, as `proxymate-cli mcp-stdio` already did.
+- **Dev remote.** `PROXYMATE_DEV_REMOTE=1` with `--features dev-harness`; `http://127.0.0.1:1430/__pm_remote` (`PROXYMATE_DEV_REMOTE_PORT`). Each POST answers inline when it has run. Verbs: `theme`, `screenshot` (the window activated, then `screencapture -l`, so vibrancy shows; it falls back to gpui's own frame, `"offscreen": true`), `click` (gpui-kit's hit-tested click by element id).
+- **CI.** `native (macos-latest | ubuntu-latest)`: clippy and nextest for the native crates with all features, then `tests/render.rs`, which renders the shell offscreen in both themes and checks pane pixels against the tokens (Metal on macOS, WGPU on Mesa's lavapipe on Linux), uploading the PNGs. The other Rust jobs exclude `proxymate-native` and `pm-widgets`. `deny.toml` ignores seven unmaintained (not vulnerable) crates inside gpui-kit's tree; its licences needed no new entry.
+
+### G0 spike results
+Measured on an Apple Silicon MacBook Pro (macOS 27) with `cargo run -p proxymate-native --features spikes --example spike_bench` (optimised dependencies) and gpui's real offscreen renderer and text system; `examples/spike_native_view.rs` for (b).
+
+- **(a) gpui-kit editor, read-only, 20 MB JSON (781,778 lines, JSON highlighting on).** It works: opening, jumping to either end, search (⌘F, 134 ms to the first match), select all and copy (all 20,971,614 bytes reached the clipboard, 30 ms). But `set_value` of 20 MB takes 2.8 s on the foreground thread, and each page-down frame takes 16.5–18.8 ms (p50 16.8 ms), at or over the 60 fps budget. **Decision:** the gpui-kit editor serves bodies up to G4's 2 MB "Highlight anyway" limit (and every editable one); above it, and for "Load all" up to 20 MB, G4 builds a custom virtualised `CodeView` (a line index built on the background executor, `uniform_list` over the lines, highlighting only the visible window). Search and copy work on the rope/bytes, not the widget.
+- **(b) PDFKit and AVKit as child NSViews.** A `PDFView` added to the gpui window's content view renders, scrolls and auto-scales, and clips correctly inside a layer-backed container with `masksToBounds` (a 480×400 view in a 300×200 clip shows exactly the clip). **Z-order fails**: everything gpui draws, popovers included, is under the native view (it sits above gpui's Metal view). Context menus are unaffected when they are gpui-kit `NativeMenu`s (real NSMenus). AVKit's `AVPlayerView` is an NSView too and behaves the same. **Decision:** keep PDFKit and AVKit (the fallback is not needed) with an overlay guard: G5's native-view host tracks its element's bounds each frame, clips through a container view, and hides the native view (showing a bitmap snapshot in its place) while a gpui-drawn overlay (dialog, sheet, popover, toast, dropdown) is open in that window. Body-viewer menus use `NativeMenu`.
+- **(c) Headless Linux rendering.** gpui's `HeadlessAppContext` with `current_headless_renderer` renders real frames offscreen, and `tests/render.rs` checks the shell's pixels in both themes. On macOS (Metal) it passes locally; on Linux it runs in CI on WGPU with Mesa's lavapipe (`mesa-vulkan-drivers`). **Decision:** pixel snapshots per viewer and per dialog, in both themes, as Playwright has today, run in the `native` jobs; the plan's macOS-artifacts fallback is not needed if the Linux job stays green.
+- **(d) VoiceOver and AccessKit.** gpui activates its AccessKit adapter when an assistive client first asks (as VoiceOver does), then sends the tree on the next frame: gpui-kit `Button`s then appear to the macOS accessibility API as `AXButton`s with their labels ("System", "Light", "Dark"), and an `AXPress` from outside clicked one (the appearance changed). Plain `div`s (text, pills, the sidebar) expose nothing. Checked through the AX API VoiceOver uses, not with VoiceOver itself. **Decision:** use gpui-kit controls for anything interactive; custom widgets (FlowGrid rows, Pill, KvTable, JSON tree) set roles and labels themselves, which G14 audits.
+- **(e) `uniform_list` with a RowCache-shaped cache, 100,000 rows of 22 px** (number, method pill, URL, status pill, size, time; 128-row pages, eviction 16 pages out). Scrolling a page per frame: p50 5.9 ms, p99 8.5 ms of CPU per frame (one outlier of 20.6 ms in 300); with the GPU render and readback, p50 6.1 ms, p99 13.2 ms. A row per frame: p50 1.1 ms. **Decision:** as planned; G1 builds FlowGrid on `uniform_list`.
+
+### Plan changes from G0
+- **G4** adds the custom virtualised `CodeView` for bodies over 2 MB (spike a), and runs `set_value` for large editable bodies off the first frame (a placeholder until the text is in).
+- **G5** builds the native-view host with the overlay guard (spike b) in `pm-platform` (`window.rs` grows a `NativeChild` trait), and uses `NativeMenu` for viewer menus.
+- **G1–G13** give every custom interactive element an accessibility role and label as they build it (spike d); G14 audits it.
+- **Snapshots** (spike c): each phase that adds a viewer or dialog adds a case to `tests/render.rs`, or a sibling test, with its pixels checked in both themes.
+
 ## Critical files (to be created)
 - `crates/pm-model/src/lib.rs`: the shared types that drive the TS bindings and the MCP schemas.
 - `crates/pm-core/src/proxy/mitm.rs`: CONNECT, the ALPN-mirrored handshake, passthrough and pinning detection.

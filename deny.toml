@@ -4,8 +4,8 @@
 # its reason.
 
 [graph]
-# Every target, so Windows- and Linux-only crates (Tauri's, the updater's zip)
-# are checked from a Mac too.
+# Every target, so Windows- and Linux-only crates (Tauri's, the updater's zip,
+# gpui's Linux backends) are checked from a Mac too.
 all-features = true
 
 [advisories]
@@ -24,11 +24,24 @@ ignore = [
   # use it for timestamps in MCP model types. Goes away when rmcp moves to
   # jiff or time.
   { id = "RUSTSEC-2026-0543", reason = "unmaintained, no vulnerability; only via rmcp's model types" },
+  # The native app (G0): gpui-kit 0.10's tree. Each is unmaintained, not
+  # vulnerable, and reached only through gpui-kit, which is pinned exactly
+  # and bumped in its own PRs; revisit these on each "Bump gpui-kit".
+  { id = "RUSTSEC-2024-0384", reason = "instant: unmaintained, no vulnerability; via gpui-base" },
+  { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile: unmaintained, no vulnerability; via gpui-kit-assets' reqwest fork" },
+  { id = "RUSTSEC-2026-0192", reason = "ttf-parser: unmaintained, no vulnerability; via gpui's font stack (fontdb, resvg)" },
+  { id = "RUSTSEC-2026-0206", reason = "rustybuzz: unmaintained, no vulnerability; via gpui's font stack (cosmic-text, resvg)" },
+  { id = "RUSTSEC-2026-0370", reason = "zvariant: folded into zbus, no vulnerability; via gpui's Linux AT-SPI (accesskit_unix)" },
+  { id = "RUSTSEC-2026-0371", reason = "zbus_names: folded into zbus, no vulnerability; via gpui's Linux AT-SPI (accesskit_unix)" },
+  { id = "RUSTSEC-2026-0372", reason = "zvariant_derive: folded into zbus, no vulnerability; via gpui's Linux AT-SPI (accesskit_unix)" },
 ]
 
 [licenses]
 # The app ships closed (UNLICENSED), so copyleft beyond MPL's file-level terms
 # is not allowed. MPL-2.0 (Tauri's Linux HTML stack, unmodified) is fine.
+# G0 checked gpui-kit 0.10's tree (about 800 crates): every licence it uses
+# is below or is an OR with one below (BSL-1.0, LGPL and GPL only appear as
+# alternatives), so the native app needed no new entry.
 allow = [
   "0BSD",
   "Apache-2.0",

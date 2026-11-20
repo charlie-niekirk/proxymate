@@ -13,6 +13,7 @@
 //! - `fs`: private files (the CA key) (M2); the app data dir (M7)
 //! - `secrets`: upstream proxy and PKCS#12 passwords (M18)
 //! - `launcher`: terminals and browsers started set up for the proxy (M21)
+//! - `window`: the native app's sidebar vibrancy and window captures (G0)
 
 pub mod adb;
 pub mod command;
@@ -25,6 +26,7 @@ pub mod secrets;
 pub mod simctl;
 pub mod sysproxy;
 pub mod trust;
+pub mod window;
 
 #[cfg(target_os = "macos")]
 mod macos;

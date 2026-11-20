@@ -1,0 +1,73 @@
+[package]
+name = "proxymate-native"
+description = "Proxymate's native desktop app: gpui and gpui-kit over the pm-core Engine (the Native track, G0–G16)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "proxymate_native"
+path = "src/lib.rs"
+
+[[bin]]
+name = "proxymate-native"
+path = "src/main.rs"
+
+# The shell rendered offscreen in both themes (Metal on macOS, WGPU on
+# Linux, lavapipe in CI): pixels checked against the tokens, PNGs written
+# to `target/native-snapshots`. G0 spike (c). Its own harness: gpui's
+# renderer wants the main thread.
+# Not in `cargo test`/nextest (its harness lists no tests): run it with
+# `cargo test -p proxymate-native --test render`.
+[[test]]
+name = "render"
+path = "tests/render.rs"
+test = false
+harness = false
+
+[features]
+# The dev remote (PROXYMATE_DEV_REMOTE=1) and window captures. It turns on
+# gpui-kit's test support for element lookup (`click`) and offscreen frames.
+dev-harness = ["gpui-kit/test-support"]
+# The G0 spike harness (`examples/spike_bench.rs`), with the tree-sitter
+# grammars the body viewers will use (G4).
+spikes = ["gpui-kit/test-support", "gpui-kit/tree-sitter-languages"]
+
+[[example]]
+name = "spike_bench"
+required-features = ["spikes"]
+
+[[example]]
+name = "spike_native_view"
+required-features = ["spikes"]
+
+[dependencies]
+async-channel = "2"
+gpui-kit.workspace = true
+pm-app.workspace = true
+pm-core.workspace = true
+pm-model.workspace = true
+pm-platform.workspace = true
+pm-theme = { workspace = true, features = ["kit"] }
+pm-widgets.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+gpui-kit = { workspace = true, features = ["test-support"] }
+# The type of gpui's captures (already in its tree).
+image = { version = "0.25", default-features = false }
+
+# G0 spike (b) only: PDFKit in a child NSView (production code for it goes
+# in pm-platform, G5).
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSResponder", "NSView", "NSWindow"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSURL", "NSGeometry"] }
+raw-window-handle = "0.6"
+objc2-pdf-kit = { version = "0.3", default-features = false, features = ["std", "PDFDocument", "PDFView", "objc2-app-kit"] }
+
+[lints]
+workspace = true

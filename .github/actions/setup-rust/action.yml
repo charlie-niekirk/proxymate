@@ -1,10 +1,13 @@
 name: Set up Rust
 description: >-
   Installs the toolchain pinned in rust-toolchain.toml, optionally the Tauri
-  system libraries (Linux), and restores the cargo cache.
+  or gpui system libraries (Linux), and restores the cargo cache.
 inputs:
   tauri-deps:
     description: Install the Tauri system libraries on Linux (anything that builds proxymate-desktop).
+    default: "false"
+  native-deps:
+    description: Install gpui's system libraries on Linux (the native app), and Mesa's lavapipe for headless rendering.
     default: "false"
   cache:
     description: Restore and save the cargo cache.
@@ -43,6 +46,17 @@ runs:
         "${apt[@]}" autoclean
         sudo chown -R "$(id -u):$(id -g)" ~/apt-archives
         du -sh ~/apt-archives
+    - name: Install gpui system dependencies
+      if: runner.os == 'Linux' && inputs.native-deps == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        sudo apt-get -o Acquire::Retries=3 update
+        # xkbcommon, wayland and fontconfig/freetype for gpui's Linux
+        # backends; the Vulkan loader and Mesa's lavapipe (software Vulkan)
+        # so wgpu can render offscreen with no GPU.
+        sudo apt-get -o Acquire::Retries=3 install -y libxkbcommon-dev libxkbcommon-x11-dev \
+          libwayland-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libvulkan1 mesa-vulkan-drivers
     # With no argument, rustup installs the toolchain rust-toolchain.toml names,
     # with its components.
     - name: Rust toolchain
