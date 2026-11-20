@@ -1,0 +1,17 @@
+[package]
+name = "pm-app"
+description = "Host glue shared by the Tauri and native apps: binary modes, engine start-up, exit guards, MCP, single instance"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+pm-core.workspace = true
+pm-mcp.workspace = true
+pm-model.workspace = true
+pm-platform.workspace = true
+tokio = { workspace = true, features = ["signal"] }
+
+[lints]
+workspace = true

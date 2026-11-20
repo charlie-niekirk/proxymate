@@ -1,0 +1,50 @@
+[package]
+name = "proxymate-native"
+description = "Proxymate's native desktop app: gpui and gpui-kit over the pm-core Engine (the Native track, G0–G16)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "proxymate_native"
+path = "src/lib.rs"
+
+[[bin]]
+name = "proxymate-native"
+path = "src/main.rs"
+
+# The shell rendered offscreen in both themes (Metal on macOS, WGPU on
+# Linux, lavapipe in CI): pixels checked against the tokens, PNGs written
+# to `target/native-snapshots`. G0 spike (c). Its own harness: gpui's
+# renderer wants the main thread.
+[[test]]
+name = "render"
+path = "tests/render.rs"
+harness = false
+
+[features]
+# The dev remote (PROXYMATE_DEV_REMOTE=1) and window captures. It turns on
+# gpui-kit's test support for element lookup (`click`) and offscreen frames.
+dev-harness = ["gpui-kit/test-support"]
+
+[dependencies]
+async-channel = "2"
+gpui-kit.workspace = true
+pm-app.workspace = true
+pm-core.workspace = true
+pm-model.workspace = true
+pm-platform.workspace = true
+pm-theme = { workspace = true, features = ["kit"] }
+pm-widgets.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+gpui-kit = { workspace = true, features = ["test-support"] }
+# The type of gpui's captures (already in its tree).
+image = { version = "0.25", default-features = false }
+
+[lints]
+workspace = true

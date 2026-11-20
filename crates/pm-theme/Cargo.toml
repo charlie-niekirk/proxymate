@@ -1,0 +1,17 @@
+[package]
+name = "pm-theme"
+description = "Proxymate's colour tokens, read from tokens.css at build time, with the contrast rules and the gpui-kit theme mapping"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+# The mapping onto gpui-kit's theme and the active-tokens global (the native app).
+kit = ["dep:gpui-kit"]
+
+[dependencies]
+gpui-kit = { workspace = true, optional = true }
+
+[lints]
+workspace = true

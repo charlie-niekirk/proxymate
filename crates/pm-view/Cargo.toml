@@ -1,0 +1,12 @@
+[package]
+name = "pm-view"
+description = "UI logic of the native app with no gpui and no engine internals: DSL autocomplete, copy formats, selection, keys, JSON documents, rewrite diffs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true
