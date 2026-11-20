@@ -27,7 +27,7 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | WM-02 | Sidebar vibrancy behind the transparent window; every pane paints an opaque background except the sidebar | `src-tauri/src/window.rs`, `components/AppShell.tsx` | G0 | ☑ | G0: dev-remote screenshots in the G0 PR |
 | WM-03 | Default window 1440×900, minimum 960×600 | `src-tauri/tauri.conf.json` | G0 | ☑ | G0: dev-remote screenshots in the G0 PR |
 | WM-04 | Appearance System/Light/Dark: System follows macOS live, the choice persists, and the native window theme (vibrancy, traffic lights) follows it | `lib/theme.ts`, `store/prefs.ts` | G0 | ☑ | G0: View › Appearance and dev remote `theme`; prefs in ui-prefs.json |
-| WM-05 | Layout: resizable sidebar (default 220 px, 160–360) beside the main column (min 600 px); flow table over inspector, 58/42, each at least 120 px | `components/AppShell.tsx` | G1 | ☐ | |
+| WM-05 | Layout: resizable sidebar (default 220 px, 160–360) beside the main column (min 600 px); flow table over inspector, 58/42, each at least 120 px | `components/AppShell.tsx` | G1 | ☑ | G1: `shell/mod.rs` (sidebar 160–360, main column ≥ 600 px, table 58% over the inspector, each ≥ 120 px); `tests/render.rs` checks both panes; `docs/native/g1/table-dark.png` |
 | WM-06 | Proxymate › About Proxymate | `src-tauri/src/menu.rs` | G0 | ☑ | G0: apps/native/src/menus.rs |
 | WM-07 | Proxymate › Check for Updates… (Help › Check for Updates… off macOS) | `src-tauri/src/menu.rs` | G15 | ☐ | |
 | WM-08 | Proxymate › Services submenu | `src-tauri/src/menu.rs` | G0 | ☑ | G0: apps/native/src/menus.rs |
@@ -127,41 +127,41 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 
 | ID | Behaviour | Source | Phase | Status | Evidence |
 |---|---|---|---|---|---|
-| FT-01 | Virtualised grid at a fixed 22 px row height; 100k rows scroll at 60 fps | `components/FlowTable/FlowTable.tsx` | G1 | ☐ | |
-| FT-02 | Only the visible window plus read-ahead is fetched; rows not loaded yet show "…" | `components/FlowTable/FlowRow.tsx`, `lib/rowCache.ts` | G1 | ☐ | |
-| FT-03 | Column # (Number): row number, pin icon on pinned flows | `components/FlowTable/FlowRow.tsx` `RowCell` | G1 | ☐ | |
-| FT-04 | State column: coloured dot per state, pulsing while active, faded once completed | `components/FlowTable/cells.tsx` `StateDot` | G1 | ☐ | |
-| FT-05 | URL column: scheme, host, port, path and query coloured; Replay, Repeat or AI sent badge; GraphQL operation badge | `components/FlowTable/cells.tsx` `UrlText` | G1 | ☐ | |
-| FT-06 | Client column: app icon and name, or "—" | `components/FlowTable/FlowRow.tsx` `RowCell` | G1 | ☐ | |
-| FT-07 | Method column: coloured method pill | `components/FlowTable/cells.tsx` `MethodPill` | G1 | ☐ | |
-| FT-08 | Status column: pill coloured by class, outlined when failed, pulsing while active, gRPC status by name with "gRPC … · HTTP …" tooltip | `components/FlowTable/cells.tsx` `StatusPill` | G1 | ☐ | |
-| FT-09 | Time, Duration, Request size and Response size columns | `components/FlowTable/FlowRow.tsx` `RowCell` | G1 | ☐ | |
-| FT-10 | Proto column: short HTTP version, full version in the tooltip | `components/FlowTable/FlowRow.tsx` `RowCell` | G1 | ☐ | |
-| FT-11 | SSL column: lock (decrypted), open lock (passed through), shield alert (likely pinned), with tooltips | `components/FlowTable/cells.tsx` `SslIcon` | G1 | ☐ | |
-| FT-12 | Notes column: label dot, comment icon (comment in the tooltip), pencil when a rule changed the flow | `components/FlowTable/FlowRow.tsx` `RowCell` | G1 | ☐ | |
-| FT-13 | Tools column: "…" button on hover opens the row menu under it | `components/FlowTable/FlowRow.tsx` `openRowMenu` | G1 | ☐ | |
+| FT-01 | Virtualised grid at a fixed 22 px row height; 100k rows scroll at 60 fps | `components/FlowTable/FlowTable.tsx` | G1 | ☑ | G1: perf probe, 100k rows: 120 fps in all three scroll runs, p95 8.4 ms, no frame over 20 ms (PR) |
+| FT-02 | Only the visible window plus read-ahead is fetched; rows not loaded yet show "…" | `components/FlowTable/FlowRow.tsx`, `lib/rowCache.ts` | G1 | ☑ | G1: `pm-widgets` `flow_grid::tests::loads_only_the_visible_window_in_capped_fetches`, `pm-view` `row_cache::tests::*`; "…" placeholder row in `flow_grid/row.rs` |
+| FT-03 | Column # (Number): row number, pin icon on pinned flows | `components/FlowTable/FlowRow.tsx` `RowCell` | G1 | ☑ | G1: `flow_grid/row.rs` `cell`; pins in `docs/native/g1/offscreen-light.png` |
+| FT-04 | State column: coloured dot per state, pulsing while active, faded once completed | `components/FlowTable/cells.tsx` `StateDot` | G1 | ☑ | G1: `flow_grid/row.rs` (`pulse` while active, 40% once completed) |
+| FT-05 | URL column: scheme, host, port, path and query coloured; Replay, Repeat or AI sent badge; GraphQL operation badge | `components/FlowTable/cells.tsx` `UrlText` | G1 | ☑ | G1: `flow_grid::row::tests::a_row_is_formatted_once_with_its_url_runs`; badges in `docs/native/g1/offscreen-dark.png` |
+| FT-06 | Client column: app icon and name, or "—" | `components/FlowTable/FlowRow.tsx` `RowCell` | G1 | ☑ | G1: `flow_grid/icons.rs` (`Engine::app_icon` bytes, loaded off the foreground thread, cached as gpui images); synthetic clients have no icon |
+| FT-07 | Method column: coloured method pill | `components/FlowTable/cells.tsx` `MethodPill` | G1 | ☑ | G1: `flow_grid/row.rs` `method_colors`; `docs/native/g1/offscreen-light.png` |
+| FT-08 | Status column: pill coloured by class, outlined when failed, pulsing while active, gRPC status by name with "gRPC … · HTTP …" tooltip | `components/FlowTable/cells.tsx` `StatusPill` | G1 | ☑ | G1: `pm-view` `flow::tests::grpc_statuses_read_by_name`; outline, pulse and gRPC tooltip in `flow_grid/row.rs` |
+| FT-09 | Time, Duration, Request size and Response size columns | `components/FlowTable/FlowRow.tsx` `RowCell` | G1 | ☑ | G1: `pm-view` `flow::tests::sizes_and_durations_read_compactly`, `times_are_local_with_milliseconds` |
+| FT-10 | Proto column: short HTTP version, full version in the tooltip | `components/FlowTable/FlowRow.tsx` `RowCell` | G1 | ☑ | G1: `flow_grid/row.rs` (label and tooltip) |
+| FT-11 | SSL column: lock (decrypted), open lock (passed through), shield alert (likely pinned), with tooltips | `components/FlowTable/cells.tsx` `SslIcon` | G1 | ☑ | G1: `flow_grid/row.rs` `ssl_cell` with `pm-view` `flow::ssl_title` tooltips |
+| FT-12 | Notes column: label dot, comment icon (comment in the tooltip), pencil when a rule changed the flow | `components/FlowTable/FlowRow.tsx` `RowCell` | G1 | ☑ | G1: `flow_grid/row.rs` (label dot, comment icon with the comment as tooltip, pencil) |
+| FT-13 | Tools column: "…" button on hover opens the row menu under it | `components/FlowTable/FlowRow.tsx` `openRowMenu` | G1 | ☐ | G1 draws the column; its "…" opens the row menu, which G3 builds |
 | FT-14 | Header columns show the header's value or "—", with the value as tooltip | `components/FlowTable/FlowRow.tsx`, `components/FlowTable/columns.ts` | G11 | ☐ | |
-| FT-15 | Alternating row shading, hover, selection colours; the focused row of a multi-selection is outlined | `components/FlowTable/FlowRow.tsx` | G1 | ☐ | |
-| FT-16 | Click a sortable title (#, URL, Method, Status, Duration, Request, Response, header columns) to sort; again to reverse; arrow on the sorted column | `components/FlowTable/Header.tsx` | G1 | ☐ | |
-| FT-17 | Drag a column's right edge to resize (to 1600 px); double-click restores the default width | `components/FlowTable/Header.tsx` `ResizeHandle` | G1 | ☐ | |
-| FT-18 | Focused resize handle: ←/→ by 8 px (⇧ 32), Home to the minimum, End to the maximum, ↩ to the default | `components/FlowTable/keys.ts` `resizeKey` | G1 | ☐ | |
-| FT-19 | Drag a header onto another to reorder, with a drop indicator | `components/FlowTable/Header.tsx` | G1 | ☐ | |
-| FT-20 | Column menu "Columns": a checkbox per hideable column (URL can't be hidden) and per header column | `components/FlowTable/Header.tsx` | G1 | ☐ | |
+| FT-15 | Alternating row shading, hover, selection colours; the focused row of a multi-selection is outlined | `components/FlowTable/FlowRow.tsx` | G1 | ☑ | G1: `tests/render.rs` checks row, odd-row and selection pixels in both themes; focused-row outline in `docs/native/g1/table-light-multi-header-columns.png` |
+| FT-16 | Click a sortable title (#, URL, Method, Status, Duration, Request, Response, header columns) to sort; again to reverse; arrow on the sorted column | `components/FlowTable/Header.tsx` | G1 | ☑ | G1: `pm-widgets` `flow_grid::tests::sorting_resizing_and_hiding_change_the_prefs`, `pm-view` `columns::tests::sorting_by_a_column_toggles_its_direction` |
+| FT-17 | Drag a column's right edge to resize (to 1600 px); double-click restores the default width | `components/FlowTable/Header.tsx` `ResizeHandle` | G1 | ☑ | G1: `pm-widgets` `flow_grid::tests::dragging_a_column_edge_resizes_it_and_a_double_click_resets_it` |
+| FT-18 | Focused resize handle: ←/→ by 8 px (⇧ 32), Home to the minimum, End to the maximum, ↩ to the default | `components/FlowTable/keys.ts` `resizeKey` | G1 | ☑ | G1: `pm-view` `keys::tests::resize_*`; `pm-widgets` `flow_grid::tests::sorting_resizing_and_hiding_change_the_prefs` (keys on the focused edge) |
+| FT-19 | Drag a header onto another to reorder, with a drop indicator | `components/FlowTable/Header.tsx` | G1 | ☑ | G1: `pm-widgets` `flow_grid::tests::dragging_a_header_onto_another_reorders` (drop indicator: `drag_over` in `header.rs`) |
+| FT-20 | Column menu "Columns": a checkbox per hideable column (URL can't be hidden) and per header column | `components/FlowTable/Header.tsx` | G1 | ☑ | G1: native menu in `header.rs` `open_column_menu`; its actions in `pm-widgets` `flow_grid::tests::sorting_resizing_and_hiding_change_the_prefs` |
 | FT-21 | Column menu: Add header column… (disabled at 8 header columns) | `components/FlowTable/Header.tsx` | G11 | ☐ | |
 | FT-22 | Column menu: Remove "<name>" column, on a header column | `components/FlowTable/Header.tsx` | G11 | ☐ | |
-| FT-23 | Column menu: Reset columns | `components/FlowTable/Header.tsx` | G1 | ☐ | |
-| FT-24 | Column order, widths, hidden columns and the sort persist across launches | `store/prefs.ts` | G1 | ☐ | |
-| FT-25 | Click selects; ⌘-click toggles a flow; ⇧-click selects a range (the whole view becomes a view selection, not ids) | `components/FlowTable/FlowTable.tsx` | G1 | ☐ | |
-| FT-26 | Keys ↑/↓, PgUp/PgDn, Home/End move the selection; with ⇧ they extend it | `components/FlowTable/keys.ts` `tableKey` | G1 | ☐ | |
-| FT-27 | ↩ focuses the inspector; Escape in a multi-selection collapses to the focused flow | `components/FlowTable/keys.ts` `tableKey` | G1 | ☐ | |
-| FT-28 | A keyboard move onto a row not loaded yet selects it once it loads | `components/FlowTable/FlowTable.tsx` | G1 | ☐ | |
-| FT-29 | Right-click inside a multi-selection keeps it (bulk menu); elsewhere it selects the row first; outside any row there is no menu | `components/FlowTable/FlowTable.tsx` | G1 | ☐ | |
-| FT-30 | Auto Select: scrolls to and selects the newest flow as traffic arrives | `components/FlowTable/FlowTable.tsx` | G1 | ☐ | |
-| FT-31 | Empty state "Waiting for traffic" with the `curl -x http://<proxy> http://example.com/` example and its "Copy command" menu | `components/FlowTable/EmptyState.tsx` | G1 | ☐ | |
-| FT-32 | Empty states "No flows match the current filter" and "Searching headers and bodies…" | `components/FlowTable/EmptyState.tsx` | G1 | ☐ | |
-| FT-33 | View error: "Couldn't open the flow list", the error, Try again | `components/FlowTable/EmptyState.tsx` `ViewError` | G1 | ☐ | |
-| FT-34 | Accessible grid: header is row 1, the grid keeps focus and names the focused row, multi-selectable | `components/FlowTable/FlowTable.tsx` | G1 | ☐ | |
-| FT-35 | The inspector follows the focused flow | `components/FlowTable/FlowTable.tsx`, `store/ui.ts` | G1 | ☐ | |
+| FT-23 | Column menu: Reset columns | `components/FlowTable/Header.tsx` | G1 | ☑ | G1: `pm-widgets` `flow_grid::tests::sorting_resizing_and_hiding_change_the_prefs`, `pm-view` `columns::tests::reset_keeps_header_columns_before_tools` |
+| FT-24 | Column order, widths, hidden columns and the sort persist across launches | `store/prefs.ts` | G1 | ☑ | G1: `ui-prefs.json`, `prefs::tests::prefs_round_trip_and_tolerate_unknown_or_missing_fields`, `pm-view` `columns::tests::saved_prefs_merge_with_new_and_removed_columns` |
+| FT-25 | Click selects; ⌘-click toggles a flow; ⇧-click selects a range (the whole view becomes a view selection, not ids) | `components/FlowTable/FlowTable.tsx` | G1 | ☑ | G1: `pm-widgets` `flow_grid::tests::click_cmd_click_and_shift_click_select_by_id`, `a_shift_range_beyond_the_loaded_rows_is_fetched_in_steps`; `pm-view` `selection::tests::*` |
+| FT-26 | Keys ↑/↓, PgUp/PgDn, Home/End move the selection; with ⇧ they extend it | `components/FlowTable/keys.ts` `tableKey` | G1 | ☑ | G1: `pm-widgets` `flow_grid::tests::arrows_pages_and_home_end_move_the_selection`, `shift_arrows_extend_and_escape_collapses`; `pm-view` `keys::tests::*` |
+| FT-27 | ↩ focuses the inspector; Escape in a multi-selection collapses to the focused flow | `components/FlowTable/keys.ts` `tableKey` | G1 | ☐ | G1: Escape in `pm-widgets` `flow_grid::tests::shift_arrows_extend_and_escape_collapses`; ↩ raises `FlowGridEvent::Inspect` (`flow_grid::tests::cmd_a_enter_and_backspace`), and G3 moves the focus into its inspector |
+| FT-28 | A keyboard move onto a row not loaded yet selects it once it loads | `components/FlowTable/FlowTable.tsx` | G1 | ☑ | G1: `pm-widgets` `flow_grid::tests::arrows_pages_and_home_end_move_the_selection` (End); a ⇧-move waits too |
+| FT-29 | Right-click inside a multi-selection keeps it (bulk menu); elsewhere it selects the row first; outside any row there is no menu | `components/FlowTable/FlowTable.tsx` | G1 | ☐ | G1: the selection half (`FlowGrid::press_row`); the row menu is G3, the bulk menu G11 |
+| FT-30 | Auto Select: scrolls to and selects the newest flow as traffic arrives | `components/FlowTable/FlowTable.tsx` | G1 | ☑ | G1: `pm-widgets` `flow_grid::tests::auto_select_follows_the_newest_flow` |
+| FT-31 | Empty state "Waiting for traffic" with the `curl -x http://<proxy> http://example.com/` example and its "Copy command" menu | `components/FlowTable/EmptyState.tsx` | G1 | ☐ | G1: "Waiting for traffic" with the curl command (`flow_table.rs` `update_overlay`); its "Copy command" menu needs G2's CopyMenu |
+| FT-32 | Empty states "No flows match the current filter" and "Searching headers and bodies…" | `components/FlowTable/EmptyState.tsx` | G1 | ☑ | G1: `features/flow_table.rs` `update_overlay` (`Overlay::NoMatch`, `Overlay::Searching`) |
+| FT-33 | View error: "Couldn't open the flow list", the error, Try again | `components/FlowTable/EmptyState.tsx` `ViewError` | G1 | ☑ | G1: `Overlay::Error` with a gpui-kit "Try again" button (`FlowGridEvent::Retry` reopens the view) |
+| FT-34 | Accessible grid: header is row 1, the grid keeps focus and names the focused row, multi-selectable | `components/FlowTable/FlowTable.tsx` | G1 | ☐ | G1: grid, row and column-header roles, header as row 1, the focused row is the active descendant; gpui 0.3 has no multiselectable setter (G14 audits) |
+| FT-35 | The inspector follows the focused flow | `components/FlowTable/FlowTable.tsx`, `store/ui.ts` | G1 | ☑ | G1: the inspector placeholder follows the focused flow (`docs/native/g1/table-dark.png`); G3 fills it |
 
 ### Flow row menu
 
@@ -208,7 +208,7 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 |---|---|---|---|---|---|
 | FO-01 | Clear button (disabled on a document tab), tooltip "Clear all flows · ⌘⌫" | `components/Footer.tsx` | G2 | ☐ | |
 | FO-02 | Filter button focuses the search box, tooltip "Search flows · ⌘F" | `components/Footer.tsx` | G2 | ☐ | |
-| FO-03 | Auto Select toggle | `components/Footer.tsx` | G1 | ☐ | |
+| FO-03 | Auto Select toggle | `components/Footer.tsx` | G1 | ☐ | G1: `FlowGrid::set_auto_select` (dev remote `autoSelect`, `PROXYMATE_DEV_AUTO_SELECT`); the footer toggle is G2's footer |
 | FO-04 | Row count "N of M rows", "1 / " with a flow selected, "N selected ·" with several | `components/Footer.tsx` | G2 | ☐ | |
 | FO-05 | Deep search: "Searching bodies · checked of total (p%) · N found", then "Searched N flows · N found" | `components/Footer.tsx` `DeepStatus` | G2 | ☐ | |
 | FO-06 | Save and export status: "<label> · p%", "Saved N flows to <name>" (4 s), "<label> failed: <error>"; menu Copy path, Copy file name, Copy error, Dismiss | `components/Footer.tsx` `SaveStatus` | G2 | ☐ | |
@@ -247,7 +247,7 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | CP-08 | "Copy URL of selected flow" (every selected URL with several) | `lib/commands.ts` | G3 | ☐ | |
 | CP-09 | "Copy selected flow as <language>", one per Copy as Code language | `lib/commands.ts` | G11 | ☐ | |
 | CP-10 | "Repeat selected flow…" ⌥⌘R | `lib/commands.ts` | G11 | ☐ | |
-| CP-11 | "Select all flows" ⌘A (in the flow table) | `lib/commands.ts` | G1 | ☐ | |
+| CP-11 | "Select all flows" ⌘A (in the flow table) | `lib/commands.ts` | G1 | ☑ | G1: `pm-widgets` `flow_grid::tests::cmd_a_enter_and_backspace` (`flow_grid::SelectAll`, ⌘A in the `FlowGrid` context) |
 | CP-12 | "Delete selected flows" ⌫ (in the flow table) | `lib/commands.ts` | G3 | ☐ | |
 | CP-13 | "Replay selected flows in order" (two or more) | `lib/commands.ts` | G8 | ☐ | |
 | CP-14 | "Compare the two selected flows" | `lib/commands.ts` | G11 | ☐ | |
@@ -259,7 +259,7 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | CP-20 | "New request…" | `lib/commands.ts` | G8 | ☐ | |
 | CP-21 | "Clear all flows" ⌘⌫ (live capture only) | `lib/commands.ts` | G2 | ☐ | |
 | CP-22 | "Start recording" / "Stop recording" ⌘E (one key, whichever applies) | `lib/commands.ts` | G2 | ☐ | |
-| CP-23 | "Toggle Auto Select" | `lib/commands.ts` | G1 | ☐ | |
+| CP-23 | "Toggle Auto Select" | `lib/commands.ts` | G1 | ☐ | G1: `FlowGrid::set_auto_select`; the palette command arrives with G2's palette |
 | CP-24 | "Intercept: New Terminal window", "New iTerm window", "Launch Google Chrome", "Launch Microsoft Edge", "Launch Brave Browser", "Launch Arc", "Launch Firefox" (hidden when not installed) | `lib/commands.ts`, `lib/capture.ts` | G13 | ☐ | |
 | CP-25 | "Toggle No Caching" | `lib/commands.ts` | G7 | ☐ | |
 | CP-26 | "Toggle Block Cookies" | `lib/commands.ts` | G7 | ☐ | |
@@ -679,7 +679,7 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 |---|---|---|---|---|---|
 | DV-01 | Dev remote: `theme` | `dev/remote.ts` | G0 | ☑ | G0: apps/native/src/dev/mod.rs |
 | DV-02 | Dev remote: `click` by test id | `dev/remote.ts` | G2 | ☐ | |
-| DV-03 | Dev remote: `select`, `selectIds`, `selectAll`, `scrollTo` | `dev/remote.ts` | G1 | ☐ | |
+| DV-03 | Dev remote: `select`, `selectIds`, `selectAll`, `scrollTo` | `dev/remote.ts` | G1 | ☑ | G1: `apps/native/src/dev/mod.rs` `select`, `selectIds`, `selectAll`, `scrollTo` (plus `headerColumns`, `filter`, `autoSelect`, `table`) |
 | DV-04 | Dev remote: `filter`, `palette`, `store`, `openDocument`, `closeDocument`, `saveSession`, `exportHar`, `contextMenu`, `reload` | `dev/remote.ts` | G2 | ☐ | |
 | DV-05 | Dev remote: `requestTab`, `responseTab`, `curl` | `dev/remote.ts` | G3 | ☐ | |
 | DV-06 | Dev remote: `viewer` | `dev/remote.ts` | G4 | ☐ | |
@@ -691,8 +691,8 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | DV-12 | Dev remote: `label`, `comment`, `headerColumns`, `compare`, `repeat`, `code`, `deleteSelection` | `dev/remote.ts` | G11 | ☐ | |
 | DV-13 | Dev remote: `settings`, `appearance`, `mockFrom`, `mockFromFile`, `importOpenApi`, `generateMocks`, `removeMockSource`, `removeOpenApi`, `importProto`, `removeProto`, `neverRecord`, `recordingLists`, `autosave`, `autosaveNow` | `dev/remote.ts` | G12 | ☐ | |
 | DV-14 | Dev remote: `intercept`, `deviceTab` | `dev/remote.ts` | G13 | ☐ | |
-| DV-15 | `VITE_PM_AUTO_SELECT`: start with Auto Select on | `dev/harness.ts` | G1 | ☐ | |
-| DV-16 | Perf probe (`PROXYMATE_SYNTH_FLOWS` + `VITE_PM_PERF_PROBE`): `[perf-probe]` scroll and filter timings | `dev/perfProbe.ts` | G1 | ☐ | |
+| DV-15 | `VITE_PM_AUTO_SELECT`: start with Auto Select on | `dev/harness.ts` | G1 | ☑ | G1: `PROXYMATE_DEV_AUTO_SELECT=1` (`features/flow_table.rs`, `dev_env.rs`) |
+| DV-16 | Perf probe (`PROXYMATE_SYNTH_FLOWS` + `VITE_PM_PERF_PROBE`): `[perf-probe]` scroll and filter timings | `dev/perfProbe.ts` | G1 | ☑ | G1: `apps/native/src/perf_probe.rs`, `PROXYMATE_DEV_PERF_PROBE=1`; numbers in the G1 PR |
 | DV-17 | `VITE_PM_FILTER`: start with search text | `dev/harness.ts` | G2 | ☐ | |
 | DV-18 | `VITE_PM_RESPONSE_TAB`: open the response pane on a tab | `dev/harness.ts` | G3 | ☐ | |
 | DV-19 | `VITE_PM_OPEN=rules` | `dev/harness.ts` | G7 | ☐ | |
@@ -710,7 +710,7 @@ Rows per owning phase. G14 also audits every row; its own row is the browser-onl
 | Phase | Rows | Done (`☑`) |
 |---|---|---|
 | G0 | 14 | 14 |
-| G1 | 39 | 0 |
+| G1 | 39 | 32 |
 | G2 | 91 | 0 |
 | G3 | 62 | 0 |
 | G4 | 31 | 0 |
@@ -725,4 +725,4 @@ Rows per owning phase. G14 also audits every row; its own row is the browser-onl
 | G13 | 29 | 0 |
 | G14 | 1 | 0 |
 | G15 | 7 | 0 |
-| **Total** | **524** | **14** |
+| **Total** | **524** | **46** |

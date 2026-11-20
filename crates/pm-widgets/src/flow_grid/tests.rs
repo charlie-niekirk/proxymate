@@ -392,3 +392,75 @@ fn header_columns_show_their_values(cx: &mut TestAppContext) {
     });
     assert!(h.grid.read_with(h.cx, |g, _| g.prefs().header_columns.is_empty()));
 }
+
+/// The right edge of column `id`, from the placed widths (the URL column
+/// takes what the others leave of the 1200 px window).
+fn right_edge(h: &mut Harness, id: &ColumnId) -> f32 {
+    h.grid.read_with(h.cx, |g, _| {
+        let fixed: f32 = g.columns().iter().filter(|c| !c.grow).map(|c| c.px).sum();
+        let mut x = 0.;
+        for c in g.columns() {
+            x += if c.grow { (1200. - fixed).max(c.px) } else { c.px };
+            if &c.id == id {
+                return x;
+            }
+        }
+        panic!("no column {id}")
+    })
+}
+
+#[gpui_kit::test]
+fn dragging_a_column_edge_resizes_it_and_a_double_click_resets_it(cx: &mut TestAppContext) {
+    let fake = Fake::new(20);
+    let mut h = setup(cx, &fake);
+    let time = ColumnId::Builtin(Builtin::Time);
+    let x = right_edge(&mut h, &time) - 1.;
+    let y = HEADER_HEIGHT / 2.;
+    let left = gpui_kit::MouseButton::Left;
+    h.cx.simulate_mouse_down(point(px(x), px(y)), left, Modifiers::none());
+    for step in 1..=6 {
+        h.cx.simulate_mouse_move(point(px(x + 5. * step as f32), px(y)), left, Modifiers::none());
+    }
+    h.cx.simulate_mouse_up(point(px(x + 30.), px(y)), left, Modifiers::none());
+    h.cx.run_until_parked();
+    let px_of = |h: &mut Harness| h.grid.read_with(h.cx, |g, _| g.columns().iter().find(|c| c.id == time).unwrap().px);
+    assert_eq!(px_of(&mut h), 122., "92 px dragged 30 px wider");
+    assert!(h.took(&FlowGridEvent::PrefsChanged), "saved once the drag ends");
+    let x = right_edge(&mut h, &time) - 1.;
+    h.cx.simulate_event(gpui_kit::MouseDownEvent {
+        position: point(px(x), px(y)),
+        modifiers: Modifiers::none(),
+        button: left,
+        click_count: 2,
+        first_mouse: false,
+    });
+    h.cx.simulate_event(gpui_kit::MouseUpEvent {
+        position: point(px(x), px(y)),
+        modifiers: Modifiers::none(),
+        button: left,
+        click_count: 2,
+    });
+    h.cx.run_until_parked();
+    assert_eq!(px_of(&mut h), 92., "double-click restores the default");
+}
+
+#[gpui_kit::test]
+fn dragging_a_header_onto_another_reorders(cx: &mut TestAppContext) {
+    let fake = Fake::new(20);
+    let mut h = setup(cx, &fake);
+    let method = ColumnId::Builtin(Builtin::Method);
+    let id = ColumnId::Builtin(Builtin::Id);
+    // From the middle of the Method title to over the # header.
+    let from = right_edge(&mut h, &method) - 36.;
+    let y = HEADER_HEIGHT / 2.;
+    let left = gpui_kit::MouseButton::Left;
+    h.cx.simulate_mouse_down(point(px(from), px(y)), left, Modifiers::none());
+    for x in [from - 20., from - 200., 200., 30.] {
+        h.cx.simulate_mouse_move(point(px(x), px(y)), left, Modifiers::none());
+    }
+    h.cx.simulate_mouse_up(point(px(30.), px(y)), left, Modifiers::none());
+    h.cx.run_until_parked();
+    let order = h.grid.read_with(h.cx, |g, _| g.columns().iter().map(|c| c.id.clone()).collect::<Vec<_>>());
+    assert_eq!(&order[..2], [method, id], "Method now goes before #");
+    assert!(h.took(&FlowGridEvent::PrefsChanged));
+}

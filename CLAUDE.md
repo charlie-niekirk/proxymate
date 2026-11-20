@@ -64,7 +64,8 @@ Run these from the repo root unless noted.
 | Release bundle | `npm run tauri build` (host arch, ad-hoc signed) |
 | macOS release build (universal DMG, checks, staging) | `scripts/release/macos.sh` (needs `rustup target add x86_64-apple-darwin`; ad-hoc unless the signing variables in `docs/RELEASING.md` are set; output in `target/release/macos`) |
 | Native app (gpui) | `cargo run -p proxymate-native`. Same data dir, env vars (`PROXYMATE_SYNTH_*`, `PROXYMATE_EXTRA_UPSTREAM_CA`, `PROXYMATE_MCP_PORT`) and binary modes as the Tauri app; `PROXYMATE_DATA_DIR=<dir>` runs a dev copy beside the installed app (one copy per data dir) |
-| Drive the native app from a shell | `PROXYMATE_DEV_REMOTE=1 cargo run -p proxymate-native --features dev-harness`, then `curl -d '{"theme":"light"}' localhost:1430/__pm_remote` (also `{"screenshot":"/abs/x.png"}`, `{"click":"<element id>"}`; answered inline). See `apps/native/src/dev/mod.rs` |
+| Drive the native app from a shell | `PROXYMATE_DEV_REMOTE=1 cargo run -p proxymate-native --features dev-harness`, then `curl -d '{"theme":"light"}' localhost:1430/__pm_remote` (also `{"screenshot":"/abs/x.png"}`, `{"click":"<element id>"}`; G1: `select` (row index), `selectIds`, `selectAll`, `scrollTo`, `headerColumns`, `filter`, `autoSelect`, `table`; answered inline). See `apps/native/src/dev/mod.rs` |
+| Native perf probe (G1) | `PROXYMATE_SYNTH_FLOWS=100000 PROXYMATE_DEV_PERF_PROBE=1 cargo run --release -p proxymate-native --features dev-harness` (window on screen; `[perf-probe]` lines on stderr). `PROXYMATE_DEV_AUTO_SELECT=1` starts with Auto Select on. `PROXYMATE_DEV_*` are read only in debug builds or with `dev-harness` |
 | Native shell rendered offscreen | `cargo test -p proxymate-native --test render` (both themes, pixels checked, PNGs in `target/native-snapshots/`) |
 | Native spikes (G0) | `cargo run --release -p proxymate-native --features spikes --example spike_bench [a\|e]`; `--example spike_native_view -- <capture.png>` (macOS) |
 | Updater end to end | Debug bundle (`npm run tauri -- build --debug`) launched with `PROXYMATE_UPDATE_TEST=1`: checks at launch and installs without asking. Recipe in `docs/RELEASING.md` |
@@ -118,8 +119,10 @@ crates/pm-app        host glue both apps share: binary modes (guardian, mcp-stdi
                      data dir, single instance (native)
 crates/pm-theme      colour tokens read from ui/src/styles/tokens.css at build time (build.rs + css.rs), the contrast test
                      (contrast.rs), the gpui-kit mapping and ActiveTokens global (feature `kit`)
-crates/pm-view       native UI logic with no gpui (ports of lib/*.ts with their tests; empty in G0)
-crates/pm-widgets    reusable gpui widgets (Pill; FlowGrid, KvTable, … as phases land)
+crates/pm-view       native UI logic with no gpui (ports of lib/*.ts with their tests): selection, keys, columns +
+                     TablePrefs, flow formatting, RowCache (G1)
+crates/pm-widgets    reusable gpui widgets: Pill, flow_grid/ (FlowGrid: rows, header, icons; gpui tests), Assets
+                     (gpui-kit's plus the Lucide icons the widgets draw); KvTable, … as phases land
 apps/native          the native app (gpui + gpui-kit, binary `proxymate-native`): bridge/ (runtime, engine, streams), shell/
                      (main window, chrome), appearance, prefs (ui-prefs.json), menus, features/ (one module per area),
                      dev/ (remote, feature `dev-harness`); tests/render.rs; examples/ (G0 spikes)
@@ -258,7 +261,8 @@ Targets:
 - Each feature module has `register(cx)` for its actions, keys, palette entries and menu items; `features/mod.rs` only lists modules.
 - AppKit code (vibrancy, captures, later PDFKit/AVKit) lives in `pm-platform` (`window.rs`, `macos/window.rs`, one scoped `#[allow(unsafe_code)]` for the raw NSView). gpui draws under native child views: G5's host hides them while a gpui overlay is open.
 - The main window's gpui-kit `Root` is transparent on macOS (vibrancy); every pane paints its token. Traffic lights are at gpui (16, 17), the Tauri app's (16, 22).
-- Prefs (appearance now; columns and sort from G1) are `<data dir>/ui-prefs.json`, never the WebView's storage.
+- Prefs (appearance; the table's `columns`, `sort` and `headerColumns`, spelt as `store/prefs.ts` spells them) are `<data dir>/ui-prefs.json`, never the WebView's storage. `prefs::update` writes 300 ms later (a burst writes once) and `prefs::flush` on quit.
+- The flow table (G1): `pm_widgets::flow_grid::FlowGrid` knows no engine. Its owner (`features/flow_table.rs`) gives it a `RowSource` (a blocking `get_rows`, run on the background executor, at most 512 rows a call) and the view's deltas; rows are formatted once when their page lands (`GridRow`). `uniform_list` also calls the row callback for row 0 alone to measure it: that call is not the visible window. Selection is ids (`pm_view::selection`), keys are `pm_view::keys`; ⌘A and ⌫ are `flow_grid::SelectAll`/`DeleteSelection` in the `FlowGrid` key context.
 
 **Release and updates (M11)**
 - `docs/RELEASING.md` covers secrets, cutting a release (tag `v*` → draft GitHub Release) and key rotation. `.github/workflows/release.yml` runs `scripts/release/macos.sh`.

@@ -12,7 +12,7 @@
 //! - `{"click": "<element id>"}`: a real click through hit testing, on an
 //!   element rendered with `.id(…)` and `.test_support()`.
 //! - The flow table (G1): `{"select": 3}` (a row index, as in the Tauri
-//!   remote; `null` clears), `{"selectIds": [4, 9]}`, `{"selectAll": true}`,
+//!   remote; `null` clears), `{"selectIds": [4, 9]}`, `{"selectAll": true}`, `{"scrollTo": 500}`,
 //!   `{"headerColumns": [{"part": "request", "name": "x-request-id"}]}`,
 //!   `{"filter": "api"}` (the search text), `{"autoSelect": true}` and
 //!   `{"table": true}`; each answers with the table's state (rows, total,
@@ -153,7 +153,7 @@ async fn run(command: Value, cx: &mut AsyncApp) -> Value {
         let offscreen = command.get("offscreen").and_then(Value::as_bool).unwrap_or(false);
         return screenshot(window, PathBuf::from(path), offscreen, cx).await;
     }
-    json!({"error": "unknown command: try theme, screenshot, click, select, selectIds, selectAll, headerColumns, filter, autoSelect or table"})
+    json!({"error": "unknown command: try theme, screenshot, click, select, selectIds, selectAll, scrollTo, headerColumns, filter, autoSelect or table"})
 }
 
 async fn screenshot(window: AnyWindowHandle, path: PathBuf, offscreen: bool, cx: &mut AsyncApp) -> Value {
@@ -216,6 +216,9 @@ fn table_command(command: &Value, cx: &mut AsyncApp) -> Option<Value> {
         if let Some(v) = command.get("selectIds") {
             let ids: Vec<u32> = serde_json::from_value(v.clone()).map_err(|e| format!("selectIds: {e}"))?;
             grid.update(cx, |g, cx| g.select_ids(&ids, cx));
+        }
+        if let Some(index) = command.get("scrollTo").and_then(Value::as_u64) {
+            grid.update(cx, |g, cx| g.scroll_to(index as usize, cx));
         }
         if command.get("selectAll").and_then(Value::as_bool) == Some(true) {
             grid.update(cx, |g, cx| g.select_all(cx));
