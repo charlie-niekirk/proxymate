@@ -70,7 +70,8 @@ jobs:
         with:
           tauri-deps: "true"
       - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # The gpui crates (G0's native track) lint in the `native` jobs.
+      - run: cargo clippy --workspace --all-targets --locked --exclude proxymate-native --exclude pm-widgets -- -D warnings
 
   test:
     name: test (${{ matrix.os }})
@@ -94,10 +95,47 @@ jobs:
           tool: cargo-nextest
       # Per-test timeouts live in .config/nextest.toml. The workspace has no
       # doctests, so nextest (which skips them) covers everything `cargo test` did.
-      - run: cargo nextest run --workspace --locked --profile ci
+      # The gpui crates test in the `native` jobs.
+      - run: cargo nextest run --workspace --locked --profile ci --exclude proxymate-native --exclude pm-widgets
       # The proxymate-desktop export_bindings test rewrites bindings.ts.
       - name: TypeScript bindings are up to date
         run: git diff --exit-code -- apps/desktop/ui/src/bindings.ts
+
+  # The native (gpui) app and its crates: lint and test on macOS and Linux,
+  # then render the shell offscreen in both themes (Metal on macOS; WGPU on
+  # Mesa's lavapipe on Linux) and keep the captures as an artifact.
+  native:
+    name: native (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+        with:
+          native-deps: "true"
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+        with:
+          tool: cargo-nextest
+      # --all-features: the dev harness and the spike examples too.
+      - run: cargo clippy -p proxymate-native -p pm-widgets -p pm-theme -p pm-view -p pm-app --all-targets --all-features --locked -- -D warnings
+      - run: cargo nextest run -p proxymate-native -p pm-widgets -p pm-theme -p pm-view -p pm-app --locked --profile ci --no-tests=warn
+      - name: Shell renders offscreen in both themes
+        run: cargo test -p proxymate-native --test render --locked
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: native-snapshots-${{ matrix.os }}
+          path: target/native-snapshots/*.png
+          if-no-files-found: ignore
+          retention-days: 14
 
   # R2: the hot path at 100k flows against crates/pm-core/benches/budget.json.
   # Budgets are ceilings for this runner, well above the docs/PLAN.md targets
@@ -193,7 +231,7 @@ jobs:
   # was skipped (a docs-only pull request), and fails otherwise.
   ci:
     name: ci
-    needs: [changes, lint, test, bench, audit, ui]
+    needs: [changes, lint, test, native, bench, audit, ui]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5

@@ -42,7 +42,9 @@ mod render {
     }
 
     fn snapshot_dir() -> PathBuf {
-        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/native-snapshots");
+        // `target/tmp` is Cargo's scratch dir for integration tests; its
+        // sibling holds the captures (CARGO_TARGET_DIR is honoured).
+        let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("../native-snapshots");
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -60,7 +62,11 @@ mod render {
         let mut cx = context();
         cx.update(|cx| {
             use proxymate_native::prefs::{self, Appearance};
-            let forced = if mode.is_dark() { Appearance::Dark } else { Appearance::Light };
+            let forced = if mode.is_dark() {
+                Appearance::Dark
+            } else {
+                Appearance::Light
+            };
             prefs::update(cx, |p| p.appearance = forced);
             pm_theme::kit::apply(mode, cx);
         });

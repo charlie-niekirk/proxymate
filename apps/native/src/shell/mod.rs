@@ -9,10 +9,12 @@
 
 mod chrome;
 
+use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::{Selectable as _, Sizable as _};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    App, Context, Entity, FontWeight, IntoElement, Render, SharedString, Subscription, TestSupportExt as _,
-    TitlebarOptions, Window, WindowBackgroundAppearance, WindowBounds, WindowOptions, div, point, px, size,
+    App, Context, Entity, FontWeight, IntoElement, Render, SharedString, Subscription, TitlebarOptions, Window,
+    WindowBackgroundAppearance, WindowBounds, WindowOptions, div, point, px, size,
 };
 use pm_model::{ProxyStatus, StorageStatus};
 use pm_theme::Tokens;
@@ -210,26 +212,18 @@ impl MainWindow {
             ("404", t.s_4xx, t.s_4xx_bg),
             ("500", t.s_5xx, t.s_5xx_bg),
         ];
+        // gpui-kit buttons: real controls with accessibility roles and names.
         let choice = |id: &'static str, label: &'static str, value: Appearance| {
-            let selected = appearance == value;
-            div()
-                .id(id)
-                .test_support()
-                .h(px(24.))
-                .px(px(10.))
-                .flex()
-                .items_center()
-                .rounded(px(5.))
-                .cursor_pointer()
-                .text_size(px(12.))
-                .when(selected, |d| {
-                    d.bg(t.primary.hsla()).text_color(t.primary_foreground.hsla())
-                })
-                .when(!selected, |d| {
-                    d.text_color(t.foreground.hsla()).hover(|d| d.bg(t.accent.hsla()))
-                })
-                .on_click(move |_, _, cx| crate::appearance::set(value, cx))
-                .child(label)
+            let button = Button::new(id)
+                .label(label)
+                .small()
+                .selected(appearance == value)
+                .on_click(move |_, _, cx| crate::appearance::set(value, cx));
+            if appearance == value {
+                button.primary()
+            } else {
+                button.ghost()
+            }
         };
         div()
             .id("content")
