@@ -39,7 +39,10 @@ pub const SIDEBAR_RANGE: (f32, f32) = (160., 360.);
 pub const FOOTER_HEIGHT: f32 = 28.;
 /// The table's share of the main column, over the inspector.
 pub const TABLE_SHARE: f32 = 0.58;
-const TABLE_SHARE_RANGE: (f32, f32) = (0.2, 0.85);
+/// The table and the inspector are each at least this tall.
+const PANE_MIN_HEIGHT: f32 = 120.;
+/// The main column is at least this wide.
+const MAIN_MIN_WIDTH: f32 = 600.;
 /// A split handle's thickness.
 const HANDLE: f32 = 5.;
 
@@ -303,8 +306,9 @@ impl MainWindow {
                 }
                 let top = f32::from(e.bounds.origin.y);
                 let height = f32::from(e.bounds.size.height).max(1.);
-                let share = (f32::from(e.event.position.y) - top) / height;
-                this.table_share = share.clamp(TABLE_SHARE_RANGE.0, TABLE_SHARE_RANGE.1);
+                let max = (height - PANE_MIN_HEIGHT - HANDLE).max(PANE_MIN_HEIGHT);
+                let table = (f32::from(e.event.position.y) - top).clamp(PANE_MIN_HEIGHT, max);
+                this.table_share = table / height;
                 cx.notify();
             }))
             .child(
@@ -313,7 +317,7 @@ impl MainWindow {
                     .w_full()
                     .flex_none()
                     .h(gpui_kit::relative(share))
-                    .min_h_0()
+                    .min_h(px(PANE_MIN_HEIGHT))
                     .child(self.table.clone()),
             )
             .child(
@@ -347,7 +351,7 @@ impl MainWindow {
             .role(Role::Region)
             .aria_label("Inspector")
             .flex_1()
-            .min_h_0()
+            .min_h(px(PANE_MIN_HEIGHT))
             .flex()
             .flex_col()
             .items_center()
@@ -408,7 +412,7 @@ impl Render for MainWindow {
             .child(
                 div()
                     .flex_1()
-                    .min_w_0()
+                    .min_w(px(MAIN_MIN_WIDTH))
                     .h_full()
                     .flex()
                     .flex_col()

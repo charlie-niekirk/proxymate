@@ -18,6 +18,9 @@ use serde_json::{Value, json};
 
 use crate::features::flow_table::{self, FlowTable};
 
+/// A labelled change to the filter.
+type Step = (&'static str, fn(&mut FilterSpec));
+
 /// Rows the probe waits for, as the Tauri probe does.
 const ROWS: usize = 100_000;
 
@@ -183,7 +186,7 @@ async fn run(cx: &mut AsyncApp) -> Result<(), String> {
     // The Tauri probe's filter changes, applied in turn as the filter row would.
     let mut spec = FilterSpec::default();
     let mut filters = Vec::new();
-    let steps: [(&str, fn(&mut FilterSpec)); 9] = [
+    let steps: [Step; 9] = [
         ("text api", |f| f.text = "api".into()),
         ("text stripe.com/v1", |f| f.text = "stripe.com/v1".into()),
         ("https", |f| f.protocol = ProtocolFilter::Https),

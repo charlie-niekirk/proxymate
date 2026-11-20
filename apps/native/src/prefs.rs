@@ -149,7 +149,7 @@ mod tests {
         );
         std::fs::write(&path, br#"{"columns": [], "later": 1}"#).unwrap();
         assert_eq!(load(&path), Prefs::default());
-        std::fs::write(&path, br#"{"appearance": "dark", "columns": {"order": ["url"]}}"#).unwrap();
+        std::fs::write(&path, br#"{"appearance": "dark", "columns": {"order": ["url", "id"]}}"#).unwrap();
         let partial = load(&path);
         assert_eq!(partial.appearance, Appearance::Dark);
         assert_eq!(partial.table.columns.order[0], ColumnId::Builtin(Builtin::Url));

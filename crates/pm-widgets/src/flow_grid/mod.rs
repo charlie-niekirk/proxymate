@@ -462,6 +462,17 @@ impl FlowGrid {
         cx.notify();
     }
 
+    /// A right-click: inside a multi-selection it keeps the selection (the
+    /// bulk menu's case); elsewhere it selects the row first. The menus
+    /// themselves arrive with G3 (row) and G11 (bulk).
+    fn press_row(&mut self, index: usize, id: FlowId, cx: &mut Context<Self>) {
+        let len = self.cache.len();
+        if self.selected.selection.is_multi(len) && self.selected.selection.is_selected(id) {
+            return;
+        }
+        self.click_row(index, id, false, false, cx);
+    }
+
     /// Rows `anchor..=to`, focusing `focus`: from the loaded rows, else
     /// fetched (in steps of at most [`MAX_ROWS_PER_CALL`]).
     fn select_range(&mut self, to: usize, focus: FlowId, cx: &mut Context<Self>) {
@@ -685,6 +696,7 @@ impl FlowGrid {
             let look = row::RowLook {
                 selected,
                 focused: multi && id.is_some() && id == self.selected.focused,
+                current: id.is_some() && id == self.selected.focused,
                 odd: index % 2 == 1,
             };
             let icon = row
@@ -698,14 +710,22 @@ impl FlowGrid {
             };
             let element = row::row_element(index, row, &columns, &cells, _window, cx);
             let element = match id {
-                Some(id) => element.on_mouse_down(
-                    gpui_kit::MouseButton::Left,
-                    cx.listener(move |this, e: &gpui_kit::MouseDownEvent, window, cx| {
-                        window.focus(&this.focus, cx);
-                        let toggle = e.modifiers.platform || e.modifiers.control;
-                        this.click_row(index, id, e.modifiers.shift, toggle, cx);
-                    }),
-                ),
+                Some(id) => element
+                    .on_mouse_down(
+                        gpui_kit::MouseButton::Left,
+                        cx.listener(move |this, e: &gpui_kit::MouseDownEvent, window, cx| {
+                            window.focus(&this.focus, cx);
+                            let toggle = e.modifiers.platform || e.modifiers.control;
+                            this.click_row(index, id, e.modifiers.shift, toggle, cx);
+                        }),
+                    )
+                    .on_mouse_down(
+                        gpui_kit::MouseButton::Right,
+                        cx.listener(move |this, _: &gpui_kit::MouseDownEvent, window, cx| {
+                            window.focus(&this.focus, cx);
+                            this.press_row(index, id, cx);
+                        }),
+                    ),
                 None => element,
             };
             rows.push(element);

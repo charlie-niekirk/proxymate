@@ -4,11 +4,12 @@
 //! frame only lays rows out: this is the native table's "memoised row".
 
 use std::ops::Range;
+use std::time::Duration;
 
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, App, FontWeight, HighlightStyle, Hsla, ImageSource, Role, SharedString, StyledText, Window, div, img,
-    px, svg,
+    Animation, AnimationExt as _, AnyElement, App, FontWeight, HighlightStyle, Hsla, ImageSource, Role, SharedString,
+    StyledText, Window, div, img, pulsating_between, px, svg,
 };
 use pm_model::{FlowLabel, FlowRow, FlowState, SentBy, TlsStatus};
 use pm_theme::Tokens;
@@ -200,6 +201,8 @@ pub struct RowLook {
     pub selected: bool,
     /// The focused row of a multi-selection (an inset outline).
     pub focused: bool,
+    /// The focused flow's row: the grid's active descendant.
+    pub current: bool,
     pub odd: bool,
 }
 
@@ -280,8 +283,47 @@ fn icon(name: gpui_kit::assets::IconName, color: Hsla, size: f32) -> AnyElement 
         .into_any_element()
 }
 
-/// One cell of `row` in `column`.
-pub fn cell(row: &GridRow, column: &PlacedColumn, cx: &CellContext) -> AnyElement {
+/// Fades in and out while a flow is active.
+fn pulse(content: AnyElement, key: &'static str, active: bool) -> AnyElement {
+    if !active {
+        return content;
+    }
+    div()
+        .flex()
+        .items_center()
+        .child(content)
+        .with_animation(
+            key,
+            Animation::new(Duration::from_millis(2000))
+                .repeat()
+                .with_easing(pulsating_between(0.4, 1.0)),
+            |d, delta| d.opacity(delta),
+        )
+        .into_any_element()
+}
+
+/// The cell's tooltip, where the Tauri table has one.
+fn tooltip(row: &GridRow, column: &PlacedColumn) -> Option<SharedString> {
+    let r = &row.row;
+    match &column.id {
+        ColumnId::Header(_) => column.header.and_then(|i| row.extra.get(i).cloned().flatten()),
+        ColumnId::Builtin(b) => match b {
+            Builtin::State => Some(flow::state_name(r.1).into()),
+            Builtin::Client => row.client.clone(),
+            Builtin::Status => {
+                r.21.zip(r.8)
+                    .map(|(code, http)| format!("gRPC {} ({code}) · HTTP {http}", flow::grpc_name(code)).into())
+            }
+            Builtin::Proto => Some(r.16.as_str().into()),
+            Builtin::Ssl => Some(flow::ssl_title(r.17)).filter(|t| !t.is_empty()).map(Into::into),
+            Builtin::Notes => row.comment.clone(),
+            _ => None,
+        },
+    }
+}
+
+/// One cell of `row` in `column` (the row's `ix`th).
+pub fn cell(ix: usize, row: &GridRow, column: &PlacedColumn, cx: &CellContext) -> AnyElement {
     let t = cx.t;
     let base = div()
         .h_full()
@@ -326,7 +368,8 @@ pub fn cell(row: &GridRow, column: &PlacedColumn, cx: &CellContext) -> AnyElemen
                 if cx.look.selected {
                     color = t.selection_fg.hsla();
                 }
-                div().size(px(6.)).rounded_full().bg(color).into_any_element()
+                let dot = div().size(px(6.)).rounded_full().bg(color).into_any_element();
+                pulse(dot, "pulse-state", r.1 == FlowState::Active)
             }
             Builtin::Url => url_cell(row, cx),
             Builtin::Client => div()
@@ -347,7 +390,8 @@ pub fn cell(row: &GridRow, column: &PlacedColumn, cx: &CellContext) -> AnyElemen
             Builtin::Status => {
                 let (fg, bg) = status_colors(t, row.status_tone);
                 let outline = bg.is_none().then(|| fg.hsla());
-                pill(row.status.clone(), fg.hsla(), bg.map(|b| b.hsla()), outline, cx)
+                let status = pill(row.status.clone(), fg.hsla(), bg.map(|b| b.hsla()), outline, cx);
+                pulse(status, "pulse-status", row.status_tone == StatusTone::Active)
             }
             Builtin::Time => div().text_color(cx.dim()).child(row.time.clone()).into_any_element(),
             Builtin::Duration => div().text_color(cx.fg()).child(row.duration.clone()).into_any_element(),
@@ -379,7 +423,14 @@ pub fn cell(row: &GridRow, column: &PlacedColumn, cx: &CellContext) -> AnyElemen
             Builtin::Tools => div().into_any_element(),
         },
     };
-    base.child(content).into_any_element()
+    match tooltip(row, column) {
+        Some(text) => base
+            .id(("cell", ix))
+            .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(text.clone()).build(window, cx))
+            .child(content)
+            .into_any_element(),
+        None => base.child(content).into_any_element(),
+    }
 }
 
 fn ssl_cell(tls: TlsStatus, cx: &CellContext) -> AnyElement {
@@ -506,11 +557,24 @@ pub fn row_element(
         .text_size(px(11.5))
         .when_some(bg, |d, bg| d.bg(bg))
         .when(!look.selected, |d| d.hover(|s| s.bg(t.pane_row_hover.hsla())))
-        .when(look.focused, |d| d.border_1().border_color(t.selection_fg.hsla()));
+        .relative()
+        // An inset outline that takes no room from the cells.
+        .when(look.focused, |d| {
+            d.child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .size_full()
+                    .border_1()
+                    .border_color(t.selection_fg.hsla()),
+            )
+        });
     match row {
         Some(row) => base
             .aria_label(row.a11y_label.clone())
-            .children(columns.iter().map(|c| cell(row, c, cx))),
+            .when(look.current, |d| d.aria_active_descendant())
+            .children(columns.iter().enumerate().map(|(ix, c)| cell(ix, row, c, cx))),
         None => base.aria_label("Loading").child(
             div()
                 .px(px(8.))
