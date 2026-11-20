@@ -7384,6 +7384,12 @@ dependencies = [
 [[package]]
 name = "pm-view"
 version = "0.6.0"
+dependencies = [
+ "chrono",
+ "pm-model",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "pm-widgets"
