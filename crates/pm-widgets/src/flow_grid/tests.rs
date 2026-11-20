@@ -423,7 +423,10 @@ fn dragging_a_column_edge_resizes_it_and_a_double_click_resets_it(cx: &mut TestA
     }
     h.cx.simulate_mouse_up(point(px(x + 30.), px(y)), left, Modifiers::none());
     h.cx.run_until_parked();
-    let px_of = |h: &mut Harness| h.grid.read_with(h.cx, |g, _| g.columns().iter().find(|c| c.id == time).unwrap().px);
+    let px_of = |h: &mut Harness| {
+        h.grid
+            .read_with(h.cx, |g, _| g.columns().iter().find(|c| c.id == time).unwrap().px)
+    };
     assert_eq!(px_of(&mut h), 122., "92 px dragged 30 px wider");
     assert!(h.took(&FlowGridEvent::PrefsChanged), "saved once the drag ends");
     let x = right_edge(&mut h, &time) - 1.;
@@ -460,7 +463,9 @@ fn dragging_a_header_onto_another_reorders(cx: &mut TestAppContext) {
     }
     h.cx.simulate_mouse_up(point(px(30.), px(y)), left, Modifiers::none());
     h.cx.run_until_parked();
-    let order = h.grid.read_with(h.cx, |g, _| g.columns().iter().map(|c| c.id.clone()).collect::<Vec<_>>());
+    let order = h.grid.read_with(h.cx, |g, _| {
+        g.columns().iter().map(|c| c.id.clone()).collect::<Vec<_>>()
+    });
     assert_eq!(&order[..2], [method, id], "Method now goes before #");
     assert!(h.took(&FlowGridEvent::PrefsChanged));
 }
