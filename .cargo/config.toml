@@ -1,0 +1,3 @@
+# `cargo xtask <command>`: the repo's own build tooling, in Rust (G15).
+[alias]
+xtask = "run --package xtask --"

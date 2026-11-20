@@ -207,3 +207,77 @@ rustup target add aarch64-apple-darwin x86_64-apple-darwin
 scripts/release/macos.sh          # ad-hoc unless you export the variables above; output in target/release/macos
 ```
 `npm run tauri build -- --target universal-apple-darwin` does the same build without the checks and staging.
+
+## The native app (G15)
+
+The native (gpui) app is bundled by `cargo xtask bundle-macos`, in Rust, in the same formats as the Tauri release above,
+so a published release serves both and installed Tauri copies update straight into it. `release.yml` keeps running
+`macos.sh` until G16 switches it to the xtask; `.github/workflows/native-bundle.yml` runs the xtask on pull requests that
+touch it (universal, with a throwaway updater key).
+
+```bash
+cargo xtask bundle-macos                                  # universal release; output in target/release/native-macos
+cargo xtask bundle-macos --arch host --debug --no-dmg     # quick local bundle (target/native-bundle/debug/Proxymate.app)
+cargo xtask updater-key /tmp/test.key                     # a throwaway updater key pair, Tauri's format
+```
+
+| Piece | Where |
+|---|---|
+| Build, sign, check, stage | `xtask/src/bundle.rs` (`cargo xtask bundle-macos --help`) |
+| Updater signatures and keys | `xtask/src/sign.rs` |
+| Entitlements (empty), icon | `apps/native/resources/macos/` |
+| Updater | `apps/native/src/updater.rs`, `updater/feed.rs` (feed, signatures), `updater/install.rs` (swap) |
+
+What it matches, and how:
+- **Bundle.** Bundle id `dev.proxymate.desktop`, executable `Contents/MacOS/proxymate`, the Tauri app's `Info.plist`
+  keys (minimum macOS 13.3, Developer Tools), `icon.icns`. The binary is built with `MACOSX_DEPLOYMENT_TARGET=13.3`, and
+  the version (`--version`, default the workspace's) is compiled in as `PROXYMATE_APP_VERSION`, so the app and its
+  `Info.plist` always agree.
+- **Signing.** Ad-hoc with the hardened runtime and the empty entitlements, then `macos.sh`'s checks. The same
+  environment variables as `macos.sh`: with `APPLE_SIGNING_IDENTITY` (and `APPLE_CERTIFICATE`, imported into a temporary
+  keychain) it signs with the Developer ID, and with the App Store Connect key it notarises and staples the app and the
+  DMG and checks them with `spctl` and `stapler validate`. Those paths are dormant and untested until the secrets exist.
+- **Release files.** `Proxymate_<version>_universal.dmg`, `.app.tar.gz` and `.sig`, and `updater-darwin.json`, named as
+  `macos.sh` names them, so `release.yml`'s `latest.json` step is unchanged.
+- **Updater key.** `TAURI_SIGNING_PRIVATE_KEY` (and `…_PASSWORD`, empty when unset) as Tauri reads it, through the
+  `minisign` crate. The signature's trusted comment is `timestamp:…\tfile:…\tversion:<version>`: tauri-plugin-updater
+  2.14 checks a signed version against the feed's, and the native updater requires one.
+
+The native updater works like the Tauri app's (see "The updater" above): the same feed and public key
+(`feed::PUBLIC_KEY`, tested equal to `tauri.conf.json`'s), a check 5 s after launch unless Settings › Updates turns it
+off, one check at a time, "Install and Restart" / "Later", no proxy. It unpacks the update next to the bundle, swaps it in
+with one `renamex_np(RENAME_SWAP)` (two renames where the file system can't), asks for an administrator through
+`osascript` where the folder needs one, and restarts through the quit path, so the system proxy is restored first.
+
+**Testing the native updater end to end, locally.** A Tauri 0.6.x install updates into a native debug bundle, which then
+updates itself; a tampered archive is refused at each step. `PROXYMATE_UPDATE_TEST` works only in debug builds: `1`
+checks 5 s after launch and installs without asking, `check` runs "Check for Updates…" at launch so every prompt shows.
+Work in a scratch folder, never on `/Applications/Proxymate.app`: the updaters replace the bundle they run from.
+```bash
+W=$(mktemp -d); FEED=http://127.0.0.1:8765
+cargo xtask updater-key "$W/test.key"
+# A Tauri 0.6.x debug app that trusts the test key and reads the local feed
+CI=true npm run tauri -- build --debug --bundles app --config '{"plugins":{"updater":{"pubkey":"'"$(cat "$W/test.key.pub")"'","endpoints":["'$FEED'/latest.json"],"dangerousInsecureTransportProtocol":true}}}'
+mkdir "$W/install" && ditto target/debug/bundle/macos/Proxymate.app "$W/install/Proxymate.app"
+# Native debug bundles signed with the test key; their own updater reads the same feed and trusts the same key
+for v in 0.6.1 0.6.2; do
+  TAURI_SIGNING_PRIVATE_KEY=$(cat "$W/test.key") PROXYMATE_UPDATER_PUBKEY=$(cat "$W/test.key.pub") \
+  PROXYMATE_UPDATER_ENDPOINT=$FEED/latest.json DOWNLOAD_URL=$FEED OUT_DIR="$W/feed-$v" \
+    cargo xtask bundle-macos --debug --arch host --version $v --no-dmg
+done
+# Serve one version's files with release.yml's latest.json step, then launch the installed app
+serve() { rm -rf "$W/serve"; mkdir "$W/serve"; cp "$W/feed-$1"/* "$W/serve/"
+  jq -s --arg version "$1" --arg notes "test feed" '{version: $version, notes: $notes, platforms: (add)}' \
+    "$W/serve"/updater-*.json > "$W/serve/latest.json"; }
+python3 -m http.server 8765 --bind 127.0.0.1 --directory "$W/serve" &
+serve 0.6.1; printf x >> "$W/serve"/*.app.tar.gz               # tampered: "The signature verification failed", stays 0.6.0
+PROXYMATE_UPDATE_TEST=1 "$W/install/Proxymate.app/Contents/MacOS/proxymate"
+serve 0.6.1                                                     # Tauri installs the native 0.6.1 and reopens it
+PROXYMATE_UPDATE_TEST=1 "$W/install/Proxymate.app/Contents/MacOS/proxymate"
+serve 0.6.2                                                     # (quit first) the native app updates itself to 0.6.2
+PROXYMATE_UPDATE_TEST=1 "$W/install/Proxymate.app/Contents/MacOS/proxymate"
+/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$W/install/Proxymate.app/Contents/Info.plist"
+```
+The relaunched app is opened by LaunchServices (its parent is `launchd`) without the variable, so it doesn't update again.
+A native bundle shows itself by `native-instance.sock` in the data dir and an executable identical to
+`target/native-bundle/debug/Proxymate.app/Contents/MacOS/proxymate`. The prompts from that run are in `docs/native/g15/`.

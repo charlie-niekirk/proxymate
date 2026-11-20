@@ -13,3 +13,4 @@ pub mod menus;
 pub mod perf_probe;
 pub mod prefs;
 pub mod shell;
+pub mod updater;

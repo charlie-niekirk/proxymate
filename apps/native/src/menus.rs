@@ -54,7 +54,7 @@ pub fn init(cx: &mut App) {
     cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
     cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
     cx.on_action(|_: &About, cx| about(cx));
-    cx.on_action(|_: &CheckForUpdates, cx| check_for_updates(cx));
+    cx.on_action(|_: &CheckForUpdates, cx| crate::updater::check_now(cx));
     cx.on_action(|_: &AppearanceSystem, cx| crate::appearance::set(Appearance::System, cx));
     cx.on_action(|_: &AppearanceLight, cx| crate::appearance::set(Appearance::Light, cx));
     cx.on_action(|_: &AppearanceDark, cx| crate::appearance::set(Appearance::Dark, cx));
@@ -141,16 +141,6 @@ pub fn refresh(cx: &mut App) {
 fn about(cx: &mut App) {
     let detail = format!("Version {} (native preview)", env!("CARGO_PKG_VERSION"));
     prompt(cx, PromptLevel::Info, "Proxymate", detail);
-}
-
-/// G15 brings the updater; until then the item says so.
-fn check_for_updates(cx: &mut App) {
-    prompt(
-        cx,
-        PromptLevel::Info,
-        "Updates",
-        "The native app's updater arrives in G15. The installed app keeps updating itself.".into(),
-    );
 }
 
 fn prompt(cx: &mut App, level: PromptLevel, message: &'static str, detail: String) {
