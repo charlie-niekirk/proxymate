@@ -7396,7 +7396,9 @@ name = "pm-widgets"
 version = "0.6.0"
 dependencies = [
  "gpui-kit",
+ "pm-model",
  "pm-theme",
+ "pm-view",
 ]
 
 [[package]]
