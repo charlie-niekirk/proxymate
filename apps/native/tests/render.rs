@@ -331,7 +331,8 @@ mod render {
         assert_pixel(&image, scale, (main_x + 300., SIZE.1 - 3.), t.pane_toolbar, "footer");
         if !cfg!(target_os = "macos") {
             // macOS leaves the sidebar clear for the vibrancy behind the window.
-            assert_pixel(&image, scale, (8., SIZE.1 - 20.), t.sidebar, "sidebar");
+            // Under the sections, above the filter box at the bottom.
+            assert_pixel(&image, scale, (4., SIZE.1 - 60.), t.sidebar, "sidebar");
         }
 
         // The ⌘K palette over the shell, with the commands G2 registers.
