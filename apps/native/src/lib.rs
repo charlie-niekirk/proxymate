@@ -7,7 +7,9 @@ pub mod appearance;
 pub mod bridge;
 #[cfg(feature = "dev-harness")]
 pub mod dev;
+pub mod dev_env;
 pub mod features;
 pub mod menus;
+pub mod perf_probe;
 pub mod prefs;
 pub mod shell;

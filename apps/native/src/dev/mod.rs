@@ -11,6 +11,12 @@
 //!   falls back to gpui's own frame (`"offscreen": true` asks for that).
 //! - `{"click": "<element id>"}`: a real click through hit testing, on an
 //!   element rendered with `.id(…)` and `.test_support()`.
+//! - The flow table (G1): `{"select": 3}` (a row index, as in the Tauri
+//!   remote; `null` clears), `{"selectIds": [4, 9]}`, `{"selectAll": true}`, `{"scrollTo": 500}`,
+//!   `{"headerColumns": [{"part": "request", "name": "x-request-id"}]}`,
+//!   `{"filter": "api"}` (the search text), `{"autoSelect": true}` and
+//!   `{"table": true}`; each answers with the table's state (rows, total,
+//!   selection, focused flow, columns, last filter timing).
 //!
 //! Every phase adds the verbs its surfaces need (see `docs/PLAN.md`).
 
@@ -140,11 +146,14 @@ async fn run(command: Value, cx: &mut AsyncApp) -> Value {
             Err(err) => json!({ "error": err.to_string() }),
         };
     }
+    if let Some(answer) = table_command(&command, cx) {
+        return answer;
+    }
     if let Some(path) = command.get("screenshot").and_then(Value::as_str) {
         let offscreen = command.get("offscreen").and_then(Value::as_bool).unwrap_or(false);
         return screenshot(window, PathBuf::from(path), offscreen, cx).await;
     }
-    json!({"error": "unknown command: try theme, screenshot or click"})
+    json!({"error": "unknown command: try theme, screenshot, click, select, selectIds, selectAll, scrollTo, headerColumns, filter, autoSelect or table"})
 }
 
 async fn screenshot(window: AnyWindowHandle, path: PathBuf, offscreen: bool, cx: &mut AsyncApp) -> Value {
@@ -176,4 +185,78 @@ async fn screenshot(window: AnyWindowHandle, path: PathBuf, offscreen: bool, cx:
         },
         Ok(Err(err)) | Err(err) => json!({ "error": err.to_string() }),
     }
+}
+
+/// The flow table's verbs; `None` when `command` has none of them.
+fn table_command(command: &Value, cx: &mut AsyncApp) -> Option<Value> {
+    const VERBS: [&str; 7] = [
+        "select",
+        "selectIds",
+        "selectAll",
+        "headerColumns",
+        "filter",
+        "autoSelect",
+        "table",
+    ];
+    if !VERBS.iter().any(|v| command.get(v).is_some()) {
+        return None;
+    }
+    let Some(table) = cx.update(|cx| crate::features::flow_table::first(cx)) else {
+        return Some(json!({"error": "no flow table"}));
+    };
+    let result: Result<(), String> = cx.update(|cx| {
+        let grid = table.read(cx).grid().clone();
+        if let Some(v) = command.get("select") {
+            match v.as_u64() {
+                Some(index) => grid.update(cx, |g, cx| g.select_index(index as usize, cx)),
+                None if v.is_null() => grid.update(cx, |g, cx| g.select(None, cx)),
+                None => return Err("select takes a row index or null".into()),
+            }
+        }
+        if let Some(v) = command.get("selectIds") {
+            let ids: Vec<u32> = serde_json::from_value(v.clone()).map_err(|e| format!("selectIds: {e}"))?;
+            grid.update(cx, |g, cx| g.select_ids(&ids, cx));
+        }
+        if let Some(index) = command.get("scrollTo").and_then(Value::as_u64) {
+            grid.update(cx, |g, cx| g.scroll_to(index as usize, cx));
+        }
+        if command.get("selectAll").and_then(Value::as_bool) == Some(true) {
+            grid.update(cx, |g, cx| g.select_all(cx));
+        }
+        if let Some(v) = command.get("headerColumns") {
+            let columns: Vec<pm_model::HeaderColumn> =
+                serde_json::from_value(v.clone()).map_err(|e| format!("headerColumns: {e}"))?;
+            table.update(cx, |t, cx| t.set_header_columns(columns, cx));
+        }
+        if let Some(text) = command.get("filter").and_then(Value::as_str) {
+            let filter = pm_model::FilterSpec {
+                text: text.into(),
+                ..table.read(cx).filter().clone()
+            };
+            table.update(cx, |t, cx| t.set_filter(filter, cx));
+        }
+        if let Some(on) = command.get("autoSelect").and_then(Value::as_bool) {
+            grid.update(cx, |g, cx| g.set_auto_select(on, cx));
+        }
+        Ok(())
+    });
+    if let Err(err) = result {
+        return Some(json!({ "error": err }));
+    }
+    Some(cx.update(|cx| {
+        let t = table.read(cx);
+        let g = t.grid().read(cx);
+        json!({
+            "rows": g.len(),
+            "total": t.total(),
+            "selection": g.flow_selection(),
+            "selected": g.selection_count(),
+            "focused": g.selected().focused,
+            "columns": g.columns().iter().map(|c| c.id.to_string()).collect::<Vec<_>>(),
+            "sort": g.prefs().sort,
+            "filterTiming": t.filter_timing().map(|f| json!({
+                "engineMs": f.engine_ms, "endToEndMs": f.end_to_end_ms, "rows": f.rows
+            })),
+        })
+    }))
 }

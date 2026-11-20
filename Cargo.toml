@@ -31,6 +31,7 @@ pm-testkit = { path = "crates/pm-testkit" }
 pm-app = { path = "crates/pm-app" }
 pm-theme = { path = "crates/pm-theme" }
 pm-widgets = { path = "crates/pm-widgets" }
+pm-view = { path = "crates/pm-view" }
 
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"

@@ -7384,13 +7384,21 @@ dependencies = [
 [[package]]
 name = "pm-view"
 version = "0.6.0"
+dependencies = [
+ "chrono",
+ "pm-model",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "pm-widgets"
 version = "0.6.0"
 dependencies = [
  "gpui-kit",
+ "pm-model",
  "pm-theme",
+ "pm-view",
 ]
 
 [[package]]
@@ -7817,6 +7825,7 @@ dependencies = [
  "pm-model",
  "pm-platform",
  "pm-theme",
+ "pm-view",
  "pm-widgets",
  "raw-window-handle",
  "serde",

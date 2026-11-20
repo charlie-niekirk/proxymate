@@ -7,6 +7,14 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+# Local time for the Time column (already in gpui's tree; thread-safe,
+# unlike `time`'s local offset).
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+pm-model.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
 
 [lints]
 workspace = true
