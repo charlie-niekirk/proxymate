@@ -71,6 +71,25 @@ gpui_kit::assets::icon_assets!(
         Send,
         Unplug,
         RotateCcw,
+        // The Settings window (G12).
+        Wifi,
+        Network,
+        ShieldCheck,
+        Laptop,
+        HardDrive,
+        Braces,
+        Boxes,
+        Palette,
+        SlidersHorizontal,
+        RefreshCw,
+        Settings,
+        Smartphone,
+        FileBox,
+        FileCode,
+        KeyRound,
+        Monitor,
+        Sun,
+        Moon,
     ]
 );
 
