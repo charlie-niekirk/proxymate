@@ -408,7 +408,12 @@ pub fn send_request(
     cx: &mut App,
 ) {
     run_async(
-        move |engine| async move { engine.send(spec, user_send(apply_rules)).await.map_err(|e| e.to_string()) },
+        move |engine| async move {
+            engine
+                .send(spec, user_send(apply_rules))
+                .await
+                .map_err(|e| e.to_string())
+        },
         done,
         cx,
     );
@@ -454,7 +459,9 @@ pub fn replay_in_order(
             };
             let (mut last, mut failed) = (None, 0);
             for &id in &ids {
-                let Some(flow) = engine.get_flow_in(store, id) else { continue };
+                let Some(flow) = engine.get_flow_in(store, id) else {
+                    continue;
+                };
                 if !pm_view::compose::is_sendable(&flow.method, flow.scheme) {
                     continue;
                 }

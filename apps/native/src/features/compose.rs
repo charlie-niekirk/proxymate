@@ -27,7 +27,7 @@ use crate::bridge::mutations;
 use crate::features::chrome::Compose;
 use crate::features::commands;
 use crate::features::context_menu::Menu;
-use crate::features::editing::{BodyEditor, error_line, line_input, menus};
+use crate::features::editing::{BodyEditor, BodyInit, error_line, line_input, menus};
 
 pub const DEFAULT_SIZE: (f32, f32) = (920., 640.);
 pub const MIN_SIZE: (f32, f32) = (640., 420.);
@@ -175,8 +175,18 @@ impl ComposeWindow {
             .on_menu(|req, window, cx| menus::removed_row(&req.row).show(req.position, window, cx))
         });
         let language = language_for(draft.content_type());
-        let text = if draft.body_base64 { String::new() } else { draft.body.clone() };
-        let body = cx.new(|cx| BodyEditor::new("compose-body", "Body", text, None, language, false, window, cx));
+        let text = if draft.body_base64 {
+            String::new()
+        } else {
+            draft.body.clone()
+        };
+        let init = BodyInit {
+            text,
+            original: None,
+            language,
+            read_only: false,
+        };
+        let body = cx.new(|cx| BodyEditor::new("compose-body", "Body", init, window, cx));
         let subscriptions = vec![cx.subscribe_in(&headers, window, |this, _, _: &KvChanged, window, cx| {
             let language = language_for(this.draft(cx).content_type());
             this.body.update(cx, |b, cx| b.set_language(language, window, cx));
@@ -264,7 +274,8 @@ impl ComposeWindow {
     }
 
     pub fn set_method(&mut self, method: &str, window: &mut Window, cx: &mut Context<Self>) {
-        self.method.update(cx, |s, cx| s.set_value(method.to_owned(), window, cx));
+        self.method
+            .update(cx, |s, cx| s.set_value(method.to_owned(), window, cx));
         cx.notify();
     }
 
@@ -272,7 +283,8 @@ impl ComposeWindow {
         let mut draft = self.draft(cx);
         draft.set_content_type(value);
         let original = self.headers.read(cx).original().to_vec();
-        self.headers.update(cx, |h, cx| h.set_rows(draft.headers.clone(), original, cx));
+        self.headers
+            .update(cx, |h, cx| h.set_rows(draft.headers.clone(), original, cx));
         let language = language_for(draft.content_type());
         self.body.update(cx, |b, cx| b.set_language(language, window, cx));
         cx.notify();
@@ -423,9 +435,7 @@ impl Render for ComposeWindow {
             .on_action(cx.listener(|this, a: &SetComposeContentType, window, cx| {
                 this.set_content_type(a.value.as_deref(), window, cx)
             }))
-            .on_action(cx.listener(|this, a: &SetComposeMethod, window, cx| {
-                this.set_method(&a.method, window, cx)
-            }))
+            .on_action(cx.listener(|this, a: &SetComposeMethod, window, cx| this.set_method(&a.method, window, cx)))
             .child(
                 div()
                     .flex_none()
@@ -445,7 +455,11 @@ impl Render for ComposeWindow {
                             .role(Role::Heading)
                             .text_size(px(14.))
                             .font_weight(FontWeight::SEMIBOLD)
-                            .child(pm_widgets::icon(gpui_kit::assets::IconName::Send, t.foreground.hsla(), 16.))
+                            .child(pm_widgets::icon(
+                                gpui_kit::assets::IconName::Send,
+                                t.foreground.hsla(),
+                                16.,
+                            ))
                             .child(title),
                     )
                     .child(
@@ -465,13 +479,12 @@ impl Render for ComposeWindow {
                     .py(px(8.))
                     .border_b_1()
                     .border_color(t.border.hsla())
-                    .child(
-                        div()
-                            .w(px(96.))
-                            .flex_none()
-                            .flex()
-                            .child(line_input(&self.method, "compose-method", "Method", cx)),
-                    )
+                    .child(div().w(px(96.)).flex_none().flex().child(line_input(
+                        &self.method,
+                        "compose-method",
+                        "Method",
+                        cx,
+                    )))
                     .child(
                         Button::new("compose-methods")
                             .ghost()
@@ -572,12 +585,13 @@ impl Render for ComposeWindow {
                             }),
                     )
                     .child(error_line("compose-error", self.error.as_deref(), &t))
-                    .child(
-                        div()
-                            .text_size(px(11.))
-                            .text_color(t.muted_foreground.hsla())
-                            .child(if cfg!(target_os = "macos") { "⌘↩" } else { "Ctrl+↩" }),
-                    )
+                    .child(div().text_size(px(11.)).text_color(t.muted_foreground.hsla()).child(
+                        if cfg!(target_os = "macos") {
+                            "⌘↩"
+                        } else {
+                            "Ctrl+↩"
+                        },
+                    ))
                     .child(
                         Button::new("compose-send")
                             .primary()

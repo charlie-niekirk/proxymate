@@ -418,8 +418,9 @@ pub fn editing_caches(cx: &mut App) -> EditingCaches {
     }
     let engine = cx.try_global::<Bridge>().map(|b| b.engine.clone());
     let body = engine.map(|engine| {
-        Arc::new(move |id: &pm_model::BreakpointId| engine.breakpoint_body(*id).map(Arc::new).map_err(|e| e.to_string()))
-            as Fetcher<pm_model::BreakpointId, Arc<Vec<u8>>>
+        Arc::new(move |id: &pm_model::BreakpointId| {
+            engine.breakpoint_body(*id).map(Arc::new).map_err(|e| e.to_string())
+        }) as Fetcher<pm_model::BreakpointId, Arc<Vec<u8>>>
     });
     let caches = EditingCaches {
         breakpoint_body: cx.new(|_| Resource::new(body)),

@@ -15,7 +15,7 @@ use pm_view::flow::MethodTone;
 use pm_widgets::Pill;
 use pm_widgets::flow_grid::row::method_colors;
 
-pub use body::{BodyChanged, BodyEditor};
+pub use body::{BodyChanged, BodyEditor, BodyInit};
 
 /// A method pill in the table's colours.
 pub fn method_pill(method: &str, t: &Tokens) -> Pill {

@@ -191,7 +191,10 @@ pub fn remove(rows: &mut Vec<KvRow>, id: u64) {
 
 /// Headers as rows with fresh ids.
 pub fn from_headers(headers: &[Header]) -> Vec<KvRow> {
-    headers.iter().map(|h| KvRow::new(h.name.clone(), h.value.clone())).collect()
+    headers
+        .iter()
+        .map(|h| KvRow::new(h.name.clone(), h.value.clone()))
+        .collect()
 }
 
 /// Rows as headers (`cleanHeaders`): names trimmed, nameless rows dropped.
@@ -267,7 +270,11 @@ mod tests {
         assert_eq!(v.rows[1].note, Some(RENAME_NOTE));
         // Without the locks (breakpoints, Compose) everything is editable.
         let free = view(&original, &original, KvOptions::default());
-        assert!(free.rows.iter().all(|r| !r.name_locked && !r.value_locked && r.removable));
+        assert!(
+            free.rows
+                .iter()
+                .all(|r| !r.name_locked && !r.value_locked && r.removable)
+        );
     }
 
     #[test]

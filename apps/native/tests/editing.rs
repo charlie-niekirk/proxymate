@@ -11,8 +11,7 @@ use std::time::Duration;
 use gpui_kit::{AppContext as _, Entity, Focusable as _, TestAppContext, VisualTestContext};
 use pm_core::{Engine, EngineConfig};
 use pm_model::{
-    BreakpointInfo, HeldMessage, MessageEdits, Phase, ProxyStatus, RequestSpec, Scheme, WsDirection,
-    WsOpcode,
+    BreakpointInfo, HeldMessage, MessageEdits, Phase, ProxyStatus, RequestSpec, Scheme, WsDirection, WsOpcode,
 };
 use pm_view::breakpoints::MessageMode;
 use pm_view::json::editor::Key;
@@ -67,7 +66,10 @@ fn message_bp(id: u32) -> BreakpointInfo {
     bp
 }
 
-fn open_editor(cx: &mut TestAppContext, queue: Vec<BreakpointInfo>) -> (Entity<BreakpointsWindow>, &mut VisualTestContext) {
+fn open_editor(
+    cx: &mut TestAppContext,
+    queue: Vec<BreakpointInfo>,
+) -> (Entity<BreakpointsWindow>, &mut VisualTestContext) {
     init(cx, None);
     let (view, cx) = cx.add_window_view(|window, cx| {
         let queue = bridge::breakpoints(cx);
@@ -105,13 +107,23 @@ fn the_request_form_sends_only_its_edits(cx: &mut TestAppContext) {
 
     // The head, a header and the body as a tree.
     form.update_in(cx, |f, window, cx| {
-        f.set_head(Some("put"), Some("https://api.example.com/v1/orders?limit=3"), None, window, cx);
+        f.set_head(
+            Some("put"),
+            Some("https://api.example.com/v1/orders?limit=3"),
+            None,
+            window,
+            cx,
+        );
         f.headers().update(cx, |h, cx| h.push("x-debug", "1", cx));
     });
-    let body = cx.update(|_, cx| form.read(cx).body().cloned()).expect("the body loaded");
+    let body = cx
+        .update(|_, cx| form.read(cx).body().cloned())
+        .expect("the body loaded");
     body.update_in(cx, |b, window, cx| b.set_mode(BodyMode::Tree, window, cx));
     cx.run_until_parked();
-    let tree = cx.update(|_, cx| body.read(cx).tree().cloned()).expect("JSON opens as a tree");
+    let tree = cx
+        .update(|_, cx| body.read(cx).tree().cloned())
+        .expect("JSON opens as a tree");
     // Rows: $, id, total, items: edit total.
     tree.update_in(cx, |t, window, cx| {
         t.press(Key::Down, window, cx);
@@ -126,7 +138,10 @@ fn the_request_form_sends_only_its_edits(cx: &mut TestAppContext) {
     assert_eq!(edits.url.as_deref(), Some("https://api.example.com/v1/orders?limit=3"));
     assert_eq!(edits.headers.unwrap().last().unwrap().name, "x-debug");
     // Numbers stay as written; only the edited one changed.
-    assert_eq!(edits.body.as_deref(), Some(r#"{"id":"o1","total":13.00,"items":[1,2]}"#));
+    assert_eq!(
+        edits.body.as_deref(),
+        Some(r#"{"id":"o1","total":13.00,"items":[1,2]}"#)
+    );
     assert_eq!(edits.status, None);
 }
 
@@ -150,7 +165,10 @@ fn execute_shows_the_engines_answer_inline(cx: &mut TestAppContext) {
         std::thread::sleep(Duration::from_millis(10));
     }
     let error = cx.update(|_, cx| form.read(cx).error().map(str::to_owned));
-    assert!(error.is_some_and(|e| e.contains('1')), "the unknown breakpoint is named");
+    assert!(
+        error.is_some_and(|e| e.contains('1')),
+        "the unknown breakpoint is named"
+    );
 }
 
 #[gpui_kit::test]
@@ -162,7 +180,11 @@ fn a_response_form_edits_the_status_and_responds(cx: &mut TestAppContext) {
             sample::breakpoint(2, Phase::Response),
         ],
     );
-    assert_eq!(cx.update(|_, cx| view.read(cx).shown(cx).map(|b| b.id)), Some(1), "the oldest first");
+    assert_eq!(
+        cx.update(|_, cx| view.read(cx).shown(cx).map(|b| b.id)),
+        Some(1),
+        "the oldest first"
+    );
     view.update_in(cx, |w, window, cx| w.select(2, window, cx));
     let form = http_form(&view, cx);
     form.update_in(cx, |f, window, cx| f.set_head(None, None, Some("503"), window, cx));
@@ -227,7 +249,10 @@ fn a_held_message_is_edited_as_a_tree_text_or_hex(cx: &mut TestAppContext) {
     });
     cx.run_until_parked();
     let edits = cx.update(|_, cx| form.read(cx).edits()).unwrap();
-    assert_eq!(edits.body.as_deref(), Some(r#"{"id":"o9","total":12.50,"items":[1,2]}"#));
+    assert_eq!(
+        edits.body.as_deref(),
+        Some(r#"{"id":"o9","total":12.50,"items":[1,2]}"#)
+    );
 
     // Hex carries the edit over; edited bytes go as base64.
     form.update_in(cx, |f, window, cx| f.switch_to(MessageMode::Hex, window, cx));
@@ -251,16 +276,25 @@ fn the_window_opens_when_something_pauses_and_closes_when_empty(cx: &mut TestApp
     assert!(cx.update(|_, cx| BreakpointsWindow::global(cx).is_none()));
     set_body(cx, 1, b"{}");
     set_queue(cx, vec![sample::breakpoint(1, Phase::Request)]);
-    assert!(cx.update(|_, cx| BreakpointsWindow::global(cx).is_some()), "opened by the pause");
+    assert!(
+        cx.update(|_, cx| BreakpointsWindow::global(cx).is_some()),
+        "opened by the pause"
+    );
     set_queue(cx, Vec::new());
-    assert!(cx.update(|_, cx| BreakpointsWindow::global(cx).is_none()), "closed once empty");
+    assert!(
+        cx.update(|_, cx| BreakpointsWindow::global(cx).is_none()),
+        "closed once empty"
+    );
 }
 
 #[gpui_kit::test]
 fn compose_sends_with_cmd_enter(cx: &mut TestAppContext) {
     // The send runs on tokio, whose threads wake the test's tasks.
     cx.executor().allow_parking();
-    let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap();
     let _guard = runtime.enter();
     let upstream = runtime.block_on(pm_testkit::Upstream::start());
     let engine = Engine::with_config(EngineConfig::default());

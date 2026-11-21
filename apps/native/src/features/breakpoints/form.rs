@@ -23,7 +23,7 @@ use super::window::phase_pill;
 use crate::bridge::keys::{self, EditingCaches};
 use crate::bridge::mutations;
 use crate::bridge::resource::Load;
-use crate::features::editing::{BodyEditor, error_line, heading, line_input, menus};
+use crate::features::editing::{BodyEditor, BodyInit, error_line, heading, line_input, menus};
 
 pub struct HttpForm {
     pub bp: BreakpointInfo,
@@ -147,10 +147,12 @@ impl HttpForm {
                     BodyEditor::new(
                         format!("bp-body-{id}"),
                         "Body",
-                        text,
-                        Some(original),
-                        language,
-                        !editable,
+                        BodyInit {
+                            text,
+                            original: Some(original),
+                            language,
+                            read_only: !editable,
+                        },
                         window,
                         cx,
                     )
@@ -292,10 +294,12 @@ impl HttpForm {
             BodyEditor::new(
                 format!("bp-answer-body-{id}"),
                 "Response body",
-                String::new(),
-                None,
-                "json",
-                false,
+                BodyInit {
+                    text: String::new(),
+                    original: None,
+                    language: "json",
+                    read_only: false,
+                },
                 window,
                 cx,
             )
@@ -364,13 +368,12 @@ impl HttpForm {
                                 .text_color(t.muted_foreground.hsla())
                                 .child("Status"),
                         )
-                        .child(
-                            div()
-                                .w(px(80.))
-                                .flex_none()
-                                .flex()
-                                .child(line_input(&self.status, "bp-status", "Status", cx)),
-                        ),
+                        .child(div().w(px(80.)).flex_none().flex().child(line_input(
+                            &self.status,
+                            "bp-status",
+                            "Status",
+                            cx,
+                        ))),
                 )
                 .into_any_element()
         }
@@ -428,13 +431,12 @@ impl Render for HttpForm {
                                 .text_color(t.muted_foreground.hsla())
                                 .child("Status"),
                         )
-                        .child(
-                            div()
-                                .w(px(80.))
-                                .flex_none()
-                                .flex()
-                                .child(line_input(&self.answer_status, "bp-answer-status", "Answer status", cx)),
-                        ),
+                        .child(div().w(px(80.)).flex_none().flex().child(line_input(
+                            &self.answer_status,
+                            "bp-answer-status",
+                            "Answer status",
+                            cx,
+                        ))),
                 )
                 .child(self.answer_headers.clone())
                 .children(
@@ -481,35 +483,29 @@ impl Render for HttpForm {
                     ),
             )
             .child(
-                div()
-                    .id("bp-scroll")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap(px(12.))
-                            .p(px(12.))
-                            .child(self.head(&t, cx))
-                            .child(self.headers.clone())
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap(px(4.))
-                                    .child(heading(logic::body_heading(bp.body.size), &t))
-                                    .children(bp.body.note.clone().map(|n| {
-                                        div()
-                                            .text_size(px(12.))
-                                            .text_color(t.muted_foreground.hsla())
-                                            .child(n)
-                                    }))
-                                    .child(div().h(px(260.)).child(body)),
-                            )
-                            .children(answer),
-                    ),
+                div().id("bp-scroll").flex_1().min_h_0().overflow_y_scroll().child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(12.))
+                        .p(px(12.))
+                        .child(self.head(&t, cx))
+                        .child(self.headers.clone())
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap(px(4.))
+                                .child(heading(logic::body_heading(bp.body.size), &t))
+                                .children(
+                                    bp.body.note.clone().map(|n| {
+                                        div().text_size(px(12.)).text_color(t.muted_foreground.hsla()).child(n)
+                                    }),
+                                )
+                                .child(div().h(px(260.)).child(body)),
+                        )
+                        .children(answer),
+                ),
             )
             .child(
                 div()

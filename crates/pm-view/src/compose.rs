@@ -26,7 +26,10 @@ pub fn is_sendable(method: &str, scheme: Scheme) -> bool {
 }
 
 /// The toast for Replay on a flow it can't send.
-pub const NOT_SENDABLE: (&str, &str) = ("Can't replay this flow", "tunnels and WebSockets can't be sent again yet");
+pub const NOT_SENDABLE: (&str, &str) = (
+    "Can't replay this flow",
+    "tunnels and WebSockets can't be sent again yet",
+);
 pub const NOTHING_TO_REPLAY: (&str, &str) = ("Nothing to replay", "select a flow first");
 
 /// Compose's window description.
@@ -200,7 +203,10 @@ mod tests {
         draft.set_content_type(Some("application/json; charset=utf-8"));
         assert_eq!(draft.content_type_choice(), ContentTypeChoice::Listed("JSON"));
         draft.set_content_type(Some("image/png"));
-        assert_eq!(draft.content_type_choice(), ContentTypeChoice::Custom("image/png".into()));
+        assert_eq!(
+            draft.content_type_choice(),
+            ContentTypeChoice::Custom("image/png".into())
+        );
         draft.set_content_type(None);
         assert_eq!(draft.content_type_choice(), ContentTypeChoice::Listed("None"));
         assert_eq!(draft.headers.len(), 1);

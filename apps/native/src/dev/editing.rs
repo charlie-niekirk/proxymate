@@ -73,7 +73,12 @@ fn set_headers(
     cx: &mut gpui_kit::Context<pm_widgets::kv_editor::KvEditor>,
 ) {
     for row in rows {
-        match h.rows().iter().find(|r| r.name.eq_ignore_ascii_case(&row.name)).map(|r| (r.id, r.name.clone())) {
+        match h
+            .rows()
+            .iter()
+            .find(|r| r.name.eq_ignore_ascii_case(&row.name))
+            .map(|r| (r.id, r.name.clone()))
+        {
             Some((id, name)) => h.set(id, &name, &row.value, window, cx),
             None => h.push(&row.name, &row.value, cx),
         }
@@ -240,7 +245,11 @@ fn message_edit(
     window
         .update(cx, |_, window, cx| {
             form.update(cx, |f, cx| {
-                if let Some(mode) = edit.get("messageMode").and_then(Value::as_str).and_then(MessageMode::from_id) {
+                if let Some(mode) = edit
+                    .get("messageMode")
+                    .and_then(Value::as_str)
+                    .and_then(MessageMode::from_id)
+                {
                     f.switch_to(mode, window, cx);
                 }
                 if let Some(payload) = edit.get("payload").and_then(Value::as_str) {
@@ -283,7 +292,9 @@ pub async fn command(command: &Value, cx: &mut AsyncApp) -> Option<Value> {
         let Some((handle, view)) = cx.update(|cx| breakpoints_window(cx)) else {
             return Some(json!({"error": "the Breakpoint Editor isn't open"}));
         };
-        let _ = handle.update(cx, |_, window, cx| view.update(cx, |w, cx| w.select(id as u32, window, cx)));
+        let _ = handle.update(cx, |_, window, cx| {
+            view.update(cx, |w, cx| w.select(id as u32, window, cx))
+        });
     }
     if let Some(edit) = command.get("breakpointEdit") {
         let Some((handle, _)) = cx.update(|cx| breakpoints_window(cx)) else {
@@ -331,7 +342,9 @@ pub async fn command(command: &Value, cx: &mut AsyncApp) -> Option<Value> {
         }
     }
     if let Some(text) = command.get("breakpointType").and_then(Value::as_str) {
-        let (Some((handle, _)), Some(tree)) = (cx.update(|cx| breakpoints_window(cx)), cx.update(|cx| focused_tree(cx))) else {
+        let (Some((handle, _)), Some(tree)) =
+            (cx.update(|cx| breakpoints_window(cx)), cx.update(|cx| focused_tree(cx)))
+        else {
             return Some(json!({"error": "no JSON tree is shown"}));
         };
         let text = text.to_owned();
@@ -357,7 +370,8 @@ pub async fn command(command: &Value, cx: &mut AsyncApp) -> Option<Value> {
         };
         let abort = action.get("abort").and_then(Value::as_bool) == Some(true);
         let respond = action.get("respond").and_then(Value::as_bool) == Some(true);
-        let resolved = cx.update(|cx| pane(cx).map(|p| (p, breakpoints_window(cx).and_then(|(_, w)| w.read(cx).shown(cx)))));
+        let resolved =
+            cx.update(|cx| pane(cx).map(|p| (p, breakpoints_window(cx).and_then(|(_, w)| w.read(cx).shown(cx)))));
         let Some((pane, shown)) = resolved else {
             return Some(json!({"error": "nothing is paused"}));
         };
@@ -382,7 +396,8 @@ pub async fn command(command: &Value, cx: &mut AsyncApp) -> Option<Value> {
         // Until the queue drops it (or the form shows an error).
         let id = shown.map(|b| b.id);
         until(Duration::from_secs(3), cx, |cx| {
-            let gone = breakpoints_window(cx).is_none_or(|(_, w)| !w.read(cx).queue(cx).iter().any(|b| Some(b.id) == id));
+            let gone =
+                breakpoints_window(cx).is_none_or(|(_, w)| !w.read(cx).queue(cx).iter().any(|b| Some(b.id) == id));
             let failed = match self::pane(cx) {
                 Some(Pane::Http(f)) => f.read(cx).error().is_some(),
                 Some(Pane::Message(f)) => f.read(cx).error().is_some(),
@@ -418,7 +433,8 @@ pub async fn command(command: &Value, cx: &mut AsyncApp) -> Option<Value> {
     }
 
     // ---- Replay ----
-    let store = cx.update(|cx| crate::workspace::Workspace::global(cx).map_or(pm_model::LIVE_STORE, |w| w.read(cx).store));
+    let store =
+        cx.update(|cx| crate::workspace::Workspace::global(cx).map_or(pm_model::LIVE_STORE, |w| w.read(cx).store));
     if let Some(id) = command.get("replay").and_then(Value::as_u64) {
         let flow = FlowRef { store, id: id as u32 };
         cx.update(|cx| replay::replay(flow, cx));

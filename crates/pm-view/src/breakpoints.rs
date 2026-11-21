@@ -187,7 +187,9 @@ impl HttpDraft {
             out.url = Some(self.url.clone());
         }
         if !request {
-            let status = self.status_code().ok_or("The status must be a number from 100 to 999")?;
+            let status = self
+                .status_code()
+                .ok_or("The status must be a number from 100 to 999")?;
             if Some(status) != bp.response.as_ref().map(|r| r.status) {
                 out.status = Some(status);
             }
@@ -534,8 +536,10 @@ mod tests {
 
     #[test]
     fn respond_answers_with_the_form() {
-        let mut answer = Answer::default();
-        answer.body = "{}".into();
+        let mut answer = Answer {
+            body: "{}".into(),
+            ..Default::default()
+        };
         assert_eq!(
             answer.resolution().unwrap(),
             BreakpointResolution::Respond {
@@ -565,7 +569,10 @@ mod tests {
                 ..Default::default()
             },
         );
-        assert_eq!((merged.method.as_deref(), merged.body.as_deref()), (Some("PUT"), Some("b")));
+        assert_eq!(
+            (merged.method.as_deref(), merged.body.as_deref()),
+            (Some("PUT"), Some("b"))
+        );
     }
 
     #[test]

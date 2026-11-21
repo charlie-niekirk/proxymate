@@ -24,9 +24,9 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Escape, Input, InputEvent, InputState};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    App, ClickEvent, Context, ElementId, Entity, EventEmitter, FocusHandle, Focusable, Hsla, KeyDownEvent,
-    MouseButton, MouseDownEvent, Pixels, Point, Role, ScrollStrategy, SharedString, Subscription,
-    UniformListScrollHandle, Window, div, px, uniform_list,
+    App, ClickEvent, Context, ElementId, Entity, EventEmitter, FocusHandle, Focusable, Hsla, KeyDownEvent, MouseButton,
+    MouseDownEvent, Pixels, Point, Role, ScrollStrategy, SharedString, Subscription, UniformListScrollHandle, Window,
+    div, px, uniform_list,
 };
 use pm_theme::Tokens;
 use pm_theme::kit::TokensExt as _;
@@ -174,12 +174,7 @@ impl JsonEditor {
 
     /// Changes the model (tests, the dev remote and the owner use this; the
     /// editor itself does too), then follows the selection and the edit.
-    pub fn update_model(
-        &mut self,
-        f: impl FnOnce(&mut JsonEditorModel),
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub fn update_model(&mut self, f: impl FnOnce(&mut JsonEditorModel), window: &mut Window, cx: &mut Context<Self>) {
         let before = self.model.root().clone();
         f(&mut self.model);
         self.after(before, true, window, cx);
@@ -397,7 +392,13 @@ impl JsonEditor {
                 .min_w_0()
                 .items_center()
                 .gap(px(4.))
-                .child(div().min_w_0().truncate().text_color(value_color).child(row.value_text()))
+                .child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .text_color(value_color)
+                        .child(row.value_text()),
+                )
                 .children(row.size_text().map(|s| {
                     div()
                         .flex_none()
@@ -534,9 +535,11 @@ impl Render for JsonEditor {
             .text_color(t.foreground.hsla())
             .on_action(cx.listener(|this, _: &Undo, window, cx| _ = this.press(Key::Undo, window, cx)))
             .on_action(cx.listener(|this, _: &Redo, window, cx| _ = this.press(Key::Redo, window, cx)))
-            .on_action(cx.listener(|this, _: &ExpandAll, window, cx| {
-                this.update_model(JsonEditorModel::expand_all, window, cx)
-            }))
+            .on_action(
+                cx.listener(|this, _: &ExpandAll, window, cx| {
+                    this.update_model(JsonEditorModel::expand_all, window, cx)
+                }),
+            )
             .on_action(cx.listener(|this, _: &CollapseAll, window, cx| {
                 this.update_model(JsonEditorModel::collapse_all, window, cx)
             }))
@@ -586,23 +589,23 @@ impl Render for JsonEditor {
                     .child(
                         tool("undo", gpui_kit::assets::IconName::Undo2, "Undo (⌘Z)")
                             .disabled(!can_undo)
-                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                                _ = this.press(Key::Undo, window, cx)
-                            })),
+                            .on_click(
+                                cx.listener(|this, _: &ClickEvent, window, cx| _ = this.press(Key::Undo, window, cx)),
+                            ),
                     )
                     .child(
                         tool("redo", gpui_kit::assets::IconName::Redo2, "Redo (⇧⌘Z)")
                             .disabled(!can_redo)
-                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                                _ = this.press(Key::Redo, window, cx)
-                            })),
+                            .on_click(
+                                cx.listener(|this, _: &ClickEvent, window, cx| _ = this.press(Key::Redo, window, cx)),
+                            ),
                     )
                     .child(
-                        tool("expand", gpui_kit::assets::IconName::ChevronsUpDown, "Expand all").on_click(
-                            cx.listener(|this, _: &ClickEvent, window, cx| {
+                        tool("expand", gpui_kit::assets::IconName::ChevronsUpDown, "Expand all").on_click(cx.listener(
+                            |this, _: &ClickEvent, window, cx| {
                                 this.update_model(JsonEditorModel::expand_all, window, cx)
-                            }),
-                        ),
+                            },
+                        )),
                     )
                     .child(
                         tool("collapse", gpui_kit::assets::IconName::ChevronsDownUp, "Collapse all").on_click(

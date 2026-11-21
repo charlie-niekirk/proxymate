@@ -335,8 +335,24 @@ impl Render for KvEditor {
                             this.open_menu(for_menu.clone(), e, window, cx);
                         }),
                     )
-                    .child(div().w(name_width).flex_none().px(px(8.)).truncate().line_through().child(row.name))
-                    .child(div().flex_1().min_w_0().px(px(8.)).truncate().line_through().child(row.value))
+                    .child(
+                        div()
+                            .w(name_width)
+                            .flex_none()
+                            .px(px(8.))
+                            .truncate()
+                            .line_through()
+                            .child(row.name),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .px(px(8.))
+                            .truncate()
+                            .line_through()
+                            .child(row.value),
+                    )
                     .child(
                         Button::new(SharedString::from(format!("{editor_id}-put-back-{i}")))
                             .ghost()
@@ -378,8 +394,7 @@ mod tests {
             framing_locked: true,
             ..Default::default()
         };
-        let (editor, cx) =
-            cx.add_window_view(move |_, cx| KvEditor::new("kv", original.clone(), original, opts, cx));
+        let (editor, cx) = cx.add_window_view(move |_, cx| KvEditor::new("kv", original.clone(), original, opts, cx));
         cx.run_until_parked();
         (editor, cx)
     }

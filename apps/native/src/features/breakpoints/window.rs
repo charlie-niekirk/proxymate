@@ -8,9 +8,9 @@ use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, AnyWindowHandle, App, Bounds, Context, Entity, FocusHandle, Focusable, FontWeight, Global,
-    MouseButton, MouseDownEvent, Render, Role, SharedString, Subscription, Task, TitlebarOptions, WeakEntity, Window,
-    WindowBounds, WindowOptions, div, px, size,
+    AnyElement, AnyWindowHandle, App, Bounds, Context, Entity, FocusHandle, Focusable, FontWeight, Global, MouseButton,
+    MouseDownEvent, Render, Role, SharedString, Subscription, Task, TitlebarOptions, WeakEntity, Window, WindowBounds,
+    WindowOptions, div, px, size,
 };
 use pm_model::{BreakpointId, BreakpointInfo, Phase, WsDirection};
 use pm_theme::Tokens;
@@ -219,8 +219,12 @@ impl BreakpointsWindow {
                 .into_iter()
                 .fold(Menu::new(), |menu, item| match item {
                     QueueItem::Copy { label, text, what } => menu.copy(label, text, what),
-                    QueueItem::ShowFlow(flow) => menu.item(format!("Show flow #{}", flow + 1), ShowPausedFlow { id: flow }),
-                    QueueItem::OpenRule { id, name } => menu.item(format!("Open rule “{name}”"), OpenRule { id: id.into() }),
+                    QueueItem::ShowFlow(flow) => {
+                        menu.item(format!("Show flow #{}", flow + 1), ShowPausedFlow { id: flow })
+                    }
+                    QueueItem::OpenRule { id, name } => {
+                        menu.item(format!("Open rule “{name}”"), OpenRule { id: id.into() })
+                    }
                     QueueItem::Separator => menu.separator(),
                     QueueItem::Continue => menu.item("Continue unmodified", ContinueBreakpoint { id }),
                     QueueItem::Abort(label) => menu.item(label, AbortBreakpoint { id }),
@@ -238,6 +242,14 @@ impl BreakpointsWindow {
         let what = match &bp.message {
             Some(m) => {
                 let (icon, color) = match m.direction {
+                    _ if selected => (
+                        if m.direction == WsDirection::Sent {
+                            gpui_kit::assets::IconName::ArrowUp
+                        } else {
+                            gpui_kit::assets::IconName::ArrowDown
+                        },
+                        t.selection_fg,
+                    ),
                     WsDirection::Sent => (gpui_kit::assets::IconName::ArrowUp, t.ws_sent),
                     WsDirection::Received => (gpui_kit::assets::IconName::ArrowDown, t.ws_received),
                 };
@@ -252,7 +264,16 @@ impl BreakpointsWindow {
                     .child("WebSocket")
                     .into_any_element()
             }
+            None if selected => {
+                pm_widgets::Pill::new(bp.request.method.clone(), t.selection_fg, t.pill_on_selection).into_any_element()
+            }
             None => method_pill(&bp.request.method, t).into_any_element(),
+        };
+        // On the selection, pills turn to its colours (the table's rows do).
+        let phase = if selected {
+            pm_widgets::Pill::new(logic::phase_label(bp.phase), t.selection_fg, t.pill_on_selection)
+        } else {
+            phase_pill(bp.phase, t)
         };
         let mono = cx.theme().mono_font_family.clone();
         div()
@@ -288,20 +309,14 @@ impl BreakpointsWindow {
                 }),
             )
             .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(6.))
-                    .child(phase_pill(bp.phase, t))
-                    .child(what)
-                    .child(
-                        div()
-                            .ml_auto()
-                            .font_family(mono.clone())
-                            .text_size(px(11.))
-                            .text_color(muted.hsla())
-                            .children(logic::flow_number(bp)),
-                    ),
+                div().flex().items_center().gap(px(6.)).child(phase).child(what).child(
+                    div()
+                        .ml_auto()
+                        .font_family(mono.clone())
+                        .text_size(px(11.))
+                        .text_color(muted.hsla())
+                        .children(logic::flow_number(bp)),
+                ),
             )
             .child(
                 div()
@@ -424,21 +439,23 @@ impl Render for BreakpointsWindow {
                             })
                             .children(rows),
                     )
-                    .child(div().flex_1().min_w_0().map(|d| match &self.pane {
-                        Some((_, Pane::Http(form))) => {
-                            form.update(cx, |f, _| f.now_ms = now);
-                            d.child(form.clone())
+                    .child(div().flex_1().min_w_0().map(|d| {
+                        match &self.pane {
+                            Some((_, Pane::Http(form))) => {
+                                form.update(cx, |f, _| f.now_ms = now);
+                                d.child(form.clone())
+                            }
+                            Some((_, Pane::Message(form))) => {
+                                form.update(cx, |f, _| f.now_ms = now);
+                                d.child(form.clone())
+                            }
+                            None => d.flex().items_center().justify_center().p(px(24.)).child(
+                                div()
+                                    .text_size(px(12.))
+                                    .text_color(t.muted_foreground.hsla())
+                                    .child(logic::EMPTY),
+                            ),
                         }
-                        Some((_, Pane::Message(form))) => {
-                            form.update(cx, |f, _| f.now_ms = now);
-                            d.child(form.clone())
-                        }
-                        None => d.flex().items_center().justify_center().p(px(24.)).child(
-                            div()
-                                .text_size(px(12.))
-                                .text_color(t.muted_foreground.hsla())
-                                .child(logic::EMPTY),
-                        ),
                     })),
             )
             .test_support()

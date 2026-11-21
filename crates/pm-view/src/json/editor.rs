@@ -143,7 +143,11 @@ impl Row {
         if !self.node.is_container() || n == 0 {
             return None;
         }
-        let unit = if matches!(*self.node, Node::Arr(_)) { "item" } else { "key" };
+        let unit = if matches!(*self.node, Node::Arr(_)) {
+            "item"
+        } else {
+            "key"
+        };
         Some(format!("{n} {unit}{}", if n == 1 { "" } else { "s" }))
     }
 
@@ -508,7 +512,9 @@ impl JsonEditorModel {
     /// "Add after" (⌘↩): a blank value after the row, its key (in an
     /// object) or value opened for editing. On the root, adds a child.
     pub fn add_after(&mut self, index: usize, t: JType) {
-        let Some(row) = self.rows.get(index).cloned() else { return };
+        let Some(row) = self.rows.get(index).cloned() else {
+            return;
+        };
         if row.path.is_empty() {
             return self.add_child(index, t);
         }
@@ -525,7 +531,9 @@ impl JsonEditorModel {
 
     /// "Add key / item": a blank value at the end of the container.
     pub fn add_child(&mut self, index: usize, t: JType) {
-        let Some(row) = self.rows.get(index).cloned() else { return };
+        let Some(row) = self.rows.get(index).cloned() else {
+            return;
+        };
         if !row.node.is_container() {
             return;
         }
@@ -543,7 +551,9 @@ impl JsonEditorModel {
     /// Removes the row (not the root); the selection moves to the next row
     /// at its level or above, else the one before, else the parent.
     pub fn remove_row(&mut self, index: usize) {
-        let Some(row) = self.rows.get(index).cloned() else { return };
+        let Some(row) = self.rows.get(index).cloned() else {
+            return;
+        };
         if row.path.is_empty() {
             return;
         }
@@ -561,7 +571,9 @@ impl JsonEditorModel {
     }
 
     pub fn duplicate_row(&mut self, index: usize) {
-        let Some(row) = self.rows.get(index).cloned() else { return };
+        let Some(row) = self.rows.get(index).cloned() else {
+            return;
+        };
         if row.path.is_empty() {
             return;
         }
@@ -571,7 +583,9 @@ impl JsonEditorModel {
     }
 
     pub fn change_type(&mut self, index: usize, t: JType) {
-        let Some(row) = self.rows.get(index).cloned() else { return };
+        let Some(row) = self.rows.get(index).cloned() else {
+            return;
+        };
         let converted = convert(&row.node, t);
         let container = converted.is_container();
         let root = set_value(self.root(), &row.path, converted);
@@ -594,8 +608,12 @@ impl JsonEditorModel {
     /// "Reset to original": the original value and key; a row the original
     /// didn't have is removed.
     pub fn reset(&mut self, index: usize) {
-        let Some(row) = self.rows.get(index).cloned() else { return };
-        let Some(reference) = self.reference.clone() else { return };
+        let Some(row) = self.rows.get(index).cloned() else {
+            return;
+        };
+        let Some(reference) = self.reference.clone() else {
+            return;
+        };
         if row.path.is_empty() {
             return self.change(reference.root.clone());
         }
@@ -613,7 +631,9 @@ impl JsonEditorModel {
     /// flips instead, a container opens or closes, and null has nothing to
     /// edit. Returns whether an inline edit started.
     pub fn start_edit(&mut self, index: usize, field: Field) -> bool {
-        let Some(row) = self.rows.get(index).cloned() else { return false };
+        let Some(row) = self.rows.get(index).cloned() else {
+            return false;
+        };
         if field == Field::Key && !matches!(row.label, Label::Key(_)) {
             return false;
         }
@@ -897,7 +917,11 @@ mod tests {
         m.select_row(1);
         m.key(Key::AddAfter);
         assert_eq!(m.text(false), r#"{"a":1,"key":"","b":[1]}"#);
-        assert_eq!(m.editing_row(), Some((2, Field::Key)), "a new member starts with its key");
+        assert_eq!(
+            m.editing_row(),
+            Some((2, Field::Key)),
+            "a new member starts with its key"
+        );
         m.commit("x").unwrap();
         m.key(Key::Duplicate);
         assert_eq!(m.text(false), r#"{"a":1,"x":"","x_copy":"","b":[1]}"#);
@@ -909,12 +933,20 @@ mod tests {
         let b = find(&m, "\"b\"");
         m.add_child(b, JType::Num);
         assert_eq!(m.text(false), r#"{"a":1,"x":"","b":[1,0]}"#);
-        assert_eq!(m.editing().map(|e| e.field), Some(Field::Value), "a new item starts with its value");
+        assert_eq!(
+            m.editing().map(|e| e.field),
+            Some(Field::Value),
+            "a new item starts with its value"
+        );
         m.cancel_edit();
         let last = m.rows().len() - 1;
         m.select_row(last);
         m.key(Key::Remove);
-        assert_eq!(m.selected_index(), Some(last - 1), "the last row falls back to the one before");
+        assert_eq!(
+            m.selected_index(),
+            Some(last - 1),
+            "the last row falls back to the one before"
+        );
         m.select_row(0);
         m.key(Key::Remove);
         assert_eq!(m.text(false), r#"{"a":1,"x":"","b":[1]}"#, "the root stays");

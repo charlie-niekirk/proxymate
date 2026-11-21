@@ -6,9 +6,7 @@
 use pm_view::json::doc::JType;
 use pm_view::json::editor::MenuSpec;
 use pm_view::kv::KvRow;
-use pm_widgets::json_editor::{
-    AddAfter, AddChild, ChangeType, Duplicate, EditValue, RemoveRow, Rename, ResetRow,
-};
+use pm_widgets::json_editor::{AddAfter, AddChild, ChangeType, Duplicate, EditValue, RemoveRow, Rename, ResetRow};
 use pm_widgets::kv_editor::PutBack;
 
 use crate::features::context_menu::Menu;
@@ -53,9 +51,11 @@ pub fn json_row(spec: &MenuSpec) -> Menu {
     if spec.not_root {
         menu = menu.item("Remove  ⌫", RemoveRow);
     }
-    menu.separator()
-        .copy("Copy value", spec.value.clone(), "value")
-        .copy("Copy JSON pointer", spec.pointer.clone(), "JSON pointer")
+    menu.separator().copy("Copy value", spec.value.clone(), "value").copy(
+        "Copy JSON pointer",
+        spec.pointer.clone(),
+        "JSON pointer",
+    )
 }
 
 /// A removed row's menu in a KvEditor.
@@ -77,12 +77,7 @@ mod tests {
         let root = json_row(&m.menu(0).unwrap());
         assert_eq!(
             root.labels(),
-            [
-                "Change type",
-                "Add key",
-                "Copy value",
-                "Copy JSON pointer"
-            ]
+            ["Change type", "—", "Add key", "—", "Copy value", "Copy JSON pointer"]
         );
         assert_eq!(root.copy_text("Copy JSON pointer"), Some("/"));
         let s = json_row(&m.menu(m.rows().len() - 1).unwrap());

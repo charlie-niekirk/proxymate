@@ -238,7 +238,10 @@ pub fn escape_token(token: &str) -> String {
 
 /// `/a/0/b` from tokens.
 pub fn pointer_of<S: AsRef<str>>(tokens: &[S]) -> String {
-    tokens.iter().map(|t| format!("/{}", escape_token(t.as_ref()))).collect()
+    tokens
+        .iter()
+        .map(|t| format!("/{}", escape_token(t.as_ref())))
+        .collect()
 }
 
 /// The JSON pointer of the node at `path` (`""` for the root).
@@ -293,11 +296,7 @@ pub fn update(root: &Arc<Node>, path: &Path, change: impl FnOnce(&Arc<Node>) -> 
 }
 
 /// Replaces the children of the container at `path`.
-fn with_children(
-    root: &Arc<Node>,
-    path: &Path,
-    change: impl FnOnce(Vec<Member>, bool) -> Vec<Member>,
-) -> Arc<Node> {
+fn with_children(root: &Arc<Node>, path: &Path, change: impl FnOnce(Vec<Member>, bool) -> Vec<Member>) -> Arc<Node> {
     update(root, path, |node| match &**node {
         Node::Obj(m) => Arc::new(Node::Obj(change(m.clone(), true))),
         Node::Arr(m) => Arc::new(Node::Arr(change(m.clone(), false))),
@@ -340,7 +339,9 @@ pub fn remove(root: &Arc<Node>, path: &Path) -> Arc<Node> {
     let Some((id, parent)) = path.split_last() else {
         return root.clone();
     };
-    with_children(root, parent, |kids, _| kids.into_iter().filter(|c| c.id != *id).collect())
+    with_children(root, parent, |kids, _| {
+        kids.into_iter().filter(|c| c.id != *id).collect()
+    })
 }
 
 /// A key not yet used in `obj`, based on `base`.
@@ -606,8 +607,7 @@ pub fn removed_count(node: &Node, id: Id, original: &DocIndex, original_root: &N
 pub fn align(original: &Arc<Node>, result: &Arc<Node>) -> Arc<Node> {
     match (&**original, &**result) {
         (Node::Obj(before), Node::Obj(after)) => {
-            let by_key: HashMap<&str, &Member> =
-                before.iter().filter_map(|m| Some((m.key.as_deref()?, m))).collect();
+            let by_key: HashMap<&str, &Member> = before.iter().filter_map(|m| Some((m.key.as_deref()?, m))).collect();
             let mut used = HashSet::new();
             Arc::new(Node::Obj(
                 after
@@ -743,9 +743,15 @@ mod tests {
             Node::Str("1.50".into())
         );
         assert_eq!(*convert(&Arc::new(Node::Bool(true)), JType::Num), Node::Num("1".into()));
-        assert_eq!(*convert(&Arc::new(Node::Num("0.0".into())), JType::Bool), Node::Bool(false));
+        assert_eq!(
+            *convert(&Arc::new(Node::Num("0.0".into())), JType::Bool),
+            Node::Bool(false)
+        );
         assert_eq!(*convert(&s("true"), JType::Bool), Node::Bool(true));
-        assert_eq!(convert(&parse("[1,2]").unwrap(), JType::Obj).to_json(0), r#"{"0":1,"1":2}"#);
+        assert_eq!(
+            convert(&parse("[1,2]").unwrap(), JType::Obj).to_json(0),
+            r#"{"0":1,"1":2}"#
+        );
         assert_eq!(
             convert(&parse(r#"{"a":1}"#).unwrap(), JType::Str).to_json(0),
             r#""{\"a\":1}""#

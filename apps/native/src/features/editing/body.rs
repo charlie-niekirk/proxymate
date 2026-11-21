@@ -47,17 +47,30 @@ pub struct BodyEditor {
 
 impl EventEmitter<BodyChanged> for BodyEditor {}
 
+/// What a [`BodyEditor`] starts with.
+pub struct BodyInit {
+    pub text: String,
+    /// The paused body, for the tree's tints; `None` offers no tree.
+    pub original: Option<String>,
+    /// The editor grammar (`pm_view::compose::language_for`).
+    pub language: &'static str,
+    pub read_only: bool,
+}
+
 impl BodyEditor {
     pub fn new(
         id: impl Into<SharedString>,
         label: impl Into<SharedString>,
-        text: String,
-        original: Option<String>,
-        language: &'static str,
-        read_only: bool,
+        init: BodyInit,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let BodyInit {
+            text,
+            original,
+            language,
+            read_only,
+        } = init;
         let (id, label) = (id.into(), label.into());
         let (code, events) = Self::make_code(&id, &label, language, read_only, &text, window, cx);
         BodyEditor {
@@ -130,11 +143,7 @@ impl BodyEditor {
 
     /// Whether Tree is offered: an editable JSON body with an original.
     pub fn can_tree(&self) -> bool {
-        !self.read_only
-            && self
-                .original
-                .as_deref()
-                .is_some_and(pm_view::breakpoints::is_json)
+        !self.read_only && self.original.as_deref().is_some_and(pm_view::breakpoints::is_json)
     }
 
     /// Follows the Content-Type: a new editor in the language, same text.
