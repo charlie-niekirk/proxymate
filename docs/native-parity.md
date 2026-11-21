@@ -385,24 +385,24 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 
 | ID | Behaviour | Source | Phase | Status | Evidence |
 |---|---|---|---|---|---|
-| ST-01 | WebSocket panel header: "WebSocket", live dot with Open / close description / Closed, "N messages" or "a of b messages" | `components/Inspector/WebSocketPanel.tsx` | G6 | ☐ | |
-| ST-02 | Direction filter All, Sent, Received | `components/Inspector/WebSocketPanel.tsx` | G6 | ☐ | |
-| ST-03 | "Search payloads" box with clear | `components/Inspector/StreamShell.tsx` `SearchBox` | G6 | ☐ | |
-| ST-04 | Close button on a live open connection ("a normal close frame to each side") | `components/Inspector/WebSocketPanel.tsx` | G6 | ☐ | |
-| ST-05 | Message list: direction arrow, #, Time, Type, Size, Payload preview; follows the end until scrolled up; "No messages yet" / "No messages match" | `components/Inspector/WebSocketPanel.tsx`, `components/Inspector/StreamShell.tsx` `MessageList` | G6 | ☐ | |
-| ST-06 | Message flags Injected, Edited, Dropped with tooltips; dropped rows struck through | `components/Inspector/WebSocketPanel.tsx` `Flags` | G6 | ☐ | |
-| ST-07 | Click selects a message; with Auto Select the newest is inspected until one is clicked | `components/Inspector/WebSocketPanel.tsx` | G6 | ☐ | |
-| ST-08 | Message detail lines: who sent it, type, bytes, time; close code; truncation; dropped; Resend button | `components/Inspector/WebSocketPanel.tsx` `MessageDetail` | G6 | ☐ | |
-| ST-09 | Edited message: Forwarded / Original toggle | `components/Inspector/WebSocketPanel.tsx` `MessageDetail` | G6 | ☐ | |
-| ST-10 | Payload view: viewer picker (bytes viewers; hex first for binary), "mime · size", "Empty payload", body menu | `components/Inspector/PayloadView.tsx` | G6 | ☐ | |
-| ST-11 | Composer: To server / To client, Text / Binary (hex), message box, Send (⌘↩), inline error | `components/Inspector/WebSocketPanel.tsx` `Composer` | G6 | ☐ | |
-| ST-12 | Message menu: Copy payload (or Copy close code and reason), Copy payload as Base64, Copy payload as hex, Resend to the server / to the client | `components/Inspector/WebSocketPanel.tsx` `MessageItems` | G6 | ☐ | |
-| ST-13 | "Select a message", "Loading…", "Couldn't load the payload: …" | `components/Inspector/WebSocketPanel.tsx` | G6 | ☐ | |
-| ST-14 | SSE panel header: "Events", Streaming / Stream ended, event count, "Search events" | `components/Inspector/SsePanel.tsx` | G6 | ☐ | |
-| ST-15 | SSE list: Time, Event, Id, Data; "Waiting for events…", "No events", "No events match" | `components/Inspector/SsePanel.tsx` | G6 | ☐ | |
-| ST-16 | SSE event detail: id, retry, time; "Data cut at 1 MB"; data in the payload view; "Select an event" | `components/Inspector/SsePanel.tsx` | G6 | ☐ | |
-| ST-17 | SSE menu: Copy data, Copy as event-stream text, Copy event name, Copy id | `components/Inspector/SsePanel.tsx` | G6 | ☐ | |
-| ST-18 | List and detail side by side, resizable | `components/Inspector/StreamShell.tsx` | G6 | ☐ | |
+| ST-01 | WebSocket panel header: "WebSocket", live dot with Open / close description / Closed, "N messages" or "a of b messages" | `components/Inspector/WebSocketPanel.tsx` | G6 | ☑ | G6: `streams/mod.rs` `toolbar` (live dot `--s-active`/`--s-blocked`, `pm_view::stream::{ws_status, count_label}`); `tests/streams.rs`, `docs/native/g6/websocket-composer-resend.png` |
+| ST-02 | Direction filter All, Sent, Received | `components/Inspector/WebSocketPanel.tsx` | G6 | ☑ | G6: chips with `aria_toggled` in a radio group; each filter is its own `WsListKey`; `tests/streams.rs` `a_websocket_flow_lists…` |
+| ST-03 | "Search payloads" box with clear | `components/Inspector/StreamShell.tsx` `SearchBox` | G6 | ☑ | G6: gpui-kit `Input` with a clear button (`stream-search-clear`); search runs in Rust; `tests/streams.rs` |
+| ST-04 | Close button on a live open connection ("a normal close frame to each side") | `components/Inspector/WebSocketPanel.tsx` | G6 | ☑ | G6: `ws-close` → `CloseWebSocket` → `mutations::ws_close`; shown only while `sendable` (live, open); `tests/streams.rs` `row_menus…` |
+| ST-05 | Message list: direction arrow, #, Time, Type, Size, Payload preview; follows the end until scrolled up; "No messages yet" / "No messages match" | `components/Inspector/WebSocketPanel.tsx`, `components/Inspector/StreamShell.tsx` `MessageList` | G6 | ☑ | G6: `uniform_list` of 22 px rows, pages of 128 fetched for the rows on screen; follows the end until scrolled up (`StreamPanel::follow`); ↑/↓/Home/End move the selection; `tests/streams.rs`, `docs/native/g6/` |
+| ST-06 | Message flags Injected, Edited, Dropped with tooltips; dropped rows struck through | `components/Inspector/WebSocketPanel.tsx` `Flags` | G6 | ☑ | G6: `websocket.rs` `flag` badges (`--diff-*`) with tooltips, dropped previews struck through; `tests/streams.rs`, `tests/render.rs` (the Injected badge's pixels) |
+| ST-07 | Click selects a message; with Auto Select the newest is inspected until one is clicked | `components/Inspector/WebSocketPanel.tsx` | G6 | ☑ | G6: click (or `streamSelect`) selects; `StreamPanel::shown` takes the newest while Auto Select is on and nothing is clicked; `tests/streams.rs` |
+| ST-08 | Message detail lines: who sent it, type, bytes, time; close code; truncation; dropped; Resend button | `components/Inspector/WebSocketPanel.tsx` `MessageDetail` | G6 | ☑ | G6: `pm_view::stream::detail_lines` (tested) and the Resend button; `tests/streams.rs` |
+| ST-09 | Edited message: Forwarded / Original toggle | `components/Inspector/WebSocketPanel.tsx` `MessageDetail` | G6 | ☑ | G6: Forwarded / Original chips over `websocket_original_in` (`WsPayloadKey.original`); `tests/streams.rs` `a_selected_message…`, `tests/render.rs` |
+| ST-10 | Payload view: viewer picker (bytes viewers; hex first for binary), "mime · size", "Empty payload", body menu | `components/Inspector/PayloadView.tsx` | G6 | ☑ | G6 (deviation): Text and Hex only (binary opens on Hex unless it is JSON), "mime · size", "Empty payload", the payload menu (selection, text, Base64, hex); G4's viewers can be offered here later; `streams/payload.rs`, `tests/streams.rs` |
+| ST-11 | Composer: To server / To client, Text / Binary (hex), message box, Send (⌘↩), inline error | `components/Inspector/WebSocketPanel.tsx` `Composer` | G6 | ☑ | G6: chips, a gpui-kit `Textarea`, Send and ⌘↩ (the textarea's secondary Enter), inline error; live: composed text to the server and hex to the client through the app (`docs/native/g6/websocket-composer-resend.png`); `tests/streams.rs` `the_composer…` |
+| ST-12 | Message menu: Copy payload (or Copy close code and reason), Copy payload as Base64, Copy payload as hex, Resend to the server / to the client | `components/Inspector/WebSocketPanel.tsx` `MessageItems` | G6 | ☑ | G6: `pm_view::stream::ws_menu` (tested) → `CopyWsPayload` (fetched whole) and `ResendWsMessage`; live: Resend through the app; `tests/streams.rs` `row_menus…` |
+| ST-13 | "Select a message", "Loading…", "Couldn't load the payload: …" | `components/Inspector/WebSocketPanel.tsx` | G6 | ☑ | G6: `payload::centered` placeholders for every load state; `tests/streams.rs` |
+| ST-14 | SSE panel header: "Events", Streaming / Stream ended, event count, "Search events" | `components/Inspector/SsePanel.tsx` | G6 | ☑ | G6: `sse.rs` `render_sse`; `tests/streams.rs`, `docs/native/g6/sse-streaming-*.png` |
+| ST-15 | SSE list: Time, Event, Id, Data; "Waiting for events…", "No events", "No events match" | `components/Inspector/SsePanel.tsx` | G6 | ☑ | G6: `sse.rs` `row`, `pm_view::stream::sse_empty` (tested); live: `/sse?count=40&interval_ms=500` grew 15 → 20 → 25 → 30 events with no reselect |
+| ST-16 | SSE event detail: id, retry, time; "Data cut at 1 MB"; data in the payload view; "Select an event" | `components/Inspector/SsePanel.tsx` | G6 | ☑ | G6: `KvTable` of `pm_view::stream::sse_fields` with its menu, "Data cut at 1 MB", the payload view; `tests/streams.rs`, `tests/render.rs` |
+| ST-17 | SSE menu: Copy data, Copy as event-stream text, Copy event name, Copy id | `components/Inspector/SsePanel.tsx` | G6 | ☑ | G6: `pm_view::stream::sse_menu` (tested); `tests/streams.rs` `an_event_stream…` |
+| ST-18 | List and detail side by side, resizable | `components/Inspector/StreamShell.tsx` | G6 | ☑ | G6: `StreamPanel::split_view` (drag, double-click resets; list ≥ 240 px, detail ≥ 200 px), a splitter role |
 
 ## Rules
 
@@ -683,7 +683,7 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | DV-04 | Dev remote: `filter`, `palette`, `store`, `openDocument`, `closeDocument`, `saveSession`, `exportHar`, `contextMenu`, `reload` | `dev/remote.ts` | G2 | ☑ | G2: `apps/native/src/dev/mod.rs` `filter`, `search`, `palette`, `command`, `keys`, `store`, `openDocument`, `closeDocument`, `saveSession`, `exportHar`, `contextMenu` (with `run`), `workspace`, … (`reload` has no meaning without a web view) |
 | DV-05 | Dev remote: `requestTab`, `responseTab`, `curl` | `dev/remote.ts` | G3 | ☑ | G3: `dev/mod.rs` `requestTab`, `responseTab`, `curl` (also `focus`, `inspector`, and `contextMenu` for the inspector's menus and `row:<id>[:<column>]`) |
 | DV-06 | Dev remote: `viewer` | `dev/remote.ts` | G4 | ☑ | G4: `dev/mod.rs` `viewer` (also `loadAll`, `highlightAnyway`, `body`, `contextMenu: "body:<part>"`) |
-| DV-07 | Dev remote: `wsSend`, `wsClose` | `dev/remote.ts` | G6 | ☐ | |
+| DV-07 | Dev remote: `wsSend`, `wsClose` | `dev/remote.ts` | G6 | ☑ | G6: `wsSend`, `wsClose`, plus `streamSelect`, `streamDirection`, `streamSearch`, `streamViewer`, `wsOriginal`, `wsCompose`, `wsComposeSend`, `stream`, `tableShare`; `contextMenu` `stream:<row>` and `payload` (`dev/mod.rs`) |
 | DV-08 | Dev remote: `rules`, `rulesEditor`, `preset`, `saveRule`, `testRule`, `deleteRule`, `throttle`, `noCache`, `noCookies` | `dev/remote.ts` | G7 | ☐ | |
 | DV-09 | Dev remote: `replay`, `editReplay`, `compose`, `composeSend`, `breakpoints`, `breakpointAction` | `dev/remote.ts` | G8 | ☐ | |
 | DV-10 | Dev remote: `rewrite`, `rewriteEdit` | `dev/remote.ts` | G9 | ☐ | |
@@ -715,7 +715,7 @@ Rows per owning phase. G14 also audits every row; its own row is the browser-onl
 | G3 | 62 | 62 |
 | G4 | 31 | 31 |
 | G5 | 10 | 0 |
-| G6 | 19 | 0 |
+| G6 | 19 | 19 |
 | G7 | 60 | 0 |
 | G8 | 32 | 0 |
 | G9 | 19 | 0 |
@@ -725,4 +725,4 @@ Rows per owning phase. G14 also audits every row; its own row is the browser-onl
 | G13 | 29 | 0 |
 | G14 | 1 | 0 |
 | G15 | 5 | 5 |
-| **Total** | **524** | **208** |
+| **Total** | **524** | **227** |

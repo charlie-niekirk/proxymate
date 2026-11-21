@@ -54,6 +54,10 @@ gpui_kit::assets::icon_assets!(
         TextWrap,
         WandSparkles,
         Download,
+        // The stream panels (G6).
+        Send,
+        Unplug,
+        RotateCcw,
     ]
 );
 

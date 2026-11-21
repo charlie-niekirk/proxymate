@@ -9,7 +9,11 @@
 use std::sync::Arc;
 
 use gpui_kit::{App, AppContext as _, Entity, Global};
-use pm_model::{BodyPart, FlowDetail, FlowId, FlowSummary, OperationMatch, StoreId, ViewDelta};
+use pm_model::{
+    BodyPart, FlowDetail, FlowId, FlowSummary, OperationMatch, SseEvent, SsePage, StoreId, ViewDelta, WsDirection,
+    WsMessage, WsPage, WsQuery,
+};
+use pm_view::stream::LIST_PAGE;
 
 use super::Bridge;
 use super::resource::{Fetcher, Resource};
@@ -74,12 +78,72 @@ pub type BodyCache = Resource<BodyKey, Arc<Vec<u8>>>;
 /// is finished, so not refetched as a live flow changes.
 pub type DecodedCache = Resource<DecodedKey, Arc<DecodedBody>>;
 
+/// A WebSocket flow's messages under a filter (`wsHeadKey`).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct WsListKey {
+    pub flow: FlowKey,
+    pub direction: Option<WsDirection>,
+    pub text: String,
+}
+
+impl WsListKey {
+    pub fn query(&self) -> WsQuery {
+        WsQuery {
+            direction: self.direction,
+            text: self.text.clone(),
+        }
+    }
+}
+
+/// One page of a list ([`LIST_PAGE`] rows from `page * LIST_PAGE`), as of
+/// `dropped` older rows gone (the per-connection limit shifts positions).
+/// A full page never changes; a partial one goes stale with its flow.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct PageKey<L> {
+    pub list: L,
+    pub page: u32,
+    pub dropped: u32,
+}
+
+/// One WebSocket message's payload: as forwarded, or (`original`) as it
+/// arrived before a rule edited it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct WsPayloadKey {
+    pub flow: FlowKey,
+    pub index: u32,
+    pub original: bool,
+}
+
+/// An event stream's events matching a search (`sseHeadKey`).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct SseListKey {
+    pub flow: FlowKey,
+    pub text: String,
+}
+
+/// `wsHeadKey`: the counts, open state and close of a filtered message list.
+pub type WsHeadCache = Resource<WsListKey, Arc<WsPage>>;
+/// `wsPagesKey`: a page of messages.
+pub type WsRowsCache = Resource<PageKey<WsListKey>, Arc<Vec<WsMessage>>>;
+/// `wsPayloadKey`: a payload, `None` for an original that isn't there (the
+/// message wasn't edited).
+pub type WsPayloadCache = Resource<WsPayloadKey, Option<Arc<Vec<u8>>>>;
+/// `sseHeadKey`: the counts and open state of an event list.
+pub type SseHeadCache = Resource<SseListKey, Arc<SsePage>>;
+/// `ssePagesKey`: a page of events.
+pub type SseRowsCache = Resource<PageKey<SseListKey>, Arc<Vec<SseEvent>>>;
+
 #[derive(Clone)]
 pub struct Caches {
     pub inspected: Entity<InspectedCache>,
     pub operation: Entity<OperationCache>,
     pub body: Entity<BodyCache>,
     pub decoded: Entity<DecodedCache>,
+    pub ws_head: Entity<WsHeadCache>,
+    pub ws_rows: Entity<WsRowsCache>,
+    pub ws_payload: Entity<WsPayloadCache>,
+    pub sse_head: Entity<SseHeadCache>,
+    pub sse_rows: Entity<SseRowsCache>,
 }
 
 impl Global for Caches {}
@@ -128,11 +192,55 @@ pub fn caches(cx: &mut App) -> Caches {
             }
         }) as Fetcher<_, _>
     });
-    let body: Option<Fetcher<BodyKey, Arc<Vec<u8>>>> = engine.map(|engine| {
+    let body: Option<Fetcher<BodyKey, Arc<Vec<u8>>>> = engine.clone().map(|engine| {
         Arc::new(move |k: &BodyKey| {
             engine
                 .body_head_in(k.flow.store, k.flow.id, k.part, false, None)
                 .map(|b| Arc::new(b.bytes))
+                .map_err(|e| e.to_string())
+        }) as Fetcher<_, _>
+    });
+    let ws_head: Option<Fetcher<WsListKey, Arc<WsPage>>> = engine.clone().map(|engine| {
+        Arc::new(move |k: &WsListKey| {
+            engine
+                .websocket_messages_in(k.flow.store, k.flow.id, &k.query(), 0, 0)
+                .map(Arc::new)
+                .map_err(|e| e.to_string())
+        }) as Fetcher<_, _>
+    });
+    let ws_rows: Option<Fetcher<PageKey<WsListKey>, Arc<Vec<WsMessage>>>> = engine.clone().map(|engine| {
+        Arc::new(move |k: &PageKey<WsListKey>| {
+            let f = k.list.flow;
+            engine
+                .websocket_messages_in(f.store, f.id, &k.list.query(), k.page * LIST_PAGE, LIST_PAGE)
+                .map(|p| Arc::new(p.messages))
+                .map_err(|e| e.to_string())
+        }) as Fetcher<_, _>
+    });
+    let ws_payload: Option<Fetcher<WsPayloadKey, Option<Arc<Vec<u8>>>>> = engine.clone().map(|engine| {
+        Arc::new(move |k: &WsPayloadKey| {
+            let f = k.flow;
+            let bytes = match k.original {
+                true => engine.websocket_original_in(f.store, f.id, k.index),
+                false => engine.websocket_payload_in(f.store, f.id, k.index).map(Some),
+            };
+            bytes.map(|b| b.map(Arc::new)).map_err(|e| e.to_string())
+        }) as Fetcher<_, _>
+    });
+    let sse_head: Option<Fetcher<SseListKey, Arc<SsePage>>> = engine.clone().map(|engine| {
+        Arc::new(move |k: &SseListKey| {
+            engine
+                .sse_events_in(k.flow.store, k.flow.id, &k.text, 0, 0)
+                .map(Arc::new)
+                .map_err(|e| e.to_string())
+        }) as Fetcher<_, _>
+    });
+    let sse_rows: Option<Fetcher<PageKey<SseListKey>, Arc<Vec<SseEvent>>>> = engine.map(|engine| {
+        Arc::new(move |k: &PageKey<SseListKey>| {
+            let f = k.list.flow;
+            engine
+                .sse_events_in(f.store, f.id, &k.list.text, k.page * LIST_PAGE, LIST_PAGE)
+                .map(|p| Arc::new(p.events))
                 .map_err(|e| e.to_string())
         }) as Fetcher<_, _>
     });
@@ -141,6 +249,11 @@ pub fn caches(cx: &mut App) -> Caches {
         operation: cx.new(|_| Resource::new(operation)),
         body: cx.new(|_| Resource::new(body)),
         decoded: cx.new(|_| Resource::new(decoded)),
+        ws_head: cx.new(|_| Resource::new(ws_head)),
+        ws_rows: cx.new(|_| Resource::new(ws_rows)),
+        ws_payload: cx.new(|_| Resource::new(ws_payload)),
+        sse_head: cx.new(|_| Resource::new(sse_head)),
+        sse_rows: cx.new(|_| Resource::new(sse_rows)),
     };
     cx.set_global(caches.clone());
     caches
@@ -164,6 +277,7 @@ pub fn flows_changed(store: StoreId, delta: &ViewDelta, cx: &mut App) {
             cx,
         );
     });
+    streams_changed(store, |id| everything || delta.changed.contains(&id), everything, cx);
     if everything {
         caches
             .body
@@ -184,4 +298,41 @@ pub fn store_changed(store: StoreId, cx: &mut App) {
     caches
         .inspected
         .update(cx, |c, cx| c.invalidate(|k, _| k.store == store, cx));
+}
+
+/// New messages or events may have arrived for the flows `changed` picks
+/// (a delta names a flow whose message counts or sizes moved): their list
+/// heads and partial pages go stale, so the panels refetch only the tail.
+/// `everything` (a clear) drops full pages and payloads too.
+pub fn streams_changed(store: StoreId, changed: impl Fn(FlowId) -> bool, everything: bool, cx: &mut App) {
+    let caches = caches(cx);
+    let hit = |k: &FlowKey| k.store == store && changed(k.id);
+    let partial = |len: usize| len < LIST_PAGE as usize;
+    caches.ws_head.update(cx, |c, cx| c.invalidate(|k, _| hit(&k.flow), cx));
+    caches
+        .sse_head
+        .update(cx, |c, cx| c.invalidate(|k, _| hit(&k.flow), cx));
+    caches.ws_rows.update(cx, |c, cx| {
+        c.invalidate(
+            |k, v| hit(&k.list.flow) && (everything || v.is_none_or(|v| partial(v.len()))),
+            cx,
+        )
+    });
+    caches.sse_rows.update(cx, |c, cx| {
+        c.invalidate(
+            |k, v| hit(&k.list.flow) && (everything || v.is_none_or(|v| partial(v.len()))),
+            cx,
+        )
+    });
+    if everything {
+        caches
+            .ws_payload
+            .update(cx, |c, cx| c.invalidate(|k, _| hit(&k.flow), cx));
+    }
+}
+
+/// A flow's WebSocket changed by our own hand (a send or a close): its
+/// lists go stale at once, before the delta that follows.
+pub fn websocket_changed(flow: FlowKey, cx: &mut App) {
+    streams_changed(flow.store, |id| id == flow.id, false, cx);
 }
