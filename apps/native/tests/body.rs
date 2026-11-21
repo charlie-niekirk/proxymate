@@ -181,6 +181,11 @@ fn state(w: &Win, cx: &mut VisualTestContext) -> serde_json::Value {
     cx.update(|_, cx| pane.read(cx).describe(cx))
 }
 
+/// ⌘ on macOS, Ctrl elsewhere, as the key bindings are.
+fn primary(key: &str) -> String {
+    format!("{}-{key}", if cfg!(target_os = "macos") { "cmd" } else { "ctrl" })
+}
+
 fn clipboard(cx: &mut VisualTestContext) -> Option<String> {
     cx.read_from_clipboard().and_then(|c| c.text())
 }
@@ -305,7 +310,7 @@ fn the_raw_tab_highlights_and_searches_with_cmd_f(cx: &mut TestAppContext) {
         let focus = gpui_kit::Focusable::focus_handle(raw.read(cx), cx);
         window.focus(&focus, cx);
     });
-    cx.simulate_keystrokes("cmd-f");
+    cx.simulate_keystrokes(&primary("f"));
     settle(cx);
     assert!(cx.update(|_, cx| raw.read(cx).is_find_open()), "⌘F opened the find bar");
     cx.simulate_input("alice");
@@ -322,7 +327,7 @@ fn the_raw_tab_highlights_and_searches_with_cmd_f(cx: &mut TestAppContext) {
     settle(cx);
     assert!(!cx.update(|_, cx| raw.read(cx).is_find_open()), "Escape closed it");
     // ⌘A then the menu's Copy copies everything, rows off screen included.
-    cx.simulate_keystrokes("cmd-a");
+    cx.simulate_keystrokes(&primary("a"));
     assert!(cx.update(|_, cx| raw.read(cx).is_all_selected()));
     let selection = cx.update(|window, cx| raw.update(cx, |r, cx| r.selected_text(window, cx)));
     let menu = cx
