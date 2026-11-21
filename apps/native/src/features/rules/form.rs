@@ -88,6 +88,8 @@ pub struct RuleForm {
     groups: Vec<RuleGroup>,
     /// Inputs whose text doesn't parse (JSON, a number, status ranges).
     field_errors: BTreeMap<String, String>,
+    /// Their text, so an input made later shows what was typed.
+    unparsed: BTreeMap<String, String>,
     invalid: Option<String>,
     save_error: Option<String>,
     saving: bool,
@@ -119,6 +121,7 @@ impl RuleForm {
             group_picked: false,
             groups,
             field_errors: BTreeMap::new(),
+            unparsed: BTreeMap::new(),
             invalid: None,
             save_error: None,
             saving: false,
@@ -204,9 +207,11 @@ impl RuleForm {
         match edit::set_text(&mut self.rule, key, value) {
             Ok(()) => {
                 self.field_errors.remove(key);
+                self.unparsed.remove(key);
             }
             Err(err) => {
                 self.field_errors.insert(key.to_owned(), err);
+                self.unparsed.insert(key.to_owned(), value.to_owned());
             }
         }
         self.changed(cx);
@@ -279,6 +284,7 @@ impl RuleForm {
             }
         }
         self.field_errors.clear();
+        self.unparsed.clear();
     }
 
     fn changed(&mut self, cx: &mut Context<Self>) {
@@ -535,7 +541,10 @@ impl RuleForm {
         cx: &mut Context<Self>,
     ) -> &Field {
         if !self.fields.contains_key(key) {
-            let text = edit::text(&self.rule, key).unwrap_or_default();
+            let text = match self.unparsed.get(key) {
+                Some(typed) => typed.clone(),
+                None => edit::text(&self.rule, key).unwrap_or_default(),
+            };
             let placeholder = placeholder.to_owned();
             let owned = key.to_owned();
             let entry = match area {
