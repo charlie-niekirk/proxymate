@@ -105,7 +105,13 @@ fn summarises_a_comment_and_a_script() {
     assert_eq!(action_summary(&script, &names(&[("x1", "b64")]), &none), "script b64");
     assert_eq!(action_summary(&script, &none, &none), "script x1");
     assert_eq!(
-        action_summary(&Action::Script { script_id: String::new() }, &none, &none),
+        action_summary(
+            &Action::Script {
+                script_id: String::new()
+            },
+            &none,
+            &none
+        ),
         "script (none)"
     );
 }
@@ -254,7 +260,11 @@ fn the_list_orders_sections_and_drops() {
         rule("d", Some("g1"), false),
     ];
     let ids = |v: Vec<&Rule>| v.into_iter().map(|r| r.id.clone()).collect::<Vec<_>>();
-    assert_eq!(ids(members(&rules, &groups, None)), ["a", "b"], "an unknown group is no group");
+    assert_eq!(
+        ids(members(&rules, &groups, None)),
+        ["a", "b"],
+        "an unknown group is no group"
+    );
     let g1 = members(&rules, &groups, Some("g1"));
     assert_eq!(ids(g1.clone()), ["c", "d"]);
     assert_eq!(group_count(&g1), "1/2");
@@ -292,7 +302,11 @@ fn the_editor_reads_and_writes_matcher_fields() {
         "kind and case switch on the value kept"
     );
     assert_eq!(chosen(&r, "m.host.kind").as_deref(), Some("exact"));
-    assert_eq!(chosen(&r, "m.path.kind").as_deref(), Some("glob"), "an empty pattern shows a glob");
+    assert_eq!(
+        chosen(&r, "m.path.kind").as_deref(),
+        Some("glob"),
+        "an empty pattern shows a glob"
+    );
     set_text(&mut r, "m.host", "").unwrap();
     assert_eq!(r.matcher.host, None, "empty is any host");
     set_text(&mut r, "m.port", "8443").unwrap();
@@ -395,7 +409,11 @@ fn the_editor_reads_and_writes_every_actions_fields() {
         },
         "the exact text is kept"
     );
-    assert!(set_text(&mut r, &key("JsonSet", "raw"), "{oops").unwrap_err().starts_with("Not JSON yet"));
+    assert!(
+        set_text(&mut r, &key("JsonSet", "raw"), "{oops")
+            .unwrap_err()
+            .starts_with("Not JSON yet")
+    );
     assert!(set_text(&mut r, &key("SetStatus", "status"), "abc").is_err());
     assert!(set_text(&mut r, &key("SetStatus", "nope"), "1").is_err());
     set_text(&mut r, &key("MapRemote", "host"), "").unwrap();
@@ -450,7 +468,10 @@ fn the_editor_reads_and_writes_every_actions_fields() {
     ));
     choose(&mut r, &key("ReplaceBody", "pattern.kind"), "regex").unwrap();
     choose(&mut r, &key("ReplaceBody", "pattern.ci"), "true").unwrap();
-    assert_eq!(chosen(&r, &key("ReplaceBody", "pattern.kind")).as_deref(), Some("regex"));
+    assert_eq!(
+        chosen(&r, &key("ReplaceBody", "pattern.kind")).as_deref(),
+        Some("regex")
+    );
 
     // Structure.
     let n = r.actions.len();

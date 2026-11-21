@@ -49,6 +49,19 @@ gpui_kit::assets::icon_assets!(
         Copy,
         // The inspector (G3).
         TriangleAlert,
+        // Rules (G7): the toolbar's tools and the Rules window.
+        ListChecks,
+        ArchiveX,
+        Cookie,
+        Gauge,
+        OctagonPause,
+        GripVertical,
+        FolderPlus,
+        FlaskConical,
+        CircleX,
+        Save,
+        CaseSensitive,
+        Check,
     ]
 );
 

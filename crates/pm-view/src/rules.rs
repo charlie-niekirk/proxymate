@@ -147,7 +147,10 @@ pub fn default_action(type_id: &str) -> Option<Action> {
             name: s(),
             value: s(),
         },
-        "RemoveHeader" => Action::RemoveHeader { phase: Request, name: s() },
+        "RemoveHeader" => Action::RemoveHeader {
+            phase: Request,
+            name: s(),
+        },
         "ReplaceHeaderValue" => Action::ReplaceHeaderValue {
             phase: Request,
             name: s(),
@@ -181,7 +184,10 @@ pub fn default_action(type_id: &str) -> Option<Action> {
             name: s(),
             value: s(),
         },
-        "FormRemove" => Action::FormRemove { phase: Request, name: s() },
+        "FormRemove" => Action::FormRemove {
+            phase: Request,
+            name: s(),
+        },
         "SetStatus" => Action::SetStatus { status: 200 },
         "MapLocal" => Action::MapLocal {
             source: MapLocalSource::Inline { body: s() },
@@ -200,7 +206,10 @@ pub fn default_action(type_id: &str) -> Option<Action> {
             request: true,
             response: false,
         },
-        "Delay" => Action::Delay { phase: Request, ms: 1000 },
+        "Delay" => Action::Delay {
+            phase: Request,
+            ms: 1000,
+        },
         "Throttle" => Action::Throttle {
             download_kbps: 780,
             upload_kbps: 330,
@@ -334,7 +343,8 @@ pub fn matcher_summary(m: &Matcher) -> String {
     if let Some(p) = &m.path {
         parts.push(strip_exact(pattern_label(Some(p))));
     }
-    let extras = m.query.len() + m.headers.len() + usize::from(m.client_app.is_some()) + usize::from(m.response.is_some());
+    let extras =
+        m.query.len() + m.headers.len() + usize::from(m.client_app.is_some()) + usize::from(m.response.is_some());
     if extras > 0 {
         parts.push(format!("+{extras}"));
     }
@@ -421,7 +431,10 @@ pub fn action_summary(a: &Action, scripts: &Names, mocks: &Names) -> String {
                 .into_iter()
                 .flatten()
                 .collect();
-            format!("breakpoint {}", if at.is_empty() { "off".into() } else { at.join(" + ") })
+            format!(
+                "breakpoint {}",
+                if at.is_empty() { "off".into() } else { at.join(" + ") }
+            )
         }
         Action::Delay { phase, ms } => format!("delay {} {ms} ms", phase_id(*phase)),
         Action::Throttle {
@@ -435,17 +448,17 @@ pub fn action_summary(a: &Action, scripts: &Names, mocks: &Names) -> String {
         },
         Action::Script { script_id } => format!(
             "script {}",
-            scripts.get(script_id).cloned().unwrap_or_else(|| if script_id.is_empty() {
-                "(none)".into()
-            } else {
-                script_id.clone()
-            })
+            scripts
+                .get(script_id)
+                .cloned()
+                .unwrap_or_else(|| if script_id.is_empty() {
+                    "(none)".into()
+                } else {
+                    script_id.clone()
+                })
         ),
         Action::ServeFrom {
-            source,
-            on_miss,
-            pick,
-            ..
+            source, on_miss, pick, ..
         } => {
             let name = mocks.get(source).cloned().unwrap_or_else(|| {
                 if source.is_empty() {

@@ -244,6 +244,8 @@ pub struct MainWindow {
     filter_bar: Entity<FilterBar>,
     footer: Entity<Footer>,
     inspector: Entity<Inspector>,
+    /// The toolbar's registered tools (`toolbar::add_tool`), by order.
+    tools: Vec<(i32, gpui_kit::AnyView)>,
     sidebar_width: f32,
     table_share: f32,
     _subscriptions: Vec<Subscription>,
@@ -319,6 +321,7 @@ impl MainWindow {
         // The table has the keyboard from the start.
         let focus = table.read(cx).grid().focus_handle(cx);
         window.focus(&focus, cx);
+        let tools = toolbar::make_tools(window, cx);
         MainWindow {
             workspace,
             table,
@@ -326,6 +329,7 @@ impl MainWindow {
             filter_bar,
             footer,
             inspector,
+            tools,
             sidebar_width: SIDEBAR_WIDTH,
             table_share: TABLE_SHARE,
             _subscriptions: subscriptions,
@@ -467,7 +471,8 @@ impl Render for MainWindow {
             let ws = self.workspace.read(cx);
             (ws.proxy.clone(), ws.is_live())
         };
-        let toolbar = toolbar::render(&proxy, live, &t, cx).into_any_element();
+        let tools = self.tools.clone();
+        let toolbar = toolbar::render(&proxy, live, &tools, &t, cx).into_any_element();
         let tabs = tabs::render(self.workspace.read(cx), &t);
         div()
             .id("main-window")

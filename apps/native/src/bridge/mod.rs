@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use gpui_kit::{App, Entity, Global};
 use pm_core::Engine;
-use pm_model::{SidebarSnapshot, StorageStatus};
+use pm_model::{BreakpointInfo, RuleBook, SidebarSnapshot, StorageStatus};
 
 use stream::Latest;
 
@@ -68,6 +68,8 @@ impl Bridge {
 pub struct Streams {
     storage: Option<Entity<Latest<StorageStatus>>>,
     sidebar: Option<Entity<Latest<SidebarSnapshot>>>,
+    rules: Option<Entity<Latest<RuleBook>>>,
+    breakpoints: Option<Entity<Latest<Vec<BreakpointInfo>>>>,
 }
 
 impl Global for Streams {}
@@ -93,5 +95,34 @@ pub fn sidebar(cx: &mut App) -> Entity<Latest<SidebarSnapshot>> {
     let engine = Bridge::engine(cx);
     let entity = stream::latest(cx, move |sink| engine.subscribe_sidebar(sink));
     cx.global_mut::<Streams>().sidebar = Some(entity.clone());
+    entity
+}
+
+/// The rules and groups (G7), pushed at first and whenever the UI or an
+/// agent changes them. Without an engine (tests, offscreen renders) the
+/// entity is never fed: tests set its value.
+pub fn rule_book(cx: &mut App) -> Entity<Latest<RuleBook>> {
+    if let Some(entity) = cx.default_global::<Streams>().rules.clone() {
+        return entity;
+    }
+    let entity = match cx.try_global::<Bridge>().map(|b| b.engine.clone()) {
+        Some(engine) => stream::latest(cx, move |sink| engine.subscribe_rules(sink)),
+        None => stream::latest(cx, |_| {}),
+    };
+    cx.global_mut::<Streams>().rules = Some(entity.clone());
+    entity
+}
+
+/// The flows paused at a breakpoint (the toolbar's badge; G8's editor),
+/// pushed whenever the queue changes. Without an engine, as [`rule_book`].
+pub fn breakpoints(cx: &mut App) -> Entity<Latest<Vec<BreakpointInfo>>> {
+    if let Some(entity) = cx.default_global::<Streams>().breakpoints.clone() {
+        return entity;
+    }
+    let entity = match cx.try_global::<Bridge>().map(|b| b.engine.clone()) {
+        Some(engine) => stream::latest(cx, move |sink| engine.subscribe_breakpoints(sink)),
+        None => stream::latest(cx, |_| {}),
+    };
+    cx.global_mut::<Streams>().breakpoints = Some(entity.clone());
     entity
 }

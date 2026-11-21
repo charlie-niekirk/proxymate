@@ -21,8 +21,7 @@
 //! functions.
 
 use pm_model::{
-    Action, BlockMode, KvMatch, MapLocalSource, Pattern, PatternKind, Phase, ResponseMatcher, Rule, Scheme,
-    WsDirection, WsOp,
+    Action, BlockMode, KvMatch, MapLocalSource, Pattern, PatternKind, Phase, Rule, Scheme, WsDirection, WsOp,
 };
 
 use super::{
@@ -78,7 +77,13 @@ fn pattern_slot<'a>(rule: &'a mut Rule, key: &str) -> Option<Slot<'a>> {
         "m.host" => return Some(Slot::Optional(&mut rule.matcher.host)),
         "m.path" => return Some(Slot::Optional(&mut rule.matcher.path)),
         "m.app" => return Some(Slot::Optional(&mut rule.matcher.client_app)),
-        "m.ctype" => return rule.matcher.response.as_mut().map(|r| Slot::Optional(&mut r.content_type)),
+        "m.ctype" => {
+            return rule
+                .matcher
+                .response
+                .as_mut()
+                .map(|r| Slot::Optional(&mut r.content_type));
+        }
         _ => {}
     }
     for which in ["query", "headers"] {
@@ -296,7 +301,9 @@ pub fn set_text(rule: &mut Rule, key: &str, value: &str) -> Result<(), String> {
     }
     for which in ["query", "headers"] {
         if let Some((i, "name")) = indexed(key, &format!("m.{which}.")) {
-            let row = kv_rows(rule, which).and_then(|rows| rows.get_mut(i)).ok_or("no such row")?;
+            let row = kv_rows(rule, which)
+                .and_then(|rows| rows.get_mut(i))
+                .ok_or("no such row")?;
             row.name = value.to_owned();
             return Ok(());
         }
@@ -441,7 +448,10 @@ pub fn chosen(rule: &Rule, key: &str) -> Option<String> {
     if let Some(base) = key.strip_suffix(".kind").or_else(|| key.strip_suffix(".ci")) {
         let mut scratch = rule.clone();
         let slot = pattern_slot(&mut scratch, base)?;
-        let p = slot.get().cloned().unwrap_or_else(|| new_pattern(PatternKind::Glob, ""));
+        let p = slot
+            .get()
+            .cloned()
+            .unwrap_or_else(|| new_pattern(PatternKind::Glob, ""));
         return Some(if key.ends_with(".kind") {
             super::pattern_kind_id(p.kind).to_owned()
         } else {
@@ -584,7 +594,9 @@ pub fn choose(rule: &mut Rule, key: &str, value: &str) -> Result<(), String> {
     for which in ["query", "headers"] {
         if let Some((i, "negate")) = indexed(key, &format!("m.{which}.")) {
             let on = flag(value)?;
-            let row = kv_rows(rule, which).and_then(|rows| rows.get_mut(i)).ok_or("no such row")?;
+            let row = kv_rows(rule, which)
+                .and_then(|rows| rows.get_mut(i))
+                .ok_or("no such row")?;
             row.negate = on;
             return Ok(());
         }
@@ -661,7 +673,7 @@ pub fn choose(rule: &mut Rule, key: &str, value: &str) -> Result<(), String> {
 
 /// Adds the response matcher ("Only for some responses") or removes it.
 pub fn set_response(rule: &mut Rule, on: bool) {
-    rule.matcher.response = on.then(|| rule.matcher.response.take().unwrap_or_else(ResponseMatcher::default));
+    rule.matcher.response = on.then(|| rule.matcher.response.take().unwrap_or_default());
 }
 
 /// A blank query (`"query"`) or header (`"headers"`) condition.
