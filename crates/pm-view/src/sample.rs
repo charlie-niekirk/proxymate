@@ -1,4 +1,5 @@
-//! A sample flow, its row and its detail: fixtures for tests and offscreen
+//! A sample flow, its row and its detail, and a WebSocket and an SSE
+//! flow with their messages and events (G6): fixtures for tests and offscreen
 //! renders, which build the inspector without an engine. Tests change the
 //! fields they care about.
 
@@ -6,7 +7,8 @@ use std::sync::Arc;
 
 use pm_model::{
     BodyInfo, CertSummary, ContentKind, FlowDetail, FlowRow, FlowRules, FlowState, FlowSummary, Header, HttpVersion,
-    RequestHead, ResponseHead, Scheme, Timing, TlsInfo, TlsStatus, Via,
+    RequestHead, ResponseHead, Scheme, SseEvent, SsePage, Timing, TlsInfo, TlsStatus, Via, WsDirection, WsMessage,
+    WsOpcode, WsPage,
 };
 
 pub fn header(name: &str, value: &str) -> Header {
@@ -168,5 +170,135 @@ pub fn detail() -> FlowDetail {
             ..Default::default()
         }),
         error_kind: None,
+    }
+}
+
+/// A live `wss://api.example.com/socket` flow that switched (101), id 6.
+pub fn ws_summary() -> FlowSummary {
+    let mut f = summary();
+    f.id = 6;
+    f.scheme = Scheme::Wss;
+    f.path = "/socket".into();
+    f.query = String::new();
+    f.status = Some(101);
+    f.state = FlowState::Active;
+    f
+}
+
+/// The WebSocket flow's detail: the upgrade and its 101.
+pub fn ws_detail() -> FlowDetail {
+    let mut d = detail();
+    d.id = 6;
+    d.request.url = "wss://api.example.com/socket".into();
+    d.request.version = HttpVersion::Http11;
+    d.request.headers = vec![header("upgrade", "websocket"), header("connection", "Upgrade")];
+    d.response = Some(ResponseHead {
+        status: 101,
+        reason: "Switching Protocols".into(),
+        version: HttpVersion::Http11,
+        headers: vec![header("upgrade", "websocket")],
+    });
+    d.response_body = body(0, ContentKind::None);
+    d
+}
+
+/// Messages of every kind: text both ways, an injected one, an edited
+/// one, a dropped one, binary, a ping and a close.
+pub fn ws_messages() -> Vec<WsMessage> {
+    let m = |index: u32, direction, opcode, preview: &str, len: u64| WsMessage {
+        index,
+        direction,
+        opcode,
+        len,
+        time_ms: 1_700_000_000_000.0 + f64::from(index) * 250.0,
+        truncated: false,
+        close_code: None,
+        preview: preview.into(),
+        edited: false,
+        injected: false,
+        dropped: false,
+    };
+    let (sent, received) = (WsDirection::Sent, WsDirection::Received);
+    let mut out = vec![
+        m(
+            0,
+            sent,
+            WsOpcode::Text,
+            r#"{"type":"subscribe","channel":"prices"}"#,
+            41,
+        ),
+        m(1, received, WsOpcode::Text, r#"{"type":"subscribed"}"#, 21),
+        m(2, received, WsOpcode::Text, r#"{"price":101.5}"#, 15),
+        m(3, sent, WsOpcode::Text, "hello from the composer", 23),
+        m(4, received, WsOpcode::Text, r#"{"price":999}"#, 13),
+        m(5, sent, WsOpcode::Text, "spam", 4),
+        m(6, received, WsOpcode::Binary, "", 6),
+        m(7, sent, WsOpcode::Ping, "", 0),
+        m(8, received, WsOpcode::Close, "bye", 5),
+    ];
+    out[3].injected = true;
+    out[4].edited = true;
+    out[5].dropped = true;
+    out[8].close_code = Some(1000);
+    out
+}
+
+/// What a page answers with `messages` (all of them, unfiltered).
+pub fn ws_page(messages: &[WsMessage], open: bool) -> WsPage {
+    let n = messages.len() as u32;
+    WsPage {
+        total: n,
+        len: n,
+        start: 0,
+        messages: Vec::new(),
+        open,
+        close: None,
+        dropped: 0,
+    }
+}
+
+/// A `text/event-stream` response, id 7.
+pub fn sse_summary() -> FlowSummary {
+    let mut f = summary();
+    f.id = 7;
+    f.path = "/events".into();
+    f.query = String::new();
+    f.state = FlowState::Active;
+    f
+}
+
+pub fn sse_detail() -> FlowDetail {
+    let mut d = detail();
+    d.id = 7;
+    d.request.url = "https://api.example.com/events".into();
+    if let Some(r) = &mut d.response {
+        r.headers = vec![header("content-type", "text/event-stream; charset=utf-8")];
+    }
+    d
+}
+
+/// Events: the default type, named ones, ids and a retry.
+pub fn sse_events() -> Vec<SseEvent> {
+    (0..6u32)
+        .map(|index| SseEvent {
+            index,
+            time_ms: Some(1_700_000_000_000.0 + f64::from(index) * 500.0),
+            id: (index % 2 == 0).then(|| format!("evt-{index}")),
+            event: (index % 3 == 1).then(|| "tick".into()),
+            data: format!("{{\"n\":{index},\"msg\":\"update {index}\"}}"),
+            retry: (index == 0).then_some(3000),
+            truncated: false,
+        })
+        .collect()
+}
+
+pub fn sse_page(events: &[SseEvent], open: bool) -> SsePage {
+    let n = events.len() as u32;
+    SsePage {
+        total: n,
+        len: n,
+        start: 0,
+        events: Vec::new(),
+        open,
     }
 }

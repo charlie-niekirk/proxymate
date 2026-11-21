@@ -9,9 +9,11 @@
 //! tab's bodies have caches of their own. Nothing here calls the engine on
 //! the foreground thread.
 //!
+//! WebSocket and SSE flows get [`streams::StreamPanel`] under the
+//! messages (40/60, G6).
+//!
 //! Extension points for later phases: the Body tabs ([`panes`]'s
-//! `body_tab`, G4), the stream panel under WebSocket and SSE flows
-//! (`stream_panel`, G6), and the stubs in `features::chrome` for the
+//! `body_tab`, G4), and the stubs in `features::chrome` for the
 //! dialogs the buttons open (Rewrite…: G9, Comment…: G11, Open rule: G7,
 //! Certificate wizard…: G13).
 
@@ -20,6 +22,7 @@ pub mod menus;
 mod panes;
 mod parts;
 mod raw;
+pub mod streams;
 
 use std::sync::Arc;
 
@@ -109,6 +112,7 @@ impl ResponseTab {
 
 pub fn register(cx: &mut App) {
     actions::register(cx);
+    streams::register(cx);
     cx.bind_keys([KeyBinding::new("escape", FocusTable, Some(KEY_CONTEXT))]);
     cx.on_action(|_: &FocusTable, cx| in_window(cx, crate::shell::focus_table));
     cx.on_action(|_: &FocusInspector, cx| in_window(cx, crate::shell::focus_inspector));
@@ -217,6 +221,8 @@ pub struct Inspector {
     /// The Request pane's share of the width.
     split: f32,
     raw: raw::RawDocs,
+    /// The WebSocket or SSE panel of the flow shown, if it has one.
+    streams: Option<Entity<streams::StreamPanel>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -247,6 +253,7 @@ impl Inspector {
             response_tab,
             split: 0.5,
             raw: raw::RawDocs::default(),
+            streams: None,
             _subscriptions: subscriptions,
         }
     }
@@ -282,6 +289,32 @@ impl Inspector {
         self.caches.inspected.read(cx).peek(&key).cloned().flatten()
     }
 
+    /// The stream panel of the flow shown, while it is a WebSocket or SSE
+    /// flow.
+    pub fn stream_panel(&self, cx: &App) -> Option<Entity<streams::StreamPanel>> {
+        let key = self.key(cx)?;
+        self.streams.clone().filter(|p| p.read(cx).flow() == key)
+    }
+
+    /// The panel for `key`, made afresh for another flow or kind.
+    fn stream_panel_for(
+        &mut self,
+        key: FlowKey,
+        kind: StreamKind,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<streams::StreamPanel> {
+        if let Some(panel) = &self.streams
+            && panel.read(cx).flow() == key
+            && panel.read(cx).kind() == kind
+        {
+            return panel.clone();
+        }
+        let panel = cx.new(|cx| streams::StreamPanel::new(key, kind, window, cx));
+        self.streams = Some(panel.clone());
+        panel
+    }
+
     /// Moves the keyboard into the inspector (↩ in the table, "Focus the
     /// inspector").
     pub fn focus(&self, window: &mut Window, cx: &mut App) {
@@ -292,8 +325,12 @@ impl Inspector {
     /// tests): `url`, `kv:<table>[:<row>]` (`request-headers`,
     /// `query-params`, `response-headers`, `response-trailers`,
     /// `tls-connection`, `cert-<n>`), `rule:<n>`, `cert:<n>`,
-    /// `timing[:<row>]`, `failure`, `raw:request|response`.
+    /// `timing[:<row>]`, `failure`, `raw:request|response`, and the stream
+    /// panel's `stream:<row>` and `payload`.
     pub fn menu_for(&self, name: &str, selected: Option<String>, cx: &App) -> Option<Menu> {
+        if name == "payload" || name.starts_with("stream:") {
+            return self.stream_panel(cx)?.read(cx).menu_for(name, selected, cx);
+        }
         let insp = self.inspected(cx)?;
         let key = self.key(cx)?;
         let (kind, arg) = name.split_once(':').map_or((name, None), |(k, a)| (k, Some(a)));
@@ -367,16 +404,20 @@ impl Inspector {
             .then(|| self.caches.operation.update(cx, |c, cx| c.get(&key, cx)))
             .and_then(|l| l.ready().cloned().flatten());
         let messages = self.messages(key, &insp, t, window, cx);
-        let body = match stream {
+        let panel = stream.map(|kind| self.stream_panel_for(key, kind, window, cx));
+        if panel.is_none() {
+            self.streams = None;
+        }
+        let body = match panel {
             None => messages.into_any_element(),
             // WebSocket messages and SSE events take the lower 60%.
-            Some(kind) => div()
+            Some(panel) => div()
                 .flex_1()
                 .min_h_0()
                 .flex()
                 .flex_col()
                 .child(div().h(gpui_kit::relative(0.4)).min_h(px(96.)).flex().child(messages))
-                .child(stream_panel(kind, t))
+                .child(panel)
                 .into_any_element(),
         };
         div()
@@ -461,26 +502,6 @@ impl Inspector {
                     .child(response),
             )
     }
-}
-
-/// The WebSocket or SSE panel's place (G6 builds both).
-fn stream_panel(kind: StreamKind, t: &Tokens) -> impl IntoElement {
-    let what = match kind {
-        StreamKind::WebSocket => "The WebSocket message list arrives in G6.",
-        StreamKind::Sse => "The event-stream panel arrives in G6.",
-    };
-    div()
-        .id("stream-panel")
-        .flex_1()
-        .min_h(px(120.))
-        .border_t_1()
-        .border_color(t.border.hsla())
-        .flex()
-        .items_center()
-        .justify_center()
-        .text_size(px(12.))
-        .text_color(t.muted_foreground.hsla())
-        .child(what)
 }
 
 trait Opacity {
