@@ -209,12 +209,21 @@ mod tests {
     #[test]
     fn picks_the_best_viewer_unless_the_user_chose_another_that_fits() {
         assert_eq!(pick_viewer(ContentKind::Json, None), ViewerId::Json);
-        assert_eq!(pick_viewer(ContentKind::Json, Some(ViewerId::JsonTree)), ViewerId::JsonTree);
-        assert_eq!(pick_viewer(ContentKind::Image, Some(ViewerId::JsonTree)), ViewerId::Image);
+        assert_eq!(
+            pick_viewer(ContentKind::Json, Some(ViewerId::JsonTree)),
+            ViewerId::JsonTree
+        );
+        assert_eq!(
+            pick_viewer(ContentKind::Image, Some(ViewerId::JsonTree)),
+            ViewerId::Image
+        );
         assert_eq!(pick_viewer(ContentKind::Svg, None), ViewerId::Image);
         assert_eq!(pick_viewer(ContentKind::Binary, None), ViewerId::Hex);
         assert_eq!(pick_viewer(ContentKind::Grpc, None), ViewerId::Grpc);
-        assert_eq!(pick_viewer(ContentKind::Cbor, Some(ViewerId::JsonTree)), ViewerId::Decoded);
+        assert_eq!(
+            pick_viewer(ContentKind::Cbor, Some(ViewerId::JsonTree)),
+            ViewerId::Decoded
+        );
     }
 
     #[test]

@@ -129,7 +129,13 @@ pub fn suggested_file_name(url: &str, mime: &str, part: BodyPart) -> String {
         .unwrap_or_else(|| "body".into());
     let mut last: String = last
         .chars()
-        .map(|c| if c.is_alphanumeric() || "_.@+-".contains(c) { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || "_.@+-".contains(c) {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     if last.is_empty() {
         last = "body".into();
@@ -166,14 +172,21 @@ mod tests {
     #[test]
     fn suggests_file_names() {
         assert_eq!(
-            suggested_file_name("https://a.example/v1/users.json?x=1", "application/json", BodyPart::Response),
+            suggested_file_name(
+                "https://a.example/v1/users.json?x=1",
+                "application/json",
+                BodyPart::Response
+            ),
             "users.json"
         );
         assert_eq!(
             suggested_file_name("https://a.example/v1/users", "application/json", BodyPart::Request),
             "users-request.json"
         );
-        assert_eq!(suggested_file_name("https://a.example/", "image/png", BodyPart::Response), "body.png");
+        assert_eq!(
+            suggested_file_name("https://a.example/", "image/png", BodyPart::Response),
+            "body.png"
+        );
         assert_eq!(
             suggested_file_name("https://a.example/a%20b", "application/x-thing", BodyPart::Response),
             "a_b"

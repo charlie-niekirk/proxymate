@@ -80,7 +80,13 @@ pub fn code(selected: Option<String>, text: SharedString, extra: Menu, body: Opt
 }
 
 /// The hex menu: the byte and row under the pointer, the whole dump.
-pub fn hex(bytes: &[u8], row: Option<usize>, offset: Option<usize>, selected: Option<String>, body: Option<&BodyRef>) -> Menu {
+pub fn hex(
+    bytes: &[u8],
+    row: Option<usize>,
+    offset: Option<usize>,
+    selected: Option<String>,
+    body: Option<&BodyRef>,
+) -> Menu {
     let mut menu = Menu::new().selection(selected);
     if let Some(row) = row.filter(|r| r * HEX_WIDTH < bytes.len()) {
         if let Some((offset, byte)) = offset.and_then(|o| Some((o, *bytes.get(o)?))) {
@@ -107,9 +113,11 @@ pub fn tree(row: Option<&TreeRow>, value: Option<String>, selected: Option<Strin
         if let Some(key) = row.key_text() {
             menu = menu.copy("Copy key", key, "key");
         }
-        menu = menu
-            .copy("Copy path", row.json_path(), "path")
-            .copy("Copy JSON pointer", row.pointer_text(), "JSON pointer");
+        menu = menu.copy("Copy path", row.json_path(), "path").copy(
+            "Copy JSON pointer",
+            row.pointer_text(),
+            "JSON pointer",
+        );
         if row.is_container() {
             menu = menu
                 .separator()
@@ -239,7 +247,11 @@ mod tests {
             Some("10 11 12 13 14 15 16 17 18 19 1a 1b 1c 1d 1e 1f")
         );
         assert_eq!(menu.copy_text("Copy offset"), Some("0x10"));
-        assert!(menu.copy_text("Copy as hex dump").unwrap().starts_with("00000000  00 01 02"));
+        assert!(
+            menu.copy_text("Copy as hex dump")
+                .unwrap()
+                .starts_with("00000000  00 01 02")
+        );
         let blank = hex(&bytes, None, None, None, None);
         assert_eq!(blank.labels(), ["Copy as hex dump"]);
     }

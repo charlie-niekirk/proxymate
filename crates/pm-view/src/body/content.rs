@@ -202,7 +202,8 @@ fn sniff_text(head: &[u8]) -> Option<Sniffed> {
     if lower.starts_with("<svg") || (lower.starts_with("<?xml") && text.to_lowercase().contains("<svg")) {
         return sniffed(ContentKind::Svg, "image/svg+xml");
     }
-    if lower.starts_with("<?xml") || (lower.starts_with('<') && lower[1..].starts_with(|c: char| c.is_ascii_lowercase()))
+    if lower.starts_with("<?xml")
+        || (lower.starts_with('<') && lower[1..].starts_with(|c: char| c.is_ascii_lowercase()))
     {
         return sniffed(ContentKind::Xml, "application/xml");
     }
@@ -269,14 +270,23 @@ mod tests {
 
     #[test]
     fn sniffs_parts() {
-        assert_eq!(sniff(b"\x89PNG\r\n\x1a\nrest", Some("text/plain")).kind, ContentKind::Image);
+        assert_eq!(
+            sniff(b"\x89PNG\r\n\x1a\nrest", Some("text/plain")).kind,
+            ContentKind::Image
+        );
         assert_eq!(sniff(b"{\"a\":1}", None).kind, ContentKind::Json);
         assert_eq!(sniff(b"hello", Some("text/plain")).mime, "text/plain");
         assert_eq!(sniff(b"<html><body>", None).kind, ContentKind::Html);
-        assert_eq!(sniff(b"<feed>", Some("application/octet-stream")).kind, ContentKind::Xml);
+        assert_eq!(
+            sniff(b"<feed>", Some("application/octet-stream")).kind,
+            ContentKind::Xml
+        );
         assert_eq!(sniff(b"\x00\x01\x02", None).kind, ContentKind::Binary);
         assert_eq!(sniff(b"", Some("text/plain")).kind, ContentKind::None);
-        assert_eq!(sniff(b"abc", Some("application/x-protobuf")).kind, ContentKind::Protobuf);
+        assert_eq!(
+            sniff(b"abc", Some("application/x-protobuf")).kind,
+            ContentKind::Protobuf
+        );
     }
 
     #[test]

@@ -13,10 +13,10 @@ use std::sync::Arc;
 
 use gpui_kit::base::{SelectableText, TestSupportExt as _, TextSelectionHandle};
 use gpui_kit::component::ActiveTheme as _;
+use gpui_kit::component::Disableable as _;
 use gpui_kit::component::Sizable as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
-use gpui_kit::component::Disableable as _;
 use gpui_kit::prelude::*;
 use gpui_kit::{
     App, ClickEvent, Context, ElementId, Entity, FocusHandle, Focusable, HighlightStyle, Hsla, MouseButton,
@@ -139,7 +139,8 @@ impl JsonTree {
 
     /// Sets the filter (a JSONPath or pointer), as typing it would.
     pub fn set_filter(&mut self, filter: &str, window: &mut Window, cx: &mut Context<Self>) {
-        self.filter.update(cx, |s, cx| s.set_value(filter.to_owned(), window, cx));
+        self.filter
+            .update(cx, |s, cx| s.set_value(filter.to_owned(), window, cx));
         self.reflatten(cx);
     }
 
@@ -251,14 +252,20 @@ impl JsonTree {
             .collect()
     }
 
-    fn render_rows(&mut self, range: Range<usize>, _window: &mut Window, cx: &mut Context<Self>) -> Vec<gpui_kit::AnyElement> {
+    fn render_rows(
+        &mut self,
+        range: Range<usize>,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Vec<gpui_kit::AnyElement> {
         let t = *cx.tokens();
         let current_ptr = self.current.and_then(|i| self.hits.get(i)).cloned();
         let rows = self.rows.clone();
         range
             .filter_map(|ix| {
                 let row = rows.get(ix)?;
-                let is_current = current_ptr.as_deref() == Some(row.ptr.as_str()) && !matches!(row.label, Label::Match(_));
+                let is_current =
+                    current_ptr.as_deref() == Some(row.ptr.as_str()) && !matches!(row.label, Label::Match(_));
                 let label = row.label_text();
                 let value = row.value_text();
                 let label_color: Hsla = match row.label {
@@ -335,9 +342,10 @@ impl JsonTree {
                         .when(is_current, |d| d.bg(t.code_active_line.hsla()))
                         .when(expandable, |d| {
                             let ptr = ptr.clone();
-                            d.cursor_pointer().on_click(cx.listener(move |this, e: &ClickEvent, _, cx| {
-                                this.toggle(&ptr, e.modifiers().alt, cx);
-                            }))
+                            d.cursor_pointer()
+                                .on_click(cx.listener(move |this, e: &ClickEvent, _, cx| {
+                                    this.toggle(&ptr, e.modifiers().alt, cx);
+                                }))
                         })
                         .on_mouse_down(
                             MouseButton::Right,
@@ -434,8 +442,18 @@ impl Render for JsonTree {
                         .text_color(t.muted_foreground.hsla())
                         .child(label),
                 )
-                .child(step("json-match-prev", gpui_kit::assets::IconName::ChevronUp, false, "Previous match"))
-                .child(step("json-match-next", gpui_kit::assets::IconName::ChevronDown, true, "Next match"))
+                .child(step(
+                    "json-match-prev",
+                    gpui_kit::assets::IconName::ChevronUp,
+                    false,
+                    "Previous match",
+                ))
+                .child(step(
+                    "json-match-next",
+                    gpui_kit::assets::IconName::ChevronDown,
+                    true,
+                    "Next match",
+                ))
         });
         let len = self.rows.len();
         div()
@@ -479,11 +497,15 @@ impl Render for JsonTree {
                     .children(terms),
             )
             .child(
-                uniform_list(ElementId::Name(format!("{}-rows", self.id).into()), len, cx.processor(Self::render_rows))
-                    .track_scroll(&self.scroll)
-                    .flex_1()
-                    .font_family(mono)
-                    .text_size(px(11.5)),
+                uniform_list(
+                    ElementId::Name(format!("{}-rows", self.id).into()),
+                    len,
+                    cx.processor(Self::render_rows),
+                )
+                .track_scroll(&self.scroll)
+                .flex_1()
+                .font_family(mono)
+                .text_size(px(11.5)),
             )
             .test_support()
     }

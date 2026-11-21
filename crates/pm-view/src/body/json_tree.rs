@@ -93,7 +93,11 @@ impl TreeRow {
 
     /// The pointer to copy: `/` for the root.
     pub fn pointer_text(&self) -> String {
-        if self.ptr.is_empty() { "/".into() } else { self.ptr.clone() }
+        if self.ptr.is_empty() {
+            "/".into()
+        } else {
+            self.ptr.clone()
+        }
     }
 
     /// The key to copy, for a member of an object or array.

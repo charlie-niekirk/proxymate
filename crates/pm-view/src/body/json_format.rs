@@ -102,9 +102,15 @@ mod tests {
 
     #[test]
     fn formats_loosely_when_the_json_is_broken_or_cut_short() {
-        assert_eq!(format_json(r#"{"a": [1, 2"#, "  ").unwrap(), "{\n  \"a\": [\n    1,\n    2");
+        assert_eq!(
+            format_json(r#"{"a": [1, 2"#, "  ").unwrap(),
+            "{\n  \"a\": [\n    1,\n    2"
+        );
         assert_eq!(format_json("hello", "  "), None);
-        assert_eq!(format_json("{\"a\":\"unterminated", "  ").unwrap(), "{\n  \"a\": \"unterminated");
+        assert_eq!(
+            format_json("{\"a\":\"unterminated", "  ").unwrap(),
+            "{\n  \"a\": \"unterminated"
+        );
         assert_eq!(format_json("\u{feff} [ ] ", "  ").unwrap(), "[]");
         assert_eq!(format_json("{\"é\":\"ü\"}", "  ").unwrap(), "{\n  \"é\": \"ü\"\n}");
     }

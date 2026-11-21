@@ -22,14 +22,14 @@ use std::sync::Arc;
 
 use gpui_kit::base::{SelectableText, TestSupportExt as _, TextSelectionHandle};
 use gpui_kit::component::ActiveTheme as _;
-use gpui_kit::component::{Disableable as _, Sizable as _};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::{Disableable as _, Sizable as _};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    App, Context, ElementId, Entity, FocusHandle, Focusable, FontWeight, HighlightStyle, Hsla, KeyBinding,
-    MouseButton, MouseDownEvent, Pixels, Point, Role, ScrollStrategy, SharedString, Subscription, Task,
-    UniformListScrollHandle, Window, canvas, div, px, uniform_list,
+    App, Context, ElementId, Entity, FocusHandle, Focusable, FontWeight, HighlightStyle, Hsla, KeyBinding, MouseButton,
+    MouseDownEvent, Pixels, Point, Role, ScrollStrategy, SharedString, Subscription, Task, UniformListScrollHandle,
+    Window, canvas, div, px, uniform_list,
 };
 use pm_theme::Tokens;
 use pm_theme::kit::TokensExt as _;
@@ -87,7 +87,10 @@ pub enum Highlight {
     Lang(Lang),
     /// An HTTP message: the head's first `head_lines` lines, then a body in
     /// `body`.
-    Http { head_lines: usize, body: Lang },
+    Http {
+        head_lines: usize,
+        body: Lang,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -448,8 +451,11 @@ impl CodeView {
         self.current = search::step(self.current, self.matches.len(), forward);
         if let Some(at) = self.current.and_then(|i| self.matches.get(i)) {
             let start = at.start;
-            let row = self.rows.partition_point(|r| r.range.end < start || (r.range.end == start && r.range.start < start));
-            self.scroll.scroll_to_item(row.min(self.rows.len().saturating_sub(1)), ScrollStrategy::Center);
+            let row = self
+                .rows
+                .partition_point(|r| r.range.end < start || (r.range.end == start && r.range.start < start));
+            self.scroll
+                .scroll_to_item(row.min(self.rows.len().saturating_sub(1)), ScrollStrategy::Center);
         }
         cx.notify();
     }
@@ -460,15 +466,12 @@ impl CodeView {
             Some(input) => input.clone(),
             None => {
                 let input = cx.new(|cx| InputState::new(window, cx).placeholder("Find"));
-                self._subscriptions.push(cx.subscribe_in(
-                    &input,
-                    window,
-                    |this, _, e: &InputEvent, _, cx| {
+                self._subscriptions
+                    .push(cx.subscribe_in(&input, window, |this, _, e: &InputEvent, _, cx| {
                         if matches!(e, InputEvent::Change) {
                             this.research(cx);
                         }
-                    },
-                ));
+                    }));
                 self.find = Some(input.clone());
                 input
             }
@@ -518,7 +521,12 @@ impl CodeView {
         }
     }
 
-    fn render_rows(&mut self, range: Range<usize>, _window: &mut Window, cx: &mut Context<Self>) -> Vec<gpui_kit::AnyElement> {
+    fn render_rows(
+        &mut self,
+        range: Range<usize>,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Vec<gpui_kit::AnyElement> {
         let t = *cx.tokens();
         let gutter = self.gutter_width();
         let rows = self.rows.clone();
@@ -558,9 +566,10 @@ impl CodeView {
                     .collect();
                 let runs = highlight::layer(&syntax, &marks, |a, b| a.highlight(*b));
                 let id = ElementId::Name(format!("{}-{ix}", self.id).into());
-                let text = SelectableText::with_handle(id, self.selection.clone(), SharedString::from(piece.to_owned()))
-                    .document_order(ix as u64)
-                    .highlights(runs);
+                let text =
+                    SelectableText::with_handle(id, self.selection.clone(), SharedString::from(piece.to_owned()))
+                        .document_order(ix as u64)
+                        .highlights(runs);
                 Some(
                     div()
                         .id(("code-row", ix))
@@ -615,8 +624,18 @@ impl CodeView {
                     .text_color(t.muted_foreground.hsla())
                     .child(label),
             )
-            .child(step("match-prev", gpui_kit::assets::IconName::ChevronUp, false, "Previous match · ⇧↩"))
-            .child(step("match-next", gpui_kit::assets::IconName::ChevronDown, true, "Next match · ↩"));
+            .child(step(
+                "match-prev",
+                gpui_kit::assets::IconName::ChevronUp,
+                false,
+                "Previous match · ⇧↩",
+            ))
+            .child(step(
+                "match-next",
+                gpui_kit::assets::IconName::ChevronDown,
+                true,
+                "Next match · ↩",
+            ));
         let bar = div()
             .flex_none()
             .h(px(28.))
@@ -712,12 +731,24 @@ impl Render for CodeView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = *cx.tokens();
         let mono = cx.theme().mono_font_family.clone();
-        let font = gpui_kit::font(mono.clone());
-        let font_id = window.text_system().resolve_font(&font);
+        // The advance as the rows are drawn: a run shaped in the window's
+        // text style with the mono family, the way the rows inherit it.
+        let mut style = window.text_style();
+        style.font_family = mono.clone();
+        let sample: SharedString = "0".repeat(64).into();
+        let run = gpui_kit::TextRun {
+            len: sample.len(),
+            font: style.font(),
+            color: t.foreground.hsla(),
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        };
         let char_width = window
             .text_system()
-            .ch_width(font_id, px(FONT_SIZE))
-            .unwrap_or(px(7.2));
+            .shape_line(sample, px(FONT_SIZE), &[run], None)
+            .width
+            / 64.;
         let bar = self.render_bar(&t, cx);
         let entity = cx.entity();
         let measure = canvas(

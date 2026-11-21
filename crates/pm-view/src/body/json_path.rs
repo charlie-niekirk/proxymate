@@ -137,7 +137,11 @@ fn parse_json_path(e: &str) -> Result<Vec<Step>, String> {
         } else if let Some((a, b)) = t.split_once(':') {
             let num = |s: &str| -> Result<Option<i64>, ()> {
                 let s = s.trim();
-                if s.is_empty() { Ok(None) } else { s.parse().map(Some).map_err(|_| ()) }
+                if s.is_empty() {
+                    Ok(None)
+                } else {
+                    s.parse().map(Some).map_err(|_| ())
+                }
             };
             match (num(a), num(b)) {
                 (Ok(a), Ok(b)) => Step::Slice(a, b),

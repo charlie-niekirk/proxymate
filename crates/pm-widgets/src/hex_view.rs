@@ -77,7 +77,12 @@ impl HexView {
         window.defer(cx, move |window, cx| menu(request, window, cx));
     }
 
-    fn render_rows(&mut self, range: Range<usize>, _window: &mut Window, cx: &mut Context<Self>) -> Vec<gpui_kit::AnyElement> {
+    fn render_rows(
+        &mut self,
+        range: Range<usize>,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Vec<gpui_kit::AnyElement> {
         let t = *cx.tokens();
         let digits = offset_digits(self.bytes.len());
         range
@@ -228,13 +233,21 @@ impl Render for HexView {
                             .bg(t.pane_header.hsla())
                             .text_color(t.muted_foreground.hsla())
                             .child(div().w(px((digits as f32 + 2.) * 7.)).flex_none().child("Offset"))
-                            .child(div().flex_none().child(SharedString::from(header_hex.trim_start().to_owned())))
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .child(SharedString::from(header_hex.trim_start().to_owned())),
+                            )
                             .child(div().ml(px(14.)).child("ASCII")),
                     )
                     .child(
-                        uniform_list(ElementId::Name(format!("{}-rows", self.id).into()), rows, cx.processor(Self::render_rows))
-                            .track_scroll(&self.scroll)
-                            .flex_1(),
+                        uniform_list(
+                            ElementId::Name(format!("{}-rows", self.id).into()),
+                            rows,
+                            cx.processor(Self::render_rows),
+                        )
+                        .track_scroll(&self.scroll)
+                        .flex_1(),
                     ),
             )
             .test_support()

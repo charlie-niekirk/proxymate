@@ -9,7 +9,9 @@ use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::Sizable as _;
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, App, Context, FontWeight, MouseButton, MouseDownEvent, Role, SharedString, Window, div, px};
+use gpui_kit::{
+    AnyElement, App, Context, FontWeight, MouseButton, MouseDownEvent, Role, SharedString, Window, div, px,
+};
 use pm_model::{BodyPart, FlowDetail, FlowState, FlowSummary, TlsStatus};
 use pm_theme::Tokens;
 use pm_view::flow::{format_duration, format_ms};

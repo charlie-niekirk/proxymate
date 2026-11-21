@@ -439,8 +439,8 @@ async fn body_command(command: &Value, window: AnyWindowHandle, cx: &mut AsyncAp
     let result: Result<(), String> = window
         .update(cx, |_, _, cx| -> Result<(), String> {
             if let Some(v) = command.get("viewer") {
-                let kind: pm_model::ContentKind = serde_json::from_value(v["kind"].clone())
-                    .map_err(|_| format!("no content kind {}", v["kind"]))?;
+                let kind: pm_model::ContentKind =
+                    serde_json::from_value(v["kind"].clone()).map_err(|_| format!("no content kind {}", v["kind"]))?;
                 let viewer = v["viewer"]
                     .as_str()
                     .and_then(pm_view::body::registry::ViewerId::parse)

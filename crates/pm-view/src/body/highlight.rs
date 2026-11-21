@@ -120,7 +120,11 @@ fn json(line: &str) -> Spans {
                 while k < b.len() && b[k] == b' ' {
                     k += 1;
                 }
-                let tone = if b.get(k) == Some(&b':') { Tone::Key } else { Tone::String };
+                let tone = if b.get(k) == Some(&b':') {
+                    Tone::Key
+                } else {
+                    Tone::String
+                };
                 out.push((i..end, tone));
                 i = end;
             }
@@ -152,11 +156,7 @@ fn markup(line: &str) -> Spans {
     let mut i = 0;
     while i < b.len() {
         if b[i] == b'&' {
-            let end = b[i..]
-                .iter()
-                .take(12)
-                .position(|c| *c == b';')
-                .map(|p| i + p + 1);
+            let end = b[i..].iter().take(12).position(|c| *c == b';').map(|p| i + p + 1);
             if let Some(end) = end {
                 out.push((i..end, Tone::Literal));
                 i = end;
@@ -230,9 +230,43 @@ fn markup(line: &str) -> Spans {
 }
 
 const JS_KEYWORDS: &[&str] = &[
-    "async", "await", "break", "case", "catch", "class", "const", "continue", "default", "delete", "do", "else",
-    "export", "extends", "finally", "for", "function", "if", "import", "in", "instanceof", "let", "new", "of", "return",
-    "static", "super", "switch", "this", "throw", "try", "typeof", "var", "void", "while", "yield", "from",
+    "async",
+    "await",
+    "break",
+    "case",
+    "catch",
+    "class",
+    "const",
+    "continue",
+    "default",
+    "delete",
+    "do",
+    "else",
+    "export",
+    "extends",
+    "finally",
+    "for",
+    "function",
+    "if",
+    "import",
+    "in",
+    "instanceof",
+    "let",
+    "new",
+    "of",
+    "return",
+    "static",
+    "super",
+    "switch",
+    "this",
+    "throw",
+    "try",
+    "typeof",
+    "var",
+    "void",
+    "while",
+    "yield",
+    "from",
 ];
 
 /// JavaScript (and the base of CSS): comments, strings, numbers, keywords.
@@ -425,11 +459,7 @@ pub fn layer<T: Clone>(
     if top.is_empty() {
         return base.to_vec();
     }
-    let mut cuts: Vec<usize> = base
-        .iter()
-        .chain(top)
-        .flat_map(|(r, _)| [r.start, r.end])
-        .collect();
+    let mut cuts: Vec<usize> = base.iter().chain(top).flat_map(|(r, _)| [r.start, r.end]).collect();
     cuts.sort_unstable();
     cuts.dedup();
     let find = |spans: &[(Range<usize>, T)], at: usize| {
@@ -514,7 +544,11 @@ mod tests {
     fn script_css_and_graphql() {
         assert_eq!(
             spans(Lang::Javascript, "const a = 'x'; // done"),
-            [("const", Tone::Keyword), ("'x'", Tone::String), ("// done", Tone::Comment)]
+            [
+                ("const", Tone::Keyword),
+                ("'x'", Tone::String),
+                ("// done", Tone::Comment)
+            ]
         );
         assert_eq!(
             spans(Lang::Css, "a { color: #fff; }"),
@@ -546,11 +580,27 @@ mod tests {
     #[test]
     fn http_heads() {
         let line = "GET /a?b=1 HTTP/1.1";
-        let got: Vec<_> = highlight_http_head(line, true).into_iter().map(|(r, t)| (&line[r], t)).collect();
-        assert_eq!(got, [("GET", Tone::Keyword), ("/a?b=1", Tone::String), ("HTTP/1.1", Tone::Meta)]);
+        let got: Vec<_> = highlight_http_head(line, true)
+            .into_iter()
+            .map(|(r, t)| (&line[r], t))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                ("GET", Tone::Keyword),
+                ("/a?b=1", Tone::String),
+                ("HTTP/1.1", Tone::Meta)
+            ]
+        );
         let line = "HTTP/2 404 Not Found";
-        let got: Vec<_> = highlight_http_head(line, true).into_iter().map(|(r, t)| (&line[r], t)).collect();
+        let got: Vec<_> = highlight_http_head(line, true)
+            .into_iter()
+            .map(|(r, t)| (&line[r], t))
+            .collect();
         assert_eq!(got, [("HTTP/2", Tone::Meta), ("404", Tone::Number)]);
-        assert_eq!(highlight_http_head("Host: a", false), [(0..4, Tone::Attr), (4..5, Tone::Punct)]);
+        assert_eq!(
+            highlight_http_head("Host: a", false),
+            [(0..4, Tone::Attr), (4..5, Tone::Punct)]
+        );
     }
 }

@@ -286,7 +286,10 @@ impl Parser<'_> {
     }
 
     fn hex4(&mut self) -> Result<u32, String> {
-        let digits = self.text.get(self.i..self.i + 4).ok_or_else(|| self.error("Bad \\u escape"))?;
+        let digits = self
+            .text
+            .get(self.i..self.i + 4)
+            .ok_or_else(|| self.error("Bad \\u escape"))?;
         let n = u32::from_str_radix(digits, 16).map_err(|_| self.error("Bad \\u escape"))?;
         self.i += 4;
         Ok(n)

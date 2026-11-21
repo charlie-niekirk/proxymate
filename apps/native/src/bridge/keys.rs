@@ -115,7 +115,9 @@ pub fn caches(cx: &mut App) -> Caches {
                 })),
                 // It didn't decode: the raw bytes, with why.
                 Err(err) => {
-                    let raw = engine.body_head_in(store, id, k.part, false, max).map_err(|e| e.to_string())?;
+                    let raw = engine
+                        .body_head_in(store, id, k.part, false, max)
+                        .map_err(|e| e.to_string())?;
                     Ok(Arc::new(DecodedBody {
                         bytes: Arc::new(raw.bytes),
                         decoded_from: None,

@@ -43,7 +43,10 @@ fn find(hay: &[u8], needle: &[u8], from: usize) -> Option<usize> {
     if needle.is_empty() || from > hay.len() {
         return None;
     }
-    hay[from..].windows(needle.len()).position(|w| w == needle).map(|p| p + from)
+    hay[from..]
+        .windows(needle.len())
+        .position(|w| w == needle)
+        .map(|p| p + from)
 }
 
 /// A Content-Disposition parameter (`name`, `filename`), unquoted.
@@ -125,7 +128,12 @@ pub fn parse_multipart(body: &[u8], boundary: &str) -> Vec<Part> {
             .filter_map(|l| l.split_once(':'))
             .map(|(k, v)| (k.trim().to_owned(), v.trim().to_owned()))
             .collect();
-        let header = |n: &str| headers.iter().find(|(k, _)| k.eq_ignore_ascii_case(n)).map(|(_, v)| v.clone());
+        let header = |n: &str| {
+            headers
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case(n))
+                .map(|(_, v)| v.clone())
+        };
         let disposition = header("content-disposition").unwrap_or_default();
         parts.push(Part {
             name: param(&disposition, "name"),
@@ -148,8 +156,14 @@ mod tests {
 
     #[test]
     fn reads_the_boundary_parameter() {
-        assert_eq!(boundary_of(Some("multipart/form-data; boundary=----abc")).as_deref(), Some("----abc"));
-        assert_eq!(boundary_of(Some(r#"multipart/mixed; charset=utf-8; boundary="a b""#)).as_deref(), Some("a b"));
+        assert_eq!(
+            boundary_of(Some("multipart/form-data; boundary=----abc")).as_deref(),
+            Some("----abc")
+        );
+        assert_eq!(
+            boundary_of(Some(r#"multipart/mixed; charset=utf-8; boundary="a b""#)).as_deref(),
+            Some("a b")
+        );
         assert_eq!(boundary_of(Some("application/json")), None);
     }
 

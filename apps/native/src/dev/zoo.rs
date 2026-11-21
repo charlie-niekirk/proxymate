@@ -17,7 +17,11 @@ pub fn start(cx: &mut App) {
         let mut proxy = None;
         for _ in 0..100 {
             let status = engine.proxy_status();
-            if let Some(port) = status.listening.as_deref().and_then(|a| a.rsplit(':').next()?.parse::<u16>().ok()) {
+            if let Some(port) = status
+                .listening
+                .as_deref()
+                .and_then(|a| a.rsplit(':').next()?.parse::<u16>().ok())
+            {
                 proxy = Some(std::net::SocketAddr::from(([127, 0, 0, 1], port)));
                 break;
             }

@@ -57,12 +57,16 @@ fn stats(label: &str, mut samples: Vec<Duration>) {
 }
 
 fn frame(cx: &mut HeadlessAppContext, handle: AnyWindowHandle) {
-    cx.update_window(handle, |_, window, cx| window.render_frame(cx)).unwrap();
+    cx.update_window(handle, |_, window, cx| window.render_frame(cx))
+        .unwrap();
 }
 
 fn main() {
     let raw = pm_testkit::zoo::big_json(20 << 20);
-    println!("viewer_bench: {:.1} MB of minified JSON", raw.len() as f64 / (1 << 20) as f64);
+    println!(
+        "viewer_bench: {:.1} MB of minified JSON",
+        raw.len() as f64 / (1 << 20) as f64
+    );
     let start = Instant::now();
     let text = pm_view::body::text_of(&raw).expect("text");
     let pretty = pm_view::body::json_format::format_json(text, "  ").expect("JSON");
@@ -130,7 +134,11 @@ fn main() {
         let mut page = Vec::new();
         for i in 0..240 {
             let begin = Instant::now();
-            cx.update(|cx| view.read(cx).scroll_handle().scroll_to_item(i * 38 + 60, ScrollStrategy::Top));
+            cx.update(|cx| {
+                view.read(cx)
+                    .scroll_handle()
+                    .scroll_to_item(i * 38 + 60, ScrollStrategy::Top)
+            });
             frame(&mut cx, handle);
             page.push(begin.elapsed());
         }
@@ -139,7 +147,11 @@ fn main() {
         for i in 0..120 {
             let begin = Instant::now();
             let target = (i * 7919 * 13) % rows.max(1);
-            cx.update(|cx| view.read(cx).scroll_handle().scroll_to_item(target, ScrollStrategy::Top));
+            cx.update(|cx| {
+                view.read(cx)
+                    .scroll_handle()
+                    .scroll_to_item(target, ScrollStrategy::Top)
+            });
             frame(&mut cx, handle);
             jumps.push(begin.elapsed());
         }

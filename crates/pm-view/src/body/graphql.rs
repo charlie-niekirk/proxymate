@@ -111,7 +111,9 @@ pub fn parse_query_string(url: &str) -> Option<Operation> {
         }
     };
     Some(Operation {
-        operation_name: get("operationName").filter(|n| !n.is_empty()).or_else(|| name_in(&query)),
+        operation_name: get("operationName")
+            .filter(|n| !n.is_empty())
+            .or_else(|| name_in(&query)),
         kind: operation_kind(&query),
         variables: json("variables"),
         extensions: json("extensions"),
@@ -138,7 +140,11 @@ mod tests {
 
     #[test]
     fn keeps_variables_as_sent() {
-        let ops = parse_body(r#"{"query":"{ a }","variables":{"z":1,"2":12345678901234567890,"a":1.50}}"#, None).unwrap();
+        let ops = parse_body(
+            r#"{"query":"{ a }","variables":{"z":1,"2":12345678901234567890,"a":1.50}}"#,
+            None,
+        )
+        .unwrap();
         assert_eq!(
             ops[0].variables_text().unwrap(),
             "{\n  \"z\": 1,\n  \"2\": 12345678901234567890,\n  \"a\": 1.50\n}"
@@ -158,8 +164,11 @@ mod tests {
         );
         let raw = parse_body("subscription S { s }", Some("application/graphql")).unwrap();
         assert_eq!(raw[0].operation_name.as_deref(), Some("S"));
-        let persisted =
-            parse_body(r#"{"operationName":"P","extensions":{"persistedQuery":{"version":1}}}"#, None).unwrap();
+        let persisted = parse_body(
+            r#"{"operationName":"P","extensions":{"persistedQuery":{"version":1}}}"#,
+            None,
+        )
+        .unwrap();
         assert_eq!(persisted[0].operation_name.as_deref(), Some("P"));
         assert_eq!(persisted[0].query, "");
         assert_eq!(persisted[0].kind, None);

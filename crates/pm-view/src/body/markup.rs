@@ -37,7 +37,11 @@ enum Token<'a> {
 }
 
 fn tag_name(after: &str, stop: &[char]) -> String {
-    after.split(|c: char| c.is_whitespace() || stop.contains(&c)).next().unwrap_or("").to_owned()
+    after
+        .split(|c: char| c.is_whitespace() || stop.contains(&c))
+        .next()
+        .unwrap_or("")
+        .to_owned()
 }
 
 fn tokenize(src: &str, html: bool) -> Vec<Token<'_>> {
@@ -199,8 +203,7 @@ mod tests {
 
     #[test]
     fn indents_nested_xml_and_keeps_short_text_inline() {
-        let xml =
-            r#"<?xml version="1.0"?><feed><title>Hi &amp; bye</title><entry id="1"><a/><b></b></entry><!-- c --></feed>"#;
+        let xml = r#"<?xml version="1.0"?><feed><title>Hi &amp; bye</title><entry id="1"><a/><b></b></entry><!-- c --></feed>"#;
         assert_eq!(
             format_markup(xml, false, "  "),
             [
@@ -245,15 +248,30 @@ mod tests {
 
     #[test]
     fn keeps_multi_line_scripts_verbatim_but_re_indented() {
-        let out = format_markup("<div><style>\n    a { b: c }\n      d { e: f }\n</style></div>", true, "  ");
+        let out = format_markup(
+            "<div><style>\n    a { b: c }\n      d { e: f }\n</style></div>",
+            true,
+            "  ",
+        );
         assert_eq!(
             out,
-            ["<div>", "  <style>", "    a { b: c }", "      d { e: f }", "  </style>", "</div>"].join("\n")
+            [
+                "<div>",
+                "  <style>",
+                "    a { b: c }",
+                "      d { e: f }",
+                "  </style>",
+                "</div>"
+            ]
+            .join("\n")
         );
     }
 
     #[test]
     fn survives_unbalanced_and_truncated_markup() {
-        assert_eq!(format_markup("<a><b></a><c", false, "  "), ["<a>", "  <b>", "</a>", "<c"].join("\n"));
+        assert_eq!(
+            format_markup("<a><b></a><c", false, "  "),
+            ["<a>", "  <b>", "</a>", "<c"].join("\n")
+        );
     }
 }

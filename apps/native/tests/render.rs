@@ -551,9 +551,9 @@ mod render {
         use gpui_kit::{Context, Entity, HeadlessAppContext, Window, WindowBounds, WindowOptions, div};
         use gpui_kit::{point, px, size};
         use pm_model::{BodyInfo, BodyPart, ContentKind, Header};
+        use pm_testkit::zoo;
         use pm_theme::kit::TokensExt as _;
         use pm_theme::{Mode, Rgba, Tokens};
-        use pm_testkit::zoo;
         use pm_view::body::registry::ViewerId;
         use proxymate_native::bridge::keys::{self, DecodedBody, DecodedKey, FlowKey};
         use proxymate_native::features::body::{self, BodyInput, BodyPane};
@@ -590,7 +590,11 @@ mod render {
             serde_json::from_value(serde_json::json!(s)).expect("a content kind")
         }
 
-        fn response(name: &'static str, viewer: Option<ViewerId>, expect: Vec<(fn(&Tokens) -> Rgba, &'static str)>) -> Case {
+        fn response(
+            name: &'static str,
+            viewer: Option<ViewerId>,
+            expect: Vec<(fn(&Tokens) -> Rgba, &'static str)>,
+        ) -> Case {
             let f = zoo::fixture(name.split('+').next().unwrap()).expect("a zoo fixture");
             let bytes = match (&f.file, &f.encoding) {
                 (Some(file), Some(_)) => zoo::file_bytes(file).to_vec(),
@@ -642,7 +646,11 @@ mod render {
             let header: fn(&Tokens) -> Rgba = |t| t.pane_header;
             vec![
                 response("json", None, vec![(key, "JSON keys"), (string, "JSON strings")]),
-                response("json+tree", Some(ViewerId::JsonTree), vec![(key, "tree keys"), (number, "tree numbers")]),
+                response(
+                    "json+tree",
+                    Some(ViewerId::JsonTree),
+                    vec![(key, "tree keys"), (number, "tree numbers")],
+                ),
                 response("json-gzip", None, vec![(key, "decoded JSON keys")]),
                 response("json-headerless", None, vec![(key, "sniffed JSON keys")]),
                 response("json-base64", None, vec![(key, "JSON keys")]),
@@ -655,8 +663,15 @@ mod render {
                 response("graphql", None, vec![(key, "the GraphQL response's JSON")]),
                 request("form", vec![(key, "form field names")]),
                 request("multipart", vec![(card, "part cards"), (key, "part names")]),
-                request("graphql", vec![(header, "the Query and Variables panes"), (key, "variables")]),
-                response("binary", None, vec![(comment, "hex offsets"), (string, "the ASCII column")]),
+                request(
+                    "graphql",
+                    vec![(header, "the Query and Variables panes"), (key, "variables")],
+                ),
+                response(
+                    "binary",
+                    None,
+                    vec![(comment, "hex offsets"), (string, "the ASCII column")],
+                ),
             ]
         }
 
@@ -689,7 +704,9 @@ mod render {
                         cx,
                     )
                 });
-                let viewer = case.viewer.unwrap_or(pm_view::body::registry::viewers_for(case.kind)[0]);
+                let viewer = case
+                    .viewer
+                    .unwrap_or(pm_view::body::registry::viewers_for(case.kind)[0]);
                 body::choose(case.kind, viewer, cx);
             });
             let input = BodyInput {
@@ -744,10 +761,14 @@ mod render {
             }
             let image = cx.capture_screenshot(handle.into()).expect("a viewer frame");
             let theme = if mode.is_dark() { "dark" } else { "light" };
-            let file = format!("viewer-{}-{}-{theme}.png", case.name.replace('+', "-"), match part {
-                BodyPart::Request => "request",
-                BodyPart::Response => "response",
-            });
+            let file = format!(
+                "viewer-{}-{}-{theme}.png",
+                case.name.replace('+', "-"),
+                match part {
+                    BodyPart::Request => "request",
+                    BodyPart::Response => "response",
+                }
+            );
             let path = super::snapshot_dir().join(file);
             image.save(&path).unwrap();
             println!("wrote {}", path.display());
@@ -764,7 +785,11 @@ mod render {
             let mut cx = super::context();
             cx.update(|cx| {
                 use proxymate_native::prefs::{self, Appearance};
-                let forced = if mode.is_dark() { Appearance::Dark } else { Appearance::Light };
+                let forced = if mode.is_dark() {
+                    Appearance::Dark
+                } else {
+                    Appearance::Light
+                };
                 prefs::update(cx, |p| p.appearance = forced);
                 pm_theme::kit::apply(mode, cx);
             });

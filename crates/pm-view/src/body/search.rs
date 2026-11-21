@@ -100,14 +100,17 @@ mod tests {
         let s = Search::new(&["id", "user_id", ""]).unwrap();
         assert_eq!(s.ranges("USER_ID and Id"), [0..7, 12..14]);
         assert!(Search::new::<&str>(&[]).is_none());
-        assert!(Search::new(&["a.b"]).unwrap().ranges("axb").is_empty(), "terms are literal");
-        assert_eq!(Search::new(&["é"]).unwrap().ranges("É"), [0..2]);
+        assert!(
+            Search::new(&["a.b"]).unwrap().ranges("axb").is_empty(),
+            "terms are literal"
+        );
+        assert_eq!(Search::new(&["é"]).unwrap().ranges("É"), vec![0..2]);
     }
 
     #[test]
     fn cuts_ranges_to_a_window() {
         let ranges = [0..3, 5..9, 12..14];
-        assert_eq!(ranges_in(&ranges, 4..8), [1..4]);
+        assert_eq!(ranges_in(&ranges, 4..8), vec![1..4]);
         assert_eq!(ranges_in(&ranges, 8..13), [0..1, 4..5]);
         assert!(ranges_in(&ranges, 15..20).is_empty());
     }

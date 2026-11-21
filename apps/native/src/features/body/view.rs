@@ -30,7 +30,10 @@ pub enum Prepared {
     Binary,
     Tree(Arc<JNode>),
     /// JS or CSS, and whether it looks minified (it starts beautified then).
-    Script { text: SharedString, minified: bool },
+    Script {
+        text: SharedString,
+        minified: bool,
+    },
     Form {
         text: SharedString,
         fields: Vec<(String, String)>,
@@ -93,7 +96,9 @@ pub fn prepare(viewer: ViewerId, bytes: &[u8], content_type: Option<&str>) -> Pr
             fields: form_fields(text),
             text: text.to_owned().into(),
         },
-        ViewerId::Graphql => Prepared::Graphql(graphql::parse_body(text, content_type).ok_or_else(|| text.to_owned().into())),
+        ViewerId::Graphql => {
+            Prepared::Graphql(graphql::parse_body(text, content_type).ok_or_else(|| text.to_owned().into()))
+        }
         _ => Prepared::Text {
             text: text.to_owned().into(),
             note: None,
@@ -147,7 +152,8 @@ impl SurfaceOpts {
     }
 }
 
-pub type CodeMenu = std::rc::Rc<dyn Fn(Option<String>, SharedString, gpui_kit::Point<gpui_kit::Pixels>, &mut Window, &mut App)>;
+pub type CodeMenu =
+    std::rc::Rc<dyn Fn(Option<String>, SharedString, gpui_kit::Point<gpui_kit::Pixels>, &mut Window, &mut App)>;
 
 /// A text widget: the editor or the CodeView.
 #[derive(Clone)]
@@ -183,9 +189,8 @@ impl Surface {
         if opts.editor {
             let (id, label) = (id.to_owned(), label.to_owned());
             let editor = cx.new(|cx| {
-                let mut e = CodeEditor::new(id, label, language, true, window, cx).on_menu(move |req, window, cx| {
-                    menu(req.selection, req.text, req.position, window, cx)
-                });
+                let mut e = CodeEditor::new(id, label, language, true, window, cx)
+                    .on_menu(move |req, window, cx| menu(req.selection, req.text, req.position, window, cx));
                 e.set_wrap(opts.wrap, window, cx);
                 e.set_text(text, window, cx);
                 e
@@ -289,7 +294,10 @@ mod tests {
         let (_, note) = text(prepare(ViewerId::JsonTree, b"{\"a\":", None));
         assert!(note.unwrap().contains("Showing the text"));
         assert!(matches!(prepare(ViewerId::JsonTree, b"[1]", None), Prepared::Tree(_)));
-        assert_eq!(text(prepare(ViewerId::Xml, b"<a><b/></a>", None)).0, "<a>\n  <b/>\n</a>");
+        assert_eq!(
+            text(prepare(ViewerId::Xml, b"<a><b/></a>", None)).0,
+            "<a>\n  <b/>\n</a>"
+        );
         assert!(matches!(prepare(ViewerId::Text, b"a\0b", None), Prepared::Binary));
         assert!(matches!(
             prepare(ViewerId::Javascript, "x".repeat(1000).as_bytes(), None),
@@ -299,13 +307,20 @@ mod tests {
             Prepared::Form { fields, .. } => assert_eq!(fields.len(), 2),
             _ => panic!("form"),
         }
-        match prepare(ViewerId::Multipart, b"--x\r\n\r\nhi\r\n--x--", Some("multipart/form-data; boundary=x")) {
+        match prepare(
+            ViewerId::Multipart,
+            b"--x\r\n\r\nhi\r\n--x--",
+            Some("multipart/form-data; boundary=x"),
+        ) {
             Prepared::Multipart { boundary, parts } => {
                 assert_eq!(boundary.as_deref(), Some("x"));
                 assert_eq!(parts.len(), 1);
             }
             _ => panic!("multipart"),
         }
-        assert!(matches!(prepare(ViewerId::Graphql, b"{\"q\":1}", None), Prepared::Graphql(Err(_))));
+        assert!(matches!(
+            prepare(ViewerId::Graphql, b"{\"q\":1}", None),
+            Prepared::Graphql(Err(_))
+        ));
     }
 }

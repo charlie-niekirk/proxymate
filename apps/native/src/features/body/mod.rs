@@ -52,8 +52,8 @@ use crate::features::clipboard::{copy_later, report_error};
 use crate::features::context_menu::Menu;
 use crate::features::inspector::actions::FlowRef;
 pub use menus::BodyRef;
-pub use view::{Surface, lang_for_kind};
 use view::{BINARY, Prepared, SurfaceOpts, prepare};
+pub use view::{Surface, lang_for_kind};
 
 /// Copies the shown body as text (or Base64).
 #[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
@@ -126,9 +126,11 @@ fn loaded(flow: FlowRef, part: BodyPart, cx: &mut App) -> Option<Arc<Vec<u8>>> {
     let caches = keys::caches(cx);
     let key = FlowKey::new(flow.store, flow.id);
     let decoded = caches.decoded.read(cx);
-    [None, Some(LOAD_LIMIT)]
-        .into_iter()
-        .find_map(|max| decoded.peek(&DecodedKey { flow: key, part, max }).map(|b| b.bytes.clone()))
+    [None, Some(LOAD_LIMIT)].into_iter().find_map(|max| {
+        decoded
+            .peek(&DecodedKey { flow: key, part, max })
+            .map(|b| b.bytes.clone())
+    })
 }
 
 fn engine(cx: &App) -> Option<Arc<pm_core::Engine>> {
@@ -170,7 +172,9 @@ fn save_body(flow: FlowRef, part: BodyPart, file_name: String, cx: &mut App) {
     let Some(engine) = engine(cx) else {
         return;
     };
-    cx.default_global::<Choices>().save_errors.remove(&(flow.store, flow.id, part));
+    cx.default_global::<Choices>()
+        .save_errors
+        .remove(&(flow.store, flow.id, part));
     let directory = std::env::var_os("HOME").map_or_else(std::env::temp_dir, std::path::PathBuf::from);
     let picked = cx.prompt_for_new_path(&directory, Some(&file_name));
     cx.spawn(async move |cx| {
@@ -230,10 +234,13 @@ impl BodyInput {
     }
 
     pub fn mime(&self) -> String {
-        self.info.mime.clone().unwrap_or_else(|| match essence(self.content_type()) {
-            m if m.is_empty() => "application/octet-stream".into(),
-            m => m,
-        })
+        self.info
+            .mime
+            .clone()
+            .unwrap_or_else(|| match essence(self.content_type()) {
+                m if m.is_empty() => "application/octet-stream".into(),
+                m => m,
+            })
     }
 
     fn flow(&self) -> FlowRef {
@@ -417,7 +424,11 @@ impl BodyPane {
             Some(Shown::Code { surface, note, .. }) => {
                 let (matches, current) = surface.matches(cx);
                 (
-                    if surface.is_editor() { "code-editor" } else { "code-view" },
+                    if surface.is_editor() {
+                        "code-editor"
+                    } else {
+                        "code-view"
+                    },
                     serde_json::json!({
                         "chars": surface.text(cx).len(),
                         "note": note.as_ref().map(|n| n.to_string()),
@@ -437,9 +448,10 @@ impl BodyPane {
             Some(Shown::Form { fields, show_raw, .. }) => {
                 ("form", serde_json::json!({ "fields": fields.len(), "raw": show_raw }))
             }
-            Some(Shown::Multipart { parts, boundary, .. }) => {
-                ("multipart", serde_json::json!({ "parts": parts.len(), "boundary": boundary }))
-            }
+            Some(Shown::Multipart { parts, boundary, .. }) => (
+                "multipart",
+                serde_json::json!({ "parts": parts.len(), "boundary": boundary }),
+            ),
             Some(Shown::Graphql { ops, index, .. }) => (
                 "graphql",
                 serde_json::json!({
@@ -563,7 +575,14 @@ impl BodyPane {
         }
     }
 
-    fn build(&mut self, prepared: Prepared, viewer: ViewerId, size: usize, window: &mut Window, cx: &mut Context<Self>) -> Shown {
+    fn build(
+        &mut self,
+        prepared: Prepared,
+        viewer: ViewerId,
+        size: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Shown {
         let bytes = self.current_bytes(cx);
         let menu = self.code_menu(bytes.as_deref().map(|b| b.as_slice()));
         let opts = SurfaceOpts::for_size(size, self.highlight_anyway, false);
@@ -581,7 +600,16 @@ impl BodyPane {
                 }
             }
             Prepared::Script { text, minified } => {
-                let surface = Surface::new(&id, label, text.clone(), viewer, SurfaceOpts { wrap: true, ..opts }, menu, window, cx);
+                let surface = Surface::new(
+                    &id,
+                    label,
+                    text.clone(),
+                    viewer,
+                    SurfaceOpts { wrap: true, ..opts },
+                    menu,
+                    window,
+                    cx,
+                );
                 let mut shown = Shown::Code {
                     surface,
                     bar: CodeBar::Beautify {
@@ -600,14 +628,27 @@ impl BodyPane {
                 let body = self.body_ref(bytes.as_deref().map(|b| b.as_slice()));
                 let tree = cx.new(|cx| {
                     JsonTree::new(self.id("tree"), doc, window, cx).on_menu(move |req, window, cx| {
-                        menus::tree(req.row.as_ref(), req.value, req.selection, body.as_ref()).show(req.position, window, cx)
+                        menus::tree(req.row.as_ref(), req.value, req.selection, body.as_ref()).show(
+                            req.position,
+                            window,
+                            cx,
+                        )
                     })
                 });
                 Shown::Tree(tree)
             }
             Prepared::Form { text, fields } => Shown::Form {
                 fields: Rc::new(fields),
-                raw: Surface::new(&id, label, text, ViewerId::Text, SurfaceOpts { wrap: true, ..opts }, menu, window, cx),
+                raw: Surface::new(
+                    &id,
+                    label,
+                    text,
+                    ViewerId::Text,
+                    SurfaceOpts { wrap: true, ..opts },
+                    menu,
+                    window,
+                    cx,
+                ),
                 show_raw: false,
             },
             Prepared::Multipart { boundary, parts } => {
@@ -632,7 +673,16 @@ impl BodyPane {
             }
             Prepared::Graphql(Ok(ops)) => self.graphql(Rc::new(ops), 0, window, cx),
             Prepared::Graphql(Err(text)) => Shown::Code {
-                surface: Surface::new(&id, label, text, ViewerId::Text, SurfaceOpts { wrap: true, ..opts }, menu, window, cx),
+                surface: Surface::new(
+                    &id,
+                    label,
+                    text,
+                    ViewerId::Text,
+                    SurfaceOpts { wrap: true, ..opts },
+                    menu,
+                    window,
+                    cx,
+                ),
                 bar: CodeBar::Wrap(true),
                 note: Some("Not a GraphQL request body. Showing the text.".into()),
             },
@@ -644,13 +694,25 @@ impl BodyPane {
         self.load(&input, cx).0.ready().map(|b| b.bytes.clone())
     }
 
-    fn part_view(&self, i: usize, part: Part, bytes: &Arc<Vec<u8>>, window: &mut Window, cx: &mut Context<Self>) -> PartView {
+    fn part_view(
+        &self,
+        i: usize,
+        part: Part,
+        bytes: &Arc<Vec<u8>>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> PartView {
         let body = &bytes[part.body.clone()];
         let sniffed = sniff(body, part.content_type.as_deref());
         let headers = Rc::new(
             part.headers
                 .iter()
-                .map(|(k, v)| (SharedString::from(display_header_name(k)), SharedString::from(v.clone())))
+                .map(|(k, v)| {
+                    (
+                        SharedString::from(display_header_name(k)),
+                        SharedString::from(v.clone()),
+                    )
+                })
                 .collect(),
         );
         let viewer = viewers_for(sniffed.kind)[0];
@@ -664,7 +726,13 @@ impl BodyPane {
             if viewer.def().source == Source::Bytes {
                 PartBody::Hex(hex_view(self.part, Arc::new(body.to_vec()), None, cx))
             } else {
-                PartBody::Message(format!("{} preview: G5 adds media viewers. Copy or save the part from its menu.", viewer.label()).into())
+                PartBody::Message(
+                    format!(
+                        "{} preview: G5 adds media viewers. Copy or save the part from its menu.",
+                        viewer.label()
+                    )
+                    .into(),
+                )
             }
         } else {
             match prepare(viewer, body, part.content_type.as_deref()) {
@@ -673,10 +741,16 @@ impl BodyPane {
                     let menu = {
                         let part = part.clone();
                         let mime = sniffed.mime.clone();
-                        Rc::new(move |selection: Option<String>, text: SharedString, position, window: &mut Window, cx: &mut App| {
-                            let extra = menus::part(&part, &mime, &text_bytes[..]);
-                            menus::code(selection, text, extra, None).show(position, window, cx)
-                        }) as view::CodeMenu
+                        Rc::new(
+                            move |selection: Option<String>,
+                                  text: SharedString,
+                                  position,
+                                  window: &mut Window,
+                                  cx: &mut App| {
+                                let extra = menus::part(&part, &mime, &text_bytes[..]);
+                                menus::code(selection, text, extra, None).show(position, window, cx)
+                            },
+                        ) as view::CodeMenu
                     };
                     let opts = SurfaceOpts::for_size(body.len(), false, true);
                     PartBody::Text(Surface::new(&id, "Part body", text, viewer, opts, menu, window, cx))
@@ -925,7 +999,11 @@ impl BodyPane {
                     .truncate()
                     .font_family(mono)
                     .text_color(t.muted_foreground.hsla())
-                    .child(SharedString::from(format!("{} · {}", input.mime(), format_size(input.info.size)))),
+                    .child(SharedString::from(format!(
+                        "{} · {}",
+                        input.mime(),
+                        format_size(input.info.size)
+                    ))),
             )
             .child(
                 Button::new(match part {
@@ -977,17 +1055,27 @@ impl BodyPane {
     }
 }
 
-
 impl BodyPane {
     fn render_shown(&self, t: &Tokens, mono: &SharedString, cx: &mut Context<Self>) -> AnyElement {
         let Some(shown) = &self.shown else {
-            return centered(if self.preparing.is_some() { "Formatting…" } else { "Loading…" }, t);
+            return centered(
+                if self.preparing.is_some() {
+                    "Formatting…"
+                } else {
+                    "Loading…"
+                },
+                t,
+            );
         };
         match shown {
             Shown::Message(text) => centered(text.clone(), t),
             Shown::Tree(tree) => tree.clone().into_any_element(),
             Shown::Hex(hex) => hex.clone().into_any_element(),
-            Shown::Code { surface, bar: code_bar, note: n } => {
+            Shown::Code {
+                surface,
+                bar: code_bar,
+                note: n,
+            } => {
                 let tools = match code_bar {
                     CodeBar::None => None,
                     CodeBar::Wrap(wrap) => Some(
@@ -1036,11 +1124,17 @@ impl BodyPane {
                             .into_any_element(),
                     ),
                 };
+                let terms = self.input.as_ref().map(|i| i.terms.clone()).unwrap_or_default();
+                let search = match surface {
+                    Surface::Editor(editor) if !terms.is_empty() => Some(self.match_bar(editor, &terms, t, cx)),
+                    _ => None,
+                };
                 div()
                     .size_full()
                     .flex()
                     .flex_col()
                     .children(tools)
+                    .children(search)
                     .children(n.clone().map(|n| note("body-invalid-note", true, t).child(n)))
                     .child(div().flex_1().min_h_0().child(surface.element()))
                     .into_any_element()
@@ -1075,11 +1169,14 @@ impl BodyPane {
                         .id(self.id("form-scroll"))
                         .size_full()
                         .overflow_y_scroll()
-                        .child(KvTable::new(self.id("form"), "Form fields", shared).on_menu(move |index, position, window, cx| {
-                            let selected = crate::features::context_menu::selected_text(window, cx);
-                            let menu = crate::features::inspector::menus::kv(&rows, KvKind::Form, None, index, selected);
-                            menus::body_items(menu, body.as_ref()).show(position, window, cx);
-                        }))
+                        .child(KvTable::new(self.id("form"), "Form fields", shared).on_menu(
+                            move |index, position, window, cx| {
+                                let selected = crate::features::context_menu::selected_text(window, cx);
+                                let menu =
+                                    crate::features::inspector::menus::kv(&rows, KvKind::Form, None, index, selected);
+                                menus::body_items(menu, body.as_ref()).show(position, window, cx);
+                            },
+                        ))
                         .into_any_element()
                 };
                 div()
@@ -1163,7 +1260,9 @@ impl BodyPane {
                         Button::new(("graphql-op", i))
                             .ghost()
                             .xsmall()
-                            .label(SharedString::from(o.operation_name.clone().unwrap_or_else(|| format!("#{}", i + 1))))
+                            .label(SharedString::from(
+                                o.operation_name.clone().unwrap_or_else(|| format!("#{}", i + 1)),
+                            ))
                             .selected(i == *index)
                             .on_click(cx.listener(move |this, _, window, cx| this.pick_operation(i, window, cx)))
                     }))
@@ -1208,7 +1307,10 @@ impl BodyPane {
                         bar(t)
                             .children(picker)
                             .children(op.kind.clone().map(|k| {
-                                div().font_family(mono.clone()).text_color(t.syntax_keyword.hsla()).child(k)
+                                div()
+                                    .font_family(mono.clone())
+                                    .text_color(t.syntax_keyword.hsla())
+                                    .child(k)
                             }))
                             .child(
                                 div()
@@ -1219,7 +1321,9 @@ impl BodyPane {
                                         cx.stop_propagation();
                                         menus::graphql(&menu_op).show(e.position, window, cx);
                                     })
-                                    .child(SharedString::from(op.operation_name.clone().unwrap_or_else(|| "anonymous".into()))),
+                                    .child(SharedString::from(
+                                        op.operation_name.clone().unwrap_or_else(|| "anonymous".into()),
+                                    )),
                             )
                             .when(ops.len() > 1, |d| {
                                 d.child(
@@ -1255,7 +1359,10 @@ impl BodyPane {
                                     .flex_col()
                                     .child(pane(
                                         "VARIABLES",
-                                        variables.as_ref().map(Surface::element).unwrap_or_else(|| empty("No variables")),
+                                        variables
+                                            .as_ref()
+                                            .map(Surface::element)
+                                            .unwrap_or_else(|| empty("No variables")),
                                     ))
                                     .children(extensions.as_ref().map(|e| pane("EXTENSIONS", e.element()))),
                             ),
@@ -1263,6 +1370,64 @@ impl BodyPane {
                     .into_any_element()
             }
         }
+    }
+
+    /// "Body search: … · 3 of 12 ⌃ ⌄" over the editor (the CodeView draws
+    /// its own).
+    fn match_bar(
+        &self,
+        editor: &Entity<pm_widgets::code_editor::CodeEditor>,
+        terms: &[String],
+        t: &Tokens,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let (count, current) = (editor.read(cx).match_count(), editor.read(cx).current_match());
+        let label = pm_view::body::search::match_label(count, current);
+        let step = |id: &'static str, icon: gpui_kit::assets::IconName, forward: bool, tip: &'static str| {
+            let editor = editor.clone();
+            Button::new(id)
+                .ghost()
+                .xsmall()
+                .icon(icon)
+                .tooltip(tip)
+                .disabled(count == 0)
+                .on_click(cx.listener(move |_, _, window, cx| {
+                    editor.update(cx, |e, cx| e.step(forward, window, cx));
+                    cx.notify();
+                }))
+        };
+        bar(t)
+            .bg(t.pane_header.hsla())
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_color(t.muted_foreground.hsla())
+                    .child(SharedString::from(format!("Body search: {}", terms.join(", ")))),
+            )
+            .child(
+                div()
+                    .id(self.id("match-count"))
+                    .role(Role::Status)
+                    .aria_label(SharedString::from(label.clone()))
+                    .mr(px(4.))
+                    .text_color(t.muted_foreground.hsla())
+                    .child(label),
+            )
+            .child(step(
+                "body-match-prev",
+                gpui_kit::assets::IconName::ChevronUp,
+                false,
+                "Previous match",
+            ))
+            .child(step(
+                "body-match-next",
+                gpui_kit::assets::IconName::ChevronDown,
+                true,
+                "Next match",
+            ))
+            .into_any_element()
     }
 
     fn form_body_ref(&self, cx: &App) -> Option<BodyRef> {
@@ -1282,7 +1447,14 @@ impl BodyPane {
         self.caches.decoded.read(cx).peek(&key).map(|b| b.bytes.clone())
     }
 
-    fn part_card(&self, i: usize, p: &PartView, bytes: Option<Arc<Vec<u8>>>, t: &Tokens, mono: &SharedString) -> AnyElement {
+    fn part_card(
+        &self,
+        i: usize,
+        p: &PartView,
+        bytes: Option<Arc<Vec<u8>>>,
+        t: &Tokens,
+        mono: &SharedString,
+    ) -> AnyElement {
         let part = p.part.clone();
         let mime = p.mime.clone();
         let size = p.part.body.len() as u64;
@@ -1306,7 +1478,10 @@ impl BodyPane {
                     .py(px(4.))
                     .font_family(mono.clone())
                     .text_size(px(12.))
-                    .child(SelectableText::new(ElementId::Name(format!("part-{i}-text").into()), text.clone()))
+                    .child(SelectableText::new(
+                        ElementId::Name(format!("part-{i}-text").into()),
+                        text.clone(),
+                    ))
                     .into_any_element(),
             ),
             PartBody::Text(surface) => Some(self.part_box(surface.element(), t)),
@@ -1353,7 +1528,9 @@ impl BodyPane {
                             .font_family(mono.clone())
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(t.syntax_key.hsla())
-                            .child(SharedString::from(p.part.name.clone().unwrap_or_else(|| "(unnamed)".into()))),
+                            .child(SharedString::from(
+                                p.part.name.clone().unwrap_or_else(|| "(unnamed)".into()),
+                            )),
                     )
                     .children(
                         p.part
@@ -1426,29 +1603,41 @@ impl Render for BodyPane {
                 .into_any_element()
         };
         // A GET GraphQL request: its operation from the query string.
-        if info.size == 0 && kind == ContentKind::GraphQl && part == BodyPart::Request {
-            if let Some(op) = graphql::parse_query_string(&input.url) {
-                let source = Source_ {
-                    body: 1,
-                    viewer: ViewerId::Graphql,
-                    highlight_anyway: false,
-                };
-                if self.source != Some(source) {
-                    self.source = Some(source);
-                    self.shown = Some(self.graphql(Rc::new(vec![op]), 0, window, cx));
-                }
-                return root(self.render_shown(&t, &mono, cx));
+        if info.size == 0
+            && kind == ContentKind::GraphQl
+            && part == BodyPart::Request
+            && let Some(op) = graphql::parse_query_string(&input.url)
+        {
+            let source = Source_ {
+                body: 1,
+                viewer: ViewerId::Graphql,
+                highlight_anyway: false,
+            };
+            if self.source != Some(source) {
+                self.source = Some(source);
+                self.shown = Some(self.graphql(Rc::new(vec![op]), 0, window, cx));
             }
+            return root(self.render_shown(&t, &mono, cx));
         }
         if info.size == 0 && !(kind == ContentKind::Grpc && part == BodyPart::Response) {
             self.source = None;
             self.shown = None;
-            return root(centered(if input.finished { "No body" } else { "Waiting for body…" }, &t));
+            return root(centered(
+                if input.finished {
+                    "No body"
+                } else {
+                    "Waiting for body…"
+                },
+                &t,
+            ));
         }
         if !input.finished && def.source != Source::Decoded {
             self.source = None;
             self.shown = None;
-            return root(centered(format!("Body streaming · {} so far", format_size(info.size)), &t));
+            return root(centered(
+                format!("Body streaming · {} so far", format_size(info.size)),
+                &t,
+            ));
         }
         let (load, capped) = if def.source == Source::Bytes {
             self.load(&input, cx)
@@ -1471,14 +1660,18 @@ impl Render for BodyPane {
                             "Decoded from {from} · {} → {shown}",
                             format_size(info.captured)
                         )))
-                        .test_support().into_any_element(),
+                        .test_support()
+                        .into_any_element(),
                 );
             }
             if let Some(err) = &b.decode_error {
                 notes.push(
                     note("body-decode-error", true, &t)
-                        .child(SharedString::from(format!("Couldn't decode: {err}. Showing the raw bytes.")))
-                        .test_support().into_any_element(),
+                        .child(SharedString::from(format!(
+                            "Couldn't decode: {err}. Showing the raw bytes."
+                        )))
+                        .test_support()
+                        .into_any_element(),
                 );
             }
         }
@@ -1490,7 +1683,8 @@ impl Render for BodyPane {
                         format_size(info.captured),
                         format_size(info.size)
                     )))
-                    .test_support().into_any_element(),
+                    .test_support()
+                    .into_any_element(),
             );
         }
         if capped {
@@ -1526,7 +1720,8 @@ impl Render for BodyPane {
                                 )
                             }),
                     )
-                    .test_support().into_any_element(),
+                    .test_support()
+                    .into_any_element(),
             );
         }
         let too_big = bytes.as_ref().is_some_and(|b| b.len() > HIGHLIGHT_LIMIT);
@@ -1544,7 +1739,8 @@ impl Render for BodyPane {
                             .label("Highlight anyway")
                             .on_click(cx.listener(|this, _, _, cx| this.highlight_anyway(cx))),
                     )
-                    .test_support().into_any_element(),
+                    .test_support()
+                    .into_any_element(),
             );
         }
         if let Some(err) = cx
@@ -1554,7 +1750,8 @@ impl Render for BodyPane {
             notes.push(
                 note("body-save-error", true, &t)
                     .child(SharedString::from(format!("Couldn't save: {err}")))
-                    .test_support().into_any_element(),
+                    .test_support()
+                    .into_any_element(),
             );
         }
         let content = match (def.source, load) {
@@ -1586,7 +1783,14 @@ impl Render for BodyPane {
                 .key_context("BodyViewer")
                 .on_action(cx.listener(|this, _: &SelectAllInBody, window, cx| this.select_all(window, cx)))
                 .on_action(cx.listener(|this, _: &FindInBody, window, cx| this.find(window, cx)))
-                .child(self.render_bar(kind, viewer, &input, bytes.as_deref().map(|b| b.as_slice()), mono.clone(), &t))
+                .child(self.render_bar(
+                    kind,
+                    viewer,
+                    &input,
+                    bytes.as_deref().map(|b| b.as_slice()),
+                    mono.clone(),
+                    &t,
+                ))
                 .children(notes)
                 .child(
                     div()

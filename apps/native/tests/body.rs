@@ -17,6 +17,7 @@ use pm_model::{BodyPart, ContentKind, FlowSummary, ProxyStatus, SidebarSnapshot,
 use pm_view::body::LOAD_LIMIT;
 use pm_view::body::registry::ViewerId;
 use pm_view::sample;
+use pm_widgets::code_editor::CodeEditor;
 use proxymate_native::bridge::keys::{self, BodyKey, DecodedBody, DecodedKey, FlowKey, Inspected};
 use proxymate_native::bridge::stream::Latest;
 use proxymate_native::features::body::{self, BodyPane};
@@ -24,7 +25,6 @@ use proxymate_native::features::flow_table::FlowTable;
 use proxymate_native::features::inspector::{Inspector, RequestTab, ResponseTab};
 use proxymate_native::shell::{self, MainWindow, Parts};
 use proxymate_native::workspace::Workspace;
-use pm_widgets::code_editor::CodeEditor;
 
 const JSON: &str = r#"{"user":{"id":12345678901234567890,"name":"alice","price":1.50},"tags":["admin","alice"]}"#;
 
@@ -82,7 +82,11 @@ fn open(cx: &mut TestAppContext) -> (Win, &mut VisualTestContext) {
         shell::root(main, window, cx)
     });
     cx.run_until_parked();
-    let main = cx.update(|_, cx| shell::parts(cx).and_then(|p| p.main.upgrade()).expect("the main window"));
+    let main = cx.update(|_, cx| {
+        shell::parts(cx)
+            .and_then(|p| p.main.upgrade())
+            .expect("the main window")
+    });
     let (table, inspector) = cx.update(|_, cx| {
         let m = main.read(cx);
         (m.table().clone(), m.inspector().clone())
@@ -260,7 +264,11 @@ fn the_filters_body_terms_are_marked_and_stepped(cx: &mut TestAppContext) {
     cx.update(|window, cx| editor.update(cx, |e, cx| e.step(true, window, cx)));
     assert_eq!(cx.update(|_, cx| editor.read(cx).current_match()), Some(0));
     cx.update(|window, cx| editor.update(cx, |e, cx| e.step(false, window, cx)));
-    assert_eq!(cx.update(|_, cx| editor.read(cx).current_match()), Some(1), "round to the last");
+    assert_eq!(
+        cx.update(|_, cx| editor.read(cx).current_match()),
+        Some(1),
+        "round to the last"
+    );
     // The tree marks keys and values, and reveals what it steps to.
     cx.update(|_, cx| body::choose(ContentKind::Json, ViewerId::JsonTree, cx));
     settle(cx);
@@ -268,7 +276,10 @@ fn the_filters_body_terms_are_marked_and_stepped(cx: &mut TestAppContext) {
     assert_eq!(cx.update(|_, cx| tree.read(cx).hit_count()), 2);
     cx.update(|window, cx| tree.update(cx, |t, cx| t.step(false, window, cx)));
     let shown: Vec<String> = cx.update(|_, cx| tree.read(cx).rows().iter().map(|r| r.ptr.clone()).collect());
-    assert!(shown.contains(&"/tags/1".to_owned()), "the last hit's array opened: {shown:?}");
+    assert!(
+        shown.contains(&"/tags/1".to_owned()),
+        "the last hit's array opened: {shown:?}"
+    );
     // A JSONPath filter.
     cx.update(|window, cx| tree.update(cx, |t, cx| t.set_filter("$..id", window, cx)));
     assert_eq!(cx.update(|_, cx| tree.read(cx).filter_result().clone()), Ok(Some(1)));
@@ -300,7 +311,11 @@ fn the_raw_tab_highlights_and_searches_with_cmd_f(cx: &mut TestAppContext) {
     cx.simulate_input("alice");
     settle(cx);
     assert_eq!(cx.update(|_, cx| raw.read(cx).match_count()), 2);
-    assert_eq!(cx.update(|_, cx| raw.read(cx).current_match()), Some(0), "typing jumps to the first");
+    assert_eq!(
+        cx.update(|_, cx| raw.read(cx).current_match()),
+        Some(0),
+        "typing jumps to the first"
+    );
     cx.simulate_keystrokes("enter");
     assert_eq!(cx.update(|_, cx| raw.read(cx).current_match()), Some(1));
     cx.simulate_keystrokes("escape");
