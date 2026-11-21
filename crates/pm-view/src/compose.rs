@@ -2,7 +2,7 @@
 //! edits, its content-type picker, the editor language for a content type,
 //! and the `RequestSpec` it sends.
 
-use pm_model::{Header, RequestSpec};
+use pm_model::{Header, RequestSpec, Scheme};
 
 use crate::kv::{self, KvRow};
 
@@ -19,6 +19,19 @@ pub const CONTENT_TYPES: [(&str, Option<&str>); 8] = [
 ];
 
 pub const METHODS: [&str; 7] = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
+
+/// Replay needs an HTTP request that isn't a tunnel or a WebSocket.
+pub fn is_sendable(method: &str, scheme: Scheme) -> bool {
+    method != "CONNECT" && !matches!(scheme, Scheme::Ws | Scheme::Wss)
+}
+
+/// The toast for Replay on a flow it can't send.
+pub const NOT_SENDABLE: (&str, &str) = ("Can't replay this flow", "tunnels and WebSockets can't be sent again yet");
+pub const NOTHING_TO_REPLAY: (&str, &str) = ("Nothing to replay", "select a flow first");
+
+/// Compose's window description.
+pub const DESCRIPTION: &str =
+    "Sent from Proxymate and recorded as a new flow. Host and Content-Length are set from the URL and the body.";
 
 /// What Compose edits. A binary body (from Edit & Replay) stays base64.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -201,6 +214,13 @@ mod tests {
         assert_eq!(language_for(Some("application/graphql")), "graphql");
         assert_eq!(language_for(Some("text/javascript")), "javascript");
         assert_eq!(language_for(None), "text");
+    }
+
+    #[test]
+    fn replays_only_plain_requests() {
+        assert!(is_sendable("POST", Scheme::Https));
+        assert!(!is_sendable("CONNECT", Scheme::Https));
+        assert!(!is_sendable("GET", Scheme::Wss));
     }
 
     #[test]
