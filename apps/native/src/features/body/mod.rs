@@ -1471,14 +1471,14 @@ impl Render for BodyPane {
                             "Decoded from {from} · {} → {shown}",
                             format_size(info.captured)
                         )))
-                        .into_any_element(),
+                        .test_support().into_any_element(),
                 );
             }
             if let Some(err) = &b.decode_error {
                 notes.push(
                     note("body-decode-error", true, &t)
                         .child(SharedString::from(format!("Couldn't decode: {err}. Showing the raw bytes.")))
-                        .into_any_element(),
+                        .test_support().into_any_element(),
                 );
             }
         }
@@ -1490,7 +1490,7 @@ impl Render for BodyPane {
                         format_size(info.captured),
                         format_size(info.size)
                     )))
-                    .into_any_element(),
+                    .test_support().into_any_element(),
             );
         }
         if capped {
@@ -1526,7 +1526,7 @@ impl Render for BodyPane {
                                 )
                             }),
                     )
-                    .into_any_element(),
+                    .test_support().into_any_element(),
             );
         }
         let too_big = bytes.as_ref().is_some_and(|b| b.len() > HIGHLIGHT_LIMIT);
@@ -1544,7 +1544,7 @@ impl Render for BodyPane {
                             .label("Highlight anyway")
                             .on_click(cx.listener(|this, _, _, cx| this.highlight_anyway(cx))),
                     )
-                    .into_any_element(),
+                    .test_support().into_any_element(),
             );
         }
         if let Some(err) = cx
@@ -1554,7 +1554,7 @@ impl Render for BodyPane {
             notes.push(
                 note("body-save-error", true, &t)
                     .child(SharedString::from(format!("Couldn't save: {err}")))
-                    .into_any_element(),
+                    .test_support().into_any_element(),
             );
         }
         let content = match (def.source, load) {
