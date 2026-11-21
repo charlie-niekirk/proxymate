@@ -36,6 +36,8 @@ use crate::features::context_menu::Menu;
 pub const DEFAULT_SIZE: (f32, f32) = (1180., 760.);
 pub const MIN_SIZE: (f32, f32) = (820., 520.);
 pub const LIST_WIDTH: f32 = 320.;
+/// A rule row's title line: the grip and checkbox centre on it.
+pub const TITLE_H: f32 = 20.;
 pub const DESCRIPTION: &str = "Every matching rule runs, top to bottom. Map Local, rewrites, breakpoints, Map Remote, \
 throttling and blocking are all actions. Groups turn their rules on and off together.";
 pub const EMPTY: &str = "Select a rule, or create one from a flow's context menu.";
@@ -554,7 +556,6 @@ impl RulesWindow {
         let check_id: SharedString = id.clone().into();
         let checkbox = Checkbox::new(SharedString::from(format!("rule-enabled-{id}")))
             .checked(enabled)
-            .small()
             .tooltip(check_tip)
             .accessibility_label(SharedString::from(format!("{name} enabled")))
             .on_click(move |on, window, cx| {
@@ -574,9 +575,9 @@ impl RulesWindow {
             .aria_selected(selected)
             .flex()
             .items_start()
-            .gap(px(4.))
-            .px(px(4.))
-            .py(px(4.))
+            .gap(px(6.))
+            .px(px(6.))
+            .py(px(6.))
             .when(grouped, |d| d.pl(px(16.)))
             .rounded(px(4.))
             .text_size(px(12.))
@@ -605,12 +606,12 @@ impl RulesWindow {
                     }
                 }),
             )
-            .child(div().pt(px(2.)).child(pm_widgets::icon(
+            .child(div().h(px(TITLE_H)).flex().items_center().child(pm_widgets::icon(
                 IconName::GripVertical,
                 t.muted_foreground.hsla().opacity(0.6),
                 12.,
             )))
-            .child(div().pt(px(1.)).child(checkbox))
+            .child(div().h(px(TITLE_H)).flex().items_center().child(checkbox))
             .child(
                 div()
                     .flex_1()
@@ -620,10 +621,17 @@ impl RulesWindow {
                     .text_color(text.hsla())
                     .child(
                         div()
+                            .h(px(TITLE_H))
                             .flex()
                             .items_center()
                             .gap(px(4.))
-                            .child(div().truncate().font_weight(FontWeight::MEDIUM).child(name))
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_size(px(13.))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .child(name),
+                            )
                             .children(origin_badge(&rule.origin, t)),
                     )
                     .child(
@@ -656,7 +664,7 @@ impl RulesWindow {
         let enabled = group.enabled;
         let chevron = Button::new(SharedString::from(format!("group-open-{id}")))
             .ghost()
-            .xsmall()
+            .small()
             .accessibility_label(SharedString::from(format!(
                 "{} {}",
                 if open { "Collapse" } else { "Expand" },
@@ -674,7 +682,6 @@ impl RulesWindow {
             .on_click(cx.listener(move |this, _, _, cx| this.toggle_collapsed(&toggle_id, cx)));
         let checkbox = Checkbox::new(SharedString::from(format!("group-enabled-{id}")))
             .checked(enabled)
-            .small()
             .tooltip(if enabled {
                 "On: its enabled rules run. Click to turn the whole group off"
             } else {
@@ -705,7 +712,7 @@ impl RulesWindow {
                     .child(
                         Input::new(state)
                             .id("group-name-input")
-                            .xsmall()
+                            .small()
                             .aria_label("Group name"),
                     )
                     .into_any_element()
@@ -863,32 +870,27 @@ impl RulesWindow {
             .flex()
             .flex_none()
             .items_center()
-            .gap(px(4.))
-            .p(px(6.))
+            .flex_wrap()
+            .gap(px(6.))
+            .p(px(8.))
             .border_b_1()
             .border_color(t.border.hsla())
             .child(
-                Button::new("new-rule")
-                    .outline()
-                    .xsmall()
+                super::form::control(Button::new("new-rule").outline())
                     .accessibility_label("New rule")
                     .child(icon_label(IconName::Plus, "New rule", t))
                     .on_click(|_, window, cx| window.dispatch_action(Box::new(NewRule), cx)),
             )
             .child(
-                Button::new("new-rule-group")
-                    .ghost()
-                    .xsmall()
+                super::form::control(Button::new("new-rule-group").ghost())
                     .accessibility_label("New group")
                     .tooltip("A named group of rules that turn on and off together")
                     .child(icon_label(IconName::FolderPlus, "New group", t))
                     .on_click(|_, window, cx| window.dispatch_action(Box::new(NewGroup { rule: None }), cx)),
             )
             .when(agent_rules > 0, |d| {
-                d.child(div().flex_1()).child(
-                    Button::new("remove-agent-rules")
-                        .ghost()
-                        .xsmall()
+                d.child(
+                    super::form::control(Button::new("remove-agent-rules").ghost())
                         .accessibility_label("Remove agent rules")
                         .tooltip("Delete every rule an AI agent created")
                         .child(icon_label(IconName::Bot, "Remove agent rules", t))
@@ -939,11 +941,15 @@ impl RulesWindow {
                 .text_color(t.muted_foreground.hsla())
                 .child("Breakpoint timeout")
                 .child(
-                    div().w(px(64.)).child(
-                        Input::new(state)
-                            .id("breakpoint-timeout-input")
-                            .xsmall()
-                            .aria_label("Breakpoint timeout in seconds"),
+                    div().w(px(72.)).child(
+                        gpui_kit::Styled::px(
+                            gpui_kit::Styled::h(
+                                Input::new(state).id("breakpoint-timeout-input").small(),
+                                px(super::form::CONTROL_H),
+                            ),
+                            px(10.),
+                        )
+                        .aria_label("Breakpoint timeout in seconds"),
                     ),
                 )
                 .child("s")

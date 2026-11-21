@@ -606,10 +606,17 @@ impl RuleForm {
             .text_size(px(12.))
             .when(error, |d| d.rounded(px(6.)).border_1().border_color(t.s_failed.hsla()))
             .child(
-                Input::new(&state)
-                    .id(SharedString::from(format!("field-{key}")))
-                    .small()
-                    .aria_label(SharedString::from(label.to_owned())),
+                // `Styled::h`: `Input::h` sizes multi-line inputs only.
+                gpui_kit::Styled::px(
+                    gpui_kit::Styled::h(
+                        Input::new(&state)
+                            .id(SharedString::from(format!("field-{key}")))
+                            .small()
+                            .aria_label(SharedString::from(label.to_owned())),
+                        px(CONTROL_H),
+                    ),
+                    px(10.),
+                ),
             )
             .into_any_element()
     }
@@ -651,16 +658,18 @@ impl RuleForm {
             .aria_label(SharedString::from(label.to_owned()))
             .flex()
             .flex_none()
-            .gap(px(2.))
+            .gap(px(4.))
             .children(options.iter().map(|(value, text)| {
                 let (k, v) = (key.to_owned(), (*value).to_owned());
                 let on = current == *value;
-                toggled(Button::new(SharedString::from(format!("choice-{key}-{value}"))), on)
-                    .xsmall()
-                    .selected(on)
-                    .label(*text)
-                    .accessibility_label(SharedString::from(format!("{label}: {text}")))
-                    .on_click(cx.listener(move |this, _, window, cx| this.choose(&k, &v, window, cx)))
+                control(toggled(
+                    Button::new(SharedString::from(format!("choice-{key}-{value}"))),
+                    on,
+                ))
+                .selected(on)
+                .label(*text)
+                .accessibility_label(SharedString::from(format!("{label}: {text}")))
+                .on_click(cx.listener(move |this, _, window, cx| this.choose(&k, &v, window, cx)))
             }))
             .into_any_element()
     }
@@ -676,9 +685,7 @@ impl RuleForm {
             .map_or_else(|| current.clone(), |(_, l)| l.clone());
         let k = key.to_owned();
         let t = *cx.tokens();
-        Button::new(SharedString::from(format!("picker-{key}")))
-            .outline()
-            .xsmall()
+        control(Button::new(SharedString::from(format!("picker-{key}"))).outline())
             .accessibility_label(SharedString::from(format!("{label}: {shown}")))
             .child(
                 div()
@@ -705,7 +712,6 @@ impl RuleForm {
         Checkbox::new(SharedString::from(format!("check-{key}")))
             .checked(on)
             .label(label.to_owned())
-            .small()
             .on_click(move |v, window, cx| {
                 let value = if *v { "true" } else { "false" };
                 let _ = this.update(cx, |f, cx| f.choose(&k, value, window, cx));
@@ -729,7 +735,8 @@ impl RuleForm {
         let ci = edit::chosen(&self.rule, &ci_key).as_deref() == Some("true");
         let t = *cx.tokens();
         let toggle = toggled(Button::new(SharedString::from(format!("toggle-{ci_key}"))), ci)
-            .xsmall()
+            .small()
+            .size(px(CONTROL_H))
             .selected(ci)
             .tooltip("Case-insensitive")
             .accessibility_label(SharedString::from(format!(
@@ -749,7 +756,7 @@ impl RuleForm {
             .min_w_0()
             .flex()
             .items_center()
-            .gap(px(4.))
+            .gap(px(6.))
             .child(kind)
             .child(value)
             .child(toggle)
@@ -768,11 +775,11 @@ impl RuleForm {
         let t = *cx.tokens();
         Button::new(SharedString::from(id))
             .ghost()
-            .xsmall()
+            .small()
             .disabled(disabled)
             .tooltip(label.to_owned())
             .accessibility_label(label.to_owned())
-            .child(pm_widgets::icon(icon, t.muted_foreground.hsla(), 13.))
+            .child(pm_widgets::icon(icon, t.muted_foreground.hsla(), 14.))
             .on_click(cx.listener(move |this, _, window, cx| on_click(this, window, cx)))
             .into_any_element()
     }
@@ -785,9 +792,7 @@ impl RuleForm {
         on_click: impl Fn(&mut Self, &mut Window, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        Button::new(SharedString::from(id.to_owned()))
-            .ghost()
-            .xsmall()
+        control(Button::new(SharedString::from(id.to_owned())).ghost())
             .accessibility_label(label.to_owned())
             .child(
                 div()
@@ -815,12 +820,11 @@ impl RuleForm {
             .flex()
             .flex_wrap()
             .items_center()
-            .gap(px(4.))
+            .gap(px(6.))
             .children(rules::METHODS.iter().map(|m| {
                 let on = methods.iter().any(|x| x == m);
                 let method = (*m).to_owned();
-                toggled(Button::new(SharedString::from(format!("method-{m}"))), on)
-                    .xsmall()
+                control(toggled(Button::new(SharedString::from(format!("method-{m}"))), on))
                     .selected(on)
                     .label(*m)
                     .accessibility_label(SharedString::from(format!("{m} {}", if on { "on" } else { "off" })))
@@ -928,7 +932,7 @@ impl RuleForm {
             .id("matcher-builder")
             .flex()
             .flex_col()
-            .gap(px(6.))
+            .gap(px(8.))
             .children(rows)
             .into_any_element()
     }
@@ -985,11 +989,11 @@ impl RuleForm {
                     .border_color(t.border.hsla())
                     .child(
                         div()
-                            .h(px(26.))
+                            .h(px(34.))
                             .flex()
                             .items_center()
                             .gap(px(2.))
-                            .pl(px(8.))
+                            .pl(px(10.))
                             .pr(px(4.))
                             .bg(t.muted.hsla().opacity(0.4))
                             .border_b_1()
@@ -997,7 +1001,7 @@ impl RuleForm {
                             .child(
                                 div()
                                     .flex_1()
-                                    .text_size(px(12.))
+                                    .text_size(px(13.))
                                     .font_weight(FontWeight::MEDIUM)
                                     .child(label),
                             )
@@ -1005,13 +1009,11 @@ impl RuleForm {
                             .child(down)
                             .child(remove),
                     )
-                    .child(div().flex().flex_col().gap(px(6.)).p(px(8.)).children(body))
+                    .child(div().flex().flex_col().gap(px(8.)).p(px(10.)).children(body))
                     .into_any_element(),
             );
         }
-        let add = Button::new("add-action")
-            .outline()
-            .xsmall()
+        let add = control(Button::new("add-action").outline())
             .accessibility_label("Add action")
             .child(
                 div()
@@ -1030,7 +1032,7 @@ impl RuleForm {
             .id("action-list")
             .flex()
             .flex_col()
-            .gap(px(8.))
+            .gap(px(10.))
             .children(cards)
             .child(div().flex().child(add))
             .into_any_element()
@@ -1239,9 +1241,7 @@ impl RuleForm {
             }
             Action::ServeFrom { on_miss, source, .. } => {
                 let picker = self.picker(&k("serve"), "Recording", 240., cx);
-                let library = Button::new(SharedString::from(format!("library-{i}")))
-                    .ghost()
-                    .xsmall()
+                let library = control(Button::new(SharedString::from(format!("library-{i}"))).ghost())
                     .label("Library…")
                     .tooltip("The mock library, in Settings")
                     .on_click(|_, window, cx| {
@@ -1303,9 +1303,7 @@ impl RuleForm {
 
     /// "Choose…" for a Map Local file or directory.
     fn choose_path(&self, i: usize, folder: bool, cx: &mut Context<Self>) -> AnyElement {
-        Button::new(SharedString::from(format!("choose-path-{i}")))
-            .outline()
-            .xsmall()
+        control(Button::new(SharedString::from(format!("choose-path-{i}"))).outline())
             .label("Choose…")
             .on_click(cx.listener(move |_, _, window, cx| {
                 let picked = cx.prompt_for_paths(PathPromptOptions {
@@ -1341,9 +1339,7 @@ impl RuleForm {
         let t = *cx.tokens();
         let flow = selected_flow(cx);
         let busy = self.test.busy;
-        let button = Button::new("test-rule")
-            .outline()
-            .xsmall()
+        let button = control(Button::new("test-rule").outline())
             .disabled(flow.is_none() || busy || self.engine.is_none())
             .loading(busy)
             .accessibility_label("Test against selected flow")
@@ -1380,6 +1376,14 @@ fn toggled(button: Button, on: bool) -> Button {
     if on { button.primary() } else { button.outline() }
 }
 
+/// The form's controls: 28 px high, with room around their labels.
+pub const CONTROL_H: f32 = 28.;
+
+/// A form button at [`CONTROL_H`].
+pub fn control(button: Button) -> Button {
+    button.small().h(px(CONTROL_H)).px(px(10.))
+}
+
 /// The picker value for "no group".
 pub const NO_GROUP: &str = "none";
 /// The picker value shown for a script or recording that isn't chosen (or
@@ -1408,10 +1412,10 @@ pub fn field_row(label: &str, children: Vec<AnyElement>, t: &Tokens) -> AnyEleme
         .flex()
         .min_w_0()
         .items_center()
-        .gap(px(8.))
+        .gap(px(10.))
         .child(
             div()
-                .w(px(96.))
+                .w(px(104.))
                 .flex_none()
                 .text_right()
                 .text_size(px(12.))
@@ -1424,7 +1428,7 @@ pub fn field_row(label: &str, children: Vec<AnyElement>, t: &Tokens) -> AnyEleme
                 .min_w_0()
                 .flex()
                 .items_center()
-                .gap(px(6.))
+                .gap(px(8.))
                 .children(children),
         )
         .into_any_element()
@@ -1440,7 +1444,7 @@ fn muted(text: &str, t: &Tokens) -> AnyElement {
 
 fn note(text: &str, t: &Tokens) -> AnyElement {
     div()
-        .pl(px(104.))
+        .pl(px(114.))
         .text_size(px(11.))
         .text_color(t.muted_foreground.hsla())
         .child(text.to_owned())
@@ -1694,9 +1698,9 @@ impl Render for RuleForm {
             .flex()
             .flex_none()
             .items_center()
-            .gap(px(8.))
-            .px(px(12.))
-            .py(px(8.))
+            .gap(px(10.))
+            .px(px(14.))
+            .py(px(10.))
             .border_b_1()
             .border_color(t.border.hsla())
             .child(div().w(px(360.)).flex().text_size(px(13.)).child(name));
@@ -1733,8 +1737,8 @@ impl Render for RuleForm {
                 div()
                     .flex()
                     .flex_col()
-                    .gap(px(16.))
-                    .p(px(12.))
+                    .gap(px(20.))
+                    .p(px(14.))
                     .child(section("Match", matcher, &t))
                     .child(section("Actions", actions, &t))
                     .child(section("Dry run", dry, &t)),
@@ -1747,9 +1751,9 @@ impl Render for RuleForm {
             .flex()
             .flex_none()
             .items_center()
-            .gap(px(8.))
-            .px(px(12.))
-            .py(px(8.))
+            .gap(px(10.))
+            .px(px(14.))
+            .py(px(10.))
             .border_t_1()
             .border_color(t.border.hsla())
             .child(
@@ -1767,14 +1771,14 @@ impl Render for RuleForm {
                 d.child(
                     Button::new("delete-rule")
                         .ghost()
-                        .small()
+                        .px(px(14.))
                         .accessibility_label("Delete rule")
                         .child(
                             div()
                                 .flex()
                                 .items_center()
                                 .gap(px(4.))
-                                .child(pm_widgets::icon(IconName::Trash, t.foreground.hsla(), 13.))
+                                .child(pm_widgets::icon(IconName::Trash, t.foreground.hsla(), 14.))
                                 .child("Delete"),
                         )
                         .on_click(move |_, window, cx| {
@@ -1785,7 +1789,7 @@ impl Render for RuleForm {
             .child(
                 Button::new("save-rule")
                     .primary()
-                    .small()
+                    .px(px(16.))
                     .disabled(!self.can_save())
                     .accessibility_label(if saved { "Save" } else { "Save rule" })
                     .child(
@@ -1793,7 +1797,7 @@ impl Render for RuleForm {
                             .flex()
                             .items_center()
                             .gap(px(4.))
-                            .child(pm_widgets::icon(IconName::Save, t.primary_foreground.hsla(), 13.))
+                            .child(pm_widgets::icon(IconName::Save, t.primary_foreground.hsla(), 14.))
                             .child(if saved { "Save" } else { "Save rule" }),
                     )
                     .on_click(cx.listener(|this, _, _, cx| this.save(cx))),
