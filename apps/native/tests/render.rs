@@ -2,7 +2,9 @@
 //! toolbar, sidebar, document tabs, filter bar, footer; the ⌘K palette)
 //! and the inspector (G3: a decrypted flow with notes, an OpenAPI line and
 //! rule badges on its TLS tab; a failed flow with its banner on Timing),
-//! rendered by gpui's real
+//! and the Body tab with every text-family zoo fixture (G4: JSON, JSON
+//! Tree, the 10 MB JSON in the CodeView, XML, HTML, JS and CSS beautified,
+//! text, form, multipart, GraphQL, hex), rendered by gpui's real
 //! offscreen renderer (Metal on macOS, WGPU on Linux; CI uses Mesa's
 //! lavapipe) in both themes, from injected snapshots: no engine, no proxy.
 //! The pane and row pixels must be their tokens, and each capture is
@@ -527,6 +529,250 @@ mod render {
             shell_renders(mode);
             println!("passed shell_renders ({mode:?})");
         }
-        println!("render: 2 passed (real offscreen renderer; shell, inspector and palette in each theme)");
+        let mut cases = 0;
+        for mode in [Mode::Dark, Mode::Light] {
+            println!("running viewers_render ({mode:?})");
+            cases += viewers::run(mode);
+            println!("passed viewers_render ({mode:?})");
+        }
+        println!(
+            "render: 2 + {cases} passed (real offscreen renderer; shell, inspector and palette, and the zoo's text \
+             viewers, in each theme)"
+        );
+    }
+
+    /// The Body tab (G4) over each text-family zoo fixture, alone in a
+    /// window, from injected bodies.
+    mod viewers {
+        use std::sync::Arc;
+
+        use gpui_kit::prelude::*;
+        use gpui_kit::test::TestWindowExt as _;
+        use gpui_kit::{Context, Entity, HeadlessAppContext, Window, WindowBounds, WindowOptions, div};
+        use gpui_kit::{point, px, size};
+        use pm_model::{BodyInfo, BodyPart, ContentKind, Header};
+        use pm_theme::kit::TokensExt as _;
+        use pm_theme::{Mode, Rgba, Tokens};
+        use pm_testkit::zoo;
+        use pm_view::body::registry::ViewerId;
+        use proxymate_native::bridge::keys::{self, DecodedBody, DecodedKey, FlowKey};
+        use proxymate_native::features::body::{self, BodyInput, BodyPane};
+
+        const SIZE: (f32, f32) = (900., 520.);
+
+        struct Host {
+            pane: Entity<BodyPane>,
+        }
+
+        impl Render for Host {
+            fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .size_full()
+                    .bg(cx.tokens().background.hsla())
+                    .text_color(cx.tokens().foreground.hsla())
+                    .child(self.pane.clone())
+            }
+        }
+
+        struct Case {
+            name: &'static str,
+            part: BodyPart,
+            bytes: Vec<u8>,
+            content_type: Option<String>,
+            kind: ContentKind,
+            viewer: Option<ViewerId>,
+            decoded_from: Option<String>,
+            /// Colours that must show, with what they prove.
+            expect: Vec<(fn(&Tokens) -> Rgba, &'static str)>,
+        }
+
+        fn kind(s: &str) -> ContentKind {
+            serde_json::from_value(serde_json::json!(s)).expect("a content kind")
+        }
+
+        fn response(name: &'static str, viewer: Option<ViewerId>, expect: Vec<(fn(&Tokens) -> Rgba, &'static str)>) -> Case {
+            let f = zoo::fixture(name.split('+').next().unwrap()).expect("a zoo fixture");
+            let bytes = match (&f.file, &f.encoding) {
+                (Some(file), Some(_)) => zoo::file_bytes(file).to_vec(),
+                _ => f.response_body(),
+            };
+            // A request fixture's flow kind is the request's; the response
+            // body's own kind comes from its type.
+            let body_kind = if f.request.is_some() {
+                pm_view::body::content::kind_from_content_type(f.content_type.as_deref())
+            } else {
+                kind(&f.kind)
+            };
+            Case {
+                name,
+                part: BodyPart::Response,
+                bytes,
+                content_type: f.content_type.clone(),
+                kind: body_kind,
+                viewer,
+                decoded_from: f.encoding.clone(),
+                expect,
+            }
+        }
+
+        fn request(name: &'static str, expect: Vec<(fn(&Tokens) -> Rgba, &'static str)>) -> Case {
+            let f = zoo::fixture(name).expect("a zoo fixture");
+            let r = f.request.as_ref().expect("a request fixture");
+            Case {
+                name,
+                part: BodyPart::Request,
+                bytes: zoo::file_bytes(&r.file).to_vec(),
+                content_type: Some(r.content_type.clone()),
+                kind: kind(&f.kind),
+                viewer: None,
+                decoded_from: None,
+                expect,
+            }
+        }
+
+        fn cases() -> Vec<Case> {
+            let key: fn(&Tokens) -> Rgba = |t| t.syntax_key;
+            let string: fn(&Tokens) -> Rgba = |t| t.syntax_string;
+            let tag: fn(&Tokens) -> Rgba = |t| t.syntax_tag;
+            let keyword: fn(&Tokens) -> Rgba = |t| t.syntax_keyword;
+            let number: fn(&Tokens) -> Rgba = |t| t.syntax_number;
+            let fg: fn(&Tokens) -> Rgba = |t| t.foreground;
+            let comment: fn(&Tokens) -> Rgba = |t| t.syntax_comment;
+            let card: fn(&Tokens) -> Rgba = |t| t.card;
+            let header: fn(&Tokens) -> Rgba = |t| t.pane_header;
+            vec![
+                response("json", None, vec![(key, "JSON keys"), (string, "JSON strings")]),
+                response("json+tree", Some(ViewerId::JsonTree), vec![(key, "tree keys"), (number, "tree numbers")]),
+                response("json-gzip", None, vec![(key, "decoded JSON keys")]),
+                response("json-headerless", None, vec![(key, "sniffed JSON keys")]),
+                response("json-base64", None, vec![(key, "JSON keys")]),
+                response("json-10mb", None, vec![(fg, "the 10 MB text in the CodeView")]),
+                response("xml", None, vec![(tag, "XML tags")]),
+                response("html", None, vec![(tag, "HTML tags")]),
+                response("js", None, vec![(keyword, "JavaScript keywords, beautified")]),
+                response("css", None, vec![(key, "CSS properties, beautified")]),
+                response("text", None, vec![(fg, "text")]),
+                response("graphql", None, vec![(key, "the GraphQL response's JSON")]),
+                request("form", vec![(key, "form field names")]),
+                request("multipart", vec![(card, "part cards"), (key, "part names")]),
+                request("graphql", vec![(header, "the Query and Variables panes"), (key, "variables")]),
+                response("binary", None, vec![(comment, "hex offsets"), (string, "the ASCII column")]),
+            ]
+        }
+
+        fn count_near(image: &image::RgbaImage, want: Rgba, tolerance: i32) -> usize {
+            let want = [want.r, want.g, want.b].map(|c| (c * 255.0).round() as i32);
+            image
+                .pixels()
+                .filter(|p| (0..3).all(|i| (p.0[i] as i32 - want[i]).abs() <= tolerance))
+                .count()
+        }
+
+        fn render_case(cx: &mut HeadlessAppContext, mode: Mode, id: u32, case: &Case) {
+            let key = FlowKey::new(0, id);
+            let body_size = case.bytes.len() as u64;
+            cx.update(|cx| {
+                let caches = keys::caches(cx);
+                let body = DecodedBody {
+                    bytes: Arc::new(case.bytes.clone()),
+                    decoded_from: case.decoded_from.clone(),
+                    ..Default::default()
+                };
+                caches.decoded.update(cx, |c, cx| {
+                    c.set(
+                        DecodedKey {
+                            flow: key,
+                            part: case.part,
+                            max: None,
+                        },
+                        Arc::new(body),
+                        cx,
+                    )
+                });
+                let viewer = case.viewer.unwrap_or(pm_view::body::registry::viewers_for(case.kind)[0]);
+                body::choose(case.kind, viewer, cx);
+            });
+            let input = BodyInput {
+                key,
+                part: case.part,
+                info: BodyInfo {
+                    size: body_size,
+                    captured: body_size,
+                    truncated: false,
+                    encoding: case.decoded_from.clone(),
+                    complete: true,
+                    kind: case.kind,
+                    mime: None,
+                },
+                finished: true,
+                headers: case
+                    .content_type
+                    .iter()
+                    .map(|ct| Header {
+                        name: "content-type".into(),
+                        value: ct.clone(),
+                    })
+                    .collect(),
+                url: format!("http://127.0.0.1/zoo/{}", case.name),
+                terms: Vec::new(),
+            };
+            let options = WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(gpui_kit::Bounds {
+                    origin: point(px(0.), px(0.)),
+                    size: size(px(SIZE.0), px(SIZE.1)),
+                })),
+                focus: false,
+                show: false,
+                ..Default::default()
+            };
+            let part = case.part;
+            let handle = cx
+                .update(|cx| {
+                    cx.open_window(options, |window, cx| {
+                        let pane = cx.new(|cx| BodyPane::new(part, cx));
+                        pane.update(cx, |p, cx| p.set_input(input, cx));
+                        let host = cx.new(|_| Host { pane });
+                        cx.new(|cx| gpui_kit::base::Root::new(host, window, cx))
+                    })
+                })
+                .expect("open a viewer window");
+            // Preparing, the editor's deferred text, beautify and highlighting.
+            for _ in 0..24 {
+                cx.run_until_parked();
+                cx.update_window(handle.into(), |_, window, cx| window.render_frame(cx))
+                    .unwrap();
+            }
+            let image = cx.capture_screenshot(handle.into()).expect("a viewer frame");
+            let theme = if mode.is_dark() { "dark" } else { "light" };
+            let file = format!("viewer-{}-{}-{theme}.png", case.name.replace('+', "-"), match part {
+                BodyPart::Request => "request",
+                BodyPart::Response => "response",
+            });
+            let path = super::snapshot_dir().join(file);
+            image.save(&path).unwrap();
+            println!("wrote {}", path.display());
+            let t = mode.tokens();
+            for (colour, what) in &case.expect {
+                let n = count_near(&image, colour(&t), 10);
+                assert!(n >= 12, "{} ({theme}): {what} not drawn ({n} pixels)", case.name);
+            }
+            cx.update_window(handle.into(), |_, window, _| window.remove_window())
+                .unwrap();
+        }
+
+        pub fn run(mode: Mode) -> usize {
+            let mut cx = super::context();
+            cx.update(|cx| {
+                use proxymate_native::prefs::{self, Appearance};
+                let forced = if mode.is_dark() { Appearance::Dark } else { Appearance::Light };
+                prefs::update(cx, |p| p.appearance = forced);
+                pm_theme::kit::apply(mode, cx);
+            });
+            let cases = cases();
+            for (i, case) in cases.iter().enumerate() {
+                render_case(&mut cx, mode, 1000 + i as u32, case);
+            }
+            cases.len()
+        }
     }
 }

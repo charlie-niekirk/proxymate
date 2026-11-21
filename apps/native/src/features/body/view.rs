@@ -169,6 +169,17 @@ impl Surface {
         cx: &mut App,
     ) -> Surface {
         let (language, lang) = languages(viewer);
+        // gpui-kit has the GraphQL grammar but no highlight query for it:
+        // the CodeView's own lexer colours GraphQL instead.
+        let opts = if viewer == ViewerId::Graphql {
+            SurfaceOpts {
+                editor: false,
+                highlight: true,
+                ..opts
+            }
+        } else {
+            opts
+        };
         if opts.editor {
             let (id, label) = (id.to_owned(), label.to_owned());
             let editor = cx.new(|cx| {

@@ -42,6 +42,11 @@ required-features = ["spikes"]
 name = "spike_native_view"
 required-features = ["spikes"]
 
+# G4: a 20 MB body in the CodeView (`--release --features spikes`).
+[[example]]
+name = "viewer_bench"
+required-features = ["spikes"]
+
 [dependencies]
 async-channel = "2"
 # Local time for Save Session's suggested name (already in pm-view).
