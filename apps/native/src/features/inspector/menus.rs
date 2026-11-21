@@ -5,10 +5,9 @@
 //! entries against the test clipboard; the dev remote's `contextMenu`
 //! reads them.
 
-use pm_model::{AppliedRule, BodyPart, CertSummary, FlowDetail, FlowSummary, Header, Phase};
-use pm_view::copy_formats::{headers_block, pairs_json, table_text};
+use pm_model::{AppliedRule, BodyPart, CertSummary, FlowDetail, FlowSummary, Phase};
+use pm_view::copy_formats::{pairs_json, table_text};
 use pm_view::errors::FailureHelp;
-use pm_view::http::header_rows;
 use pm_view::inspector::{self as view, KvKind};
 
 use super::actions::{AddFilterTerm, CopyFlowCurl, DisableRule, FlowRef};
@@ -169,20 +168,6 @@ pub fn failure(help: &FailureHelp) -> Menu {
     )
 }
 
-/// The Raw tab's menu: the text selected, the start line and headers, and
-/// the whole message.
-pub fn raw(part: BodyPart, start_line: &str, headers: &[Header], text: &str, selected: Option<String>) -> Menu {
-    let line = match part {
-        BodyPart::Request => "request line",
-        BodyPart::Response => "status line",
-    };
-    Menu::new()
-        .selection(selected)
-        .copy(format!("Copy {line}"), start_line.to_owned(), line)
-        .copy("Copy headers", headers_block(&header_rows(headers)), "headers")
-        .copy("Copy all", text.to_owned(), "text")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -229,7 +214,7 @@ mod tests {
 
     #[test]
     fn a_header_row_has_its_items_then_the_table() {
-        let rows = header_rows(&sample::detail().request.headers);
+        let rows = pm_view::http::header_rows(&sample::detail().request.headers);
         let auth = rows.iter().position(|(n, _)| n == "Authorization").unwrap();
         let menu = kv(&rows, KvKind::Header, Some(BodyPart::Request), Some(auth), None);
         assert_eq!(

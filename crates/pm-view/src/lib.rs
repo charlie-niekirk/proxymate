@@ -8,6 +8,7 @@
 //! WebSocket and SSE panels' logic (G6); `rules.ts` (G7); `json/doc.ts`
 //! (G8), `rewrite/*` (G9), `compare.ts` (G11) and the body helpers (G4, G5).
 
+pub mod body;
 pub mod columns;
 pub mod commands;
 pub mod copy_formats;

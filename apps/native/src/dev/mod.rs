@@ -52,6 +52,13 @@
 //!   {"flow": 3, "direction": "received", "payload": "hi", "binary": false}}`
 //!   sends into a live WebSocket and `{"wsClose": 3}` closes it.
 //!
+//! - The body viewers (G4): `{"viewer": {"kind": "json", "viewer": "json-tree"}}`
+//!   picks the viewer for a content kind (as the dropdown does),
+//!   `{"loadAll": "response"}` and `{"highlightAnyway": "response"}` press
+//!   those buttons, and `{"body": true}` answers with both Body tabs' state
+//!   (kind, viewer, what shows, matches). `contextMenu` takes
+//!   `body:request|response` (the viewer's menu). `PROXYMATE_DEV_ZOO=1`
+//!   sends the body-viewer zoo through the app at launch ([`zoo`]).
 //! - Rules (G7, `dev/rules.rs`): `{"rules": true}` (opens the Rules window
 //!   and answers with its state), `{"openRule": "<id>"}`, `{"newRule": true}`,
 //!   `{"preset": {"flow": 3, "kind": "map_local" | "breakpoint"}}`,
@@ -79,6 +86,7 @@ use serde_json::{Value, json};
 use crate::prefs::Appearance;
 
 mod rules;
+pub mod zoo;
 
 pub const DEFAULT_PORT: u16 = 1430;
 const PATH: &str = "/__pm_remote";
@@ -217,6 +225,9 @@ async fn run(command: Value, cx: &mut AsyncApp) -> Value {
     if let Some(answer) = inspector_command(&command, window, cx).await {
         return answer;
     }
+    if let Some(answer) = body_command(&command, window, cx).await {
+        return answer;
+    }
     if let Some(answer) = stream_command(&command, window, cx).await {
         return answer;
     }
@@ -227,7 +238,7 @@ async fn run(command: Value, cx: &mut AsyncApp) -> Value {
         let offscreen = command.get("offscreen").and_then(Value::as_bool).unwrap_or(false);
         return screenshot(window, PathBuf::from(path), offscreen, cx).await;
     }
-    json!({"error": "unknown command: try theme, screenshot, click, select, selectIds, selectAll, scrollTo, headerColumns, filter, search, protocol, content, scope, keys, palette, command, store, openDocument, closeDocument, saveSession, exportHar, recording, clear, contextMenu, sidebarFilter, workspace, autoSelect, table, requestTab, responseTab, focus, curl, inspector, streamSelect, streamDirection, streamSearch, streamViewer, wsOriginal, wsCompose, wsComposeSend, stream, wsSend, wsClose, rules, openRule, newRule, preset, ruleEdit, saveRule, testRule, deleteRule, throttle, noCache, noCookies, breakpointTimeout, rulesMenu, rulesClick, rulesDrag, rulesSelect, rulesRename or rulesScreenshot"})
+    json!({"error": "unknown command: try theme, screenshot, click, select, selectIds, selectAll, scrollTo, headerColumns, filter, search, protocol, content, scope, keys, palette, command, store, openDocument, closeDocument, saveSession, exportHar, recording, clear, contextMenu, sidebarFilter, workspace, autoSelect, table, requestTab, responseTab, focus, curl, inspector, streamSelect, streamDirection, streamSearch, streamViewer, wsOriginal, wsCompose, wsComposeSend, stream, wsSend, wsClose, rules, openRule, newRule, preset, ruleEdit, saveRule, testRule, deleteRule, throttle, noCache, noCookies, breakpointTimeout, rulesMenu, rulesClick, rulesDrag, rulesSelect, rulesRename, rulesScreenshot, viewer, loadAll, highlightAnyway or body"})
 }
 
 pub(crate) async fn screenshot(window: AnyWindowHandle, path: PathBuf, offscreen: bool, cx: &mut AsyncApp) -> Value {
@@ -334,6 +345,19 @@ fn row_menu(spec: &str, cx: &App) -> Option<crate::features::context_menu::Menu>
     let column = column.and_then(pm_view::columns::ColumnId::parse);
     let table = crate::features::flow_table::first(cx)?;
     table.read(cx).row_menu_for(id, column.as_ref(), cx)
+}
+
+/// A Body tab's viewer menu, with the text selected now.
+fn body_menu(part: &str, window: &mut gpui_kit::Window, cx: &mut App) -> Option<crate::features::context_menu::Menu> {
+    let part = match part {
+        "request" => pm_model::BodyPart::Request,
+        "response" => pm_model::BodyPart::Response,
+        _ => return None,
+    };
+    let inspector = crate::shell::parts(cx)?.inspector.upgrade()?;
+    let selected = crate::features::context_menu::selected_text(window, cx);
+    let pane = inspector.read(cx).body_pane(part).clone();
+    Some(pane.read(cx).menu(selected, cx))
 }
 
 /// One of the inspector's menus, with the text selected now.
@@ -586,6 +610,70 @@ async fn stream_command(command: &Value, window: AnyWindowHandle, cx: &mut Async
     Some(state.unwrap_or_else(|e| json!({ "error": e.to_string() })))
 }
 
+/// The body viewers' verbs (G4); `None` when `command` has none of them.
+async fn body_command(command: &Value, window: AnyWindowHandle, cx: &mut AsyncApp) -> Option<Value> {
+    use crate::features::body;
+    use pm_model::BodyPart;
+
+    const VERBS: [&str; 4] = ["viewer", "loadAll", "highlightAnyway", "body"];
+    if !VERBS.iter().any(|v| command.get(v).is_some()) {
+        return None;
+    }
+    let Some(inspector) = cx.update(|cx| crate::shell::parts(cx).and_then(|p| p.inspector.upgrade())) else {
+        return Some(json!({"error": "no inspector"}));
+    };
+    let part_of = |v: &Value| match v.as_str() {
+        Some("request") => Ok(BodyPart::Request),
+        Some("response") => Ok(BodyPart::Response),
+        _ => Err(format!("takes request or response, not {v}")),
+    };
+    let result: Result<(), String> = window
+        .update(cx, |_, _, cx| -> Result<(), String> {
+            if let Some(v) = command.get("viewer") {
+                let kind: pm_model::ContentKind =
+                    serde_json::from_value(v["kind"].clone()).map_err(|_| format!("no content kind {}", v["kind"]))?;
+                let viewer = v["viewer"]
+                    .as_str()
+                    .and_then(pm_view::body::registry::ViewerId::parse)
+                    .ok_or_else(|| format!("no viewer {}", v["viewer"]))?;
+                body::choose(kind, viewer, cx);
+            }
+            if let Some(v) = command.get("loadAll") {
+                let pane = inspector.read(cx).body_pane(part_of(v)?).clone();
+                pane.update(cx, |p, cx| p.load_all(cx));
+            }
+            if let Some(v) = command.get("highlightAnyway") {
+                let pane = inspector.read(cx).body_pane(part_of(v)?).clone();
+                pane.update(cx, |p, cx| p.highlight_anyway(cx));
+            }
+            Ok(())
+        })
+        .unwrap_or_else(|e| Err(e.to_string()));
+    if let Err(err) = result {
+        return Some(json!({ "error": err }));
+    }
+    // Let the body load and its viewer be prepared.
+    for _ in 0..40 {
+        cx.background_executor().timer(Duration::from_millis(50)).await;
+        let busy = cx.update(|cx| {
+            let i = inspector.read(cx);
+            [BodyPart::Request, BodyPart::Response]
+                .iter()
+                .any(|p| i.body_pane(*p).read(cx).is_preparing())
+        });
+        if !busy {
+            break;
+        }
+    }
+    Some(cx.update(|cx| {
+        let i = inspector.read(cx);
+        json!({
+            "request": i.body_pane(BodyPart::Request).read(cx).describe(cx),
+            "response": i.body_pane(BodyPart::Response).read(cx).describe(cx),
+        })
+    }))
+}
+
 /// The shell's verbs (G2); `None` when `command` has none of them.
 async fn shell_command(command: &Value, window: AnyWindowHandle, cx: &mut AsyncApp) -> Option<Value> {
     use crate::features::{capture, commands, documents};
@@ -720,6 +808,7 @@ async fn shell_command(command: &Value, window: AnyWindowHandle, cx: &mut AsyncA
                         .and_then(|store| shell::tabs::current_tab_menu(store, cx)),
                     Some(("sidebar", key)) => shell::sidebar::menu_for(key, cx),
                     Some(("row", rest)) => row_menu(rest, cx),
+                    Some(("body", part)) => body_menu(part, window, cx),
                     _ => inspector_menu(name, window, cx),
                 }
                 .ok_or_else(|| format!("no menu {name:?} now"))?;

@@ -10,7 +10,12 @@ publish.workspace = true
 # Local time for the Time column (already in gpui's tree; thread-safe,
 # unlike `time`'s local offset).
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+# JS and CSS Beautify (G4), in place of the Tauri UI's prettier.
+dprint-plugin-typescript = "0.101"
+malva = "0.16"
 pm-model.workspace = true
+# Body search, markup tokens and GraphQL names (G4).
+regex.workspace = true
 serde.workspace = true
 # JSON string escaping for `copy_formats::pairs_json`.
 serde_json.workspace = true

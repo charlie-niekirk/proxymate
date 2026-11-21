@@ -5,6 +5,7 @@
 //! which views read with [`TokensExt::tokens`]. Components never hard-code
 //! a colour.
 
+use gpui_kit::component::highlighter::HighlightTheme;
 use gpui_kit::component::theme::{Theme, ThemeColor, ThemeMode};
 use gpui_kit::{App, Global, Hsla, px};
 
@@ -80,8 +81,67 @@ pub fn apply(mode: Mode, cx: &mut App) {
         theme.radius = px(crate::RADIUS_PX);
         theme.radius_lg = px(crate::RADIUS_PX + 2.0);
         theme.shadow = false;
+        theme.highlight_theme = std::sync::Arc::new(highlight_theme(&theme.highlight_theme, &tokens));
     });
     cx.refresh_windows();
+}
+
+/// The code editor's colours (G4): gpui-kit's highlight theme with the
+/// `--syntax-*` and `--code-*` tokens over every tree-sitter capture the
+/// body viewers' grammars (JSON, JavaScript, HTML, CSS, GraphQL) produce.
+pub fn highlight_theme(base: &HighlightTheme, t: &Tokens) -> HighlightTheme {
+    let hex = |c: crate::Rgba| {
+        let byte = |x: f32| (x.clamp(0.0, 1.0) * 255.0).round() as u8;
+        format!("#{:02x}{:02x}{:02x}{:02x}", byte(c.r), byte(c.g), byte(c.b), byte(c.a))
+    };
+    let pairs: [(&str, crate::Rgba); 30] = [
+        ("attribute", t.syntax_attr),
+        ("boolean", t.syntax_literal),
+        ("comment", t.syntax_comment),
+        ("comment.doc", t.syntax_comment),
+        ("constant", t.syntax_literal),
+        ("constructor", t.syntax_type),
+        ("embedded", t.foreground),
+        ("enum", t.syntax_type),
+        ("function", t.syntax_variable),
+        ("keyword", t.syntax_keyword),
+        ("label", t.syntax_key),
+        ("number", t.syntax_number),
+        ("operator", t.syntax_punct),
+        ("property", t.syntax_key),
+        ("punctuation", t.syntax_punct),
+        ("punctuation.bracket", t.syntax_punct),
+        ("punctuation.delimiter", t.syntax_punct),
+        ("punctuation.special", t.syntax_punct),
+        ("string", t.syntax_string),
+        ("string.escape", t.syntax_literal),
+        ("string.regex", t.syntax_string),
+        ("string.special", t.syntax_string),
+        ("string.special.symbol", t.syntax_string),
+        ("tag", t.syntax_tag),
+        ("tag.doctype", t.syntax_meta),
+        ("title", t.syntax_keyword),
+        ("type", t.syntax_type),
+        ("variable", t.foreground),
+        ("variable.special", t.syntax_variable),
+        ("variant", t.syntax_type),
+    ];
+    let syntax: serde_json::Map<String, serde_json::Value> = pairs
+        .iter()
+        .map(|(name, c)| ((*name).to_owned(), serde_json::json!({ "color": hex(*c) })))
+        .collect();
+    let mut theme = base.clone();
+    if let Ok(colors) = serde_json::from_value(serde_json::Value::Object(syntax)) {
+        theme.style.syntax = colors;
+    }
+    let style = &mut theme.style;
+    style.editor_background = Some(t.background.into());
+    style.editor_foreground = Some(t.foreground.into());
+    style.editor_active_line = Some(t.code_active_line.into());
+    style.editor_line_number = Some(t.code_gutter_fg.into());
+    style.editor_active_line_number = Some(t.foreground.into());
+    style.editor_gutter_background = Some(t.code_gutter.into());
+    theme
 }
 
 /// Lays the tokens over gpui-kit's colours. Its semantic slots take the

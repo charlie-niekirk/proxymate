@@ -239,7 +239,7 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 |---|---|---|---|---|---|
 | CP-01 | ⌘K toggles the palette: "Type a command…", groups Flows, Capture, Navigate, Windows, Settings, keyword matching, shortcut labels, only commands that apply now; "No matching command" | `components/CommandPalette.tsx` | G2 | ☑ | G2: `features/commands.rs` palette (groups, shortcuts, only registered commands that apply, "No matching command"); `tests/shell.rs` `the_palette_opens_with_cmd_k_and_runs_a_command`; `tests/render.rs` renders it in both themes |
 | CP-02 | Escape in the inspector returns focus to the flow table (unless a dialog is open) | `hooks/useShortcuts.ts` | G3 | ☑ | G3: Escape is `FocusTable` in the `Inspector` key context (dialogs take the focus, so they keep Escape); `tests/inspector.rs` `enter_and_escape_move_the_keyboard_between_the_table_and_the_inspector` |
-| CP-03 | Shortcut rules: ⇧ never matches; ⌥ matches the physical key; ⌘⌫ and ⌘F are left to text fields and code editors; bare ⌫ and ⌘A only in the flow table | `lib/commands.ts` `commandForKey` | G2 | ☑ | G2: `features/commands.rs` `bind_keys` (exact bindings, so ⇧ never matches; gpui matches the physical key; ⌘⌫ yields to text fields via `!Input`; bare ⌫ and ⌘A are `FlowGrid`'s); `tests/shell.rs` `cmd_backspace_in_a_text_field_edits_the_text`. ⌘F in code editors is G4's |
+| CP-03 | Shortcut rules: ⇧ never matches; ⌥ matches the physical key; ⌘⌫ and ⌘F are left to text fields and code editors; bare ⌫ and ⌘A only in the flow table | `lib/commands.ts` `commandForKey` | G2 | ☑ | G2: `features/commands.rs` `bind_keys` (exact bindings, so ⇧ never matches; gpui matches the physical key; ⌘⌫ yields to text fields via `!Input`; bare ⌫ and ⌘A are `FlowGrid`'s); `tests/shell.rs` `cmd_backspace_in_a_text_field_edits_the_text`. G4: ⌘F yields to the CodeView and the code editor (`CODE_VIEWS_KEEP`); `tests/body.rs` |
 | CP-04 | "Replay selected flow" ⌘R ("Nothing to replay", "Can't replay this flow" for tunnels and WebSockets) | `lib/commands.ts` | G8 | ☐ | |
 | CP-05 | "Edit & Replay selected flow…" | `lib/commands.ts` | G8 | ☐ | |
 | CP-06 | "Rewrite selected flow…" | `lib/commands.ts` | G9 | ☐ | |
@@ -317,7 +317,7 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | IN-23 | Response Header tab, with a "Trailers" table when there are trailers | `components/DetailPane.tsx` | G3 | ☑ | G3: `panes.rs` response Header with the Trailers table (`response-trailers`) |
 | IN-24 | No response: "Waiting for the response…" or "No response" | `components/DetailPane.tsx` | G3 | ☑ | G3: `panes.rs` `no_response`; `docs/native/g3/untrusted-cert-dark.png` ("No response") |
 | IN-25 | Raw tab: "Rebuilt from the parsed message, not the exact bytes on the wire"; body placeholders for encoded, streaming, over 1 MB and binary bodies | `components/Inspector/RawView.tsx` | G3 | ☑ | G3: `inspector/raw.rs` (virtualised, selectable) with `pm_view::inspector::raw_body` (its test covers every placeholder); `tests/inspector.rs` `the_raw_tab_rebuilds_the_message_and_copies_its_parts`; `docs/native/g3/timing-raw-dark.png` |
-| IN-26 | Raw menu: Copy request line / Copy status line, Copy headers, plus the code menu | `components/Inspector/RawView.tsx` | G3 | ☑ | G3: `menus::raw` (Copy selection, Copy request/status line, Copy headers, Copy all); `tests/inspector.rs`. Select all and Find come with G4's CodeView |
+| IN-26 | Raw menu: Copy request line / Copy status line, Copy headers, plus the code menu | `components/Inspector/RawView.tsx` | G3 | ☑ | G3: `menus::raw` (Copy selection, Copy request/status line, Copy headers, Copy all); `tests/inspector.rs`. G4 moved it onto the CodeView: `body::menus::raw` is the code menu (Select all, Find…) with the start line and headers; `tests/body.rs` `the_raw_tab_highlights_and_searches_with_cmd_f` |
 | IN-27 | Tunnel note: "Not decrypted: <host> is in the SSL exclude or bypass list. N sent, N received through the tunnel." | `components/DetailPane.tsx` | G3 | ☑ | G3: `parts.rs` `tunnel_note`; `docs/native/g3/bypass-tunnel-dark.png` |
 | IN-28 | TLS tab, Connection: Client SNI, Client offered ALPN, Negotiated ALPN, Upstream TLS version, Upstream cipher, Upstream certificate (Verified, Not verified, Failed), Upstream proxy, Client certificate | `components/Inspector/TlsView.tsx` | G3 | ☑ | G3: `pm_view::tls::connection_rows` (its test); `docs/native/g3/tls-query-dark.png` |
 | IN-29 | TLS tab, Upstream certificate chain: per certificate subject, leaf tag, Issuer, Valid (with "expired when captured"), Names, Serial, SHA-256 | `components/Inspector/TlsView.tsx` `CertCard` | G3 | ☑ | G3: `panes.rs` `tls_view` cards with `pm_view::tls::cert_rows` (expiry at capture time; its test); `docs/native/g3/offscreen-inspector-light.png` |
@@ -339,35 +339,35 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 
 | ID | Behaviour | Source | Phase | Status | Evidence |
 |---|---|---|---|---|---|
-| BV-01 | Viewer picker: the viewers for the body's kind, best first; the choice sticks per content kind | `components/BodyViewer/BodyViewer.tsx`, `components/BodyViewer/registry.ts` | G4 | ☐ | |
-| BV-02 | Kind detection, falling back to the Content-Type for flows recorded before detection or still streaming | `components/BodyViewer/BodyViewer.tsx` | G4 | ☐ | |
-| BV-03 | Body bar: "mime · size", Copy (as text), Save… | `components/BodyViewer/BodyViewer.tsx` | G4 | ☐ | |
-| BV-04 | "No body", "Waiting for body…", "Body streaming · N so far" | `components/BodyViewer/BodyViewer.tsx` | G4 | ☐ | |
-| BV-05 | "Decoded from <encoding> · a → b"; "Couldn't decode: … Showing the raw bytes." | `components/BodyViewer/BodyViewer.tsx` | G4 | ☐ | |
-| BV-06 | "Recorded the first X of Y" for truncated bodies | `components/BodyViewer/BodyViewer.tsx` | G4 | ☐ | |
-| BV-07 | Bodies over 20 MB: "Showing the first 20 MB of …" with Load all and Save body to file… | `components/BodyViewer/BodyViewer.tsx`, `components/BodyViewer/util.ts` | G4 | ☐ | |
-| BV-08 | Highlighting off over 2 MB, with Highlight anyway | `components/BodyViewer/BodyViewer.tsx` | G4 | ☐ | |
-| BV-09 | "Loading…", "Couldn't load body: …", "Couldn't save: …" | `components/BodyViewer/BodyViewer.tsx` | G4 | ☐ | |
-| BV-10 | Body menu (viewers without their own): Copy (selection), Copy body, Copy body as Base64, Save body… | `components/menus/body.tsx` | G4 | ☐ | |
-| BV-11 | Code view: read-only, line numbers, folding, bracket matching, ⌘F search, smooth on multi-megabyte bodies | `components/BodyViewer/CodeView.tsx`, `components/BodyViewer/code/` | G4 | ☐ | |
-| BV-12 | Code menu: Copy (selection), Copy all, Select all ⌘A, Find… ⌘F, then the body items | `components/BodyViewer/CodeView.tsx` | G4 | ☐ | |
-| BV-13 | Body search from the filter's body terms: matches marked, "N matches" / "i of N" bar with previous and next | `components/BodyViewer/search.tsx`, `components/BodyViewer/searchTerms.ts` | G4 | ☐ | |
-| BV-14 | JSON: pretty-printed and highlighted (formatted off the main thread above 256 KB) | `components/BodyViewer/JsonViews.tsx` `JsonPretty` | G4 | ☐ | |
-| BV-15 | Invalid JSON: "Not valid JSON: … Showing the text." | `components/BodyViewer/JsonViews.tsx` `InvalidJson` | G4 | ☐ | |
-| BV-16 | JSON Tree: virtualised, open to depth 1, click toggles, ⌥-click expands the subtree; numbers exact | `components/BodyViewer/JsonViews.tsx` `Tree` | G4 | ☐ | |
-| BV-17 | JSON Tree filter "$.items[*].id or /items/0" with match count or error | `components/BodyViewer/JsonViews.tsx` `Tree` | G4 | ☐ | |
-| BV-18 | JSON Tree menu: Copy value, Copy key, Copy path, Copy JSON pointer, Expand all below, Collapse all | `components/BodyViewer/JsonViews.tsx` `Tree` | G4 | ☐ | |
-| BV-19 | GraphQL: Query, Variables and Extensions panes; operation picker for batches; GET operations from the query string; "Not a GraphQL request body. Showing the text." | `components/BodyViewer/GraphQlView.tsx` | G4 | ☐ | |
-| BV-20 | GraphQL menu: Copy operation name, Copy query, Copy variables | `components/BodyViewer/GraphQlView.tsx` | G4 | ☐ | |
-| BV-21 | XML and HTML: re-indented (up to 2 MB) and highlighted | `components/BodyViewer/TextViews.tsx` `MarkupView` | G4 | ☐ | |
-| BV-22 | JavaScript and CSS: Beautify toggle (on by default for minified code), "Formatting…", "Couldn't beautify: …" | `components/BodyViewer/TextViews.tsx` `ScriptView` | G4 | ☐ | |
-| BV-23 | Text: Wrap toggle; "Binary body: switch to Hex to see its bytes." | `components/BodyViewer/TextViews.tsx` `TextView` | G4 | ☐ | |
-| BV-24 | Form: Fields / Raw toggle; Name and Value table with the table menu | `components/BodyViewer/FormView.tsx` | G4 | ☐ | |
-| BV-25 | Multipart: a card per part with its headers and a fitting sub-viewer, images inline; "The Content-Type has no boundary…", "No parts found for boundary …" | `components/BodyViewer/MultipartView.tsx` | G4 | ☐ | |
-| BV-26 | Multipart part menu: Copy name, Copy file name, Copy content type | `components/BodyViewer/MultipartView.tsx` | G4 | ☐ | |
-| BV-27 | HTTP syntax highlighting for Raw messages | `components/BodyViewer/code/languages.ts` | G4 | ☐ | |
-| BV-28 | Hex: Offset, hex and ASCII, 16 bytes a row, virtualised | `components/BodyViewer/HexView.tsx` | G4 | ☐ | |
-| BV-29 | Hex menu: Copy byte 0x…, Copy row as hex, Copy row as text, Copy offset, Copy as hex dump | `components/BodyViewer/HexView.tsx` | G4 | ☐ | |
+| BV-01 | Viewer picker: the viewers for the body's kind, best first; the choice sticks per content kind | `components/BodyViewer/BodyViewer.tsx`, `components/BodyViewer/registry.ts` | G4 | ☑ | G4: `pm_view::body::registry` (its test is `registry.test.ts`'s); the bar's viewer menu (`ChooseViewer`, per kind for the session); `tests/body.rs` `the_viewer_follows_the_kind_and_the_choice_sticks_per_kind` |
+| BV-02 | Kind detection, falling back to the Content-Type for flows recorded before detection or still streaming | `components/BodyViewer/BodyViewer.tsx` | G4 | ☑ | G4: `BodyInput::kind` with `pm_view::body::content::fallback_kind`; `content` tests; `tests/render.rs` `json-headerless` |
+| BV-03 | Body bar: "mime · size", Copy (as text), Save… | `components/BodyViewer/BodyViewer.tsx` | G4 | ☑ | G4: `body/mod.rs` `render_bar` (mime · size, Copy → `CopyBody`, Save… → `SaveBody` with `suggested_file_name`); `docs/native/g4/json-dark.png` |
+| BV-04 | "No body", "Waiting for body…", "Body streaming · N so far" | `components/BodyViewer/BodyViewer.tsx` | G4 | ☑ | G4: `BodyPane::render` (No body, Waiting for body…, Body streaming · N so far) |
+| BV-05 | "Decoded from <encoding> · a → b"; "Couldn't decode: … Showing the raw bytes." | `components/BodyViewer/BodyViewer.tsx` | G4 | ☑ | G4: the `decoded` cache (`DecodedBody.decoded_from`, `decode_error`: a failed decode comes back raw with why); notes in `BodyPane::render`; `docs/native/g4/json-gzip-dark.png` |
+| BV-06 | "Recorded the first X of Y" for truncated bodies | `components/BodyViewer/BodyViewer.tsx` | G4 | ☑ | G4: `body-truncated-note` in `BodyPane::render` |
+| BV-07 | Bodies over 20 MB: "Showing the first 20 MB of …" with Load all and Save body to file… | `components/BodyViewer/BodyViewer.tsx`, `components/BodyViewer/util.ts` | G4 | ☑ | G4: `large-body-note` (Load all, Save body to file…), the cache reads 20 MB until Load all; `tests/body.rs` `big_bodies_load_the_first_20_mb_until_load_all` |
+| BV-08 | Highlighting off over 2 MB, with Highlight anyway | `components/BodyViewer/BodyViewer.tsx` | G4 | ☑ | G4: over 2 MB the CodeView, unhighlighted until Highlight anyway (its own lexer); `docs/native/g4/json-10mb-dark.png`, `json-10mb-highlighted-dark.png` |
+| BV-09 | "Loading…", "Couldn't load body: …", "Couldn't save: …" | `components/BodyViewer/BodyViewer.tsx` | G4 | ☑ | G4: Loading…, Couldn't load body: …, and `body-save-error` (Couldn't save: …) in `BodyPane::render` |
+| BV-10 | Body menu (viewers without their own): Copy (selection), Copy body, Copy body as Base64, Save body… | `components/menus/body.tsx` | G4 | ☑ | G4: `body::menus::fallback`/`body_items` (Copy body off for binary bodies); `tests/body.rs` `the_body_menu_copies_the_body_as_text_and_base64` |
+| BV-11 | Code view: read-only, line numbers, folding, bracket matching, ⌘F search, smooth on multi-megabyte bodies | `components/BodyViewer/CodeView.tsx`, `components/BodyViewer/code/` | G4 | ☑ | G4: `pm_widgets::CodeEditor` up to 2 MB (gpui-kit editor: line numbers, folding, ⌘F) and `pm_widgets::CodeView` above it; `examples/viewer_bench.rs` (20 MB: p99 0.9 ms a frame). gpui-kit has no bracket matching (PLAN G4 deviations) |
+| BV-12 | Code menu: Copy (selection), Copy all, Select all ⌘A, Find… ⌘F, then the body items | `components/BodyViewer/CodeView.tsx` | G4 | ☑ | G4: `body::menus::code` (Copy, Copy all, Select all, Find…, body items); `menus.rs` tests; `tests/body.rs` |
+| BV-13 | Body search from the filter's body terms: matches marked, "N matches" / "i of N" bar with previous and next | `components/BodyViewer/search.tsx`, `components/BodyViewer/searchTerms.ts` | G4 | ☑ | G4: `pm_view::body::search`; the CodeView's bar and the editor's (`BodyPane::match_bar`), the tree's; `tests/body.rs` `the_filters_body_terms_are_marked_and_stepped`; `docs/native/g4/body-search-light.png`, `raw-search-light.png` |
+| BV-14 | JSON: pretty-printed and highlighted (formatted off the main thread above 256 KB) | `components/BodyViewer/JsonViews.tsx` `JsonPretty` | G4 | ☑ | G4: `pm_view::body::json_format` on the background executor (all sizes); `tests/render.rs` `json`; `docs/native/g4/json-dark.png` |
+| BV-15 | Invalid JSON: "Not valid JSON: … Showing the text." | `components/BodyViewer/JsonViews.tsx` `InvalidJson` | G4 | ☑ | G4: `view::prepare` (Not valid JSON: … Showing the text.); `view.rs` tests |
+| BV-16 | JSON Tree: virtualised, open to depth 1, click toggles, ⌥-click expands the subtree; numbers exact | `components/BodyViewer/JsonViews.tsx` `Tree` | G4 | ☑ | G4: `pm_widgets::JsonTree` over `pm_view::body::json_doc` (exact numbers), open to depth 1, click toggles, ⌥-click the subtree; `tests/body.rs`; `docs/native/g4/json-tree-dark.png` |
+| BV-17 | JSON Tree filter "$.items[*].id or /items/0" with match count or error | `components/BodyViewer/JsonViews.tsx` `Tree` | G4 | ☑ | G4: `json_path` and the tree's filter (match count or error); `tests/body.rs` (`$..id`) |
+| BV-18 | JSON Tree menu: Copy value, Copy key, Copy path, Copy JSON pointer, Expand all below, Collapse all | `components/BodyViewer/JsonViews.tsx` `Tree` | G4 | ☑ | G4: `body::menus::tree` (`ExpandAllBelow`, `CollapseAll`); `menus.rs` tests |
+| BV-19 | GraphQL: Query, Variables and Extensions panes; operation picker for batches; GET operations from the query string; "Not a GraphQL request body. Showing the text." | `components/BodyViewer/GraphQlView.tsx` | G4 | ☑ | G4: `pm_view::body::graphql`, the GraphQL view (operation buttons for batches, GET operations, the fallback note); `tests/render.rs` `graphql` request; `docs/native/g4/graphql-dark.png` |
+| BV-20 | GraphQL menu: Copy operation name, Copy query, Copy variables | `components/BodyViewer/GraphQlView.tsx` | G4 | ☑ | G4: `body::menus::graphql` (on the operation name); `menus.rs` tests |
+| BV-21 | XML and HTML: re-indented (up to 2 MB) and highlighted | `components/BodyViewer/TextViews.tsx` `MarkupView` | G4 | ☑ | G4: `pm_view::body::markup` (up to 2 MB); `tests/render.rs` `xml`, `html`; `docs/native/g4/xml-light.png`, `html-light.png` |
+| BV-22 | JavaScript and CSS: Beautify toggle (on by default for minified code), "Formatting…", "Couldn't beautify: …" | `components/BodyViewer/TextViews.tsx` `ScriptView` | G4 | ☑ | G4: Beautify (dprint, malva) on the background executor, on for minified code; `beautify` tests; `docs/native/g4/js-beautified-light.png`, `css-beautified-light.png` |
+| BV-23 | Text: Wrap toggle; "Binary body: switch to Hex to see its bytes." | `components/BodyViewer/TextViews.tsx` `TextView` | G4 | ☑ | G4: the Text viewer's Wrap toggle and the binary message; `docs/native/g4/text-light.png` |
+| BV-24 | Form: Fields / Raw toggle; Name and Value table with the table menu | `components/BodyViewer/FormView.tsx` | G4 | ☑ | G4: Fields (KvTable with `menus::kv` Form) / Raw; `tests/render.rs` `form`; `docs/native/g4/form-raw-dark.png` |
+| BV-25 | Multipart: a card per part with its headers and a fitting sub-viewer, images inline; "The Content-Type has no boundary…", "No parts found for boundary …" | `components/BodyViewer/MultipartView.tsx` | G4 | ☑ | G4: `pm_view::body::multipart` and the part cards (headers, inline short text, a sub-viewer per part); both messages; `tests/render.rs` `multipart`; `docs/native/g4/multipart-dark.png`. Image parts show a G5 note until G5's image viewer |
+| BV-26 | Multipart part menu: Copy name, Copy file name, Copy content type | `components/BodyViewer/MultipartView.tsx` | G4 | ☑ | G4: `body::menus::part` (plus Copy part body, as Base64); `menus.rs` tests |
+| BV-27 | HTTP syntax highlighting for Raw messages | `components/BodyViewer/code/languages.ts` | G4 | ☑ | G4: `highlight_http_head` in the Raw tab's CodeView (`Highlight::Http`); `highlight.rs` tests; `docs/native/g4/raw-search-light.png` |
+| BV-28 | Hex: Offset, hex and ASCII, 16 bytes a row, virtualised | `components/BodyViewer/HexView.tsx` | G4 | ☑ | G4: `pm_widgets::HexView` (`uniform_list`); `tests/render.rs` `binary`; `docs/native/g4/hex-light.png` |
+| BV-29 | Hex menu: Copy byte 0x…, Copy row as hex, Copy row as text, Copy offset, Copy as hex dump | `components/BodyViewer/HexView.tsx` | G4 | ☑ | G4: `body::menus::hex`; `menus.rs` tests |
 | BV-30 | Image: checkerboard, Fit, Actual size (100%), Zoom out, Zoom in; dimensions, format (animated), size, EXIF orientation | `components/BodyViewer/MediaViews.tsx` `ImageView` | G5 | ☐ | |
 | BV-31 | Image: Save image…, Copy image buttons; menu Copy image, Copy dimensions, Save image…; "can't decode this image" | `components/BodyViewer/MediaViews.tsx` `ImageView` | G5 | ☐ | |
 | BV-32 | SVG rendered as an image: "its scripts and external resources never load" | `components/BodyViewer/MediaViews.tsx` `ImageView` | G5 | ☐ | |
@@ -682,7 +682,7 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | DV-03 | Dev remote: `select`, `selectIds`, `selectAll`, `scrollTo` | `dev/remote.ts` | G1 | ☑ | G1: `apps/native/src/dev/mod.rs` `select`, `selectIds`, `selectAll`, `scrollTo` (plus `headerColumns`, `filter`, `autoSelect`, `table`) |
 | DV-04 | Dev remote: `filter`, `palette`, `store`, `openDocument`, `closeDocument`, `saveSession`, `exportHar`, `contextMenu`, `reload` | `dev/remote.ts` | G2 | ☑ | G2: `apps/native/src/dev/mod.rs` `filter`, `search`, `palette`, `command`, `keys`, `store`, `openDocument`, `closeDocument`, `saveSession`, `exportHar`, `contextMenu` (with `run`), `workspace`, … (`reload` has no meaning without a web view) |
 | DV-05 | Dev remote: `requestTab`, `responseTab`, `curl` | `dev/remote.ts` | G3 | ☑ | G3: `dev/mod.rs` `requestTab`, `responseTab`, `curl` (also `focus`, `inspector`, and `contextMenu` for the inspector's menus and `row:<id>[:<column>]`) |
-| DV-06 | Dev remote: `viewer` | `dev/remote.ts` | G4 | ☐ | |
+| DV-06 | Dev remote: `viewer` | `dev/remote.ts` | G4 | ☑ | G4: `dev/mod.rs` `viewer` (also `loadAll`, `highlightAnyway`, `body`, `contextMenu: "body:<part>"`) |
 | DV-07 | Dev remote: `wsSend`, `wsClose` | `dev/remote.ts` | G6 | ☑ | G6: `wsSend`, `wsClose`, plus `streamSelect`, `streamDirection`, `streamSearch`, `streamViewer`, `wsOriginal`, `wsCompose`, `wsComposeSend`, `stream`, `tableShare`; `contextMenu` `stream:<row>` and `payload` (`dev/mod.rs`) |
 | DV-08 | Dev remote: `rules`, `rulesEditor`, `preset`, `saveRule`, `testRule`, `deleteRule`, `throttle`, `noCache`, `noCookies` | `dev/remote.ts` | G7 | ☑ | G7: `dev/rules.rs` `rules`, `openRule`, `newRule`, `preset`, `ruleEdit`, `saveRule`, `testRule`, `deleteRule`, `throttle`, `noCache`, `noCookies` (also `breakpointTimeout`, `rulesMenu`, `rulesClick`, `rulesDrag`, `rulesSelect`, `rulesRename`, `rulesScreenshot`) |
 | DV-09 | Dev remote: `replay`, `editReplay`, `compose`, `composeSend`, `breakpoints`, `breakpointAction` | `dev/remote.ts` | G8 | ☐ | |
@@ -700,7 +700,7 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | DV-21 | `VITE_PM_OPEN=scripts` | `dev/harness.ts` | G10 | ☐ | |
 | DV-22 | `VITE_PM_OPEN=settings:<page>` | `dev/harness.ts` | G12 | ☐ | |
 | DV-23 | `VITE_PM_OPEN=cert-wizard` and `device-setup:<tab>` | `dev/harness.ts` | G13 | ☐ | |
-| DV-24 | Body-viewer zoo: one flow per fixture in `crates/pm-testkit/fixtures/zoo/` for viewer screenshots | `dev/zoo.ts` | G4 | ☐ | |
+| DV-24 | Body-viewer zoo: one flow per fixture in `crates/pm-testkit/fixtures/zoo/` for viewer screenshots | `dev/zoo.ts` | G4 | ☑ | G4: `PROXYMATE_DEV_ZOO=1` (`dev/zoo.rs`): 31 fixtures through the app's proxy; `docs/native/g4/` |
 | DV-25 | Browser-only harness: mock backend and URL parameters (`?zoo`, `?select`, `?requestTab`, `?rules`, `?rewrite`, `?scripts`, `?theme`, `?mocks`, `?devicePrompt`…) | `dev/harness.ts`, `lib/mockBackend.ts` | G14 | ☐ | |
 
 ## Summary
@@ -713,7 +713,7 @@ Rows per owning phase. G14 also audits every row; its own row is the browser-onl
 | G1 | 39 | 38 |
 | G2 | 91 | 89 (2 `≈`: WM-13, WM-28) |
 | G3 | 62 | 62 |
-| G4 | 31 | 0 |
+| G4 | 31 | 31 |
 | G5 | 10 | 0 |
 | G6 | 19 | 19 |
 | G7 | 60 | 60 |
