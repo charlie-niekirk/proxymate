@@ -139,6 +139,12 @@ impl KvEditor {
         self.changed(cx);
     }
 
+    /// Adds a row with this name and value (the dev remote, tests).
+    pub fn push(&mut self, name: &str, value: &str, cx: &mut Context<Self>) {
+        self.rows.push(KvRow::new(name, value));
+        self.changed(cx);
+    }
+
     pub fn remove(&mut self, id: u64, cx: &mut Context<Self>) {
         kv::remove(&mut self.rows, id);
         self.inputs.remove(&id);
@@ -341,7 +347,7 @@ impl Render for KvEditor {
                     )
             }))
             .child(
-                div().child(
+                div().flex().child(
                     Button::new(SharedString::from(format!("{editor_id}-add")))
                         .ghost()
                         .xsmall()

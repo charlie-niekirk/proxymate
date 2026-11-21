@@ -188,6 +188,7 @@ impl ComposeWindow {
     /// A new draft in the open window (Compose again, or another Edit &
     /// Replay).
     pub fn start(&mut self, spec: Option<RequestSpec>, window: &mut Window, cx: &mut Context<Self>) {
+        window.set_window_title(if spec.is_some() { "Edit & Replay" } else { "Compose" });
         *self = ComposeWindow::new(spec, window, cx);
         cx.notify();
     }

@@ -17,12 +17,6 @@ use pm_widgets::flow_grid::row::method_colors;
 
 pub use body::{BodyChanged, BodyEditor};
 
-/// Registers the widgets' keys (the code editor's Escape) and the menus'
-/// actions, which the focused widget handles.
-pub fn register(cx: &mut App) {
-    pm_widgets::code_editor::init(cx);
-}
-
 /// A method pill in the table's colours.
 pub fn method_pill(method: &str, t: &Tokens) -> Pill {
     let (fg, bg) = method_colors(t, MethodTone::of(method));

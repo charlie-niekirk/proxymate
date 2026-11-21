@@ -216,6 +216,12 @@ impl HttpForm {
         cx.notify();
     }
 
+    /// Types the Respond… form's status (the dev remote, tests).
+    pub fn set_answer_status(&mut self, status: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.answer_status
+            .update(cx, |s, cx| s.set_value(status.to_owned(), window, cx));
+    }
+
     /// The form as a draft.
     pub fn draft(&self, cx: &App) -> HttpDraft {
         let headers = self.headers.read(cx);

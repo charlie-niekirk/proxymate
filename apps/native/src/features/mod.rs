@@ -34,7 +34,6 @@ pub fn register(cx: &mut App) {
     inspector::register(cx);
     navigate::register(cx);
     rules::register(cx);
-    editing::register(cx);
     breakpoints::register(cx);
     compose::register(cx);
     replay::register(cx);

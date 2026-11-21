@@ -71,6 +71,28 @@
 //!   `{"rulesClick": "<element id>"}`, `{"rulesDrag": ["rule-row-<id>", "rule-row-<id>" | "group-header-<id>"]}`,
 //!   `{"rulesSelect": "<id>"}`, `{"rulesRename": "<name>"}` (the group being renamed)
 //!   and `{"rulesScreenshot": "/abs/x.png"}`.
+//! - Editing (G8, `dev/editing.rs`): `{"breakpoints": true | false}` opens
+//!   or closes the Breakpoint Editor, `{"breakpoint": true}` answers with
+//!   its state (the queue with countdowns, the shown flow, the edits its
+//!   form would send, its error), `{"breakpointSelect": <id>}`,
+//!   `{"breakpointEdit": {"method", "url", "status", "headers": [[n, v], …]
+//!   (sets or adds by name), "removeHeaders": [n, …], "body", "bodyMode": "text" | "tree", "messageMode": "text" | "tree" |
+//!   "hex", "payload", "respond": true, "answer": {"status", "headers",
+//!   "body"}}}`, `{"breakpointKeys": "down enter"}` and `{"breakpointType":
+//!   "42"}` (keys into the shown JSON tree, then text into its inline edit,
+//!   committed), `{"breakpointAction": {"execute": {…MessageEdits} | true}}`
+//!   (Execute or Send, the edits merged over the form's, as in the Tauri
+//!   remote), `{"breakpointAction": {"abort": true}}` (Abort or Drop),
+//!   `{"breakpointAction": {"respond": true}}` (Send response),
+//!   `{"breakpointMenu": <id>, "run": "<label>"}` and
+//!   `{"breakpointScreenshot": "/abs/x.png"}`. `{"replay": 3}`,
+//!   `{"editReplay": 3}` and `{"replaySelection": true}` act on flows of the
+//!   tab shown; `{"compose": {"method", "url", "headers", "body"} | null}`
+//!   opens Compose with that request (null: a new one), `{"composeEdit":
+//!   {"contentType": "application/json" | null, "applyRules": false,
+//!   "method": "PUT", "replaceBinary": true}}`, `{"composeSend": true}`
+//!   (answers with the sent flow, now selected) and `{"composeScreenshot":
+//!   "/abs/x.png"}`; Compose verbs answer with its draft.
 //!
 //! Every phase adds the verbs its surfaces need (see `docs/PLAN.md`).
 
@@ -85,6 +107,7 @@ use serde_json::{Value, json};
 
 use crate::prefs::Appearance;
 
+mod editing;
 mod rules;
 pub mod zoo;
 
@@ -208,6 +231,9 @@ async fn run(command: Value, cx: &mut AsyncApp) -> Value {
             Err(err) => json!({ "error": err.to_string() }),
         };
     }
+    if let Some(answer) = editing::command(&command, cx).await {
+        return answer;
+    }
     if let Some(answer) = rules::command(&command, cx).await {
         return answer;
     }
@@ -238,7 +264,7 @@ async fn run(command: Value, cx: &mut AsyncApp) -> Value {
         let offscreen = command.get("offscreen").and_then(Value::as_bool).unwrap_or(false);
         return screenshot(window, PathBuf::from(path), offscreen, cx).await;
     }
-    json!({"error": "unknown command: try theme, screenshot, click, select, selectIds, selectAll, scrollTo, headerColumns, filter, search, protocol, content, scope, keys, palette, command, store, openDocument, closeDocument, saveSession, exportHar, recording, clear, contextMenu, sidebarFilter, workspace, autoSelect, table, requestTab, responseTab, focus, curl, inspector, streamSelect, streamDirection, streamSearch, streamViewer, wsOriginal, wsCompose, wsComposeSend, stream, wsSend, wsClose, rules, openRule, newRule, preset, ruleEdit, saveRule, testRule, deleteRule, throttle, noCache, noCookies, breakpointTimeout, rulesMenu, rulesClick, rulesDrag, rulesSelect, rulesRename, rulesScreenshot, viewer, loadAll, highlightAnyway or body"})
+    json!({"error": "unknown command: try theme, screenshot, click, select, selectIds, selectAll, scrollTo, headerColumns, filter, search, protocol, content, scope, keys, palette, command, store, openDocument, closeDocument, saveSession, exportHar, recording, clear, contextMenu, sidebarFilter, workspace, autoSelect, table, requestTab, responseTab, focus, curl, inspector, streamSelect, streamDirection, streamSearch, streamViewer, wsOriginal, wsCompose, wsComposeSend, stream, wsSend, wsClose, rules, openRule, newRule, preset, ruleEdit, saveRule, testRule, deleteRule, throttle, noCache, noCookies, breakpointTimeout, rulesMenu, rulesClick, rulesDrag, rulesSelect, rulesRename, rulesScreenshot, viewer, loadAll, highlightAnyway, body, breakpoints, breakpoint, breakpointSelect, breakpointEdit, breakpointKeys, breakpointType, breakpointAction, breakpointMenu, breakpointScreenshot, replay, editReplay, replaySelection, compose, composeEdit, composeSend or composeScreenshot"})
 }
 
 pub(crate) async fn screenshot(window: AnyWindowHandle, path: PathBuf, offscreen: bool, cx: &mut AsyncApp) -> Value {
