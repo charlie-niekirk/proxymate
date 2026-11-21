@@ -319,6 +319,7 @@ impl Render for CodeEditor {
                     if e.button != MouseButton::Right {
                         return;
                     }
+                    cx.stop_propagation();
                     let request = MenuRequest {
                         selection: this.selected_text(cx),
                         text: this.text.clone(),

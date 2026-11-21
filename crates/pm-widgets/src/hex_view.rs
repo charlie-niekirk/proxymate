@@ -187,7 +187,10 @@ impl Render for HexView {
             .text_color(t.foreground.hsla())
             .on_mouse_down(
                 MouseButton::Right,
-                cx.listener(|this, e: &MouseDownEvent, window, cx| this.menu(None, None, e, window, cx)),
+                cx.listener(|this, e: &MouseDownEvent, window, cx| {
+                    cx.stop_propagation();
+                    this.menu(None, None, e, window, cx)
+                }),
             )
             .child(
                 div()

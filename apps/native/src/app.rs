@@ -31,6 +31,8 @@ pub fn run(data_dir: Option<PathBuf>, lock: Option<Lock>) {
             crate::shell::open_main_window(cx);
             #[cfg(feature = "dev-harness")]
             crate::dev::init(cx);
+            #[cfg(feature = "dev-harness")]
+            crate::dev::zoo::start(cx);
             crate::perf_probe::init(cx);
             crate::updater::init(cx);
             cx.activate(true);

@@ -452,7 +452,10 @@ impl Render for JsonTree {
             .on_action(cx.listener(|this, _: &CollapseAll, _, cx| this.collapse_all(cx)))
             .on_mouse_down(
                 MouseButton::Right,
-                cx.listener(|this, e: &MouseDownEvent, window, cx| this.menu(None, e, window, cx)),
+                cx.listener(|this, e: &MouseDownEvent, window, cx| {
+                    cx.stop_propagation();
+                    this.menu(None, e, window, cx)
+                }),
             )
             .child(
                 div()

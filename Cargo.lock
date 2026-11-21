@@ -8061,6 +8061,7 @@ dependencies = [
  "pm-mcp",
  "pm-model",
  "pm-platform",
+ "pm-testkit",
  "pm-theme",
  "pm-view",
  "pm-widgets",

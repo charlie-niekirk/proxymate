@@ -1,16 +1,15 @@
 //! The Request and Response panes (`RequestPane`, `ResponsePane`) and
 //! their tabs: Header (with trailers), Query, Raw, TLS (`TlsView.tsx`),
-//! Timing (`TimingView.tsx`), and the Body tabs' place for G4.
+//! Timing (`TimingView.tsx`), and the Body tabs (G4's `body::BodyPane`).
 
 use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui_kit::base::TestSupportExt as _;
-use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::Sizable as _;
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, Context, FontWeight, MouseButton, MouseDownEvent, Role, SharedString, Window, div, px};
+use gpui_kit::{AnyElement, App, Context, FontWeight, MouseButton, MouseDownEvent, Role, SharedString, Window, div, px};
 use pm_model::{BodyPart, FlowDetail, FlowState, FlowSummary, TlsStatus};
 use pm_theme::Tokens;
 use pm_view::flow::{format_duration, format_ms};
@@ -23,6 +22,7 @@ use super::raw::address;
 use super::{Inspector, RequestTab, ResponseTab, Rows, menus, parts, shared_rows};
 use crate::bridge::keys::{BodyKey, FlowKey, Inspected};
 use crate::bridge::resource::Load;
+use crate::features::body;
 use crate::features::context_menu::selected_text;
 
 /// A table of the inspected flow by id: its rows, kind and side.
@@ -195,7 +195,10 @@ impl Inspector {
                         )
                     }
                 }
-                RequestTab::Body => body_tab(BodyPart::Request, t),
+                RequestTab::Body => {
+                    let finished = insp.flow.state != FlowState::Active || detail.request_body.complete;
+                    self.body_tab(key, insp, BodyPart::Request, finished, cx)
+                }
                 RequestTab::Raw => {
                     let finished = insp.flow.state != FlowState::Active || detail.request_body.complete;
                     self.raw_tab(key, insp, BodyPart::Request, finished, t, cx)
@@ -295,7 +298,10 @@ impl Inspector {
             },
             ResponseTab::Body => match &detail.response {
                 None => no_response(),
-                Some(_) => body_tab(BodyPart::Response, t),
+                Some(response) => {
+                    let finished = flow.state != FlowState::Active || response.status == 101;
+                    self.body_tab(key, insp, BodyPart::Response, finished, cx)
+                }
             },
             ResponseTab::Raw => match &detail.response {
                 None => no_response(),
@@ -350,6 +356,7 @@ impl Inspector {
         let doc = self.raw.update(
             part,
             source,
+            info.kind,
             move || {
                 let body_text = match rule {
                     RawBody::None => None,
@@ -361,12 +368,9 @@ impl Inspector {
             },
             cx,
         );
-        let id = match part {
-            BodyPart::Request => "raw-request",
-            BodyPart::Response => "raw-response",
-        };
-        let menu_doc = (doc.start_line.clone(), doc.headers.clone(), doc.text.clone());
-        let mono = cx.theme().mono_font_family.clone();
+        let terms = body_terms(part, cx);
+        let raw_view = doc.view.clone();
+        raw_view.update(cx, |v, cx| v.set_terms(terms, cx));
         div()
             .flex_1()
             .min_h_0()
@@ -383,29 +387,49 @@ impl Inspector {
                     .text_color(t.muted_foreground.hsla())
                     .child("Rebuilt from the parsed message, not the exact bytes on the wire"),
             )
-            .child(
-                div()
-                    .id(id)
-                    .role(Role::Document)
-                    .aria_label(match part {
-                        BodyPart::Request => "Raw request",
-                        BodyPart::Response => "Raw response",
-                    })
-                    .flex_1()
-                    .min_h_0()
-                    .py(px(4.))
-                    .font_family(mono)
-                    .text_size(px(12.))
-                    .on_mouse_down(MouseButton::Right, move |e: &MouseDownEvent, window, cx| {
-                        let selected = selected_text(window, cx);
-                        let (line, headers, text) = &menu_doc;
-                        menus::raw(part, line, headers, text, selected).show(e.position, window, cx);
-                    })
-                    .child(doc.element(id))
-                    .test_support(),
-            )
+            .child(div().flex_1().min_h_0().child(raw_view))
             .into_any_element()
     }
+
+    /// The Body tab: G4's viewers over the message's body.
+    fn body_tab(
+        &mut self,
+        key: FlowKey,
+        insp: &Arc<Inspected>,
+        part: BodyPart,
+        finished: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(detail) = insp.detail.as_ref() else {
+            return div().into_any_element();
+        };
+        let (info, headers) = match part {
+            BodyPart::Request => (detail.request_body.clone(), detail.request.headers.clone()),
+            BodyPart::Response => (
+                detail.response_body.clone(),
+                detail.response.as_ref().map(|r| r.headers.clone()).unwrap_or_default(),
+            ),
+        };
+        let input = body::BodyInput {
+            key,
+            part,
+            info,
+            finished,
+            headers,
+            url: detail.request.url.clone(),
+            terms: body_terms(part, cx),
+        };
+        let pane = self.body_pane(part).clone();
+        pane.update(cx, |p, cx| p.set_input(input, cx));
+        div().flex_1().min_h_0().child(pane).into_any_element()
+    }
+}
+
+/// The filter's body terms for one side (M17's body search).
+fn body_terms(part: BodyPart, cx: &App) -> Vec<String> {
+    crate::workspace::Workspace::global(cx)
+        .map(|w| pm_view::dsl::body_search_terms(&w.read(cx).filter.text, part))
+        .unwrap_or_default()
 }
 
 /// A pane: its tab strip, any banners, then the tab.
@@ -423,12 +447,6 @@ fn pane(header: impl IntoElement, banners: Vec<AnyElement>, content: AnyElement,
 
 fn no_detail(t: &Tokens) -> AnyElement {
     placeholder("Synthetic flow: no recorded messages", t)
-}
-
-/// The Body tab's place: G4 builds the body viewers.
-fn body_tab(part: BodyPart, t: &Tokens) -> AnyElement {
-    let _ = part;
-    placeholder("The body viewers arrive in G4.", t)
 }
 
 /// The TLS tab: how both legs were negotiated, and the upstream's chain.

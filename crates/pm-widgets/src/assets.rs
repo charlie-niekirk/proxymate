@@ -49,6 +49,11 @@ gpui_kit::assets::icon_assets!(
         Copy,
         // The inspector (G3).
         TriangleAlert,
+        // The body viewers (G4).
+        ChevronUp,
+        TextWrap,
+        WandSparkles,
+        Download,
     ]
 );
 

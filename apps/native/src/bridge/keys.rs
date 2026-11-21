@@ -34,6 +34,26 @@ pub struct BodyKey {
     pub part: BodyPart,
 }
 
+/// One body as the Body tab reads it: decoded, and only the first `max`
+/// bytes until "Load all".
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct DecodedKey {
+    pub flow: FlowKey,
+    pub part: BodyPart,
+    pub max: Option<u64>,
+}
+
+/// A decoded body (`useBody`): its bytes, the encoding undone, or why it
+/// couldn't be (the raw bytes are shown then).
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct DecodedBody {
+    pub bytes: Arc<Vec<u8>>,
+    pub decoded_from: Option<String>,
+    pub decode_error: Option<String>,
+    /// Only the first `max` bytes were read and there are more.
+    pub cut: bool,
+}
+
 /// What the inspector shows of a flow: its summary and, unless it is
 /// synthetic, its detail.
 #[derive(Clone, Debug, PartialEq)]
@@ -50,12 +70,16 @@ pub type OperationCache = Resource<FlowKey, Option<OperationMatch>>;
 /// `bodyKey`: a body's captured bytes (the Raw tab). Not refetched when a
 /// live flow changes: the Raw tab reads a body only once it is finished.
 pub type BodyCache = Resource<BodyKey, Arc<Vec<u8>>>;
+/// `bodyKey` with `decoded`: the Body tab's bodies (G4). Read once a body
+/// is finished, so not refetched as a live flow changes.
+pub type DecodedCache = Resource<DecodedKey, Arc<DecodedBody>>;
 
 #[derive(Clone)]
 pub struct Caches {
     pub inspected: Entity<InspectedCache>,
     pub operation: Entity<OperationCache>,
     pub body: Entity<BodyCache>,
+    pub decoded: Entity<DecodedCache>,
 }
 
 impl Global for Caches {}
@@ -78,6 +102,30 @@ pub fn caches(cx: &mut App) -> Caches {
     let operation: Option<Fetcher<FlowKey, Option<OperationMatch>>> = engine.clone().map(|engine| {
         Arc::new(move |k: &FlowKey| engine.flow_operation_in(k.store, k.id).map_err(|e| e.to_string())) as Fetcher<_, _>
     });
+    let decoded: Option<Fetcher<DecodedKey, Arc<DecodedBody>>> = engine.clone().map(|engine| {
+        Arc::new(move |k: &DecodedKey| {
+            let max = k.max.map(|m| usize::try_from(m).unwrap_or(usize::MAX));
+            let (store, id) = (k.flow.store, k.flow.id);
+            match engine.body_head_in(store, id, k.part, true, max) {
+                Ok(b) => Ok(Arc::new(DecodedBody {
+                    bytes: Arc::new(b.bytes),
+                    decoded_from: b.decoded_from,
+                    decode_error: None,
+                    cut: b.cut,
+                })),
+                // It didn't decode: the raw bytes, with why.
+                Err(err) => {
+                    let raw = engine.body_head_in(store, id, k.part, false, max).map_err(|e| e.to_string())?;
+                    Ok(Arc::new(DecodedBody {
+                        bytes: Arc::new(raw.bytes),
+                        decoded_from: None,
+                        decode_error: Some(err.to_string()),
+                        cut: raw.cut,
+                    }))
+                }
+            }
+        }) as Fetcher<_, _>
+    });
     let body: Option<Fetcher<BodyKey, Arc<Vec<u8>>>> = engine.map(|engine| {
         Arc::new(move |k: &BodyKey| {
             engine
@@ -90,6 +138,7 @@ pub fn caches(cx: &mut App) -> Caches {
         inspected: cx.new(|_| Resource::new(inspected)),
         operation: cx.new(|_| Resource::new(operation)),
         body: cx.new(|_| Resource::new(body)),
+        decoded: cx.new(|_| Resource::new(decoded)),
     };
     cx.set_global(caches.clone());
     caches
@@ -116,6 +165,9 @@ pub fn flows_changed(store: StoreId, delta: &ViewDelta, cx: &mut App) {
     if everything {
         caches
             .body
+            .update(cx, |c, cx| c.invalidate(|k, _| k.flow.store == store, cx));
+        caches
+            .decoded
             .update(cx, |c, cx| c.invalidate(|k, _| k.flow.store == store, cx));
         caches
             .operation

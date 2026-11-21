@@ -217,6 +217,8 @@ pub struct Inspector {
     /// The Request pane's share of the width.
     split: f32,
     raw: raw::RawDocs,
+    request_body: Entity<crate::features::body::BodyPane>,
+    response_body: Entity<crate::features::body::BodyPane>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -247,8 +249,23 @@ impl Inspector {
             response_tab,
             split: 0.5,
             raw: raw::RawDocs::default(),
+            request_body: cx.new(|cx| crate::features::body::BodyPane::new(BodyPart::Request, cx)),
+            response_body: cx.new(|cx| crate::features::body::BodyPane::new(BodyPart::Response, cx)),
             _subscriptions: subscriptions,
         }
+    }
+
+    /// The Body tab of one side (tests, the dev remote).
+    pub fn body_pane(&self, part: BodyPart) -> &Entity<crate::features::body::BodyPane> {
+        match part {
+            BodyPart::Request => &self.request_body,
+            BodyPart::Response => &self.response_body,
+        }
+    }
+
+    /// The Raw tab's view of one side, once shown.
+    pub fn raw_view(&self, part: BodyPart) -> Option<&Entity<pm_widgets::code_view::CodeView>> {
+        self.raw.get(part).map(|d| &d.view)
     }
 
     pub fn request_tab(&self) -> RequestTab {
@@ -326,7 +343,13 @@ impl Inspector {
                     _ => return None,
                 };
                 let doc = self.raw.get(part)?;
-                Some(menus::raw(part, &doc.start_line, &doc.headers, &doc.text, selected))
+                Some(crate::features::body::menus::raw(
+                    part,
+                    &doc.start_line,
+                    &doc.headers,
+                    doc.text.clone(),
+                    selected,
+                ))
             }
             _ => None,
         }

@@ -29,7 +29,7 @@ harness = false
 [features]
 # The dev remote (PROXYMATE_DEV_REMOTE=1) and window captures. It turns on
 # gpui-kit's test support for element lookup (`click`) and offscreen frames.
-dev-harness = ["gpui-kit/test-support"]
+dev-harness = ["gpui-kit/test-support", "dep:pm-testkit"]
 # The G0 spike harness (`examples/spike_bench.rs`), with the tree-sitter
 # grammars the body viewers will use (G4).
 spikes = ["gpui-kit/test-support", "gpui-kit/tree-sitter-languages"]
@@ -52,6 +52,8 @@ pm-core.workspace = true
 pm-mcp.workspace = true
 pm-model.workspace = true
 pm-platform.workspace = true
+# `PROXYMATE_DEV_ZOO` (G4): the zoo upstream and its fixtures.
+pm-testkit = { workspace = true, optional = true }
 pm-theme = { workspace = true, features = ["kit"] }
 pm-view.workspace = true
 pm-widgets.workspace = true
@@ -72,6 +74,8 @@ thiserror.workspace = true
 
 [dev-dependencies]
 gpui-kit = { workspace = true, features = ["test-support"] }
+# The body-viewer zoo's fixtures for the render snapshots (G4).
+pm-testkit.workspace = true
 # Signs test updates in the release's format (`cargo xtask bundle-macos`).
 minisign = "0.10"
 # The type of gpui's captures (already in its tree).

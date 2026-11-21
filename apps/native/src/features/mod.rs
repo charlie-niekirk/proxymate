@@ -6,6 +6,7 @@
 
 use gpui_kit::App;
 
+pub mod body;
 pub mod capture;
 pub mod chrome;
 pub mod clipboard;
@@ -20,6 +21,7 @@ pub mod navigate;
 pub fn register(cx: &mut App) {
     clipboard::register(cx);
     commands::register(cx);
+    body::register(cx);
     capture::register(cx);
     chrome::register(cx);
     documents::register(cx);

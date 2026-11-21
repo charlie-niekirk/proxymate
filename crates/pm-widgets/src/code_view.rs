@@ -270,6 +270,10 @@ impl CodeView {
         self
     }
 
+    pub fn set_on_menu(&mut self, f: impl Fn(MenuRequest, &mut Window, &mut App) + 'static) {
+        self.on_menu = Some(Rc::new(f));
+    }
+
     pub fn text(&self) -> &SharedString {
         &self.text
     }
@@ -639,7 +643,7 @@ impl CodeView {
                         Button::new("find-close")
                             .ghost()
                             .xsmall()
-                            .icon(gpui_kit::assets::IconName::Close)
+                            .icon(gpui_kit::assets::IconName::X)
                             .tooltip("Close · Esc")
                             .on_click(cx.listener(|this, _, window, cx| this.close_find(window, cx))),
                     )
@@ -785,6 +789,7 @@ impl Render for CodeView {
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |this, e: &MouseDownEvent, window, cx| {
+                    cx.stop_propagation();
                     if !focus.contains_focused(window, cx) {
                         window.focus(&focus, cx);
                     }

@@ -59,6 +59,13 @@ pub const MAC: bool = cfg!(target_os = "macos");
 /// of the line there, not every flow.
 const TEXT_FIELDS_KEEP: [&str; 1] = ["clear"];
 
+/// Commands whose key the body viewers keep (G4): ⌘F searches the body in
+/// a CodeView or code editor, not the flows.
+const CODE_VIEWS_KEEP: [&str; 1] = ["search"];
+/// Where [`CODE_VIEWS_KEEP`] keys step aside: a focused CodeView (or its
+/// find bar) and the code editor's input.
+const CODE_VIEWS: &str = "!CodeView && !CodeViewFind && !(Input && mode == editor)";
+
 pub fn register(cx: &mut App) {
     cx.default_global::<Registry>();
     cx.on_action(|a: &RunCommand, cx| {
@@ -116,11 +123,21 @@ pub fn bind_keys(cx: &mut App) {
     }
     registry.bound = true;
     let ids: Vec<String> = registry.handlers.keys().cloned().collect();
-    // Keystroke → whether text fields keep it.
-    let mut strokes: Vec<(String, bool)> = list::all()
+    // Keystroke → the context it yields to text fields or code views in.
+    let mut strokes: Vec<(String, Option<&'static str>)> = list::all()
         .into_iter()
         .filter(|c| ids.iter().any(|id| *id == c.id) && !c.bare && !c.in_table)
-        .filter_map(|c| Some((c.keystroke(MAC)?, TEXT_FIELDS_KEEP.contains(&c.id.as_ref()))))
+        .filter_map(|c| {
+            let id = c.id.as_ref();
+            let context = if TEXT_FIELDS_KEEP.contains(&id) {
+                Some("!Input")
+            } else if CODE_VIEWS_KEEP.contains(&id) {
+                Some(CODE_VIEWS)
+            } else {
+                None
+            };
+            Some((c.keystroke(MAC)?, context))
+        })
         .collect();
     strokes.sort();
     strokes.dedup_by(|a, b| a.0 == b.0);
@@ -130,13 +147,13 @@ pub fn bind_keys(cx: &mut App) {
     let mut bindings = vec![KeyBinding::new(leak(format!("{primary}-k")), TogglePalette, None)];
     // A binding with no context ranks as deep as the focus, so it would
     // beat a text field's own; `!Input` steps aside for them.
-    bindings.extend(strokes.into_iter().map(|(stroke, text_keeps)| {
+    bindings.extend(strokes.into_iter().map(|(stroke, context)| {
         KeyBinding::new(
             leak(stroke.clone()),
             RunShortcut {
                 keystroke: stroke.into(),
             },
-            text_keeps.then_some("!Input"),
+            context,
         )
     }));
     cx.bind_keys(bindings);
