@@ -356,6 +356,13 @@ impl MainWindow {
         &self.inspector
     }
 
+    /// The table's share of the height over the inspector (as a drag of
+    /// the handle sets it; offscreen renders of the stream panels).
+    pub fn set_table_share(&mut self, share: f32, cx: &mut Context<Self>) {
+        self.table_share = share.clamp(0.1, 0.9);
+        cx.notify();
+    }
+
     /// A split's handle: drag to resize, double-click for the default.
     fn handle(&self, split: Split, t: &Tokens, cx: &mut Context<Self>) -> impl IntoElement {
         let (id, label, orientation) = match split {

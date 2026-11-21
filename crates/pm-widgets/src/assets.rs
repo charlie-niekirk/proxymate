@@ -62,6 +62,10 @@ gpui_kit::assets::icon_assets!(
         Save,
         CaseSensitive,
         Check,
+        // The stream panels (G6).
+        Send,
+        Unplug,
+        RotateCcw,
     ]
 );
 

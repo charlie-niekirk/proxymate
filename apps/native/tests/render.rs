@@ -2,8 +2,10 @@
 //! toolbar, sidebar, document tabs, filter bar, footer; the ⌘K palette)
 //! and the inspector (G3: a decrypted flow with notes, an OpenAPI line and
 //! rule badges on its TLS tab; a failed flow with its banner on Timing),
-//! and the Rules window (G7: groups, origin badges, a rule with every kind
-//! of action form and a dry run), rendered by gpui's real
+//! the stream panels (G6: a WebSocket's messages, badges, composer and an
+//! edited message; an event stream's events and fields), and the Rules
+//! window (G7: groups, origin badges, a rule with every kind of action
+//! form and a dry run), rendered by gpui's real
 //! offscreen renderer (Metal on macOS, WGPU on Linux; CI uses Mesa's
 //! lavapipe) in both themes, from injected snapshots: no engine, no proxy.
 //! The pane and row pixels must be their tokens, and each capture is
@@ -343,6 +345,7 @@ mod render {
         }
 
         inspector_renders(&mut cx, handle.into(), scale, mode, top, content);
+        stream_renders(&mut cx, handle.into(), scale, mode);
 
         // The ⌘K palette over the shell, with the commands G2 registers.
         cx.update_window(handle.into(), |_, window, cx| {
@@ -503,6 +506,186 @@ mod render {
             over(t.s_5xx_bg, t.background),
             "the failure banner",
         );
+    }
+
+    /// Where element `id` was drawn.
+    fn bounds_of(
+        cx: &mut HeadlessAppContext,
+        handle: gpui_kit::AnyWindowHandle,
+        id: &'static str,
+    ) -> (f32, f32, f32, f32) {
+        cx.update_window(handle, |_, window, _| {
+            let b = window.find(id).bounds();
+            (
+                f32::from(b.origin.x),
+                f32::from(b.origin.y),
+                f32::from(b.size.width),
+                f32::from(b.size.height),
+            )
+        })
+        .unwrap()
+    }
+
+    /// The stream panels (G6), with the table shrunk so the inspector has
+    /// room: an open WebSocket with its flags, the selected edited message
+    /// and the composer; then an event stream with an event's fields.
+    fn stream_renders(cx: &mut HeadlessAppContext, handle: gpui_kit::AnyWindowHandle, scale: f32, mode: Mode) {
+        use proxymate_native::bridge::keys::{PageKey, SseListKey, WsListKey, WsPayloadKey};
+        use proxymate_native::features::inspector::streams::StreamPanel;
+
+        let t = mode.tokens();
+        let name = if mode.is_dark() { "dark" } else { "light" };
+        let main = cx.update(|cx| {
+            shell::parts(cx)
+                .and_then(|p| p.main.upgrade())
+                .expect("the main window")
+        });
+        cx.update(|cx| main.update(cx, |m, cx| m.set_table_share(0.2, cx)));
+        let panel = |cx: &mut HeadlessAppContext| -> gpui_kit::Entity<StreamPanel> {
+            cx.update(|cx| {
+                let inspector = shell::parts(cx)
+                    .and_then(|p| p.inspector.upgrade())
+                    .expect("the inspector");
+                inspector.read(cx).stream_panel(cx).expect("a stream panel")
+            })
+        };
+
+        // A WebSocket: every kind of message, open, message 4 (edited) selected.
+        let messages = sample::ws_messages();
+        cx.update(|cx| {
+            let caches = keys::caches(cx);
+            let flow = FlowKey::new(0, 6);
+            let list = WsListKey {
+                flow,
+                direction: None,
+                text: String::new(),
+            };
+            caches.ws_head.update(cx, |c, cx| {
+                c.set(list.clone(), Arc::new(sample::ws_page(&messages, true)), cx)
+            });
+            let page = PageKey {
+                list,
+                page: 0,
+                dropped: 0,
+            };
+            caches
+                .ws_rows
+                .update(cx, |c, cx| c.set(page, Arc::new(messages.clone()), cx));
+            let payload = WsPayloadKey {
+                flow,
+                index: 4,
+                original: false,
+            };
+            caches.ws_payload.update(cx, |c, cx| {
+                c.set(payload, Some(Arc::new(br#"{"price":999}"#.to_vec())), cx)
+            });
+        });
+        inspect(
+            cx,
+            sample::ws_summary(),
+            sample::ws_detail(),
+            (RequestTab::Header, ResponseTab::Header),
+            None,
+        );
+        let ws = panel(cx);
+        cx.update(|cx| ws.update(cx, |p, cx| p.select_index(4, cx)));
+        cx.run_until_parked();
+        let image = capture(cx, handle, format!("websocket-{name}.png"));
+        let (x, y, w, h) = bounds_of(cx, handle, "stream-toolbar");
+        assert_pixel(
+            &image,
+            scale,
+            (x + w * 0.45, y + h / 2.),
+            t.pane_toolbar,
+            "the stream toolbar",
+        );
+        // The list follows its end; the badges say where rows 3 and 4 are.
+        let (x, _, _, _) = bounds_of(cx, handle, "stream-list");
+        let (_, ey, _, eh) = bounds_of(cx, handle, "ws-flag-12");
+        assert_pixel(
+            &image,
+            scale,
+            (x + 3., ey + eh / 2.),
+            over(t.selection_bg, t.pane_table),
+            "the selected message",
+        );
+        let (_, _, w, _) = bounds_of(cx, handle, "stream-list");
+        assert_pixel(
+            &image,
+            scale,
+            (x + w - 4., ey + eh / 2.),
+            over(t.selection_bg, t.pane_table),
+            "the selection's full width",
+        );
+        let (fx, fy, _, fh) = bounds_of(cx, handle, "ws-flag-9");
+        assert_pixel(
+            &image,
+            scale,
+            (fx + 1., fy + fh / 2.),
+            over(t.diff_add_bg, over(t.pane_row_alt, t.pane_table)),
+            "the Injected badge",
+        );
+        let (x, y, w, _) = bounds_of(cx, handle, "ws-composer");
+        assert_pixel(&image, scale, (x + w * 0.6, y + 3.), t.pane_toolbar, "the composer");
+        let (x, y, w, _) = bounds_of(cx, handle, "ws-edited-bar");
+        assert_pixel(
+            &image,
+            scale,
+            (x + w * 0.5, y + 2.),
+            t.background,
+            "the edited message's bar",
+        );
+
+        // An event stream, event 1 selected.
+        let events = sample::sse_events();
+        cx.update(|cx| {
+            let caches = keys::caches(cx);
+            let list = SseListKey {
+                flow: FlowKey::new(0, 7),
+                text: String::new(),
+            };
+            caches.sse_head.update(cx, |c, cx| {
+                c.set(list.clone(), Arc::new(sample::sse_page(&events, true)), cx)
+            });
+            let page = PageKey {
+                list,
+                page: 0,
+                dropped: 0,
+            };
+            caches
+                .sse_rows
+                .update(cx, |c, cx| c.set(page, Arc::new(events.clone()), cx));
+        });
+        inspect(
+            cx,
+            sample::sse_summary(),
+            sample::sse_detail(),
+            (RequestTab::Header, ResponseTab::Header),
+            None,
+        );
+        let sse = panel(cx);
+        cx.update(|cx| sse.update(cx, |p, cx| p.select_index(1, cx)));
+        cx.run_until_parked();
+        let image = capture(cx, handle, format!("sse-{name}.png"));
+        let (x, y, w, h) = bounds_of(cx, handle, "stream-toolbar");
+        assert_pixel(
+            &image,
+            scale,
+            (x + w * 0.45, y + h / 2.),
+            t.pane_toolbar,
+            "the SSE toolbar",
+        );
+        let (x, y, _, _) = bounds_of(cx, handle, "stream-list");
+        assert_pixel(
+            &image,
+            scale,
+            (x + 3., y + 22. + 22. + 11.),
+            over(t.selection_bg, t.pane_table),
+            "the selected event",
+        );
+        assert_pixel(&image, scale, (x + 3., y + 22. + 11.), t.pane_table, "event 0");
+        cx.update(|cx| main.update(cx, |m, cx| m.set_table_share(shell::TABLE_SHARE, cx)));
+        cx.run_until_parked();
     }
 
     /// The palette's panel is drawn in the popover colour, centred under
@@ -723,7 +906,7 @@ mod render {
             println!("passed rules_renders ({mode:?})");
         }
         println!(
-            "render: 4 passed (real offscreen renderer; shell, inspector, palette and Rules window in each theme)"
+            "render: 4 passed (real offscreen renderer; shell, inspector, stream panels, palette and Rules window in each theme)"
         );
     }
 }
