@@ -5,7 +5,8 @@
 //! the stream panels (G6: a WebSocket's messages, badges, composer and an
 //! edited message; an event stream's events and fields), the Rules
 //! window (G7: groups, origin badges, a rule with every kind of action
-//! form and a dry run), and the Body tab with every text-family zoo
+//! form and a dry run), the Settings window (G12: each of its eleven
+//! pages from sample settings), and the Body tab with every text-family zoo
 //! fixture (G4: JSON, JSON Tree, the 10 MB JSON in the CodeView, XML,
 //! HTML, JS and CSS beautified, text, form, multipart, GraphQL, hex),
 //! rendered by gpui's real
@@ -899,6 +900,99 @@ mod render {
         );
     }
 
+    /// The Settings window (G12): every page, from the sample settings.
+    /// Each page's background, the page list's tint and its current row
+    /// must be their tokens.
+    fn settings_renders(mode: Mode) -> usize {
+        use proxymate_native::features::settings::sample;
+        use proxymate_native::features::settings::window::{DEFAULT_SIZE, NAV_WIDTH, SettingsWindow};
+
+        let mut cx = context();
+        cx.update(|cx| {
+            use proxymate_native::prefs::{self, Appearance};
+            prefs::update(cx, |p| {
+                p.appearance = if mode.is_dark() {
+                    Appearance::Dark
+                } else {
+                    Appearance::Light
+                }
+            });
+            pm_theme::kit::apply(mode, cx);
+            let ws = cx.new(|cx| Workspace::new(None, ProxyStatus::default(), cx));
+            Workspace::set_global(ws, cx);
+            sample::seed(cx);
+        });
+        let handle = cx
+            .update(|cx| {
+                let options = WindowOptions {
+                    window_bounds: Some(WindowBounds::Windowed(gpui_kit::Bounds {
+                        origin: point(px(0.), px(0.)),
+                        size: size(px(DEFAULT_SIZE.0), px(DEFAULT_SIZE.1)),
+                    })),
+                    focus: false,
+                    show: false,
+                    ..Default::default()
+                };
+                cx.open_window(options, |window, cx| {
+                    let view = cx.new(|cx| SettingsWindow::new("proxy", window, cx));
+                    SettingsWindow::register(window.window_handle(), &view, cx);
+                    cx.new(|cx| gpui_kit::base::Root::new(view, window, cx))
+                })
+            })
+            .expect("open the Settings window");
+        cx.run_until_parked();
+        let view = cx
+            .update_window(handle.into(), |root, _, cx| {
+                let root = root.downcast::<gpui_kit::base::Root>().unwrap();
+                root.read(cx).view().clone().downcast::<SettingsWindow>().unwrap()
+            })
+            .unwrap();
+        let t = mode.tokens();
+        let name = if mode.is_dark() { "dark" } else { "light" };
+        let nav = over(
+            Rgba {
+                a: t.muted.a * 0.3,
+                ..t.muted
+            },
+            t.background,
+        );
+        let mut pages = 0;
+        for (i, (page, _)) in pm_view::commands::SETTINGS_PAGES.iter().enumerate() {
+            cx.update_window(handle.into(), |_, window, cx| {
+                view.update(cx, |w, cx| w.go(page, window, cx));
+            })
+            .unwrap();
+            cx.run_until_parked();
+            let scale = cx
+                .update_window(handle.into(), |_, window, cx| {
+                    window.render_frame(cx);
+                    window.scale_factor()
+                })
+                .unwrap();
+            let image = capture(&mut cx, handle.into(), format!("settings-{page}-{name}.png"));
+            assert_pixel(
+                &image,
+                scale,
+                (DEFAULT_SIZE.0 - 6., DEFAULT_SIZE.1 - 6.),
+                t.background,
+                &format!("the {page} page"),
+            );
+            assert_pixel(&image, scale, (12., DEFAULT_SIZE.1 - 20.), nav, "the page list");
+            // The current page's row: the accent somewhere in its band.
+            let row = 8. + i as f32 * 30.;
+            let accent = (row as u32 + 4..row as u32 + 24).any(|y| {
+                (10..(NAV_WIDTH as u32 - 20)).any(|x| {
+                    let px = image.get_pixel((x as f32 * scale) as u32, (y as f32 * scale) as u32).0;
+                    let want = [t.accent.r, t.accent.g, t.accent.b].map(|c| (c * 255.0).round() as i32);
+                    (0..3).all(|c| (px[c] as i32 - want[c]).abs() <= 3)
+                })
+            });
+            assert!(accent, "{page}: its row in the page list is marked");
+            pages += 1;
+        }
+        pages
+    }
+
     pub fn run() {
         for mode in [Mode::Dark, Mode::Light] {
             println!("running shell_renders ({mode:?})");
@@ -907,6 +1001,9 @@ mod render {
             println!("running rules_renders ({mode:?})");
             rules_renders(mode);
             println!("passed rules_renders ({mode:?})");
+            println!("running settings_renders ({mode:?})");
+            let pages = settings_renders(mode);
+            println!("passed settings_renders ({mode:?}): {pages} pages");
         }
         let mut cases = 0;
         for mode in [Mode::Dark, Mode::Light] {
@@ -915,8 +1012,8 @@ mod render {
             println!("passed viewers_render ({mode:?})");
         }
         println!(
-            "render: 4 + {cases} passed (real offscreen renderer; shell, inspector, stream panels, palette \
-             and Rules window, and the zoo's text viewers, in each theme)"
+            "render: 6 + {cases} passed (real offscreen renderer; shell, inspector, stream panels, palette, \
+             Rules window, the Settings window's eleven pages, and the zoo's text viewers, in each theme)"
         );
     }
 

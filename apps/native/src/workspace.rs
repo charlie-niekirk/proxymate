@@ -426,6 +426,12 @@ impl Workspace {
         .detach();
     }
 
+    /// The SSL lists as the engine saved them (Settings › SSL Proxying).
+    pub fn set_ssl(&mut self, ssl: SslSettings, cx: &mut Context<Self>) {
+        self.ssl = ssl;
+        cx.notify();
+    }
+
     /// Stops decrypting `host`; its next CONNECTs are tunnelled.
     pub fn add_ssl_bypass(&mut self, host: String, cx: &mut Context<Self>) {
         self.change_ssl("Couldn't add the SSL bypass", move |e| e.add_ssl_bypass(&host), cx);

@@ -85,7 +85,9 @@ pub fn never_record(host: String, cx: &mut App) {
     run(
         "Can't change the recording lists",
         move |e| e.never_record(&host),
-        move |_, cx| {
+        move |saved, cx| {
+            let c = keys::settings_caches(cx);
+            c.recording.update(cx, |c, cx| c.set((), saved, cx));
             clipboard::success_with_action(
                 &format!("Not recording {shown}"),
                 "Its traffic is still proxied. Settings › Storage lists the hosts that aren't recorded.",
@@ -337,4 +339,489 @@ pub fn ws_close(flow: keys::FlowKey, cx: &mut App) {
         move |_, cx| keys::websocket_changed(flow, cx),
         cx,
     );
+}
+
+// ---- Settings (G12) ----
+//
+// Each setter stores the engine's answer in its cache (what the engine
+// kept, so a page shows the saved value); the rest invalidate what they
+// made stale. A page that shows its own error inline passes `failed`;
+// otherwise a failure is a toast.
+
+/// Runs an async engine write on the bridge's tokio runtime (the proxy's
+/// listeners live there), then `done` or `failed` on the foreground.
+fn run_async<T: Send + 'static, F>(
+    write: impl FnOnce(Arc<Engine>) -> F + Send + 'static,
+    done: impl FnOnce(T, &mut App) + 'static,
+    failed: impl FnOnce(String, &mut App) + 'static,
+    cx: &mut App,
+) where
+    F: std::future::Future<Output = Result<T, pm_core::Error>> + Send + 'static,
+{
+    let (Some(engine), Some(runtime)) = (engine(cx), super::Bridge::try_runtime(cx)) else {
+        return;
+    };
+    let task = runtime.spawn(async move { write(engine).await });
+    cx.spawn(async move |cx| {
+        let answer = match task.await {
+            Ok(answer) => answer.map_err(|e| e.to_string()),
+            Err(err) => Err(err.to_string()),
+        };
+        cx.update(|cx| match answer {
+            Ok(answer) => done(answer, cx),
+            Err(err) => failed(err, cx),
+        });
+    })
+    .detach();
+}
+
+/// [`run`] with the failure handed to `failed` instead of a toast.
+fn run_inline<T: Send + 'static>(
+    write: impl FnOnce(&Engine) -> Result<T, pm_core::Error> + Send + 'static,
+    done: impl FnOnce(T, &mut App) + 'static,
+    failed: impl FnOnce(String, &mut App) + 'static,
+    cx: &mut App,
+) {
+    let Some(engine) = engine(cx) else { return };
+    let task = cx.background_spawn(async move { write(&engine) });
+    cx.spawn(async move |cx| {
+        let answer = task.await;
+        cx.update(|cx| match answer {
+            Ok(answer) => done(answer, cx),
+            Err(err) => failed(err.to_string(), cx),
+        });
+    })
+    .detach();
+}
+
+fn refresh_proxy_status(cx: &mut App) {
+    if let Some(ws) = Workspace::global(cx) {
+        ws.update(cx, |w, cx| w.refresh_proxy(cx));
+    }
+}
+
+/// The port (restarting the listener: "Restarting…") or the upstream pool.
+/// What shows the proxy's address goes stale.
+pub fn set_proxy_settings(
+    settings: pm_model::ProxySettings,
+    done: impl FnOnce(&mut App) + 'static,
+    failed: impl FnOnce(String, &mut App) + 'static,
+    cx: &mut App,
+) {
+    run_async(
+        move |e| async move { e.set_proxy_settings(settings).await },
+        |saved, cx| {
+            let c = keys::settings_caches(cx);
+            c.proxy.update(cx, |c, cx| c.set((), saved, cx));
+            keys::proxy_moved(cx);
+            refresh_proxy_status(cx);
+            done(cx);
+        },
+        move |err, cx| {
+            refresh_proxy_status(cx);
+            failed(err, cx);
+        },
+        cx,
+    );
+}
+
+/// Settings › Network's Save: the whole page at once. The engine answers
+/// with passwords gone (only `has_password`), and the listeners it started.
+pub fn set_network_settings(
+    settings: pm_model::NetworkSettings,
+    done: impl FnOnce(&mut App) + 'static,
+    failed: impl FnOnce(String, &mut App) + 'static,
+    cx: &mut App,
+) {
+    run_async(
+        move |e| async move { e.set_network_settings(settings).await },
+        |saved, cx| {
+            let c = keys::settings_caches(cx);
+            c.network.update(cx, |c, cx| c.set((), saved, cx));
+            refresh_proxy_status(cx);
+            done(cx);
+        },
+        failed,
+        cx,
+    );
+}
+
+/// Replaces the SSL lists (the workspace keeps them; the sidebar's ticks
+/// read them there).
+pub fn set_ssl_settings(
+    settings: pm_model::SslSettings,
+    failed: impl FnOnce(String, &mut App) + 'static,
+    cx: &mut App,
+) {
+    run_inline(
+        move |e| e.set_ssl_settings(settings),
+        |saved, cx| {
+            if let Some(ws) = Workspace::global(cx) {
+                ws.update(cx, |w, cx| w.set_ssl(saved, cx));
+            }
+        },
+        failed,
+        cx,
+    );
+}
+
+/// The storage limits; the engine trims the capture to them at once.
+pub fn set_storage_settings(
+    settings: pm_model::StorageSettings,
+    done: impl FnOnce(&mut App) + 'static,
+    failed: impl FnOnce(String, &mut App) + 'static,
+    cx: &mut App,
+) {
+    run_inline(
+        move |e| e.set_storage_settings(settings),
+        |saved, cx| {
+            let c = keys::settings_caches(cx);
+            c.storage.update(cx, |c, cx| c.set((), saved, cx));
+            done(cx);
+        },
+        failed,
+        cx,
+    );
+}
+
+/// Never record / Only record (M21).
+pub fn set_recording_settings(
+    settings: pm_model::RecordingSettings,
+    failed: impl FnOnce(String, &mut App) + 'static,
+    cx: &mut App,
+) {
+    run_inline(
+        move |e| e.set_recording_settings(settings),
+        |saved, cx| {
+            let c = keys::settings_caches(cx);
+            c.recording.update(cx, |c, cx| c.set((), saved, cx));
+        },
+        failed,
+        cx,
+    );
+}
+
+/// Auto-save's switch and form (M21).
+pub fn set_autosave_settings(
+    settings: pm_model::AutoSaveSettings,
+    failed: impl FnOnce(String, &mut App) + 'static,
+    cx: &mut App,
+) {
+    run_inline(
+        move |e| e.set_autosave_settings(settings),
+        |saved, cx| {
+            let c = keys::settings_caches(cx);
+            c.autosave.update(cx, |c, cx| c.set((), saved, cx));
+        },
+        failed,
+        cx,
+    );
+}
+
+/// Save now (and the palette's "Auto-save now"): the storage status says
+/// when it is done.
+pub fn autosave_now(cx: &mut App) {
+    let Some(engine) = engine(cx) else { return };
+    let task = cx.background_spawn(async move { engine.autosave_now() });
+    cx.spawn(async move |cx| {
+        if let Err(err) = task.await {
+            cx.update(|cx| report_error("Can't auto-save", err, cx));
+        }
+    })
+    .detach();
+}
+
+/// A protobuf schema from `.proto` files or a descriptor set (M16).
+/// Schemas change how bodies decode: the decoded bodies go stale.
+pub fn import_proto(
+    paths: Vec<std::path::PathBuf>,
+    done: impl FnOnce(pm_model::ProtoSchema, &mut App) + 'static,
+    failed: impl FnOnce(String, &mut App) + 'static,
+    cx: &mut App,
+) {
+    run_inline(
+        move |e| e.import_proto_files(&paths),
+        |schema, cx| {
+            protos_changed(cx);
+            done(schema, cx);
+        },
+        failed,
+        cx,
+    );
+}
+
+pub fn remove_proto(id: u32, failed: impl FnOnce(String, &mut App) + 'static, cx: &mut App) {
+    run_inline(
+        move |e| e.remove_proto_schema(id),
+        |_, cx| protos_changed(cx),
+        failed,
+        cx,
+    );
+}
+
+/// The "Decode as" mappings, replaced whole (Remove mapping).
+pub fn set_proto_mappings(
+    mappings: Vec<pm_model::ProtoMapping>,
+    failed: impl FnOnce(String, &mut App) + 'static,
+    cx: &mut App,
+) {
+    run_inline(
+        move |e| e.set_proto_mappings(mappings),
+        |_, cx| protos_changed(cx),
+        failed,
+        cx,
+    );
+}
+
+fn protos_changed(cx: &mut App) {
+    let c = keys::settings_caches(cx);
+    c.proto_schemas.update(cx, |c, cx| c.invalidate(|_, _| true, cx));
+    c.proto_mappings.update(cx, |c, cx| c.invalidate(|_, _| true, cx));
+    keys::caches(cx)
+        .decoded
+        .update(cx, |c, cx| c.invalidate(|_, _| true, cx));
+}
+
+fn mocks_changed(cx: &mut App) {
+    let c = keys::rules_caches(cx);
+    c.mock_sources.update(cx, |c, cx| c.invalidate(|_, _| true, cx));
+}
+
+/// "Mock from session…" (a tab's menu, the palette) and "Mock from a
+/// file…": copies the flows into the mock library, then `done` gets the
+/// engine's unsaved Serve from rule for it (the Rules window opens on it).
+pub fn create_mock_source(
+    from: MockFrom,
+    done: impl FnOnce(Rule, &mut App) + 'static,
+    failed: impl FnOnce(String, &mut App) + 'static,
+    cx: &mut App,
+) {
+    run_inline(
+        move |e| {
+            let source = match from {
+                MockFrom::Store(store) => e.create_mock_source(store, None)?,
+                MockFrom::File(path) => e.create_mock_source_from_file(&path, None)?,
+            };
+            e.draft_serve_from_rule(&source.id)
+        },
+        |rule, cx| {
+            mocks_changed(cx);
+            done(rule, cx);
+        },
+        failed,
+        cx,
+    );
+}
+
+/// Where a recording comes from.
+#[derive(Clone, Debug)]
+pub enum MockFrom {
+    Store(StoreId),
+    File(std::path::PathBuf),
+}
+
+/// Removes a recording (refused while a rule serves from it).
+pub fn remove_mock_source(id: String, failed: impl FnOnce(String, &mut App) + 'static, cx: &mut App) {
+    run_inline(
+        move |e| e.remove_mock_source(&id),
+        |_, cx| mocks_changed(cx),
+        failed,
+        cx,
+    );
+}
+
+/// Imports an OpenAPI spec (M20): flows gain their operation, so the
+/// inspector's operation lines go stale.
+pub fn import_openapi(
+    path: std::path::PathBuf,
+    done: impl FnOnce(pm_model::OpenApiSpec, &mut App) + 'static,
+    failed: impl FnOnce(String, &mut App) + 'static,
+    cx: &mut App,
+) {
+    run_inline(
+        move |e| e.import_openapi_file(&path),
+        |spec, cx| {
+            openapi_changed(cx);
+            done(spec, cx);
+        },
+        failed,
+        cx,
+    );
+}
+
+pub fn remove_openapi(id: u32, failed: impl FnOnce(String, &mut App) + 'static, cx: &mut App) {
+    run_inline(
+        move |e| e.remove_openapi_spec(id),
+        |_, cx| openapi_changed(cx),
+        failed,
+        cx,
+    );
+}
+
+fn openapi_changed(cx: &mut App) {
+    let c = keys::settings_caches(cx);
+    c.openapi_specs.update(cx, |c, cx| c.invalidate(|_, _| true, cx));
+    keys::caches(cx)
+        .operation
+        .update(cx, |c, cx| c.invalidate(|_, _| true, cx));
+}
+
+/// Generate mocks: one disabled Map Local rule per operation; the rule
+/// book reaches the Rules window as a push. `done` gets them.
+pub fn generate_openapi_mocks(
+    id: u32,
+    done: impl FnOnce(Vec<Rule>, &mut App) + 'static,
+    failed: impl FnOnce(String, &mut App) + 'static,
+    cx: &mut App,
+) {
+    run_inline(move |e| e.generate_openapi_mocks(id), done, failed, cx);
+}
+
+/// Script time limits (M14).
+pub fn set_script_settings(
+    settings: pm_model::ScriptSettings,
+    failed: impl FnOnce(String, &mut App) + 'static,
+    cx: &mut App,
+) {
+    run_inline(
+        move |e| e.set_script_settings(settings),
+        |saved, cx| {
+            let c = keys::settings_caches(cx);
+            c.scripts.update(cx, |c, cx| c.set((), saved, cx));
+        },
+        failed,
+        cx,
+    );
+}
+
+/// The breakpoint timeout with its error shown inline (the Rules window's
+/// field toasts through [`set_rule_settings`]).
+pub fn save_rule_settings(settings: RuleSettings, failed: impl FnOnce(String, &mut App) + 'static, cx: &mut App) {
+    run_inline(
+        move |e| e.set_rule_settings(settings),
+        |saved, cx| {
+            let caches = keys::rules_caches(cx);
+            caches.settings.update(cx, |c, cx| c.set((), saved, cx));
+        },
+        failed,
+        cx,
+    );
+}
+
+/// The MCP server's switches: the status push brings the change.
+pub fn set_mcp_settings(
+    settings: pm_model::McpSettings,
+    failed: impl FnOnce(String, &mut App) + 'static,
+    cx: &mut App,
+) {
+    run_inline(move |e| e.set_mcp_settings(settings), |_, _| {}, failed, cx);
+}
+
+/// A new bearer token: connected agents need it.
+pub fn regenerate_mcp_token(cx: &mut App) {
+    run(
+        "Couldn't regenerate the token",
+        |e| e.regenerate_mcp_token(),
+        |token, cx| {
+            let c = keys::settings_caches(cx);
+            c.mcp_token.update(cx, |c, cx| c.set((), token, cx));
+        },
+        cx,
+    );
+}
+
+pub fn clear_mcp_audit(cx: &mut App) {
+    run(
+        "Couldn't clear the audit log",
+        |e| e.clear_mcp_audit(),
+        |_, cx| {
+            let c = keys::settings_caches(cx);
+            c.mcp_audit.update(cx, |c, cx| c.invalidate(|_, _| true, cx));
+        },
+        cx,
+    );
+}
+
+/// Check for updates at launch (G15's launch check reads it).
+pub fn set_update_settings(
+    settings: pm_model::UpdateSettings,
+    failed: impl FnOnce(String, &mut App) + 'static,
+    cx: &mut App,
+) {
+    run_inline(
+        move |e| e.set_update_settings(settings),
+        |saved, cx| {
+            let c = keys::settings_caches(cx);
+            c.updates.update(cx, |c, cx| c.set((), saved, cx));
+        },
+        failed,
+        cx,
+    );
+}
+
+/// LAN access: the listener rebinds on every interface (or loopback). The
+/// answer carries any error; the proxy's address moves.
+pub fn set_lan_access(on: bool, cx: &mut App) {
+    run_async(
+        move |e| async move { Ok(e.set_lan_access(on).await) },
+        |access, cx| {
+            let c = keys::settings_caches(cx);
+            c.device_access.update(cx, |c, cx| c.set((), access, cx));
+            c.terminal_env.update(cx, |c, cx| c.invalidate(|_, _| true, cx));
+            refresh_proxy_status(cx);
+        },
+        |err, cx| report_error("Can't change LAN access", err, cx),
+        cx,
+    );
+}
+
+/// "Address shown to devices".
+pub fn set_lan_interface(name: String, cx: &mut App) {
+    run(
+        "Can't change the interface",
+        move |e| e.set_lan_interface(&name),
+        |access, cx| {
+            let c = keys::settings_caches(cx);
+            c.device_access.update(cx, |c, cx| c.set((), access, cx));
+        },
+        cx,
+    );
+}
+
+/// Points this Mac's proxy at Proxymate, or puts it back (a guardian
+/// restores it if the app dies). Changes the machine: never from tests.
+pub fn set_system_proxy(on: bool, cx: &mut App) {
+    run(
+        "Can't change the system proxy",
+        move |e| Ok(e.set_system_proxy(on)),
+        |status, cx| {
+            let c = keys::settings_caches(cx);
+            c.system_proxy.update(cx, |c, cx| c.set((), status, cx));
+        },
+        cx,
+    );
+}
+
+/// Allows (with a nickname) or denies a LAN device; the answer is the new
+/// device list, shown at once.
+pub fn decide_device(
+    ip: String,
+    allow: bool,
+    nickname: Option<String>,
+    failed: impl FnOnce(String, &mut App) + 'static,
+    cx: &mut App,
+) {
+    run_inline(move |e| e.decide_device(&ip, allow, nickname), set_devices, failed, cx);
+}
+
+/// Forgets a LAN device: it is asked about again next time.
+pub fn forget_device(ip: String, failed: impl FnOnce(String, &mut App) + 'static, cx: &mut App) {
+    run_inline(move |e| e.forget_device(&ip), set_devices, failed, cx);
+}
+
+fn set_devices(snapshot: pm_model::DevicesSnapshot, cx: &mut App) {
+    super::devices(cx).update(cx, |d, cx| {
+        d.value = Some(snapshot);
+        cx.notify();
+    });
 }

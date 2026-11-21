@@ -71,6 +71,27 @@
 //!   `{"rulesClick": "<element id>"}`, `{"rulesDrag": ["rule-row-<id>", "rule-row-<id>" | "group-header-<id>"]}`,
 //!   `{"rulesSelect": "<id>"}`, `{"rulesRename": "<name>"}` (the group being renamed)
 //!   and `{"rulesScreenshot": "/abs/x.png"}`.
+//! - Settings (G12, `dev/settings.rs`): `{"settings": "network"}` opens the
+//!   window at a page (`true`: as it was; `false` closes it) and answers with
+//!   its state (page, errors, busy forms, the fields typed, Network's draft)
+//!   and what the engine holds for the page; `{"settingsState": true}` just
+//!   answers. `{"settingsEdit": [["proxy.port", "9191"], ["net.up.0.host",
+//!   "proxy.corp"]]}` types into fields by key, `{"settingsChoose":
+//!   [["proxy.lan", "true"], ["net.up.0.kind", "socks5"]]}` sets switches
+//!   and pickers, `{"settingsPress": "proxy.apply"}` (or a list) presses
+//!   buttons by id (`net.save`, `list.rec.never.add`, `mock.remove:<id>`,
+//!   …; see `SettingsWindow::press`) and waits for their writes,
+//!   `{"settingsClick": "<element id>"}`, `{"settingsMenu": "list:ssl.bypass:x",
+//!   "run": "Remove"}` (keys of `SettingsWindow::menu_for`) and
+//!   `{"settingsScreenshot": "/abs/x.png"}`. As in the Tauri remote, without
+//!   the window: `{"appearance": "light"}`, `{"mockFrom": 1}`,
+//!   `{"mockFromFile": "/abs/x.har"}`, `{"importOpenApi": "/abs/x.yaml"}`,
+//!   `{"generateMocks": 1}`, `{"removeMockSource": "<id>"}`,
+//!   `{"removeOpenApi": 1}`, `{"importProto": ["/abs/shop.proto"]}`,
+//!   `{"removeProto": 1}`, `{"neverRecord": "host"}`, `{"recordingLists":
+//!   {"only": [], "never": []}}`, `{"autosave": {…}}`, `{"autosaveNow": true}`
+//!   and `{"mocking": true}`; each answers with the mock library, specs,
+//!   schemas, recording lists, auto-save, storage status and rules.
 //!
 //! Every phase adds the verbs its surfaces need (see `docs/PLAN.md`).
 
@@ -86,6 +107,7 @@ use serde_json::{Value, json};
 use crate::prefs::Appearance;
 
 mod rules;
+mod settings;
 pub mod zoo;
 
 pub const DEFAULT_PORT: u16 = 1430;
@@ -208,6 +230,9 @@ async fn run(command: Value, cx: &mut AsyncApp) -> Value {
             Err(err) => json!({ "error": err.to_string() }),
         };
     }
+    if let Some(answer) = settings::command(&command, cx).await {
+        return answer;
+    }
     if let Some(answer) = rules::command(&command, cx).await {
         return answer;
     }
@@ -238,7 +263,7 @@ async fn run(command: Value, cx: &mut AsyncApp) -> Value {
         let offscreen = command.get("offscreen").and_then(Value::as_bool).unwrap_or(false);
         return screenshot(window, PathBuf::from(path), offscreen, cx).await;
     }
-    json!({"error": "unknown command: try theme, screenshot, click, select, selectIds, selectAll, scrollTo, headerColumns, filter, search, protocol, content, scope, keys, palette, command, store, openDocument, closeDocument, saveSession, exportHar, recording, clear, contextMenu, sidebarFilter, workspace, autoSelect, table, requestTab, responseTab, focus, curl, inspector, streamSelect, streamDirection, streamSearch, streamViewer, wsOriginal, wsCompose, wsComposeSend, stream, wsSend, wsClose, rules, openRule, newRule, preset, ruleEdit, saveRule, testRule, deleteRule, throttle, noCache, noCookies, breakpointTimeout, rulesMenu, rulesClick, rulesDrag, rulesSelect, rulesRename, rulesScreenshot, viewer, loadAll, highlightAnyway or body"})
+    json!({"error": "unknown command: try theme, screenshot, click, select, selectIds, selectAll, scrollTo, headerColumns, filter, search, protocol, content, scope, keys, palette, command, store, openDocument, closeDocument, saveSession, exportHar, recording, clear, contextMenu, sidebarFilter, workspace, autoSelect, table, requestTab, responseTab, focus, curl, inspector, streamSelect, streamDirection, streamSearch, streamViewer, wsOriginal, wsCompose, wsComposeSend, stream, wsSend, wsClose, rules, openRule, newRule, preset, ruleEdit, saveRule, testRule, deleteRule, throttle, noCache, noCookies, breakpointTimeout, rulesMenu, rulesClick, rulesDrag, rulesSelect, rulesRename, rulesScreenshot, settings, settingsEdit, settingsChoose, settingsPress, settingsClick, settingsMenu, settingsScreenshot, settingsState, appearance, mockFrom, mockFromFile, importOpenApi, generateMocks, removeMockSource, removeOpenApi, importProto, removeProto, neverRecord, recordingLists, autosave, autosaveNow, mocking, viewer, loadAll, highlightAnyway or body"})
 }
 
 pub(crate) async fn screenshot(window: AnyWindowHandle, path: PathBuf, offscreen: bool, cx: &mut AsyncApp) -> Value {

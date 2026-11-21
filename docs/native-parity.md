@@ -61,11 +61,11 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | TB-03 | Clear (trash) button, tooltip "Clear all flows · ⌘⌫", disabled on a document tab | `components/Toolbar.tsx` | G2 | ☑ | G2: `shell/toolbar.rs` Clear, disabled on a document tab (`docs/native/g2/document-tabs-suggestions.png`) |
 | TB-04 | Empty toolbar space drags the window | `components/Toolbar.tsx` | G2 | ☑ | G2: the toolbar is `shell::chrome::drag`; its controls take their own presses |
 | TB-05 | Listening pill: dot and text "Starting proxy…", "Listening on <addr>", "Listening on <addr> · paused", "Proxy not running: <error>" | `components/Toolbar.tsx` `ListeningStatus` | G2 | ☑ | G2: `toolbar::listening` and its pill; `toolbar::tests::a_failed_proxy_offers_its_error` |
-| TB-06 | Listening pill click opens Device setup (Settings › Proxy when the proxy failed); tooltips "Device setup · connect a phone, simulator or emulator" or the error with "Click to change the port." | `components/Toolbar.tsx` `ListeningStatus` | G2 | ☑ | G2: the pill's click and tooltips (`shell/toolbar.rs`); Device setup and Settings › Proxy are toasts until G13 and G12 replace `OpenDeviceSetup` / `OpenSettings` |
+| TB-06 | Listening pill click opens Device setup (Settings › Proxy when the proxy failed); tooltips "Device setup · connect a phone, simulator or emulator" or the error with "Click to change the port." | `components/Toolbar.tsx` `ListeningStatus` | G2 | ☑ | G2: the pill's click and tooltips (`shell/toolbar.rs`); Device setup and Settings › Proxy are toasts until G13 and G12 replace `OpenDeviceSetup` / `OpenSettings`; G12: Settings › Proxy opens the window |
 | TB-07 | Pill menu: Copy address, Copy curl example, Copy SOCKS5 address | `components/Toolbar.tsx` `ListeningStatus` | G2 | ☑ | G2: `toolbar::listening_menu`; `toolbar::tests::the_pill_menu_copies_every_address`, `tests/shell.rs` `context_menus_copy_the_right_text`; live dev remote `contextMenu: listening` (PR) |
 | TB-08 | Pill menu: Copy reverse proxy <addr> → <target>, one per reverse listener | `components/Toolbar.tsx` `ListeningStatus` | G2 | ☑ | G2: `toolbar::tests::the_pill_menu_copies_every_address` (reverse TLS listener) |
 | TB-09 | Pill menu: Copy terminal environment; Copy error when the proxy failed | `components/Toolbar.tsx` `ListeningStatus` | G2 | ☑ | G2: `toolbar::listening_menu` (terminal environment, error); `toolbar::tests::a_failed_proxy_offers_its_error` |
-| TB-10 | Pill menu: Device setup…, Proxy settings…, Network settings… | `components/Toolbar.tsx` `ListeningStatus` | G2 | ☑ | G2: the items are there (`toolbar::listening_menu`); their windows arrive with G12 and G13, which replace the handlers |
+| TB-10 | Pill menu: Device setup…, Proxy settings…, Network settings… | `components/Toolbar.tsx` `ListeningStatus` | G2 | ☑ | G2: the items are there (`toolbar::listening_menu`); their windows arrive with G12 and G13, which replace the handlers; G12: Proxy settings… and Network settings… open the window |
 | TB-11 | "N devices waiting" button for LAN devices whose Allow prompt was dismissed; click reopens the prompt | `components/Toolbar.tsx` `WaitingDevices` | G13 | ☐ | |
 | TB-12 | Intercept button (crosshair) with the count of running intercepted apps, tooltip "Intercept: a terminal or browser that goes through Proxymate" | `components/InterceptMenu.tsx` | G13 | ☐ | |
 | TB-13 | Rules button, tooltip "Rules: Map Local, rewrites, breakpoints, Map Remote, block" | `components/Toolbar.tsx` `RulesButton` | G7 | ☑ | G7: `features/rules/tools.rs` `RulesButton` (`RULES_TIP`); `docs/native/g7/toolbar-tools-dark.png` |
@@ -78,7 +78,7 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | TB-20 | System proxy (globe) button, green while on | `components/SystemProxyMenu.tsx` | G13 | ☐ | |
 | TB-21 | Certificate (shield) button: alert shield while untrusted | `components/CertificateMenu.tsx` | G13 | ☐ | |
 | TB-22 | MCP indicator: robot icon, connected-client count, colour by state (off, error, serving, clients), tooltip per state; opens Settings › MCP | `components/Settings/McpIndicator.tsx` | G13 | ☐ | |
-| TB-23 | Settings (gear) button, tooltip "Settings · ⌘," | `components/Toolbar.tsx` `SettingsButton` | G12 | ☐ | |
+| TB-23 | Settings (gear) button, tooltip "Settings · ⌘," | `components/Toolbar.tsx` `SettingsButton` | G12 | ☑ | G12: `features::settings::settings_button` at `toolbar::order::SETTINGS` (tooltip "Settings · ⌘,"); dev remote `{"click":"settings-button"}` opened the window |
 
 ## Sidebar
 
@@ -212,7 +212,7 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | FO-04 | Row count "N of M rows", "1 / " with a flow selected, "N selected ·" with several | `components/Footer.tsx` | G2 | ☑ | G2: `footer::row_count`; `footer::tests::counts_read_like_the_tauri_footer`; live "1 / 26,583 of 100,000 rows" (`docs/native/g2/100k-filtered.png`) |
 | FO-05 | Deep search: "Searching bodies · checked of total (p%) · N found", then "Searched N flows · N found" | `components/Footer.tsx` `DeepStatus` | G2 | ☑ | G2: `footer::deep_text`; `footer::tests::counts_read_like_the_tauri_footer` |
 | FO-06 | Save and export status: "<label> · p%", "Saved N flows to <name>" (4 s), "<label> failed: <error>"; menu Copy path, Copy file name, Copy error, Dismiss | `components/Footer.tsx` `SaveStatus` | G2 | ☑ | G2: `footer::save_text`, `footer::save_menu`; `footer::tests::save_status_and_its_menu`, `tests/shell.rs` `context_menus_copy_the_right_text` |
-| FO-07 | "Not recording bodies" (a capture write failed) opens Settings › Storage | `components/Footer.tsx` `StorageWarning` | G2 | ☑ | G2: `shell/footer.rs` `storage-error` (Settings › Storage is a toast until G12) |
+| FO-07 | "Not recording bodies" (a capture write failed) opens Settings › Storage | `components/Footer.tsx` `StorageWarning` | G2 | ☑ | G2: `shell/footer.rs` `storage-error` (Settings › Storage is a toast until G12); G12: opens Settings › Storage |
 | FO-08 | "N not recorded" (recording lists) opens Settings › Storage | `components/Footer.tsx` `Unrecorded` | G2 | ☑ | G2: `shell/footer.rs` `unrecorded-count`; `tests/render.rs` shows "12 not recorded" |
 | FO-09 | Filter timing "filter X ms · Y ms end to end" | `components/Footer.tsx` | G2 | ☑ | G2: `shell/footer.rs` `filter-timing`; live "filter 2.2 ms · 9 ms end to end" (`docs/native/g2/100k-filtered.png`) |
 | FO-10 | Throughput "↑ … ↓ …" per second ("↑ — ↓ —" before the first status) | `components/Footer.tsx` `Throughput` | G2 | ☑ | G2: `shell/footer.rs` throughput, sampled every second from `StorageStatus` |
@@ -226,7 +226,7 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | DT-03 | Close (×) button on each document tab | `components/DocumentTabs.tsx` | G2 | ☑ | G2: `shell/tabs.rs` `close-<store>` |
 | DT-04 | Tab menu: Copy name, Copy path | `components/DocumentTabs.tsx` `TabMenu` | G2 | ☑ | G2: `tabs::tab_menu`; `tabs::tests::tab_menus_copy_save_export_and_close`, `tests/shell.rs` `context_menus_copy_the_right_text` |
 | DT-05 | Tab menu: Save session…, Export HAR… (switches to that tab first) | `components/DocumentTabs.tsx` `TabMenu` | G2 | ☑ | G2: `tabs::tab_menu` (`SaveStore`/`ExportStore` switch to the tab first) |
-| DT-06 | Tab menu: Mock from session… | `components/DocumentTabs.tsx` `TabMenu` | G12 | ☐ | |
+| DT-06 | Tab menu: Mock from session… | `components/DocumentTabs.tsx` `TabMenu` | G12 | ☑ | G12: `shell/tabs.rs` `tab_menu` adds Mock from session… (and Mock from a file…); dev remote `contextMenu: tab:0` › Mock from session… added the live capture to the library and opened its Serve from rule |
 | DT-07 | Tab menu: Close (documents only) | `components/DocumentTabs.tsx` `TabMenu` | G2 | ☑ | G2: `tabs::tests::tab_menus_copy_save_export_and_close` |
 | DT-08 | Opening a `.proxymate`, HAR, `.chlsj` or `.chlsx` file adds a tab and makes it active | `lib/actions.ts` `openDocument` | G2 | ☑ | G2: `Workspace::open_document` (sessions, HAR, Charles); live: opened a `.proxymate` and a `.har` (PR) |
 | DT-09 | Closing the active document returns to Live | `lib/actions.ts` `closeDocument` | G2 | ☑ | G2: `workspace::tests::closing_the_shown_document_returns_to_live_and_names_follow_the_tab` |
@@ -263,11 +263,11 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | CP-24 | "Intercept: New Terminal window", "New iTerm window", "Launch Google Chrome", "Launch Microsoft Edge", "Launch Brave Browser", "Launch Arc", "Launch Firefox" (hidden when not installed) | `lib/commands.ts`, `lib/capture.ts` | G13 | ☐ | |
 | CP-25 | "Toggle No Caching" | `lib/commands.ts` | G7 | ☑ | G7: `features/rules/mod.rs` `commands::add("no-cache")`; live `{"command": "no-cache"}` (PR) |
 | CP-26 | "Toggle Block Cookies" | `lib/commands.ts` | G7 | ☑ | G7: `commands::add("no-cookies")`; `tests/rules.rs` `the_toolbar_tools_flip_the_builtin_rules` (the actions) |
-| CP-27 | "Auto-save now" | `lib/commands.ts` | G12 | ☐ | |
+| CP-27 | "Auto-save now" | `lib/commands.ts` | G12 | ☑ | G12: palette `autosave-now` (`mutations::autosave_now`); live, `{"autosaveNow":true}` wrote a `Proxymate Autosave …proxymate` into the folder |
 | CP-28 | "Open session, HAR or Charles file…" | `lib/commands.ts` | G2 | ☑ | G2: `features/documents.rs` (`open`) |
-| CP-29 | "Mock from this session…" | `lib/commands.ts` | G12 | ☐ | |
-| CP-30 | "Mock from a file…" | `lib/commands.ts` | G12 | ☐ | |
-| CP-31 | "Import OpenAPI spec…", then Settings › Mocking | `lib/commands.ts` | G12 | ☐ | |
+| CP-29 | "Mock from this session…" | `lib/commands.ts` | G12 | ☑ | G12: palette `mock-from-session` on the tab shown (`features::settings::mock_from`) |
+| CP-30 | "Mock from a file…" | `lib/commands.ts` | G12 | ☑ | G12: palette `mock-from-file` (open panel, then `mock_from`); `tests/settings.rs` `protobuf_and_mocking_libraries` (the HAR's recording, the Rules window on its draft); `docs/native/g12/mock-from-file-dark.png` |
+| CP-31 | "Import OpenAPI spec…", then Settings › Mocking | `lib/commands.ts` | G12 | ☑ | G12: palette `import-openapi`, then Settings › Mocking (`import_openapi_path`); live `importOpenApi` toasted "Imported Swagger Petstore" |
 | CP-32 | "Save session…" | `lib/commands.ts` | G2 | ☑ | G2: `features/documents.rs` (`save-session`) |
 | CP-33 | "Export HAR…" | `lib/commands.ts` | G2 | ☑ | G2: `features/documents.rs` (`export-har`) |
 | CP-34 | "Search flows" ⌘F focuses and selects the search box | `lib/commands.ts` | G2 | ☑ | G2: `features/navigate.rs` (`search`, focuses and selects); `tests/shell.rs` `the_search_box_autocompletes_and_hands_back_to_the_table` |
@@ -284,8 +284,8 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | CP-45 | "Breakpoints…" | `lib/commands.ts` | G8 | ☐ | |
 | CP-46 | "Device setup…" | `lib/commands.ts` | G13 | ☐ | |
 | CP-47 | "Certificate wizard…" | `lib/commands.ts` | G13 | ☐ | |
-| CP-48 | "Settings…" ⌘, | `lib/commands.ts` | G12 | ☐ | |
-| CP-49 | "Settings: Proxy", "Network", "SSL Proxying", "Clients", "Storage", "Mocking", "Appearance", "Advanced", "MCP" | `lib/commands.ts` | G12 | ☐ | |
+| CP-48 | "Settings…" ⌘, | `lib/commands.ts` | G12 | ☑ | G12: palette `settings` with ⌘, (and Proxymate › Settings…); `tests/settings.rs` `appearance_and_the_palette` |
+| CP-49 | "Settings: Proxy", "Network", "SSL Proxying", "Clients", "Storage", "Mocking", "Appearance", "Advanced", "MCP" | `lib/commands.ts` | G12 | ☑ | G12: `settings-<page>` for all eleven pages, Protobuf and Updates included (the Tauri palette's gap); `tests/settings.rs` `appearance_and_the_palette` runs `settings-updates` |
 | CP-50 | "Appearance: System", "Appearance: Light", "Appearance: Dark" | `lib/commands.ts` | G2 | ☑ | G2: `features/navigate.rs` (`appearance-*`) |
 
 ## Inspector
@@ -332,7 +332,7 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | IN-38 | Table menu: Copy all headers / parameters / fields / rows, Copy all as JSON | `components/Inspector/KvTable.tsx` `KvMenu` | G3 | ☑ | G3: `menus::kv`; `tests/inspector.rs` |
 | IN-39 | Failure banner: headline and the engine's message; menu Copy error, Copy title and error | `components/DetailPane.tsx` `FailureBanner` | G3 | ☑ | G3: `parts.rs` `failure_banner`, `menus::failure`; `tests/inspector.rs` `rule_badges_and_the_failure_banner`; `tests/render.rs` checks its pixels |
 | IN-40 | Failure headlines by error kind (client rejected cert, client TLS, client cert required, upstream proxy auth, loop, unreachable, cert untrusted, cert invalid, old TLS, upstream TLS, DNS, timeout, refused, client gone, other) | `lib/errors.ts` | G3 | ☑ | G3: `pm_view::errors::explain` (ported with `errors.test.ts`, keyed on `error_kind`; `every_kind_has_a_headline`); live DNS and untrusted-certificate flows (`docs/native/g3/`) |
-| IN-41 | Fix buttons: Certificate wizard…, Bypass SSL, Allow insecure upstream / Verify upstream again, Timeouts…, Network settings…, SSL Proxying… | `components/DetailPane.tsx` `FailureBanner` | G3 | ☑ | G3: `parts.rs` fix buttons; live: Allow insecure upstream put `localhost` in the list and the retried request returned 200 (`docs/native/g3/insecure-upstream-fixed-dark.png`), Bypass SSL tunnelled the next CONNECT; Timeouts… opens Settings › Advanced (`tests/inspector.rs`); the wizard and Settings are G13's and G12's |
+| IN-41 | Fix buttons: Certificate wizard…, Bypass SSL, Allow insecure upstream / Verify upstream again, Timeouts…, Network settings…, SSL Proxying… | `components/DetailPane.tsx` `FailureBanner` | G3 | ☑ | G3: `parts.rs` fix buttons; live: Allow insecure upstream put `localhost` in the list and the retried request returned 200 (`docs/native/g3/insecure-upstream-fixed-dark.png`), Bypass SSL tunnelled the next CONNECT; Timeouts… opens Settings › Advanced (`tests/inspector.rs`); the wizard and Settings are G13's and G12's; G12: Timeouts…, Network settings… and SSL Proxying… open the window at their page |
 | IN-42 | Text in the URL bar, tables and notes is selectable | `components/DetailPane.tsx` | G3 | ☑ | G3: gpui-kit `SelectableText` in the URL bar, tables, notes, banners and Raw |
 
 ## Body viewers
@@ -542,104 +542,104 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 
 | ID | Behaviour | Source | Phase | Status | Evidence |
 |---|---|---|---|---|---|
-| SE-01 | Settings window: page list (Proxy, Network, SSL Proxying, Clients, Storage, Protobuf, Mocking, Appearance, Advanced, MCP, Updates) beside the page; opens on a given page | `components/Settings/SettingsDialog.tsx` | G12 | ☐ | |
+| SE-01 | Settings window: page list (Proxy, Network, SSL Proxying, Clients, Storage, Protobuf, Mocking, Appearance, Advanced, MCP, Updates) beside the page; opens on a given page | `components/Settings/SettingsDialog.tsx` | G12 | ☑ | G12: `features/settings/window.rs`, a second native window (880×680); `OpenSettings { page }` opens it at a page (the inspector's fixes, the footer, the pill); `tests/settings.rs` `opens_at_a_page_and_lists_eleven`; `tests/render.rs` `settings_renders` (11 pages × 2 themes) |
 
 ### Proxy
 
 | ID | Behaviour | Source | Phase | Status | Evidence |
 |---|---|---|---|---|---|
-| SE-PX-01 | Listening: status line with menu Copy address, Copy error | `components/Settings/ProxyPage.tsx` | G12 | ☐ | |
-| SE-PX-02 | Port (1024–65535) with Apply ("Restarting…") | `components/Settings/ProxyPage.tsx` | G12 | ☐ | |
-| SE-PX-03 | LAN access switch; "Address shown to devices" interface picker with Copy IP address, Copy address and port | `components/Settings/ProxyPage.tsx` | G12 | ☐ | |
-| SE-PX-04 | System proxy switch | `components/Settings/ProxyPage.tsx` | G12 | ☐ | |
-| SE-PX-05 | Proxied terminal: environment to copy | `components/Settings/ProxyPage.tsx` | G12 | ☐ | |
+| SE-PX-01 | Listening: status line with menu Copy address, Copy error | `components/Settings/ProxyPage.tsx` | G12 | ☑ | G12: `pages.rs` `proxy`, menu `listening`; `tests/settings.rs` `the_proxy_port_rebinds` copies the new address; `docs/native/g12/proxy-dark.png` |
+| SE-PX-02 | Port (1024–65535) with Apply ("Restarting…") | `components/Settings/ProxyPage.tsx` | G12 | ☑ | G12: Port + Apply ("Restarting…", 1024–65535); `tests/settings.rs` `the_proxy_port_rebinds` (refuses 80, then the listener moves and the page reopens on the new port); live: 9090 → 9391, the new listener answered and the port survived a restart |
+| SE-PX-03 | LAN access switch; "Address shown to devices" interface picker with Copy IP address, Copy address and port | `components/Settings/ProxyPage.tsx` | G12 | ☑ | G12: switch → `Engine::set_lan_access`, interface picker (native menu) → `set_lan_interface`, menu `lan-interface`; `tests/settings.rs` `menus_copy_the_right_text`. Not toggled live: it opens the listener to the LAN |
+| SE-PX-04 | System proxy switch | `components/Settings/ProxyPage.tsx` | G12 | ☑ | G12: switch → `Engine::set_system_proxy` (`mutations::set_system_proxy`), disabled when unsupported. Not toggled live or in tests: it changes the machine (needs the user's OK) |
+| SE-PX-05 | Proxied terminal: environment to copy | `components/Settings/ProxyPage.tsx` | G12 | ☑ | G12: copy field `terminal-env` from `Engine::terminal_env`; `docs/native/g12/proxy-light.png` |
 
 ### Network
 
 | ID | Behaviour | Source | Phase | Status | Evidence |
 |---|---|---|---|---|---|
-| SE-NW-01 | Upstream proxies: rules with Enabled, Hosts, Through (Direct, HTTP, SOCKS5), Proxy host, Port, Username, Password; Add upstream rule; Remove | `components/Settings/NetworkPage.tsx` | G12 | ☐ | |
-| SE-NW-02 | Upstream bypass list ("Nothing bypasses the upstream rules"); "Use the proxy that was set before Proxymate for hosts no rule matches" | `components/Settings/NetworkPage.tsx` | G12 | ☐ | |
-| SE-NW-03 | SOCKS5: description, Copy SOCKS5 address, Copy curl example | `components/Settings/NetworkPage.tsx` | G12 | ☐ | |
-| SE-NW-04 | Reverse proxies: Local port, Forwards to, TLS, Keep Host; Add reverse proxy | `components/Settings/NetworkPage.tsx` | G12 | ☐ | |
-| SE-NW-05 | Client certificates: Host, Format (PEM, PKCS#12), certificate/key or .p12 file with Choose…, password; Add client certificate | `components/Settings/NetworkPage.tsx` | G12 | ☐ | |
-| SE-NW-06 | DNS overrides: Host, Connect to; Add DNS override | `components/Settings/NetworkPage.tsx` | G12 | ☐ | |
-| SE-NW-07 | Save ("Saving…"), Revert, errors | `components/Settings/NetworkPage.tsx` | G12 | ☐ | |
+| SE-NW-01 | Upstream proxies: rules with Enabled, Hosts, Through (Direct, HTTP, SOCKS5), Proxy host, Port, Username, Password; Add upstream rule; Remove | `components/Settings/NetworkPage.tsx` | G12 | ☑ | G12: `pages.rs` `network_page`, keys of `pm_view::settings::network` (`up.N.*`); `tests/settings.rs` `network_is_one_draft_with_revert_and_save` (password to the secret store, `has_password` back) |
+| SE-NW-02 | Upstream bypass list ("Nothing bypasses the upstream rules"); "Use the proxy that was set before Proxymate for hosts no rule matches" | `components/Settings/NetworkPage.tsx` | G12 | ☑ | G12: list `net.bypass` and switch `net.previous` on the draft; `tests/settings.rs` `network_is_one_draft_with_revert_and_save` |
+| SE-NW-03 | SOCKS5: description, Copy SOCKS5 address, Copy curl example | `components/Settings/NetworkPage.tsx` | G12 | ☑ | G12: copy fields `socks-address`, `socks-curl`; `tests/settings.rs` `menus_copy_the_right_text` |
+| SE-NW-04 | Reverse proxies: Local port, Forwards to, TLS, Keep Host; Add reverse proxy | `components/Settings/NetworkPage.tsx` | G12 | ☑ | G12: `rev.N.*` rows with their listener's status line (`reverse_status`); `pm_view::settings` tests |
+| SE-NW-05 | Client certificates: Host, Format (PEM, PKCS#12), certificate/key or .p12 file with Choose…, password; Add client certificate | `components/Settings/NetworkPage.tsx` | G12 | ☑ | G12: `cert.N.*` rows (PKCS#12 / PEM picker, Choose… with gpui's open panel, password to the secret store); `pm_view::settings` `network_fields_edit_by_key` |
+| SE-NW-06 | DNS overrides: Host, Connect to; Add DNS override | `components/Settings/NetworkPage.tsx` | G12 | ☑ | G12: `dns.N.*` rows; live: `api.staging.test` → 127.0.0.1 answered 502 before Save and 200 after; `docs/native/g12/network-draft-dark.png` |
+| SE-NW-07 | Save ("Saving…"), Revert, errors | `components/Settings/NetworkPage.tsx` | G12 | ☑ | G12: the draft bar ("Unsaved changes", Revert, Save/"Saving…", the engine's error); `tests/settings.rs` `network_is_one_draft_with_revert_and_save` (revert, save, a refused save keeps the draft) |
 
 ### SSL Proxying
 
 | ID | Behaviour | Source | Phase | Status | Evidence |
 |---|---|---|---|---|---|
-| SE-SSL-01 | Decrypt list ("* decrypts everything not excluded below") | `components/Settings/SslPage.tsx` | G12 | ☐ | |
-| SE-SSL-02 | Never decrypt list (Apple defaults) | `components/Settings/SslPage.tsx` | G12 | ☐ | |
-| SE-SSL-03 | SSL bypass list | `components/Settings/SslPage.tsx` | G12 | ☐ | |
-| SE-SSL-04 | Allow insecure upstream list | `components/Settings/SslPage.tsx` | G12 | ☐ | |
-| SE-SSL-05 | Apps never decrypted list (bundle ids or tool names) | `components/Settings/SslPage.tsx` | G12 | ☐ | |
-| SE-SSL-06 | List editor: Add, Remove <item>, empty text, Copy <item> menu | `components/Settings/parts.tsx` `ListEditor` | G12 | ☐ | |
+| SE-SSL-01 | Decrypt list ("* decrypts everything not excluded below") | `components/Settings/SslPage.tsx` | G12 | ☑ | G12: list editor `ssl.include` through the workspace's SSL lists (`mutations::set_ssl_settings`); `docs/native/g12/ssl-dark.png` |
+| SE-SSL-02 | Never decrypt list (Apple defaults) | `components/Settings/SslPage.tsx` | G12 | ☑ | G12: list editor `ssl.exclude`; `docs/native/g12/ssl-light.png` |
+| SE-SSL-03 | SSL bypass list | `components/Settings/SslPage.tsx` | G12 | ☑ | G12: list editor `ssl.bypass`; `tests/settings.rs` `ssl_and_recording_lists_add_and_remove` |
+| SE-SSL-04 | Allow insecure upstream list | `components/Settings/SslPage.tsx` | G12 | ☑ | G12: list editor `ssl.insecure_upstream` (the sidebar's ticks read the same lists); `tests/settings.rs` `ssl_and_recording_lists_add_and_remove` |
+| SE-SSL-05 | Apps never decrypted list (bundle ids or tool names) | `components/Settings/SslPage.tsx` | G12 | ☑ | G12: list editor `ssl.exclude_apps`. Deviation: its placeholder is always `com.example.App` (the Tauri page suggested a sidebar app) |
+| SE-SSL-06 | List editor: Add, Remove <item>, empty text, Copy <item> menu | `components/Settings/parts.tsx` `ListEditor` | G12 | ☑ | G12: `parts.rs` `list_editor` (Add, Remove <item>, empty text, ↩ adds), menu `list:<id>:<item>` (Copy <item>, Remove); `tests/settings.rs` `ssl_and_recording_lists_add_and_remove` |
 
 ### Clients
 
 | ID | Behaviour | Source | Phase | Status | Evidence |
 |---|---|---|---|---|---|
-| SE-CL-01 | LAN clients: status, nickname, Allow / Save, Deny, Forget; "No devices have connected yet" | `components/Settings/ClientsPage.tsx` | G12 | ☐ | |
-| SE-CL-02 | Device menu: Copy IP address, Copy nickname, Allow, Deny, Forget | `components/DeviceSetup/parts.tsx` `DeviceMenu` | G12 | ☐ | |
+| SE-CL-01 | LAN clients: status, nickname, Allow / Save, Deny, Forget; "No devices have connected yet" | `components/Settings/ClientsPage.tsx` | G12 | ☑ | G12: `pages.rs` `clients` over `bridge::devices` (nickname field, Allow/Save, Deny, Forget from `pm_view::settings::client_buttons`); `tests/settings.rs` `clients_page_decides_devices`; `tests/render.rs` `settings_renders`. No LAN device live (tests can't make one) |
+| SE-CL-02 | Device menu: Copy IP address, Copy nickname, Allow, Deny, Forget | `components/DeviceSetup/parts.tsx` `DeviceMenu` | G12 | ☑ | G12: menu `device:<ip>`; `tests/settings.rs` `menus_copy_the_right_text` |
 
 ### Storage
 
 | ID | Behaviour | Source | Phase | Status | Evidence |
 |---|---|---|---|---|---|
-| SE-STO-01 | Live capture: Location, Flows, On disk, Evicted since launch, Not recorded since launch; Clear all flows | `components/Settings/StoragePage.tsx` | G12 | ☐ | |
-| SE-STO-02 | Never record list | `components/Settings/StoragePage.tsx` | G12 | ☐ | |
-| SE-STO-03 | Only record list | `components/Settings/StoragePage.tsx` | G12 | ☐ | |
-| SE-STO-04 | Auto-save: switch, Folder with Choose…, Every (minutes), Keep (sessions), Save, Save now | `components/Settings/StoragePage.tsx` | G12 | ☐ | |
-| SE-STO-05 | Limits: Flows kept, Disk used (MB), WebSocket messages per connection; Save limits, Revert | `components/Settings/StoragePage.tsx` | G12 | ☐ | |
+| SE-STO-01 | Live capture: Location, Flows, On disk, Evicted since launch, Not recorded since launch; Clear all flows | `components/Settings/StoragePage.tsx` | G12 | ☑ | G12: rows from the storage push (`storage_rows`), menu `storage-status`, Clear all flows; `tests/settings.rs` `menus_copy_the_right_text`; live: "Not recorded since launch 2 flows" (`docs/native/g12/never-record-light.png`) |
+| SE-STO-02 | Never record list | `components/Settings/StoragePage.tsx` | G12 | ☑ | G12: list `rec.never` (`mutations::set_recording_settings`); live: a never-recorded host still answered 200 through the proxy and left no flow (unrecorded 0 → 2); `tests/settings.rs` `ssl_and_recording_lists_add_and_remove` |
+| SE-STO-03 | Only record list | `components/Settings/StoragePage.tsx` | G12 | ☑ | G12: list `rec.only`; `tests/settings.rs` `ssl_and_recording_lists_add_and_remove` |
+| SE-STO-04 | Auto-save: switch, Folder with Choose…, Every (minutes), Keep (sessions), Save, Save now | `components/Settings/StoragePage.tsx` | G12 | ☑ | G12: switch, Folder with Choose… (gpui's folder panel), Every, Keep, Save, Save now, status line; `tests/settings.rs` `storage_limits_and_auto_save_round_trip`; live `autosave` + `autosaveNow` wrote a session |
+| SE-STO-05 | Limits: Flows kept, Disk used (MB), WebSocket messages per connection; Save limits, Revert | `components/Settings/StoragePage.tsx` | G12 | ☑ | G12: three number fields, Save limits, Revert, the engine's error inline; `tests/settings.rs` `storage_limits_and_auto_save_round_trip` |
 
 ### Protobuf
 
 | ID | Behaviour | Source | Phase | Status | Evidence |
 |---|---|---|---|---|---|
-| SE-PB-01 | Schemas: Import… (.proto or descriptor set), list with files, Remove <name>, how-to text | `components/Settings/ProtobufPage.tsx` | G12 | ☐ | |
-| SE-PB-02 | Decode as mappings: list, Remove mapping, "None." | `components/Settings/ProtobufPage.tsx` | G12 | ☐ | |
+| SE-PB-01 | Schemas: Import… (.proto or descriptor set), list with files, Remove <name>, how-to text | `components/Settings/ProtobufPage.tsx` | G12 | ☑ | G12: Import… (several files), list with files and types, Remove <name>; `tests/settings.rs` `protobuf_and_mocking_libraries` (shop.proto); live `importProto`; `docs/native/g12/protobuf-filled-dark.png` |
+| SE-PB-02 | Decode as mappings: list, Remove mapping, "None." | `components/Settings/ProtobufPage.tsx` | G12 | ☑ | G12: mappings with Remove mapping (`set_proto_mappings`), "None."; `pm_view::settings` `mapping_line`; `tests/render.rs` `settings_renders` |
 
 ### Mocking
 
 | ID | Behaviour | Source | Phase | Status | Evidence |
 |---|---|---|---|---|---|
-| SE-MO-01 | Recordings: Add from file…, list (name, origin, hosts), Remove <name> | `components/Settings/MockingPage.tsx` | G12 | ☐ | |
-| SE-MO-02 | OpenAPI specs: Import…, list (name, servers), Generate mocks (toast "N mock rules added, turned off…"), Remove <name> | `components/Settings/MockingPage.tsx`, `lib/actions.ts` | G12 | ☐ | |
+| SE-MO-01 | Recordings: Add from file…, list (name, origin, hosts), Remove <name> | `components/Settings/MockingPage.tsx` | G12 | ☑ | G12: Add from file…, list (name, origin, flows, size, hosts), Remove <name>; `tests/settings.rs` `protobuf_and_mocking_libraries`; `docs/native/g12/mocking-filled-dark.png` |
+| SE-MO-02 | OpenAPI specs: Import…, list (name, servers), Generate mocks (toast "N mock rules added, turned off…"), Remove <name> | `components/Settings/MockingPage.tsx`, `lib/actions.ts` | G12 | ☑ | G12: Import…, list, Generate mocks (toast "N mock rules added, turned off…", the Rules window on the first), Remove; `tests/settings.rs` `protobuf_and_mocking_libraries`; live `generateMocks` added 3 |
 
 ### Appearance
 
 | ID | Behaviour | Source | Phase | Status | Evidence |
 |---|---|---|---|---|---|
-| SE-AP-01 | Theme: System, Light, Dark radio group | `components/Settings/AppearancePage.tsx` | G12 | ☐ | |
-| SE-AP-02 | Flow table columns: Reset columns | `components/Settings/AppearancePage.tsx` | G12 | ☐ | |
+| SE-AP-01 | Theme: System, Light, Dark radio group | `components/Settings/AppearancePage.tsx` | G12 | ☑ | G12: three radio cards with their theme's swatch (`appearance::set`, `ui-prefs.json`); `tests/settings.rs` `appearance_and_the_palette`; `docs/native/g12/appearance-dark.png` |
+| SE-AP-02 | Flow table columns: Reset columns | `components/Settings/AppearancePage.tsx` | G12 | ☑ | G12: Reset columns (`FlowGrid::reset_columns`, or the prefs without a table) |
 
 ### Advanced
 
 | ID | Behaviour | Source | Phase | Status | Evidence |
 |---|---|---|---|---|---|
-| SE-AD-01 | Breakpoints: Timeout (seconds), Save | `components/Settings/AdvancedPage.tsx` | G12 | ☐ | |
-| SE-AD-02 | Scripts: Rewrite and mock scripts, View scripts (ms), Save | `components/Settings/AdvancedPage.tsx` | G12 | ☐ | |
-| SE-AD-03 | Upstream connections: Keep idle connections for, Idle connections per host, Connect timeout, Save | `components/Settings/AdvancedPage.tsx` | G12 | ☐ | |
+| SE-AD-01 | Breakpoints: Timeout (seconds), Save | `components/Settings/AdvancedPage.tsx` | G12 | ☑ | G12: Timeout (seconds) + Save (`mutations::save_rule_settings`); `tests/settings.rs` `advanced_and_updates_round_trip` |
+| SE-AD-02 | Scripts: Rewrite and mock scripts, View scripts (ms), Save | `components/Settings/AdvancedPage.tsx` | G12 | ☑ | G12: two fields (10–60,000 ms) + Save; `tests/settings.rs` `advanced_and_updates_round_trip` |
+| SE-AD-03 | Upstream connections: Keep idle connections for, Idle connections per host, Connect timeout, Save | `components/Settings/AdvancedPage.tsx` | G12 | ☑ | G12: three fields + Save ("Restarting…": it restarts the listener) through `set_proxy_settings` |
 
 ### MCP
 
 | ID | Behaviour | Source | Phase | Status | Evidence |
 |---|---|---|---|---|---|
-| SE-MCP-01 | MCP server switch with status ("Starting…", URL, error) | `components/Settings/McpPage.tsx` | G12 | ☐ | |
-| SE-MCP-02 | Read-only switch | `components/Settings/McpPage.tsx` | G12 | ☐ | |
-| SE-MCP-03 | Connect an agent: URL and token copies, Claude Code command, JSON config, `proxymate mcp-stdio`; Regenerate token (Regenerate / Cancel, "Connected agents will need the new token.") | `components/Settings/McpPage.tsx` `ConnectSection` | G12 | ☐ | |
-| SE-MCP-04 | Connected clients (n) with menu Copy name, Copy name and version, Copy session id; "No agent is connected." | `components/Settings/McpPage.tsx` `ClientsSection` | G12 | ☐ | |
-| SE-MCP-05 | Audit log: Time, Client, Tool, Arguments, Result; Refresh, Clear, Load older calls; menu Copy tool, Copy arguments, Copy error, Copy client, Copy entry as JSON; "No calls yet." | `components/Settings/McpPage.tsx` `AuditSection` | G12 | ☐ | |
+| SE-MCP-01 | MCP server switch with status ("Starting…", URL, error) | `components/Settings/McpPage.tsx` | G12 | ☑ | G12: switch over `bridge::mcp` with the serving line and menu `mcp-serving`; `tests/settings.rs` `menus_copy_the_right_text`; `docs/native/g12/mcp-dark.png` |
+| SE-MCP-02 | Read-only switch | `components/Settings/McpPage.tsx` | G12 | ☑ | G12: switch → `Engine::set_mcp_settings`; `tests/settings.rs` `mcp_switches_and_token` |
+| SE-MCP-03 | Connect an agent: URL and token copies, Claude Code command, JSON config, `proxymate mcp-stdio`; Regenerate token (Regenerate / Cancel, "Connected agents will need the new token.") | `components/Settings/McpPage.tsx` `ConnectSection` | G12 | ☑ | G12: copy fields `mcp-claude` and `mcp-json` (masked on screen, whole in copies), Regenerate / Cancel; `tests/settings.rs` `mcp_switches_and_token`, `menus_copy_the_right_text`; `pm_view::settings` ports `mcp.test.ts` |
+| SE-MCP-04 | Connected clients (n) with menu Copy name, Copy name and version, Copy session id; "No agent is connected." | `components/Settings/McpPage.tsx` `ClientsSection` | G12 | ☑ | G12: rows over `bridge::mcp`, menu `mcp-client:<session>`; `tests/settings.rs` `menus_copy_the_right_text` |
+| SE-MCP-05 | Audit log: Time, Client, Tool, Arguments, Result; Refresh, Clear, Load older calls; menu Copy tool, Copy arguments, Copy error, Copy client, Copy entry as JSON; "No calls yet." | `components/Settings/McpPage.tsx` `AuditSection` | G12 | ☑ | G12: table (Time, Client, Tool, Arguments, Result, ms) from the `mcp_audit` cache, read again every 2 s while the page shows; Refresh, Clear, Load older calls; menu `audit:<id>`; `tests/settings.rs` `menus_copy_the_right_text`; `tests/render.rs` `settings_renders` |
 
 ### Updates
 
 | ID | Behaviour | Source | Phase | Status | Evidence |
 |---|---|---|---|---|---|
-| SE-UP-01 | Updates page: "Proxymate <version>" and where updates come from | `components/Settings/UpdatesPage.tsx` | G12 | ☐ | |
-| SE-UP-02 | Check Now | `components/Settings/UpdatesPage.tsx` | G12 | ☐ | G15 moved it to G12, which builds the page: the button calls `updater::check_now` (G15) |
-| SE-UP-03 | "Check for updates at launch" switch | `components/Settings/UpdatesPage.tsx` | G12 | ☐ | G15 moved it to G12, which builds the page: the switch sets `Engine::set_update_settings`, which the launch check reads (G15) |
+| SE-UP-01 | Updates page: "Proxymate <version>" and where updates come from | `components/Settings/UpdatesPage.tsx` | G12 | ☑ | G12: "Proxymate <`updater::VERSION`>" and where updates come from; `docs/native/g12/updates-dark.png` |
+| SE-UP-02 | Check Now | `components/Settings/UpdatesPage.tsx` | G12 | ☑ | G12: Check Now → `updater::check_now` (G15) |
+| SE-UP-03 | "Check for updates at launch" switch | `components/Settings/UpdatesPage.tsx` | G12 | ☑ | G12: switch → `Engine::set_update_settings`; `tests/settings.rs` `advanced_and_updates_round_trip` |
 
 ## macOS integration
 
@@ -689,7 +689,7 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | DV-10 | Dev remote: `rewrite`, `rewriteEdit` | `dev/remote.ts` | G9 | ☐ | |
 | DV-11 | Dev remote: `scripts`, `scriptTemplate`, `scriptSource`, `saveScript`, `testScript` | `dev/remote.ts` | G10 | ☐ | |
 | DV-12 | Dev remote: `label`, `comment`, `headerColumns`, `compare`, `repeat`, `code`, `deleteSelection` | `dev/remote.ts` | G11 | ☐ | |
-| DV-13 | Dev remote: `settings`, `appearance`, `mockFrom`, `mockFromFile`, `importOpenApi`, `generateMocks`, `removeMockSource`, `removeOpenApi`, `importProto`, `removeProto`, `neverRecord`, `recordingLists`, `autosave`, `autosaveNow` | `dev/remote.ts` | G12 | ☐ | |
+| DV-13 | Dev remote: `settings`, `appearance`, `mockFrom`, `mockFromFile`, `importOpenApi`, `generateMocks`, `removeMockSource`, `removeOpenApi`, `importProto`, `removeProto`, `neverRecord`, `recordingLists`, `autosave`, `autosaveNow` | `dev/remote.ts` | G12 | ☑ | G12: `dev/settings.rs`: `settings`, `settingsEdit`, `settingsChoose`, `settingsPress`, `settingsClick`, `settingsMenu`, `settingsScreenshot`, `settingsState`, and `appearance`, `mockFrom`, `mockFromFile`, `importOpenApi`, `generateMocks`, `removeMockSource`, `removeOpenApi`, `importProto`, `removeProto`, `neverRecord`, `recordingLists`, `autosave`, `autosaveNow`; used for the live checks above |
 | DV-14 | Dev remote: `intercept`, `deviceTab` | `dev/remote.ts` | G13 | ☐ | |
 | DV-15 | `VITE_PM_AUTO_SELECT`: start with Auto Select on | `dev/harness.ts` | G1 | ☑ | G1: `PROXYMATE_DEV_AUTO_SELECT=1` (`features/flow_table.rs`, `dev_env.rs`) |
 | DV-16 | Perf probe (`PROXYMATE_SYNTH_FLOWS` + `VITE_PM_PERF_PROBE`): `[perf-probe]` scroll and filter timings | `dev/perfProbe.ts` | G1 | ☑ | G1: `apps/native/src/perf_probe.rs`, `PROXYMATE_DEV_PERF_PROBE=1`; numbers in the G1 PR |
@@ -698,7 +698,7 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | DV-19 | `VITE_PM_OPEN=rules` | `dev/harness.ts` | G7 | ☑ | G7: `PROXYMATE_DEV_OPEN=rules` (`features::rules::open_from_env`) |
 | DV-20 | `VITE_PM_OPEN=breakpoints` | `dev/harness.ts` | G8 | ☐ | |
 | DV-21 | `VITE_PM_OPEN=scripts` | `dev/harness.ts` | G10 | ☐ | |
-| DV-22 | `VITE_PM_OPEN=settings:<page>` | `dev/harness.ts` | G12 | ☐ | |
+| DV-22 | `VITE_PM_OPEN=settings:<page>` | `dev/harness.ts` | G12 | ☑ | G12: `PROXYMATE_DEV_OPEN=settings[:<page>]` (`features::settings::open_from_env`) |
 | DV-23 | `VITE_PM_OPEN=cert-wizard` and `device-setup:<tab>` | `dev/harness.ts` | G13 | ☐ | |
 | DV-24 | Body-viewer zoo: one flow per fixture in `crates/pm-testkit/fixtures/zoo/` for viewer screenshots | `dev/zoo.ts` | G4 | ☑ | G4: `PROXYMATE_DEV_ZOO=1` (`dev/zoo.rs`): 31 fixtures through the app's proxy; `docs/native/g4/` |
 | DV-25 | Browser-only harness: mock backend and URL parameters (`?zoo`, `?select`, `?requestTab`, `?rules`, `?rewrite`, `?scripts`, `?theme`, `?mocks`, `?devicePrompt`…) | `dev/harness.ts`, `lib/mockBackend.ts` | G14 | ☐ | |
@@ -721,8 +721,8 @@ Rows per owning phase. G14 also audits every row; its own row is the browser-onl
 | G9 | 19 | 0 |
 | G10 | 23 | 0 |
 | G11 | 36 | 0 |
-| G12 | 53 | 0 |
+| G12 | 53 | 53 |
 | G13 | 29 | 0 |
 | G14 | 1 | 0 |
 | G15 | 5 | 5 |
-| **Total** | **524** | **287** |
+| **Total** | **524** | **340** |

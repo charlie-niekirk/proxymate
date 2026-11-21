@@ -7,6 +7,7 @@
 use gpui_kit::component::input::{Copy, Cut, Paste, Redo, SelectAll, Undo};
 use gpui_kit::{App, AppContext as _, KeyBinding, Menu, MenuItem, OsAction, PromptLevel, SystemMenuType};
 
+use crate::features::chrome::OpenSettings;
 use crate::prefs::{self, Appearance};
 
 gpui_kit::actions!(
@@ -118,6 +119,8 @@ pub fn refresh(cx: &mut App) {
             Menu::new("Proxymate").items([
                 MenuItem::action("About Proxymate", About),
                 check_for_updates,
+                MenuItem::separator(),
+                MenuItem::action("Settings…", OpenSettings { page: "".into() }),
                 MenuItem::separator(),
                 MenuItem::os_submenu("Services", SystemMenuType::Services),
                 MenuItem::separator(),

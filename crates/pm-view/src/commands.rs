@@ -172,17 +172,20 @@ pub const INTERCEPT_TARGETS: [(&str, &str, bool); 7] = [
     ("firefox", "Firefox", false),
 ];
 
-/// Settings pages the palette opens directly.
-pub const SETTINGS_PAGES: [(&str, &str); 9] = [
+/// The Settings window's pages, in its order; the palette opens each one
+/// directly. The Tauri palette left out Protobuf and Updates (G12 adds them).
+pub const SETTINGS_PAGES: [(&str, &str); 11] = [
     ("proxy", "Proxy"),
     ("network", "Network"),
     ("ssl", "SSL Proxying"),
     ("clients", "Clients"),
     ("storage", "Storage"),
+    ("protobuf", "Protobuf"),
     ("mocking", "Mocking"),
     ("appearance", "Appearance"),
     ("advanced", "Advanced"),
     ("mcp", "MCP"),
+    ("updates", "Updates"),
 ];
 
 fn capitalised(s: &str) -> String {
@@ -360,7 +363,7 @@ mod tests {
         let commands = all();
         let ids: HashSet<_> = commands.iter().map(|c| c.id.clone()).collect();
         assert_eq!(ids.len(), commands.len());
-        assert_eq!(commands.len(), 75);
+        assert_eq!(commands.len(), 77);
         let title = |id: &str| get(id).unwrap().title.into_owned();
         assert_eq!(title("copy-code-go"), "Copy selected flow as Go (net/http)");
         assert_eq!(title("label-purple"), "Label selected flows Purple");

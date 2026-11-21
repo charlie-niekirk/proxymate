@@ -18,6 +18,7 @@ pub mod flow_table;
 pub mod inspector;
 pub mod navigate;
 pub mod rules;
+pub mod settings;
 
 pub fn register(cx: &mut App) {
     clipboard::register(cx);
@@ -30,5 +31,6 @@ pub fn register(cx: &mut App) {
     inspector::register(cx);
     navigate::register(cx);
     rules::register(cx);
+    settings::register(cx);
     commands::bind_keys(cx);
 }
