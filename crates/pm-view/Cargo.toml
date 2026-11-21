@@ -12,8 +12,7 @@ publish.workspace = true
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 pm-model.workspace = true
 serde.workspace = true
-
-[dev-dependencies]
+# JSON string escaping for `copy_formats::pairs_json`.
 serde_json.workspace = true
 
 [lints]

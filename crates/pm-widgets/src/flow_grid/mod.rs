@@ -131,6 +131,9 @@ pub enum FlowGridEvent {
     Retry,
     /// Rows of a fetch landed (the perf probe times repaints with it).
     RowsLanded,
+    /// Right-click on the empty state's command, at this window position:
+    /// the owner shows its "Copy command" menu.
+    EmptyStateMenu(gpui_kit::Point<gpui_kit::Pixels>),
 }
 
 pub struct FlowGrid {
@@ -747,6 +750,15 @@ impl FlowGrid {
                 .child(
                     div()
                         .id("empty-curl")
+                        .role(Role::Group)
+                        .aria_label(command.clone())
+                        .aria_description("Right-click to copy the command")
+                        .on_mouse_down(
+                            gpui_kit::MouseButton::Right,
+                            cx.listener(|_, e: &gpui_kit::MouseDownEvent, _, cx| {
+                                cx.emit(FlowGridEvent::EmptyStateMenu(e.position));
+                            }),
+                        )
                         .px(px(8.))
                         .py(px(4.))
                         .rounded(px(4.))

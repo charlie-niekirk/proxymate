@@ -10,3 +10,9 @@ mod pill;
 
 pub use assets::Assets;
 pub use pill::Pill;
+
+/// One of the bundled icons (see [`Assets`]), `size` px, in `color`.
+pub fn icon(name: gpui_kit::assets::IconName, color: gpui_kit::Hsla, size: f32) -> gpui_kit::Svg {
+    use gpui_kit::{Styled as _, px, svg};
+    svg().path(name.path()).flex_none().size(px(size)).text_color(color)
+}

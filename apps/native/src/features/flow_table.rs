@@ -23,6 +23,10 @@ use pm_widgets::flow_grid::{self, FlowGrid, FlowGridEvent, Overlay, RowSource};
 
 use crate::bridge::Bridge;
 
+/// How long typing in the search box waits before refiltering
+/// (`FILTER_DEBOUNCE_MS`).
+pub const FILTER_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(120);
+
 pub fn register(cx: &mut App) {
     flow_grid::bind_keys(cx);
 }
@@ -68,6 +72,8 @@ pub struct FlowTable {
     /// The header columns the engine was last given.
     header_columns: Vec<pm_model::HeaderColumn>,
     filter_seq: u64,
+    /// Bumped by every debounced filter change; only the latest applies.
+    debounce_seq: u64,
     sort_seq: u64,
     pending_filter: Option<PendingFilter>,
     filter_timing: Option<FilterTiming>,
@@ -138,6 +144,7 @@ impl FlowTable {
             proxy_addr,
             header_columns: Vec::new(),
             filter_seq: 0,
+            debounce_seq: 0,
             sort_seq: 0,
             pending_filter: None,
             filter_timing: None,
@@ -167,6 +174,62 @@ impl FlowTable {
         self.filter_timing
     }
 
+    /// The engine view the table shows (Export HAR exports its rows).
+    pub fn view(&self) -> Option<ViewId> {
+        self.view
+    }
+
+    pub fn store(&self) -> StoreId {
+        self.store
+    }
+
+    /// The deep search's progress, while the filter has header or body terms.
+    pub fn deep(&self) -> Option<DeepProgress> {
+        self.deep
+    }
+
+    /// Shows another store (a document tab): a new view over it with the
+    /// same filter and sort.
+    pub fn set_store(&mut self, store: StoreId, cx: &mut Context<Self>) {
+        if store == self.store {
+            return;
+        }
+        if let (Backend::Engine(engine), Some(view)) = (&self.backend, self.view.take()) {
+            engine.drop_view(view);
+        }
+        self.store = store;
+        self.total = 0;
+        self.deep = None;
+        self.error = None;
+        self.filter_seq += 1;
+        self.grid.update(cx, |g, cx| {
+            g.select(None, cx);
+            g.reset(0, cx);
+        });
+        self.open_view(cx);
+        cx.notify();
+    }
+
+    /// The search box's filter: typing waits [`FILTER_DEBOUNCE`] for the
+    /// next keystroke; chips and scopes apply at once.
+    pub fn apply_filter(&mut self, filter: FilterSpec, debounce: bool, cx: &mut Context<Self>) {
+        if !debounce {
+            self.set_filter(filter, cx);
+            return;
+        }
+        self.debounce_seq += 1;
+        let seq = self.debounce_seq;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(FILTER_DEBOUNCE).await;
+            let _ = this.update(cx, |this, cx| {
+                if this.debounce_seq == seq {
+                    this.set_filter(filter, cx);
+                }
+            });
+        })
+        .detach();
+    }
+
     /// Creates the view (again, after an error) and follows its deltas.
     fn open_view(&mut self, cx: &mut Context<Self>) {
         let sort = self.grid.read(cx).prefs().sort;
@@ -184,13 +247,21 @@ impl FlowTable {
             Backend::Engine(engine) => {
                 let (store, filter) = (self.store, self.filter.clone());
                 let created = cx.background_spawn({
-                    let engine = engine.clone();
+                    let (engine, filter) = (engine.clone(), filter.clone());
                     async move { engine.create_view_in(store, filter, sort) }
                 });
                 cx.spawn(async move |this, cx| {
                     let info = created.await;
                     let _ = this.update(cx, |this, cx| match info {
-                        Ok(info) => this.view_opened(engine, info, cx),
+                        // The tab changed while the view was being made.
+                        Ok(info) if this.store != store => engine.drop_view(info.view),
+                        Ok(info) => {
+                            this.view_opened(engine, info, cx);
+                            // The filter changed while the view was being made.
+                            if this.filter != filter {
+                                this.set_filter(this.filter.clone(), cx);
+                            }
+                        }
                         Err(err) => {
                             this.error = Some(err.to_string().into());
                             this.update_overlay(cx);
@@ -259,6 +330,8 @@ impl FlowTable {
     /// Refilters (synchronously in the engine, off this thread), then the
     /// grid fetches the new rows. Only the latest filter's answer applies.
     pub fn set_filter(&mut self, filter: FilterSpec, cx: &mut Context<Self>) {
+        // A pending debounced change is overtaken by this one.
+        self.debounce_seq += 1;
         self.filter = filter.clone();
         self.filter_seq += 1;
         let seq = self.filter_seq;
@@ -368,6 +441,18 @@ impl FlowTable {
                 self.error = None;
                 self.open_view(cx);
             }
+            FlowGridEvent::EmptyStateMenu(position) => {
+                let position = *position;
+                let Some(window) = cx.active_window() else { return };
+                // After the click's dispatch, which holds the window.
+                cx.defer(move |cx| {
+                    let _ = window.update(cx, |_, window, cx| {
+                        if let Some(menu) = crate::shell::toolbar::empty_state_menu(cx) {
+                            menu.show(position, window, cx);
+                        }
+                    });
+                });
+            }
             FlowGridEvent::RowsLanded => {
                 if let Some(pending) = &mut self.pending_filter
                     && !pending.ready
@@ -395,6 +480,23 @@ impl FlowTable {
         .detach();
     }
 
+    /// The empty state's `curl -x …` example, while it shows.
+    pub fn waiting_command(&self) -> Option<String> {
+        (self.error.is_none() && self.total == 0).then(|| self.curl_example())
+    }
+
+    fn curl_example(&self) -> String {
+        format!("curl -x http://{} http://example.com/", self.proxy_addr)
+    }
+
+    /// The proxy's address changed (the toolbar's status was read again).
+    pub fn set_proxy_addr(&mut self, addr: SharedString, cx: &mut Context<Self>) {
+        if addr != self.proxy_addr {
+            self.proxy_addr = addr;
+            self.update_overlay(cx);
+        }
+    }
+
     fn update_overlay(&mut self, cx: &mut Context<Self>) {
         let len = self.grid.read(cx).len();
         let overlay = if let Some(err) = &self.error {
@@ -407,7 +509,7 @@ impl FlowTable {
             Overlay::NoMatch
         } else {
             Overlay::Waiting {
-                command: format!("curl -x http://{} http://example.com/", self.proxy_addr).into(),
+                command: self.curl_example().into(),
             }
         };
         self.grid.update(cx, |g, cx| g.set_overlay(overlay, cx));

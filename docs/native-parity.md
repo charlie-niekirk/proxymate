@@ -34,38 +34,38 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | WM-09 | Proxymate › Hide Proxymate ⌘H, Hide Others ⌥⌘H, Show All | `src-tauri/src/menu.rs` | G0 | ☑ | G0: apps/native/src/menus.rs |
 | WM-10 | Proxymate › Quit Proxymate ⌘Q | `src-tauri/src/menu.rs` | G0 | ☑ | G0: apps/native/src/menus.rs |
 | WM-11 | File › New Request… ⌘N opens Compose | `src-tauri/src/menu.rs`, `hooks/useAppMenu.ts` | G8 | ☐ | |
-| WM-12 | File › Open… ⌘O: pick a session, HAR or Charles file and open it in a new tab | `src-tauri/src/menu.rs`, `hooks/useAppMenu.ts` | G2 | ☐ | |
-| WM-13 | File › Import HAR… ⇧⌘O: the open dialog filtered to HAR | `src-tauri/src/menu.rs`, `hooks/useAppMenu.ts` | G2 | ☐ | |
-| WM-14 | File › Save Session… ⌘S: saves every flow of the active tab | `src-tauri/src/menu.rs`, `hooks/useAppMenu.ts` | G2 | ☐ | |
-| WM-15 | File › Export HAR… ⇧⌘E: exports what the table shows in the active tab | `src-tauri/src/menu.rs`, `hooks/useAppMenu.ts` | G2 | ☐ | |
+| WM-12 | File › Open… ⌘O: pick a session, HAR or Charles file and open it in a new tab | `src-tauri/src/menu.rs`, `hooks/useAppMenu.ts` | G2 | ☑ | G2: `features/documents.rs` `open` (File menu ⌘O, palette); dev remote `openDocument` opened a session and a HAR live (`docs/native/g2/document-tabs-suggestions.png`) |
+| WM-13 | File › Import HAR… ⇧⌘O: the open dialog filtered to HAR | `src-tauri/src/menu.rs`, `hooks/useAppMenu.ts` | G2 | ≈ | G2: File › Import HAR… ⇧⌘O opens the panel with the prompt "Open a HAR file"; gpui's open panel takes no file-type filter, so other files show and the engine refuses what it can't read |
+| WM-14 | File › Save Session… ⌘S: saves every flow of the active tab | `src-tauri/src/menu.rs`, `hooks/useAppMenu.ts` | G2 | ☑ | G2: `features/documents.rs` `save` (⌘S): every flow of the active tab, in the background; live save to a `.proxymate` file with progress (PR) |
+| WM-15 | File › Export HAR… ⇧⌘E: exports what the table shows in the active tab | `src-tauri/src/menu.rs`, `hooks/useAppMenu.ts` | G2 | ☑ | G2: `features/documents.rs` `save` (⇧⌘E): the table's view (`FlowSelection::View`); live export to a `.har` file (PR) |
 | WM-16 | File › Scripts… ⇧⌘J opens the Scripts window | `src-tauri/src/menu.rs`, `hooks/useAppMenu.ts` | G10 | ☐ | |
 | WM-17 | File › Close Window ⌘W | `src-tauri/src/menu.rs` | G0 | ☑ | G0: apps/native/src/menus.rs |
 | WM-18 | Edit › Undo, Redo | `src-tauri/src/menu.rs` | G0 | ☑ | G0: apps/native/src/menus.rs |
 | WM-19 | Edit › Cut, Copy, Paste, Select All | `src-tauri/src/menu.rs` | G0 | ☑ | G0: apps/native/src/menus.rs |
 | WM-20 | View › Enter Full Screen (⌃⌘F) | `src-tauri/src/menu.rs` | G0 | ☑ | G0: apps/native/src/menus.rs |
 | WM-21 | Window › Minimize ⌘M, Zoom | `src-tauri/src/menu.rs` | G0 | ☑ | G0: apps/native/src/menus.rs |
-| WM-22 | Right-click where no app menu applies shows nothing (no stray system menu); text fields and selected text keep Copy, Paste, Look Up | `hooks/useNativeMenuPolicy.ts` | G2 | ☐ | |
-| WM-23 | Error toasts: what failed as the title, the reason as the description | `lib/actions.ts` `reportError`, `components/ui/sonner.tsx` | G2 | ☐ | |
-| WM-24 | Copy toasts: "Copied <what>" for 1.2 s, one toast replaced by the next; "Couldn't copy" on failure; silent copies for buttons that show their own tick | `lib/clipboard.ts` | G2 | ☐ | |
-| WM-25 | Clipboard helper: copy text, copy text fetched first (copyLater), copy an image as PNG | `lib/clipboard.ts` | G2 | ☐ | |
-| WM-26 | Context-menu framework: copy menus for single elements, one menu per list keyed by row, "Copy ⌘C" for the selection first wherever text is selectable | `components/menus/items.tsx`, `components/menus/useMenuTarget.ts` | G2 | ☐ | |
-| WM-27 | Copy formats: header lines, header blocks, cookies, Set-Cookie, auth tokens, query and form pairs, pairs as JSON, hex, Base64, DSL filter terms | `lib/copyFormats.ts` | G2 | ☐ | |
-| WM-28 | No engine: a message instead of the UI when the engine is unreachable | `components/NoEngine.tsx` | G2 | ☐ | |
+| WM-22 | Right-click where no app menu applies shows nothing (no stray system menu); text fields and selected text keep Copy, Paste, Look Up | `hooks/useNativeMenuPolicy.ts` | G2 | ☑ | G2: gpui shows no menu where the app adds none; text fields keep gpui-kit's own Copy/Cut/Paste menu (no Look Up) |
+| WM-23 | Error toasts: what failed as the title, the reason as the description | `lib/actions.ts` `reportError`, `components/ui/sonner.tsx` | G2 | ☑ | G2: `features/clipboard.rs` `report_error` (title, reason as the description); `clipboard::tests::copy_later_copies_what_loads_and_reports_failures` |
+| WM-24 | Copy toasts: "Copied <what>" for 1.2 s, one toast replaced by the next; "Couldn't copy" on failure; silent copies for buttons that show their own tick | `lib/clipboard.ts` | G2 | ☑ | G2: `features/clipboard.rs` (one copy toast replaced by the next, 1.2 s, "Couldn't copy", `copy_silent`); `clipboard::tests::copies_toast_and_menus_copy_through_the_action`, `tests/shell.rs` `context_menus_copy_the_right_text` |
+| WM-25 | Clipboard helper: copy text, copy text fetched first (copyLater), copy an image as PNG | `lib/clipboard.ts` | G2 | ☑ | G2: `features/clipboard.rs` `copy`, `copy_later` (background load), `copy_image` (PNG) |
+| WM-26 | Context-menu framework: copy menus for single elements, one menu per list keyed by row, "Copy ⌘C" for the selection first wherever text is selectable | `components/menus/items.tsx`, `components/menus/useMenuTarget.ts` | G2 | ☑ | G2: `features/context_menu.rs` (`Menu`: copy entries via `CopyText`, one builder per list keyed by row, e.g. `sidebar::menu_for`); `tests/shell.rs` `context_menus_copy_the_right_text`. No selectable plain text in the chrome yet; text fields have their own menu |
+| WM-27 | Copy formats: header lines, header blocks, cookies, Set-Cookie, auth tokens, query and form pairs, pairs as JSON, hex, Base64, DSL filter terms | `lib/copyFormats.ts` | G2 | ☑ | G2: `pm-view::copy_formats`, its vitest table as Rust tests |
+| WM-28 | No engine: a message instead of the UI when the engine is unreachable | `components/NoEngine.tsx` | G2 | ≈ | The native app runs the engine in-process (`pm_app::start_engine` before the first frame), so there is no unreachable engine to show |
 
 ## Toolbar
 
 | ID | Behaviour | Source | Phase | Status | Evidence |
 |---|---|---|---|---|---|
-| TB-01 | Record button: red square while recording ("Stop recording · traffic is still forwarded · ⌘E"), green play when paused ("Start recording · traffic is forwarded either way · ⌘E") | `components/Toolbar.tsx` | G2 | ☐ | |
-| TB-02 | Compose (+) button, tooltip "Compose a request · ⌘N" (stub until Compose exists) | `components/Toolbar.tsx` | G2 | ☐ | |
-| TB-03 | Clear (trash) button, tooltip "Clear all flows · ⌘⌫", disabled on a document tab | `components/Toolbar.tsx` | G2 | ☐ | |
-| TB-04 | Empty toolbar space drags the window | `components/Toolbar.tsx` | G2 | ☐ | |
-| TB-05 | Listening pill: dot and text "Starting proxy…", "Listening on <addr>", "Listening on <addr> · paused", "Proxy not running: <error>" | `components/Toolbar.tsx` `ListeningStatus` | G2 | ☐ | |
-| TB-06 | Listening pill click opens Device setup (Settings › Proxy when the proxy failed); tooltips "Device setup · connect a phone, simulator or emulator" or the error with "Click to change the port." | `components/Toolbar.tsx` `ListeningStatus` | G2 | ☐ | |
-| TB-07 | Pill menu: Copy address, Copy curl example, Copy SOCKS5 address | `components/Toolbar.tsx` `ListeningStatus` | G2 | ☐ | |
-| TB-08 | Pill menu: Copy reverse proxy <addr> → <target>, one per reverse listener | `components/Toolbar.tsx` `ListeningStatus` | G2 | ☐ | |
-| TB-09 | Pill menu: Copy terminal environment; Copy error when the proxy failed | `components/Toolbar.tsx` `ListeningStatus` | G2 | ☐ | |
-| TB-10 | Pill menu: Device setup…, Proxy settings…, Network settings… | `components/Toolbar.tsx` `ListeningStatus` | G2 | ☐ | |
+| TB-01 | Record button: red square while recording ("Stop recording · traffic is still forwarded · ⌘E"), green play when paused ("Start recording · traffic is forwarded either way · ⌘E") | `components/Toolbar.tsx` | G2 | ☑ | G2: `shell/toolbar.rs` (filled square / play, tooltips with ⌘E); `tests/shell.rs` `the_palette_opens_with_cmd_k_and_runs_a_command` toggles recording with ⌘E |
+| TB-02 | Compose (+) button, tooltip "Compose a request · ⌘N" (stub until Compose exists) | `components/Toolbar.tsx` | G2 | ☑ | G2: `shell/toolbar.rs` Compose button and tooltip; `features::chrome::Compose` says "Compose arrives in G8" until G8 replaces the handler |
+| TB-03 | Clear (trash) button, tooltip "Clear all flows · ⌘⌫", disabled on a document tab | `components/Toolbar.tsx` | G2 | ☑ | G2: `shell/toolbar.rs` Clear, disabled on a document tab (`docs/native/g2/document-tabs-suggestions.png`) |
+| TB-04 | Empty toolbar space drags the window | `components/Toolbar.tsx` | G2 | ☑ | G2: the toolbar is `shell::chrome::drag`; its controls take their own presses |
+| TB-05 | Listening pill: dot and text "Starting proxy…", "Listening on <addr>", "Listening on <addr> · paused", "Proxy not running: <error>" | `components/Toolbar.tsx` `ListeningStatus` | G2 | ☑ | G2: `toolbar::listening` and its pill; `toolbar::tests::a_failed_proxy_offers_its_error` |
+| TB-06 | Listening pill click opens Device setup (Settings › Proxy when the proxy failed); tooltips "Device setup · connect a phone, simulator or emulator" or the error with "Click to change the port." | `components/Toolbar.tsx` `ListeningStatus` | G2 | ☑ | G2: the pill's click and tooltips (`shell/toolbar.rs`); Device setup and Settings › Proxy are toasts until G13 and G12 replace `OpenDeviceSetup` / `OpenSettings` |
+| TB-07 | Pill menu: Copy address, Copy curl example, Copy SOCKS5 address | `components/Toolbar.tsx` `ListeningStatus` | G2 | ☑ | G2: `toolbar::listening_menu`; `toolbar::tests::the_pill_menu_copies_every_address`, `tests/shell.rs` `context_menus_copy_the_right_text`; live dev remote `contextMenu: listening` (PR) |
+| TB-08 | Pill menu: Copy reverse proxy <addr> → <target>, one per reverse listener | `components/Toolbar.tsx` `ListeningStatus` | G2 | ☑ | G2: `toolbar::tests::the_pill_menu_copies_every_address` (reverse TLS listener) |
+| TB-09 | Pill menu: Copy terminal environment; Copy error when the proxy failed | `components/Toolbar.tsx` `ListeningStatus` | G2 | ☑ | G2: `toolbar::listening_menu` (terminal environment, error); `toolbar::tests::a_failed_proxy_offers_its_error` |
+| TB-10 | Pill menu: Device setup…, Proxy settings…, Network settings… | `components/Toolbar.tsx` `ListeningStatus` | G2 | ☑ | G2: the items are there (`toolbar::listening_menu`); their windows arrive with G12 and G13, which replace the handlers |
 | TB-11 | "N devices waiting" button for LAN devices whose Allow prompt was dismissed; click reopens the prompt | `components/Toolbar.tsx` `WaitingDevices` | G13 | ☐ | |
 | TB-12 | Intercept button (crosshair) with the count of running intercepted apps, tooltip "Intercept: a terminal or browser that goes through Proxymate" | `components/InterceptMenu.tsx` | G13 | ☐ | |
 | TB-13 | Rules button, tooltip "Rules: Map Local, rewrites, breakpoints, Map Remote, block" | `components/Toolbar.tsx` `RulesButton` | G7 | ☐ | |
@@ -84,44 +84,44 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 
 | ID | Behaviour | Source | Phase | Status | Evidence |
 |---|---|---|---|---|---|
-| SB-01 | 52 px strip under the traffic lights drags the window | `components/Sidebar.tsx` | G2 | ☐ | |
-| SB-02 | Collapsible section headers: Favorites, Pinned, Saved, All, Apps, Domains | `components/Sidebar.tsx` `Section` | G2 | ☐ | |
-| SB-03 | Favorites: "No favorites yet" placeholder | `components/Sidebar.tsx` | G2 | ☐ | |
-| SB-04 | Pinned: "Pinned flows" with count toggles the `is:pinned` filter; "No pinned flows" when none or on a document tab | `components/Sidebar.tsx` `PinnedItem` | G2 | ☐ | |
-| SB-05 | Saved: "Live capture" item switches to the live tab | `components/Sidebar.tsx` `SavedDocuments` | G2 | ☐ | |
-| SB-06 | Saved: one item per open document (session or HAR icon, name, flow count, path tooltip); click shows it | `components/Sidebar.tsx` `SavedDocuments` | G2 | ☐ | |
-| SB-07 | Saved document menu: Copy name, Copy path, Close <name> | `components/Sidebar.tsx` `SavedDocuments` | G2 | ☐ | |
-| SB-08 | Saved: "Open session or HAR…" item | `components/Sidebar.tsx` `SavedDocuments` | G2 | ☐ | |
-| SB-09 | All: "All traffic" with total count clears the app and host scope | `components/Sidebar.tsx` | G2 | ☐ | |
-| SB-10 | Apps: one row per client app (icon, name, count); click toggles the app scope; "No apps yet" or "No matching apps" | `components/Sidebar.tsx` `AppItem` | G2 | ☐ | |
-| SB-11 | App row shows a shield-off badge when its HTTPS is never decrypted | `components/Sidebar.tsx` `AppItem` | G2 | ☐ | |
-| SB-12 | App menu: Show only <app> / Show all traffic | `components/Sidebar.tsx` `AppItem` | G2 | ☐ | |
-| SB-13 | App menu: Copy name, Copy bundle id | `components/Sidebar.tsx` `AppItem` | G2 | ☐ | |
-| SB-14 | App menu: "Don't decrypt HTTPS from <app>" checkbox (by bundle id, else name) | `components/Sidebar.tsx` `AppItem` | G2 | ☐ | |
-| SB-15 | Domains: registrable domains with counts, expandable to their hosts; a domain row scopes to `*.domain`, a host row to the host | `components/Sidebar.tsx` `DomainItem` | G2 | ☐ | |
-| SB-16 | Domains: "No domains yet" or "No matching domains"; a filter expands every match | `components/Sidebar.tsx` | G2 | ☐ | |
-| SB-17 | Domain and host menu: Show only <scope> / Show all traffic | `components/Sidebar.tsx` `HostMenu` | G2 | ☐ | |
-| SB-18 | Domain and host menu: Copy <host>, Copy <*.domain> | `components/Sidebar.tsx` `HostMenu` | G2 | ☐ | |
-| SB-19 | Domain and host menu: Add <host> to SSL bypass | `components/Sidebar.tsx` `HostMenu` | G2 | ☐ | |
-| SB-20 | Domain and host menu: "Accept <host>'s certificate unverified" checkbox | `components/Sidebar.tsx` `HostMenu` | G2 | ☐ | |
-| SB-21 | "Filter apps and domains" box at the bottom (⌘L); Escape clears it | `components/Sidebar.tsx` | G2 | ☐ | |
-| SB-22 | Long app and host names truncate; the tooltip has "<name> · N flows" | `components/Sidebar.tsx` `Item` | G2 | ☐ | |
-| SB-23 | Counts update live from the engine's sidebar snapshot (at most every 250 ms) | `store/sidebar.ts` | G2 | ☐ | |
+| SB-01 | 52 px strip under the traffic lights drags the window | `components/Sidebar.tsx` | G2 | ☑ | G2: `shell/sidebar.rs` `sidebar-drag` (`chrome::drag`, 52 px) |
+| SB-02 | Collapsible section headers: Favorites, Pinned, Saved, All, Apps, Domains | `components/Sidebar.tsx` `Section` | G2 | ☑ | G2: `Sidebar::section` (role Button, `aria_expanded`); `tests/render.rs` renders every section |
+| SB-03 | Favorites: "No favorites yet" placeholder | `components/Sidebar.tsx` | G2 | ☑ | G2: `shell/sidebar.rs` (Favorites placeholder) |
+| SB-04 | Pinned: "Pinned flows" with count toggles the `is:pinned` filter; "No pinned flows" when none or on a document tab | `components/Sidebar.tsx` `PinnedItem` | G2 | ☑ | G2: `shell/sidebar.rs` Pinned row (`ToggleText is:pinned`, storage `pinned`); `tests/render.rs` shows "Pinned flows 3" |
+| SB-05 | Saved: "Live capture" item switches to the live tab | `components/Sidebar.tsx` `SavedDocuments` | G2 | ☑ | G2: `tests/shell.rs` `chips_and_sidebar_rows_filter` (Saved and tab rows switch stores) |
+| SB-06 | Saved: one item per open document (session or HAR icon, name, flow count, path tooltip); click shows it | `components/Sidebar.tsx` `SavedDocuments` | G2 | ☑ | G2: `shell/sidebar.rs` (session/HAR icons, name, count, path tooltip); `tests/shell.rs` `chips_and_sidebar_rows_filter` clicks `saved-1` |
+| SB-07 | Saved document menu: Copy name, Copy path, Close <name> | `components/Sidebar.tsx` `SavedDocuments` | G2 | ☑ | G2: `sidebar::document_menu`; `sidebar::tests::document_menus_copy_and_close`, `tests/shell.rs` `context_menus_copy_the_right_text` |
+| SB-08 | Saved: "Open session or HAR…" item | `components/Sidebar.tsx` `SavedDocuments` | G2 | ☑ | G2: `shell/sidebar.rs` `saved-open` (File › Open…) |
+| SB-09 | All: "All traffic" with total count clears the app and host scope | `components/Sidebar.tsx` | G2 | ☑ | G2: `tests/shell.rs` `chips_and_sidebar_rows_filter` (`sidebar-all` clears the scope) |
+| SB-10 | Apps: one row per client app (icon, name, count); click toggles the app scope; "No apps yet" or "No matching apps" | `components/Sidebar.tsx` `AppItem` | G2 | ☑ | G2: `shell/sidebar.rs` apps (icons from `Engine::app_icon`, initial otherwise; counts; empty states); `tests/shell.rs` `context_menus_copy_the_right_text` ("Show only Safari" scopes the table); live (`docs/native/g2/100k-filtered.png`) |
+| SB-11 | App row shows a shield-off badge when its HTTPS is never decrypted | `components/Sidebar.tsx` `AppItem` | G2 | ☑ | G2: `shell/sidebar.rs` ShieldOff badge from `SslSettings.exclude_apps` (by bundle id, else name) |
+| SB-12 | App menu: Show only <app> / Show all traffic | `components/Sidebar.tsx` `AppItem` | G2 | ☑ | G2: `sidebar::app_menu`; `sidebar::tests::app_menus_copy_the_name_and_bundle_id` |
+| SB-13 | App menu: Copy name, Copy bundle id | `components/Sidebar.tsx` `AppItem` | G2 | ☑ | G2: `sidebar::tests::app_menus_copy_the_name_and_bundle_id`, `tests/shell.rs` `context_menus_copy_the_right_text` |
+| SB-14 | App menu: "Don't decrypt HTTPS from <app>" checkbox (by bundle id, else name) | `components/Sidebar.tsx` `AppItem` | G2 | ☑ | G2: `sidebar::app_menu` check item → `Engine::set_app_ssl_excluded` (`workspace.rs`) |
+| SB-15 | Domains: registrable domains with counts, expandable to their hosts; a domain row scopes to `*.domain`, a host row to the host | `components/Sidebar.tsx` `DomainItem` | G2 | ☑ | G2: `shell/sidebar.rs` domains (chevron expands; `*.domain` / host scopes); `tests/shell.rs` `chips_and_sidebar_rows_filter` |
+| SB-16 | Domains: "No domains yet" or "No matching domains"; a filter expands every match | `components/Sidebar.tsx` | G2 | ☑ | G2: `shell/sidebar.rs` (empty states, a filter opens every match); `tests/shell.rs` `cmd_l_filters_the_sidebar` |
+| SB-17 | Domain and host menu: Show only <scope> / Show all traffic | `components/Sidebar.tsx` `HostMenu` | G2 | ☑ | G2: `sidebar::host_menu`; `sidebar::tests::host_menus_copy_the_host_and_the_domain_pattern` |
+| SB-18 | Domain and host menu: Copy <host>, Copy <*.domain> | `components/Sidebar.tsx` `HostMenu` | G2 | ☑ | G2: `sidebar::tests::host_menus_copy_the_host_and_the_domain_pattern`, `tests/shell.rs` `context_menus_copy_the_right_text`; live dev remote `contextMenu: sidebar:domain:127.0.0.1` (PR) |
+| SB-19 | Domain and host menu: Add <host> to SSL bypass | `components/Sidebar.tsx` `HostMenu` | G2 | ☑ | G2: `sidebar::host_menu` → `Engine::add_ssl_bypass` (`workspace.rs`) |
+| SB-20 | Domain and host menu: "Accept <host>'s certificate unverified" checkbox | `components/Sidebar.tsx` `HostMenu` | G2 | ☑ | G2: `sidebar::host_menu` check item → `Engine::set_insecure_upstream` (`workspace.rs`) |
+| SB-21 | "Filter apps and domains" box at the bottom (⌘L); Escape clears it | `components/Sidebar.tsx` | G2 | ☑ | G2: `shell/sidebar.rs` filter box (Escape clears: `clean_on_escape`), ⌘L (`navigate.rs`); `tests/shell.rs` `cmd_l_filters_the_sidebar` |
+| SB-22 | Long app and host names truncate; the tooltip has "<name> · N flows" | `components/Sidebar.tsx` `Item` | G2 | ☑ | G2: `shell/sidebar.rs` rows truncate; tooltip "<name> · N flows" |
+| SB-23 | Counts update live from the engine's sidebar snapshot (at most every 250 ms) | `store/sidebar.ts` | G2 | ☑ | G2: `bridge::sidebar` (`subscribe_sidebar`, one subscription for every window); the table sets `set_sidebar_store` with its view; live ({S}live-traffic.png`) |
 
 ## Filter bar
 
 | ID | Behaviour | Source | Phase | Status | Evidence |
 |---|---|---|---|---|---|
-| FB-01 | Protocol chips, one at a time: All, HTTP, HTTPS, WebSocket | `components/FilterBar.tsx` | G2 | ☐ | |
-| FB-02 | Content chips: All (clears), JSON, Form, XML, JS, CSS, GraphQL, Document, Media, Other (several at once) | `components/FilterBar.tsx` | G2 | ☐ | |
-| FB-03 | Search box with the DSL, placeholder "Filter: text, host:*.example.com status:4xx body:token…"; typing is debounced, chips apply at once | `components/FilterBar.tsx` `SearchBox` | G2 | ☐ | |
-| FB-04 | Autocomplete of keys with their help: host, path, method, status, ct, grpc, app, scheme, state, is, label, comment, op, header, reqheader, resheader, body, reqbody, resbody, dur, size, reqsize, id | `lib/dsl.ts` | G2 | ☐ | |
-| FB-05 | Value suggestions: known hosts and `*.domain`s, apps, and fixed lists for method, status, ct, grpc, scheme, state, is and label | `lib/dsl.ts` | G2 | ☐ | |
-| FB-06 | Key aliases: domain, client, type, content, proto, respbody, respheader, note, operation | `lib/dsl.ts` | G2 | ☐ | |
-| FB-07 | Suggestion keys: ↓ opens, ↑/↓ pick, Tab or ↩ accept, Escape closes; Escape or ↩ with no list goes to the flow table | `components/FilterBar.tsx` `SearchBox` | G2 | ☐ | |
-| FB-08 | Clear search (×) button | `components/FilterBar.tsx` `SearchBox` | G2 | ☐ | |
-| FB-09 | Deep-search icon in the box while the query has deep terms | `components/FilterBar.tsx` `SearchBox` | G2 | ☐ | |
-| FB-10 | Deep-search percentage inside the box while it runs, tooltip "Searching headers and bodies: matches appear as they are found" | `components/FilterBar.tsx` `DeepBadge` | G2 | ☐ | |
+| FB-01 | Protocol chips, one at a time: All, HTTP, HTTPS, WebSocket | `components/FilterBar.tsx` | G2 | ☑ | G2: `shell/filter_bar.rs` protocol chips; `tests/shell.rs` `chips_and_sidebar_rows_filter`; `tests/render.rs` checks the on chip |
+| FB-02 | Content chips: All (clears), JSON, Form, XML, JS, CSS, GraphQL, Document, Media, Other (several at once) | `components/FilterBar.tsx` | G2 | ☑ | G2: `shell/filter_bar.rs` content chips; `tests/shell.rs` `chips_and_sidebar_rows_filter` (several at once, All clears) |
+| FB-03 | Search box with the DSL, placeholder "Filter: text, host:*.example.com status:4xx body:token…"; typing is debounced, chips apply at once | `components/FilterBar.tsx` `SearchBox` | G2 | ☑ | G2: `shell/filter_bar.rs` (placeholder; text debounced 120 ms by `FlowTable::apply_filter`, chips at once); `tests/shell.rs` `the_search_box_autocompletes_and_hands_back_to_the_table` |
+| FB-04 | Autocomplete of keys with their help: host, path, method, status, ct, grpc, app, scheme, state, is, label, comment, op, header, reqheader, resheader, body, reqbody, resbody, dur, size, reqsize, id | `lib/dsl.ts` | G2 | ☑ | G2: `pm-view::dsl` (`DSL_KEYS`, numeric keys with operators), its vitest table as Rust tests |
+| FB-05 | Value suggestions: known hosts and `*.domain`s, apps, and fixed lists for method, status, ct, grpc, scheme, state, is and label | `lib/dsl.ts` | G2 | ☑ | G2: `pm-view::dsl` (`DslContext::from_sidebar`); `tests/shell.rs` suggests `*.example.com` and the host; live (`docs/native/g2/document-tabs-suggestions.png`) |
+| FB-06 | Key aliases: domain, client, type, content, proto, respbody, respheader, note, operation | `lib/dsl.ts` | G2 | ☑ | G2: `pm-view::dsl::tests::aliases_suggest_their_keys_values` |
+| FB-07 | Suggestion keys: ↓ opens, ↑/↓ pick, Tab or ↩ accept, Escape closes; Escape or ↩ with no list goes to the flow table | `components/FilterBar.tsx` `SearchBox` | G2 | ☑ | G2: `FilterBar::on_key` (keystroke interceptor); `tests/shell.rs` `the_search_box_autocompletes_and_hands_back_to_the_table` |
+| FB-08 | Clear search (×) button | `components/FilterBar.tsx` `SearchBox` | G2 | ☑ | G2: `shell/filter_bar.rs` `clear-search` |
+| FB-09 | Deep-search icon in the box while the query has deep terms | `components/FilterBar.tsx` `SearchBox` | G2 | ☑ | G2: `shell/filter_bar.rs` ScanSearch icon while `dsl::has_deep_terms` |
+| FB-10 | Deep-search percentage inside the box while it runs, tooltip "Searching headers and bodies: matches appear as they are found" | `components/FilterBar.tsx` `DeepBadge` | G2 | ☑ | G2: `shell/filter_bar.rs` `deep-badge` with its tooltip |
 
 ## Flow table
 
@@ -157,7 +157,7 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | FT-28 | A keyboard move onto a row not loaded yet selects it once it loads | `components/FlowTable/FlowTable.tsx` | G1 | ☑ | G1: `pm-widgets` `flow_grid::tests::arrows_pages_and_home_end_move_the_selection` (End); a ⇧-move waits too |
 | FT-29 | Right-click inside a multi-selection keeps it (bulk menu); elsewhere it selects the row first; outside any row there is no menu | `components/FlowTable/FlowTable.tsx` | G1 | ☐ | G1: the selection half (`FlowGrid::press_row`); the row menu is G3, the bulk menu G11 |
 | FT-30 | Auto Select: scrolls to and selects the newest flow as traffic arrives | `components/FlowTable/FlowTable.tsx` | G1 | ☑ | G1: `pm-widgets` `flow_grid::tests::auto_select_follows_the_newest_flow` |
-| FT-31 | Empty state "Waiting for traffic" with the `curl -x http://<proxy> http://example.com/` example and its "Copy command" menu | `components/FlowTable/EmptyState.tsx` | G1 | ☐ | G1: "Waiting for traffic" with the curl command (`flow_table.rs` `update_overlay`); its "Copy command" menu needs G2's CopyMenu |
+| FT-31 | Empty state "Waiting for traffic" with the `curl -x http://<proxy> http://example.com/` example and its "Copy command" menu | `components/FlowTable/EmptyState.tsx` | G1 | ☑ | G2: the empty state's command opens `toolbar::empty_state_menu` on right-click (`FlowGridEvent::EmptyStateMenu`); `tests/shell.rs` `the_empty_state_copies_its_command` |
 | FT-32 | Empty states "No flows match the current filter" and "Searching headers and bodies…" | `components/FlowTable/EmptyState.tsx` | G1 | ☑ | G1: `features/flow_table.rs` `update_overlay` (`Overlay::NoMatch`, `Overlay::Searching`) |
 | FT-33 | View error: "Couldn't open the flow list", the error, Try again | `components/FlowTable/EmptyState.tsx` `ViewError` | G1 | ☑ | G1: `Overlay::Error` with a gpui-kit "Try again" button (`FlowGridEvent::Retry` reopens the view) |
 | FT-34 | Accessible grid: header is row 1, the grid keeps focus and names the focused row, multi-selectable | `components/FlowTable/FlowTable.tsx` | G1 | ☐ | G1: grid, row and column-header roles, header as row 1, the focused row is the active descendant; gpui 0.3 has no multiselectable setter (G14 audits) |
@@ -206,40 +206,40 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 
 | ID | Behaviour | Source | Phase | Status | Evidence |
 |---|---|---|---|---|---|
-| FO-01 | Clear button (disabled on a document tab), tooltip "Clear all flows · ⌘⌫" | `components/Footer.tsx` | G2 | ☐ | |
-| FO-02 | Filter button focuses the search box, tooltip "Search flows · ⌘F" | `components/Footer.tsx` | G2 | ☐ | |
-| FO-03 | Auto Select toggle | `components/Footer.tsx` | G1 | ☐ | G1: `FlowGrid::set_auto_select` (dev remote `autoSelect`, `PROXYMATE_DEV_AUTO_SELECT`); the footer toggle is G2's footer |
-| FO-04 | Row count "N of M rows", "1 / " with a flow selected, "N selected ·" with several | `components/Footer.tsx` | G2 | ☐ | |
-| FO-05 | Deep search: "Searching bodies · checked of total (p%) · N found", then "Searched N flows · N found" | `components/Footer.tsx` `DeepStatus` | G2 | ☐ | |
-| FO-06 | Save and export status: "<label> · p%", "Saved N flows to <name>" (4 s), "<label> failed: <error>"; menu Copy path, Copy file name, Copy error, Dismiss | `components/Footer.tsx` `SaveStatus` | G2 | ☐ | |
-| FO-07 | "Not recording bodies" (a capture write failed) opens Settings › Storage | `components/Footer.tsx` `StorageWarning` | G2 | ☐ | |
-| FO-08 | "N not recorded" (recording lists) opens Settings › Storage | `components/Footer.tsx` `Unrecorded` | G2 | ☐ | |
-| FO-09 | Filter timing "filter X ms · Y ms end to end" | `components/Footer.tsx` | G2 | ☐ | |
-| FO-10 | Throughput "↑ … ↓ …" per second ("↑ — ↓ —" before the first status) | `components/Footer.tsx` `Throughput` | G2 | ☐ | |
+| FO-01 | Clear button (disabled on a document tab), tooltip "Clear all flows · ⌘⌫" | `components/Footer.tsx` | G2 | ☑ | G2: `shell/footer.rs` `footer-clear` (disabled on a document tab) |
+| FO-02 | Filter button focuses the search box, tooltip "Search flows · ⌘F" | `components/Footer.tsx` | G2 | ☑ | G2: `shell/footer.rs` `footer-filter` → `shell::focus_search` |
+| FO-03 | Auto Select toggle | `components/Footer.tsx` | G1 | ☑ | G2: `shell/footer.rs` `auto-select` (role Switch) → `capture::toggle_auto_select` |
+| FO-04 | Row count "N of M rows", "1 / " with a flow selected, "N selected ·" with several | `components/Footer.tsx` | G2 | ☑ | G2: `footer::row_count`; `footer::tests::counts_read_like_the_tauri_footer`; live "1 / 26,583 of 100,000 rows" (`docs/native/g2/100k-filtered.png`) |
+| FO-05 | Deep search: "Searching bodies · checked of total (p%) · N found", then "Searched N flows · N found" | `components/Footer.tsx` `DeepStatus` | G2 | ☑ | G2: `footer::deep_text`; `footer::tests::counts_read_like_the_tauri_footer` |
+| FO-06 | Save and export status: "<label> · p%", "Saved N flows to <name>" (4 s), "<label> failed: <error>"; menu Copy path, Copy file name, Copy error, Dismiss | `components/Footer.tsx` `SaveStatus` | G2 | ☑ | G2: `footer::save_text`, `footer::save_menu`; `footer::tests::save_status_and_its_menu`, `tests/shell.rs` `context_menus_copy_the_right_text` |
+| FO-07 | "Not recording bodies" (a capture write failed) opens Settings › Storage | `components/Footer.tsx` `StorageWarning` | G2 | ☑ | G2: `shell/footer.rs` `storage-error` (Settings › Storage is a toast until G12) |
+| FO-08 | "N not recorded" (recording lists) opens Settings › Storage | `components/Footer.tsx` `Unrecorded` | G2 | ☑ | G2: `shell/footer.rs` `unrecorded-count`; `tests/render.rs` shows "12 not recorded" |
+| FO-09 | Filter timing "filter X ms · Y ms end to end" | `components/Footer.tsx` | G2 | ☑ | G2: `shell/footer.rs` `filter-timing`; live "filter 2.2 ms · 9 ms end to end" (`docs/native/g2/100k-filtered.png`) |
+| FO-10 | Throughput "↑ … ↓ …" per second ("↑ — ↓ —" before the first status) | `components/Footer.tsx` `Throughput` | G2 | ☑ | G2: `shell/footer.rs` throughput, sampled every second from `StorageStatus` |
 
 ## Document tabs
 
 | ID | Behaviour | Source | Phase | Status | Evidence |
 |---|---|---|---|---|---|
-| DT-01 | Tab strip shown only while a document is open; "Live" first with a green dot | `components/DocumentTabs.tsx` | G2 | ☐ | |
-| DT-02 | Document tab: session or HAR icon, name, flow count, path tooltip; click switches the table and inspector to it | `components/DocumentTabs.tsx` | G2 | ☐ | |
-| DT-03 | Close (×) button on each document tab | `components/DocumentTabs.tsx` | G2 | ☐ | |
-| DT-04 | Tab menu: Copy name, Copy path | `components/DocumentTabs.tsx` `TabMenu` | G2 | ☐ | |
-| DT-05 | Tab menu: Save session…, Export HAR… (switches to that tab first) | `components/DocumentTabs.tsx` `TabMenu` | G2 | ☐ | |
+| DT-01 | Tab strip shown only while a document is open; "Live" first with a green dot | `components/DocumentTabs.tsx` | G2 | ☑ | G2: `shell/tabs.rs` (only while a document is open); `tests/render.rs` |
+| DT-02 | Document tab: session or HAR icon, name, flow count, path tooltip; click switches the table and inspector to it | `components/DocumentTabs.tsx` | G2 | ☑ | G2: `shell/tabs.rs`; `tests/shell.rs` `chips_and_sidebar_rows_filter` (`tab-0`); live (`docs/native/g2/document-tabs-suggestions.png`) |
+| DT-03 | Close (×) button on each document tab | `components/DocumentTabs.tsx` | G2 | ☑ | G2: `shell/tabs.rs` `close-<store>` |
+| DT-04 | Tab menu: Copy name, Copy path | `components/DocumentTabs.tsx` `TabMenu` | G2 | ☑ | G2: `tabs::tab_menu`; `tabs::tests::tab_menus_copy_save_export_and_close`, `tests/shell.rs` `context_menus_copy_the_right_text` |
+| DT-05 | Tab menu: Save session…, Export HAR… (switches to that tab first) | `components/DocumentTabs.tsx` `TabMenu` | G2 | ☑ | G2: `tabs::tab_menu` (`SaveStore`/`ExportStore` switch to the tab first) |
 | DT-06 | Tab menu: Mock from session… | `components/DocumentTabs.tsx` `TabMenu` | G12 | ☐ | |
-| DT-07 | Tab menu: Close (documents only) | `components/DocumentTabs.tsx` `TabMenu` | G2 | ☐ | |
-| DT-08 | Opening a `.proxymate`, HAR, `.chlsj` or `.chlsx` file adds a tab and makes it active | `lib/actions.ts` `openDocument` | G2 | ☐ | |
-| DT-09 | Closing the active document returns to Live | `lib/actions.ts` `closeDocument` | G2 | ☐ | |
-| DT-10 | Save Session suggests "<document>.proxymate" or "Proxymate YYYY-MM-DD HH.MM.proxymate" and saves in the background | `lib/actions.ts` `saveSession` | G2 | ☐ | |
-| DT-11 | Export HAR exports what the table shows by default, with the same naming | `lib/actions.ts` `exportHar` | G2 | ☐ | |
+| DT-07 | Tab menu: Close (documents only) | `components/DocumentTabs.tsx` `TabMenu` | G2 | ☑ | G2: `tabs::tests::tab_menus_copy_save_export_and_close` |
+| DT-08 | Opening a `.proxymate`, HAR, `.chlsj` or `.chlsx` file adds a tab and makes it active | `lib/actions.ts` `openDocument` | G2 | ☑ | G2: `Workspace::open_document` (sessions, HAR, Charles); live: opened a `.proxymate` and a `.har` (PR) |
+| DT-09 | Closing the active document returns to Live | `lib/actions.ts` `closeDocument` | G2 | ☑ | G2: `workspace::tests::closing_the_shown_document_returns_to_live_and_names_follow_the_tab` |
+| DT-10 | Save Session suggests "<document>.proxymate" or "Proxymate YYYY-MM-DD HH.MM.proxymate" and saves in the background | `lib/actions.ts` `saveSession` | G2 | ☑ | G2: `Workspace::suggested_name`; `workspace::tests::closing_the_shown_document_returns_to_live_and_names_follow_the_tab` |
+| DT-11 | Export HAR exports what the table shows by default, with the same naming | `lib/actions.ts` `exportHar` | G2 | ☑ | G2: `features/documents.rs` `save` (Har: the table's view by default) |
 
 ## Command palette & shortcuts
 
 | ID | Behaviour | Source | Phase | Status | Evidence |
 |---|---|---|---|---|---|
-| CP-01 | ⌘K toggles the palette: "Type a command…", groups Flows, Capture, Navigate, Windows, Settings, keyword matching, shortcut labels, only commands that apply now; "No matching command" | `components/CommandPalette.tsx` | G2 | ☐ | |
+| CP-01 | ⌘K toggles the palette: "Type a command…", groups Flows, Capture, Navigate, Windows, Settings, keyword matching, shortcut labels, only commands that apply now; "No matching command" | `components/CommandPalette.tsx` | G2 | ☑ | G2: `features/commands.rs` palette (groups, shortcuts, only registered commands that apply, "No matching command"); `tests/shell.rs` `the_palette_opens_with_cmd_k_and_runs_a_command`; `tests/render.rs` renders it in both themes |
 | CP-02 | Escape in the inspector returns focus to the flow table (unless a dialog is open) | `hooks/useShortcuts.ts` | G3 | ☐ | |
-| CP-03 | Shortcut rules: ⇧ never matches; ⌥ matches the physical key; ⌘⌫ and ⌘F are left to text fields and code editors; bare ⌫ and ⌘A only in the flow table | `lib/commands.ts` `commandForKey` | G2 | ☐ | |
+| CP-03 | Shortcut rules: ⇧ never matches; ⌥ matches the physical key; ⌘⌫ and ⌘F are left to text fields and code editors; bare ⌫ and ⌘A only in the flow table | `lib/commands.ts` `commandForKey` | G2 | ☑ | G2: `features/commands.rs` `bind_keys` (exact bindings, so ⇧ never matches; gpui matches the physical key; ⌘⌫ yields to text fields via `!Input`; bare ⌫ and ⌘A are `FlowGrid`'s); `tests/shell.rs` `cmd_backspace_in_a_text_field_edits_the_text`. ⌘F in code editors is G4's |
 | CP-04 | "Replay selected flow" ⌘R ("Nothing to replay", "Can't replay this flow" for tunnels and WebSockets) | `lib/commands.ts` | G8 | ☐ | |
 | CP-05 | "Edit & Replay selected flow…" | `lib/commands.ts` | G8 | ☐ | |
 | CP-06 | "Rewrite selected flow…" | `lib/commands.ts` | G9 | ☐ | |
@@ -257,28 +257,28 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | CP-18 | "Add header column…" | `lib/commands.ts` | G11 | ☐ | |
 | CP-19 | "Copy selected flow as cURL" | `lib/commands.ts` | G3 | ☐ | |
 | CP-20 | "New request…" | `lib/commands.ts` | G8 | ☐ | |
-| CP-21 | "Clear all flows" ⌘⌫ (live capture only) | `lib/commands.ts` | G2 | ☐ | |
-| CP-22 | "Start recording" / "Stop recording" ⌘E (one key, whichever applies) | `lib/commands.ts` | G2 | ☐ | |
-| CP-23 | "Toggle Auto Select" | `lib/commands.ts` | G1 | ☐ | G1: `FlowGrid::set_auto_select`; the palette command arrives with G2's palette |
+| CP-21 | "Clear all flows" ⌘⌫ (live capture only) | `lib/commands.ts` | G2 | ☑ | G2: `features/capture.rs` (live only); `tests/shell.rs` `cmd_backspace_in_a_text_field_edits_the_text` |
+| CP-22 | "Start recording" / "Stop recording" ⌘E (one key, whichever applies) | `lib/commands.ts` | G2 | ☑ | G2: `features/capture.rs`; `commands::tests::only_registered_commands_that_apply_are_listed_and_keys_pick_the_one_that_applies`, `tests/shell.rs` `the_palette_opens_with_cmd_k_and_runs_a_command` |
+| CP-23 | "Toggle Auto Select" | `lib/commands.ts` | G1 | ☑ | G2: `features/capture.rs` (`auto-select`) in the palette |
 | CP-24 | "Intercept: New Terminal window", "New iTerm window", "Launch Google Chrome", "Launch Microsoft Edge", "Launch Brave Browser", "Launch Arc", "Launch Firefox" (hidden when not installed) | `lib/commands.ts`, `lib/capture.ts` | G13 | ☐ | |
 | CP-25 | "Toggle No Caching" | `lib/commands.ts` | G7 | ☐ | |
 | CP-26 | "Toggle Block Cookies" | `lib/commands.ts` | G7 | ☐ | |
 | CP-27 | "Auto-save now" | `lib/commands.ts` | G12 | ☐ | |
-| CP-28 | "Open session, HAR or Charles file…" | `lib/commands.ts` | G2 | ☐ | |
+| CP-28 | "Open session, HAR or Charles file…" | `lib/commands.ts` | G2 | ☑ | G2: `features/documents.rs` (`open`) |
 | CP-29 | "Mock from this session…" | `lib/commands.ts` | G12 | ☐ | |
 | CP-30 | "Mock from a file…" | `lib/commands.ts` | G12 | ☐ | |
 | CP-31 | "Import OpenAPI spec…", then Settings › Mocking | `lib/commands.ts` | G12 | ☐ | |
-| CP-32 | "Save session…" | `lib/commands.ts` | G2 | ☐ | |
-| CP-33 | "Export HAR…" | `lib/commands.ts` | G2 | ☐ | |
-| CP-34 | "Search flows" ⌘F focuses and selects the search box | `lib/commands.ts` | G2 | ☐ | |
-| CP-35 | "Filter apps and domains" ⌘L | `lib/commands.ts` | G2 | ☐ | |
-| CP-36 | "Show pinned flows" (`is:pinned`) | `lib/commands.ts` | G2 | ☐ | |
-| CP-37 | "Show labelled flows" (`is:labelled`) | `lib/commands.ts` | G2 | ☐ | |
-| CP-38 | "Show commented flows" (`is:commented`) | `lib/commands.ts` | G2 | ☐ | |
-| CP-39 | "Search request and response bodies…" appends `body:` and focuses the box | `lib/commands.ts` | G2 | ☐ | |
+| CP-32 | "Save session…" | `lib/commands.ts` | G2 | ☑ | G2: `features/documents.rs` (`save-session`) |
+| CP-33 | "Export HAR…" | `lib/commands.ts` | G2 | ☑ | G2: `features/documents.rs` (`export-har`) |
+| CP-34 | "Search flows" ⌘F focuses and selects the search box | `lib/commands.ts` | G2 | ☑ | G2: `features/navigate.rs` (`search`, focuses and selects); `tests/shell.rs` `the_search_box_autocompletes_and_hands_back_to_the_table` |
+| CP-35 | "Filter apps and domains" ⌘L | `lib/commands.ts` | G2 | ☑ | G2: `features/navigate.rs` (`filter`); `tests/shell.rs` `cmd_l_filters_the_sidebar` |
+| CP-36 | "Show pinned flows" (`is:pinned`) | `lib/commands.ts` | G2 | ☑ | G2: `features/navigate.rs`; `tests/shell.rs` `the_palette_opens_with_cmd_k_and_runs_a_command` runs it from the palette |
+| CP-37 | "Show labelled flows" (`is:labelled`) | `lib/commands.ts` | G2 | ☑ | G2: `features/navigate.rs` (`labelled`) |
+| CP-38 | "Show commented flows" (`is:commented`) | `lib/commands.ts` | G2 | ☑ | G2: `features/navigate.rs` (`commented`) |
+| CP-39 | "Search request and response bodies…" appends `body:` and focuses the box | `lib/commands.ts` | G2 | ☑ | G2: `features/navigate.rs` (`deep-search`, `pm_view::commands::with_body_term`, caret at the end) |
 | CP-40 | "Focus the flow table" | `lib/commands.ts`, `lib/focus.ts` | G3 | ☐ | |
 | CP-41 | "Focus the inspector" (with a selection) | `lib/commands.ts`, `lib/focus.ts` | G3 | ☐ | |
-| CP-42 | "Show live capture" (on a document tab) | `lib/commands.ts` | G2 | ☐ | |
+| CP-42 | "Show live capture" (on a document tab) | `lib/commands.ts` | G2 | ☑ | G2: `features/documents.rs` (`live`, only on a document tab); `tests/shell.rs` checks it is hidden on Live |
 | CP-43 | "Rules…" | `lib/commands.ts` | G7 | ☐ | |
 | CP-44 | "Scripts…" | `lib/commands.ts` | G10 | ☐ | |
 | CP-45 | "Breakpoints…" | `lib/commands.ts` | G8 | ☐ | |
@@ -286,7 +286,7 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | CP-47 | "Certificate wizard…" | `lib/commands.ts` | G13 | ☐ | |
 | CP-48 | "Settings…" ⌘, | `lib/commands.ts` | G12 | ☐ | |
 | CP-49 | "Settings: Proxy", "Network", "SSL Proxying", "Clients", "Storage", "Mocking", "Appearance", "Advanced", "MCP" | `lib/commands.ts` | G12 | ☐ | |
-| CP-50 | "Appearance: System", "Appearance: Light", "Appearance: Dark" | `lib/commands.ts` | G2 | ☐ | |
+| CP-50 | "Appearance: System", "Appearance: Light", "Appearance: Dark" | `lib/commands.ts` | G2 | ☑ | G2: `features/navigate.rs` (`appearance-*`) |
 
 ## Inspector
 
@@ -678,9 +678,9 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | ID | Behaviour | Source | Phase | Status | Evidence |
 |---|---|---|---|---|---|
 | DV-01 | Dev remote: `theme` | `dev/remote.ts` | G0 | ☑ | G0: apps/native/src/dev/mod.rs |
-| DV-02 | Dev remote: `click` by test id | `dev/remote.ts` | G2 | ☐ | |
+| DV-02 | Dev remote: `click` by test id | `dev/remote.ts` | G2 | ☑ | G2: G0's `click`, now on every chrome control (`.test_support()` on plain elements); `tests/shell.rs` clicks chips, rows and tabs |
 | DV-03 | Dev remote: `select`, `selectIds`, `selectAll`, `scrollTo` | `dev/remote.ts` | G1 | ☑ | G1: `apps/native/src/dev/mod.rs` `select`, `selectIds`, `selectAll`, `scrollTo` (plus `headerColumns`, `filter`, `autoSelect`, `table`) |
-| DV-04 | Dev remote: `filter`, `palette`, `store`, `openDocument`, `closeDocument`, `saveSession`, `exportHar`, `contextMenu`, `reload` | `dev/remote.ts` | G2 | ☐ | |
+| DV-04 | Dev remote: `filter`, `palette`, `store`, `openDocument`, `closeDocument`, `saveSession`, `exportHar`, `contextMenu`, `reload` | `dev/remote.ts` | G2 | ☑ | G2: `apps/native/src/dev/mod.rs` `filter`, `search`, `palette`, `command`, `keys`, `store`, `openDocument`, `closeDocument`, `saveSession`, `exportHar`, `contextMenu` (with `run`), `workspace`, … (`reload` has no meaning without a web view) |
 | DV-05 | Dev remote: `requestTab`, `responseTab`, `curl` | `dev/remote.ts` | G3 | ☐ | |
 | DV-06 | Dev remote: `viewer` | `dev/remote.ts` | G4 | ☐ | |
 | DV-07 | Dev remote: `wsSend`, `wsClose` | `dev/remote.ts` | G6 | ☐ | |
@@ -693,7 +693,7 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | DV-14 | Dev remote: `intercept`, `deviceTab` | `dev/remote.ts` | G13 | ☐ | |
 | DV-15 | `VITE_PM_AUTO_SELECT`: start with Auto Select on | `dev/harness.ts` | G1 | ☑ | G1: `PROXYMATE_DEV_AUTO_SELECT=1` (`features/flow_table.rs`, `dev_env.rs`) |
 | DV-16 | Perf probe (`PROXYMATE_SYNTH_FLOWS` + `VITE_PM_PERF_PROBE`): `[perf-probe]` scroll and filter timings | `dev/perfProbe.ts` | G1 | ☑ | G1: `apps/native/src/perf_probe.rs`, `PROXYMATE_DEV_PERF_PROBE=1`; numbers in the G1 PR |
-| DV-17 | `VITE_PM_FILTER`: start with search text | `dev/harness.ts` | G2 | ☐ | |
+| DV-17 | `VITE_PM_FILTER`: start with search text | `dev/harness.ts` | G2 | ☑ | G2: `PROXYMATE_DEV_FILTER` (`dev_env::value`, `Workspace::new`) |
 | DV-18 | `VITE_PM_RESPONSE_TAB`: open the response pane on a tab | `dev/harness.ts` | G3 | ☐ | |
 | DV-19 | `VITE_PM_OPEN=rules` | `dev/harness.ts` | G7 | ☐ | |
 | DV-20 | `VITE_PM_OPEN=breakpoints` | `dev/harness.ts` | G8 | ☐ | |
@@ -710,8 +710,8 @@ Rows per owning phase. G14 also audits every row; its own row is the browser-onl
 | Phase | Rows | Done (`☑`) |
 |---|---|---|
 | G0 | 14 | 14 |
-| G1 | 39 | 32 |
-| G2 | 91 | 0 |
+| G1 | 39 | 35 |
+| G2 | 91 | 89 (2 `≈`: WM-13, WM-28) |
 | G3 | 62 | 0 |
 | G4 | 31 | 0 |
 | G5 | 10 | 0 |
@@ -725,4 +725,4 @@ Rows per owning phase. G14 also audits every row; its own row is the browser-onl
 | G13 | 29 | 0 |
 | G14 | 1 | 0 |
 | G15 | 5 | 5 |
-| **Total** | **524** | **51** |
+| **Total** | **524** | **143** |
