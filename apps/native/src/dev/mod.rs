@@ -76,13 +76,14 @@
 //!   its state (the queue with countdowns, the shown flow, the edits its
 //!   form would send, its error), `{"breakpointSelect": <id>}`,
 //!   `{"breakpointEdit": {"method", "url", "status", "headers": [[n, v], …]
-//!   (sets or adds by name), "removeHeaders": [n, …], "body", "bodyMode": "text" | "tree", "messageMode": "text" | "tree" |
-//!   "hex", "payload", "respond": true, "answer": {"status", "headers",
-//!   "body"}}}`, `{"breakpointKeys": "down enter"}` and `{"breakpointType":
-//!   "42"}` (keys into the shown JSON tree, then text into its inline edit,
-//!   committed), `{"breakpointAction": {"execute": {…MessageEdits} | true}}`
-//!   (Execute or Send, the edits merged over the form's, as in the Tauri
-//!   remote), `{"breakpointAction": {"abort": true}}` (Abort or Drop),
+//!   (sets or adds by name), "removeHeaders": [n, …], "body", "bodyMode":
+//!   "text" | "tree", "messageMode": "text" | "tree" | "hex", "payload",
+//!   "respond": true, "answer": {"status", "headers", "body"}}}`,
+//!   `{"breakpointKeys": "down enter"}` and `{"breakpointType": "42"}` (keys
+//!   into the shown JSON tree, then text into its inline edit, committed),
+//!   `{"breakpointAction": {"execute": {…MessageEdits} | true}}` (Execute or
+//!   Send, the edits merged over the form's, as in the Tauri remote),
+//!   `{"breakpointAction": {"abort": true}}` (Abort or Drop),
 //!   `{"breakpointAction": {"respond": true}}` (Send response),
 //!   `{"breakpointMenu": <id>, "run": "<label>"}` and
 //!   `{"breakpointScreenshot": "/abs/x.png"}`. `{"replay": 3}`,

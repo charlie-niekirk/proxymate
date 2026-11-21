@@ -54,7 +54,15 @@ pub fn register(cx: &mut App) {
     let stroke: &'static str = Box::leak(format!("{primary}-enter").into_boxed_str());
     cx.bind_keys([KeyBinding::new(stroke, SendCompose, Some(KEY_CONTEXT))]);
     cx.on_action(|_: &Compose, cx| open(None, cx));
+    cx.on_action(|_: &crate::menus::NewRequest, cx| open(None, cx));
     commands::add("compose", commands::always, |_, cx| open(None, cx), cx);
+}
+
+/// `PROXYMATE_DEV_OPEN=compose` opens Compose at launch (dev only).
+pub fn open_from_env(cx: &mut App) {
+    if crate::dev_env::value("PROXYMATE_DEV_OPEN").as_deref() == Some("compose") {
+        open(None, cx);
+    }
 }
 
 /// Opens Compose (or brings it forward) with `spec` (Edit & Replay) or a

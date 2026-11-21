@@ -79,6 +79,13 @@ fn resolve_from_menu(id: BreakpointId, resolution: BreakpointResolution, what: &
     );
 }
 
+/// `PROXYMATE_DEV_OPEN=breakpoints` opens the editor at launch (dev only).
+pub fn open_from_env(cx: &mut App) {
+    if crate::dev_env::value("PROXYMATE_DEV_OPEN").as_deref() == Some("breakpoints") {
+        open(cx);
+    }
+}
+
 /// Opens the window (or brings it forward).
 pub fn open(cx: &mut App) {
     // Deferred: the action that asked is still being dispatched.
