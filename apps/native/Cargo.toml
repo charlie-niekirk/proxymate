@@ -26,6 +26,15 @@ path = "tests/render.rs"
 test = false
 harness = false
 
+# G13's surfaces (certificate wizard and popovers, Device setup, the LAN
+# prompt, the toolbar's tools) the same way, from injected snapshots:
+# `cargo test -p proxymate-native --test render_integration`.
+[[test]]
+name = "render_integration"
+path = "tests/render_integration.rs"
+test = false
+harness = false
+
 [features]
 # The dev remote (PROXYMATE_DEV_REMOTE=1) and window captures. It turns on
 # gpui-kit's test support for element lookup (`click`) and offscreen frames.

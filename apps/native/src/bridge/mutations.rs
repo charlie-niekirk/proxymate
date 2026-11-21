@@ -338,3 +338,359 @@ pub fn ws_close(flow: keys::FlowKey, cx: &mut App) {
         cx,
     );
 }
+
+// ---- macOS integration (G13) ----
+
+/// Writes that change the machine or the device allow-list: keychain
+/// trust, the CA, the system proxy, LAN listening, `simctl`, `adb` and
+/// intercepted launches. With a `Journal` set (tests), each is written
+/// down here instead of run, and its `done` never comes: a test can't
+/// change the machine even with an engine (`CLAUDE.md`, M4/M9/M21).
+#[derive(Default)]
+pub struct Journal(pub Vec<String>);
+
+impl gpui_kit::Global for Journal {}
+
+/// Writes `entry` to the journal if there is one; true if it did (then
+/// the write doesn't run).
+fn journaled(entry: impl FnOnce() -> String, cx: &mut App) -> bool {
+    if !cx.has_global::<Journal>() {
+        return false;
+    }
+    let entry = entry();
+    cx.global_mut::<Journal>().0.push(entry);
+    true
+}
+
+/// Why a G13 write failed, for the line under the button that ran it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Failure {
+    /// The user cancelled the macOS prompt: nothing changed.
+    pub cancelled: bool,
+    pub message: String,
+}
+
+impl Failure {
+    fn of(err: pm_core::Error) -> Failure {
+        Failure {
+            cancelled: err.kind() == pm_model::IpcErrorKind::Cancelled,
+            message: err.to_string(),
+        }
+    }
+
+    fn other(message: impl Into<String>) -> Failure {
+        Failure {
+            cancelled: false,
+            message: message.into(),
+        }
+    }
+}
+
+type Done<T> = Box<dyn FnOnce(Result<T, Failure>, &mut App)>;
+
+/// Runs one of the engine's async writes on the bridge's runtime, then
+/// `done` with its answer on the foreground.
+fn run_async<T, F>(write: impl FnOnce(Arc<Engine>) -> F + 'static, done: Done<T>, cx: &mut App)
+where
+    T: Send + 'static,
+    F: std::future::Future<Output = Result<T, pm_core::Error>> + Send + 'static,
+{
+    let Some((engine, runtime)) = super::Bridge::try_async(cx) else {
+        return done(Err(Failure::other("the engine isn't running")), cx);
+    };
+    let task = runtime.spawn(write(engine));
+    cx.spawn(async move |cx| {
+        let answer = match task.await {
+            Ok(answer) => answer.map_err(Failure::of),
+            Err(err) => Err(Failure::other(err.to_string())),
+        };
+        cx.update(|cx| done(answer, cx));
+    })
+    .detach();
+}
+
+/// Runs a blocking engine write off the foreground, then `done`.
+fn run_blocking<T: Send + 'static>(
+    write: impl FnOnce(&Arc<Engine>) -> Result<T, pm_core::Error> + Send + 'static,
+    done: Done<T>,
+    cx: &mut App,
+) {
+    let Some((engine, _)) = super::Bridge::try_async(cx) else {
+        return done(Err(Failure::other("the engine isn't running")), cx);
+    };
+    let task = cx.background_spawn(async move { write(&engine).map_err(Failure::of) });
+    cx.spawn(async move |cx| {
+        let answer = task.await;
+        cx.update(|cx| done(answer, cx));
+    })
+    .detach();
+}
+
+fn set_trust(status: &pm_model::TrustStatus, cx: &mut App) {
+    let caches = keys::integration_caches(cx);
+    let status = status.clone();
+    caches.trust.update(cx, |c, cx| c.set((), status, cx));
+}
+
+/// Install & Trust: adds the CA to the login keychain as a trusted root
+/// (macOS asks for a password or Touch ID), then checks it again.
+pub fn install_ca_trust(done: impl FnOnce(Result<(), Failure>, &mut App) + 'static, cx: &mut App) {
+    if journaled(|| "install_ca_trust".into(), cx) {
+        return;
+    }
+    run_async(
+        |e| async move { e.install_ca_trust().await },
+        Box::new(move |answer, cx| {
+            if let Ok(status) = &answer {
+                set_trust(status, cx);
+            }
+            done(answer.map(drop), cx);
+        }),
+        cx,
+    );
+}
+
+/// Remove from keychain (macOS asks).
+pub fn uninstall_ca_trust(done: impl FnOnce(Result<(), Failure>, &mut App) + 'static, cx: &mut App) {
+    if journaled(|| "uninstall_ca_trust".into(), cx) {
+        return;
+    }
+    run_async(
+        |e| async move { e.uninstall_ca_trust().await },
+        Box::new(move |answer, cx| {
+            if let Ok(status) = &answer {
+                set_trust(status, cx);
+            }
+            done(answer.map(drop), cx);
+        }),
+        cx,
+    );
+}
+
+/// Replaces the root CA, optionally removing the old one's trust (macOS
+/// asks). The CA and the trust state are read again either way: a failure
+/// to untrust still leaves the new CA in place.
+pub fn regenerate_ca(remove_old_trust: bool, done: impl FnOnce(Result<(), Failure>, &mut App) + 'static, cx: &mut App) {
+    if journaled(|| format!("regenerate_ca remove_old_trust={remove_old_trust}"), cx) {
+        return;
+    }
+    run_async(
+        move |e| async move { e.regenerate_ca_and_untrust(remove_old_trust).await },
+        Box::new(move |answer: Result<pm_model::CaInfo, Failure>, cx| {
+            let caches = keys::integration_caches(cx);
+            match &answer {
+                Ok(info) => {
+                    let info = info.clone();
+                    caches.ca.update(cx, |c, cx| c.set((), info, cx));
+                }
+                Err(_) => {
+                    caches.ca.update(cx, |c, cx| c.invalidate(|_, _| true, cx));
+                }
+            }
+            caches.trust.update(cx, |c, cx| c.invalidate(|_, _| true, cx));
+            done(answer.map(drop), cx);
+        }),
+        cx,
+    );
+}
+
+/// Turns the system proxy on or off (every active network service; the
+/// guardian puts the old settings back after a crash). The status says
+/// whether it worked.
+pub fn set_system_proxy(on: bool, done: impl FnOnce(&mut App) + 'static, cx: &mut App) {
+    if journaled(|| format!("set_system_proxy {on}"), cx) {
+        return;
+    }
+    run_blocking(
+        move |e| Ok(e.set_system_proxy(on)),
+        Box::new(move |answer, cx| {
+            if let Ok(status) = answer {
+                let caches = keys::integration_caches(cx);
+                caches.system_proxy.update(cx, |c, cx| c.set((), status, cx));
+            }
+            done(cx);
+        }),
+        cx,
+    );
+}
+
+fn access_changed(answer: Result<pm_model::DeviceAccess, Failure>, what: &'static str, cx: &mut App) {
+    match answer {
+        Ok(access) => {
+            let caches = keys::integration_caches(cx);
+            caches.access.update(cx, |c, cx| c.set((), access, cx));
+        }
+        Err(err) => report_error(what, err.message, cx),
+    }
+    // The listener moved (0.0.0.0 or back): the pill's address follows.
+    if let Some(ws) = Workspace::global(cx) {
+        ws.update(cx, |w, cx| w.refresh_proxy(cx));
+    }
+}
+
+/// "Allow devices on your network": listens on every interface (or
+/// loopback only again). A failure comes back in the access's `error`.
+pub fn set_lan_access(on: bool, done: impl FnOnce(&mut App) + 'static, cx: &mut App) {
+    if journaled(|| format!("set_lan_access {on}"), cx) {
+        return;
+    }
+    run_async(
+        move |e| async move { Ok(e.set_lan_access(on).await) },
+        Box::new(move |answer, cx| {
+            access_changed(answer, "Can't change LAN access", cx);
+            done(cx);
+        }),
+        cx,
+    );
+}
+
+/// The interface the setup URL, QR code and toolbar use.
+pub fn set_lan_interface(name: String, cx: &mut App) {
+    if journaled(|| format!("set_lan_interface {name}"), cx) {
+        return;
+    }
+    run_blocking(
+        move |e| e.set_lan_interface(&name),
+        Box::new(|answer, cx| access_changed(answer, "Can't change the interface", cx)),
+        cx,
+    );
+}
+
+fn devices_changed(snapshot: pm_model::DevicesSnapshot, cx: &mut App) {
+    let devices = super::devices(cx);
+    devices.update(cx, |d, cx| {
+        d.value = Some(snapshot);
+        cx.notify();
+    });
+}
+
+/// Allows or denies a LAN client (its held connections go on or are
+/// refused), with a nickname for the Client column.
+pub fn decide_device(
+    ip: String,
+    allow: bool,
+    nickname: Option<String>,
+    done: impl FnOnce(Result<(), Failure>, &mut App) + 'static,
+    cx: &mut App,
+) {
+    if journaled(
+        || {
+            format!(
+                "decide_device {ip} allow={allow} nickname={}",
+                nickname.as_deref().unwrap_or("")
+            )
+        },
+        cx,
+    ) {
+        return;
+    }
+    run_blocking(
+        move |e| e.decide_device(&ip, allow, nickname),
+        Box::new(move |answer, cx| {
+            let answer = answer.map(|snapshot| devices_changed(snapshot, cx));
+            done(answer, cx);
+        }),
+        cx,
+    );
+}
+
+/// Forgets a LAN client: its next connection asks again.
+pub fn forget_device(ip: String, done: impl FnOnce(Result<(), Failure>, &mut App) + 'static, cx: &mut App) {
+    if journaled(|| format!("forget_device {ip}"), cx) {
+        return;
+    }
+    run_blocking(
+        move |e| e.forget_device(&ip),
+        Box::new(move |answer, cx| {
+            let answer = answer.map(|snapshot| devices_changed(snapshot, cx));
+            done(answer, cx);
+        }),
+        cx,
+    );
+}
+
+/// Adds the CA to the booted simulators `udids` (every booted one when
+/// empty) with `simctl keychain add-root-cert`. The simulators are read
+/// again, installed or not.
+pub fn install_simulator_cert(
+    udids: Vec<String>,
+    done: impl FnOnce(Result<Vec<pm_model::SimInstallResult>, Failure>, &mut App) + 'static,
+    cx: &mut App,
+) {
+    if journaled(|| format!("install_simulator_cert [{}]", udids.join(",")), cx) {
+        return;
+    }
+    run_async(
+        move |e| async move { e.install_simulator_cert(udids).await },
+        Box::new(move |answer, cx| {
+            let caches = keys::integration_caches(cx);
+            caches.simulator.update(cx, |c, cx| c.invalidate(|_, _| true, cx));
+            done(answer, cx);
+        }),
+        cx,
+    );
+}
+
+/// Points an emulator's global proxy at us over adb, or clears it.
+pub fn set_android_proxy(
+    serial: String,
+    on: bool,
+    done: impl FnOnce(Result<(), Failure>, &mut App) + 'static,
+    cx: &mut App,
+) {
+    if journaled(|| format!("set_android_proxy {serial} {on}"), cx) {
+        return;
+    }
+    run_async(
+        move |e| async move { e.set_android_proxy(&serial, on).await },
+        Box::new(move |answer: Result<pm_model::AndroidStatus, Failure>, cx| {
+            let caches = keys::integration_caches(cx);
+            match &answer {
+                Ok(status) => {
+                    let status = status.clone();
+                    caches.android.update(cx, |c, cx| c.set((), status, cx));
+                }
+                Err(_) => {
+                    caches.android.update(cx, |c, cx| c.invalidate(|_, _| true, cx));
+                }
+            }
+            done(answer.map(drop), cx);
+        }),
+        cx,
+    );
+}
+
+/// Copies the CA to the device's Downloads; `done` gets its path there.
+pub fn push_android_cert(serial: String, done: impl FnOnce(Result<String, Failure>, &mut App) + 'static, cx: &mut App) {
+    if journaled(|| format!("push_android_cert {serial}"), cx) {
+        return;
+    }
+    run_async(
+        move |e| async move { e.push_android_cert(&serial).await },
+        Box::new(done),
+        cx,
+    );
+}
+
+/// Starts a terminal or browser already pointed at the proxy and trusting
+/// its CA, then says so (or why it couldn't).
+pub fn intercept(target: pm_model::InterceptTarget, cx: &mut App) {
+    if journaled(|| format!("intercept {target:?}"), cx) {
+        return;
+    }
+    run_blocking(
+        move |e| e.intercept(target),
+        Box::new(|answer, cx| {
+            let caches = keys::integration_caches(cx);
+            caches.intercepts.update(cx, |c, cx| c.invalidate(|_, _| true, cx));
+            match answer {
+                Ok(session) => {
+                    let (title, description) = pm_view::integration::intercept_started(&session);
+                    clipboard::success(&title, Some(description), cx);
+                }
+                Err(err) => report_error("Can't start the app", err.message, cx),
+            }
+        }),
+        cx,
+    );
+}
