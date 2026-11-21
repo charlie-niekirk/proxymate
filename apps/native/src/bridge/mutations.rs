@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use gpui_kit::{App, AppContext as _};
 use pm_core::Engine;
-use pm_model::{FlowSelection, LIVE_STORE, StoreId};
+use pm_model::{FlowSelection, LIVE_STORE, StoreId, WsDirection, WsOpcode};
 
 use super::keys;
 use crate::features::clipboard::{self, report_error};
@@ -121,4 +121,54 @@ pub fn set_insecure_upstream(host: String, allow: bool, cx: &mut App) {
     if let Some(ws) = Workspace::global(cx) {
         ws.update(cx, |w, cx| w.set_insecure_upstream(host, allow, cx));
     }
+}
+
+/// Sends a message into an open WebSocket of the live capture (the
+/// composer): `done` gets the engine's answer, so the composer can show an
+/// error inline. The flow's lists go stale either way.
+pub fn ws_send(
+    flow: keys::FlowKey,
+    message: pm_model::WsSend,
+    done: impl FnOnce(Result<(), String>, &mut App) + 'static,
+    cx: &mut App,
+) {
+    let Some(engine) = engine(cx) else {
+        // After the caller's update, which `done` may want to update again.
+        cx.defer(move |cx| done(Err("No engine".into()), cx));
+        return;
+    };
+    let task = cx.background_spawn(async move { engine.ws_send(flow.id, &message) });
+    cx.spawn(async move |cx| {
+        let answer = task.await.map_err(|e| e.to_string());
+        cx.update(|cx| {
+            keys::websocket_changed(flow, cx);
+            done(answer, cx);
+        });
+    })
+    .detach();
+}
+
+/// Resend: message `index` again, its payload as it was forwarded, in its
+/// direction. Failures toast.
+pub fn ws_resend(flow: keys::FlowKey, index: u32, direction: WsDirection, opcode: WsOpcode, cx: &mut App) {
+    run(
+        "Couldn't resend the message",
+        move |e| {
+            let payload = e.websocket_payload_in(flow.store, flow.id, index)?;
+            e.ws_send(flow.id, &pm_view::stream::resend_of(direction, opcode, &payload))
+        },
+        move |_, cx| keys::websocket_changed(flow, cx),
+        cx,
+    );
+}
+
+/// Closes an open WebSocket of the live capture: a normal close frame to
+/// each side.
+pub fn ws_close(flow: keys::FlowKey, cx: &mut App) {
+    run(
+        "Couldn't close the connection",
+        move |e| e.ws_close(flow.id),
+        move |_, cx| keys::websocket_changed(flow, cx),
+        cx,
+    );
 }

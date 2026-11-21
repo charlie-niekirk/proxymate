@@ -30,7 +30,8 @@
 //!   "run": "<label>"}` (answers with the entries, and the clipboard after
 //!   running one), `{"sidebarFilter": "saf"}` and `{"workspace": true}`;
 //!   each answers with the workspace's state (store, documents, filter,
-//!   proxy, save status, last toast).
+//!   proxy, save status, last toast). `{"tableShare": 0.3}` sets the
+//!   table's share of the height over the inspector (G6, for screenshots).
 //! - The inspector (G3): `{"requestTab": "Raw"}`, `{"responseTab": "TLS"}`,
 //!   `{"focus": "inspector" | "table"}`, `{"curl": 3}` (Copy as cURL's
 //!   command for flow 3 of the tab shown) and `{"inspector": true}`; each
@@ -39,6 +40,17 @@
 //!   menus (`url`, `kv:<table>[:<row>]`, `rule:<n>`, `cert:<n>`,
 //!   `timing[:<row>]`, `failure`, `raw:request|response`) and the flow row
 //!   menu, `row:<flow id>[:<column id>]` (`row:3:status`).
+//! - The stream panels (G6), on the inspected WebSocket or SSE flow:
+//!   `{"streamSelect": 4}` (a row of the list), `{"streamDirection": "sent"
+//!   | "received" | "all"}`, `{"streamSearch": "ping"}`, `{"streamViewer":
+//!   "hex"}`, `{"wsOriginal": true}`, `{"wsCompose": {"text": "hi",
+//!   "direction": "received", "mode": "hex"}}` (fills the composer),
+//!   `{"wsComposeSend": true}` (Send, as ⌘↩) and `{"stream": true}`; each
+//!   answers with the panel's state (status, counts, the rows on screen,
+//!   the selection, its detail, the composer's error). `contextMenu` takes
+//!   `stream:<row>` and `payload`. As in the Tauri remote, `{"wsSend":
+//!   {"flow": 3, "direction": "received", "payload": "hi", "binary": false}}`
+//!   sends into a live WebSocket and `{"wsClose": 3}` closes it.
 //!
 //! Every phase adds the verbs its surfaces need (see `docs/PLAN.md`).
 
@@ -182,6 +194,9 @@ async fn run(command: Value, cx: &mut AsyncApp) -> Value {
     if let Some(answer) = inspector_command(&command, window, cx).await {
         return answer;
     }
+    if let Some(answer) = stream_command(&command, window, cx).await {
+        return answer;
+    }
     if let Some(answer) = table {
         return answer;
     }
@@ -189,7 +204,7 @@ async fn run(command: Value, cx: &mut AsyncApp) -> Value {
         let offscreen = command.get("offscreen").and_then(Value::as_bool).unwrap_or(false);
         return screenshot(window, PathBuf::from(path), offscreen, cx).await;
     }
-    json!({"error": "unknown command: try theme, screenshot, click, select, selectIds, selectAll, scrollTo, headerColumns, filter, search, protocol, content, scope, keys, palette, command, store, openDocument, closeDocument, saveSession, exportHar, recording, clear, contextMenu, sidebarFilter, workspace, autoSelect, table, requestTab, responseTab, focus, curl or inspector"})
+    json!({"error": "unknown command: try theme, screenshot, click, select, selectIds, selectAll, scrollTo, headerColumns, filter, search, protocol, content, scope, keys, palette, command, store, openDocument, closeDocument, saveSession, exportHar, recording, clear, contextMenu, sidebarFilter, workspace, autoSelect, table, requestTab, responseTab, focus, curl, inspector, streamSelect, streamDirection, streamSearch, streamViewer, wsOriginal, wsCompose, wsComposeSend, stream, wsSend or wsClose"})
 }
 
 async fn screenshot(window: AnyWindowHandle, path: PathBuf, offscreen: bool, cx: &mut AsyncApp) -> Value {
@@ -393,13 +408,169 @@ async fn inspector_command(command: &Value, window: AnyWindowHandle, cx: &mut As
     Some(answer)
 }
 
+/// The stream panels' verbs (G6); `None` when `command` has none of them.
+async fn stream_command(command: &Value, window: AnyWindowHandle, cx: &mut AsyncApp) -> Option<Value> {
+    use crate::features::inspector::streams::{Row, Viewer};
+    use pm_model::WsDirection;
+    use pm_view::stream::ComposeMode;
+
+    const VERBS: [&str; 10] = [
+        "streamSelect",
+        "streamDirection",
+        "streamSearch",
+        "streamViewer",
+        "wsOriginal",
+        "wsCompose",
+        "wsComposeSend",
+        "stream",
+        "wsSend",
+        "wsClose",
+    ];
+    if !VERBS.iter().any(|v| command.get(v).is_some()) {
+        return None;
+    }
+    let engine = cx.update(|cx| crate::bridge::Bridge::engine(cx));
+    if let Some(v) = command.get("wsSend") {
+        let flow = v.get("flow").and_then(Value::as_u64).unwrap_or(u64::MAX) as pm_model::FlowId;
+        let message: pm_model::WsSend = match serde_json::from_value(v.clone()) {
+            Ok(m) => m,
+            Err(err) => return Some(json!({ "error": format!("wsSend: {err}") })),
+        };
+        let e = engine.clone();
+        if let Err(err) = cx.background_spawn(async move { e.ws_send(flow, &message) }).await {
+            return Some(json!({ "error": err.to_string() }));
+        }
+    }
+    if let Some(flow) = command.get("wsClose").and_then(Value::as_u64) {
+        let e = engine.clone();
+        if let Err(err) = cx
+            .background_spawn(async move { e.ws_close(flow as pm_model::FlowId) })
+            .await
+        {
+            return Some(json!({ "error": err.to_string() }));
+        }
+    }
+    // The panel is made when the inspector draws the flow: give a
+    // selection just made a few frames.
+    let mut panel = None;
+    for _ in 0..10 {
+        panel = cx.update(|cx| {
+            crate::shell::parts(cx)
+                .and_then(|p| p.inspector.upgrade())
+                .and_then(|i| i.read(cx).stream_panel(cx))
+        });
+        if panel.is_some() {
+            break;
+        }
+        let _ = window.update(cx, |_, window, _| window.refresh());
+        cx.background_executor().timer(Duration::from_millis(50)).await;
+    }
+    let Some(panel) = panel else {
+        if command.get("wsSend").is_some() || command.get("wsClose").is_some() {
+            return Some(json!({ "ok": true }));
+        }
+        return Some(json!({"error": "the inspected flow has no stream panel"}));
+    };
+    let direction = |v: &Value| match v.as_str() {
+        Some("sent") => Ok(Some(WsDirection::Sent)),
+        Some("received") => Ok(Some(WsDirection::Received)),
+        Some("all") | None => Ok(None),
+        Some(other) => Err(format!("direction takes sent, received or all, not {other:?}")),
+    };
+    let result: Result<(), String> = window
+        .update(cx, |_, window, cx| -> Result<(), String> {
+            if let Some(v) = command.get("streamDirection") {
+                let d = direction(v)?;
+                panel.update(cx, |p, cx| p.set_direction(d, cx));
+            }
+            if let Some(text) = command.get("streamSearch").and_then(Value::as_str) {
+                panel.update(cx, |p, cx| p.set_search(text, window, cx));
+            }
+            if let Some(index) = command.get("streamSelect").and_then(Value::as_u64) {
+                panel.update(cx, |p, cx| p.select_index(index as usize, cx));
+            }
+            if let Some(v) = command.get("streamViewer").and_then(Value::as_str) {
+                let viewer = Viewer::parse(v).ok_or_else(|| format!("no viewer {v:?}: text or hex"))?;
+                panel.update(cx, |p, cx| p.set_viewer(viewer, cx));
+            }
+            if let Some(on) = command.get("wsOriginal").and_then(Value::as_bool) {
+                panel.update(cx, |p, cx| p.set_original(on, cx));
+            }
+            if let Some(c) = command.get("wsCompose") {
+                let text = c.get("text").and_then(Value::as_str).unwrap_or_default().to_owned();
+                let d = match c.get("direction") {
+                    Some(v) => direction(v)?,
+                    None => None,
+                };
+                let mode = match c.get("mode").and_then(Value::as_str) {
+                    Some("hex") => Some(ComposeMode::Hex),
+                    Some("text") => Some(ComposeMode::Text),
+                    Some(other) => return Err(format!("mode takes text or hex, not {other:?}")),
+                    None => None,
+                };
+                panel.update(cx, |p, cx| p.compose(&text, d, mode, window, cx));
+            }
+            if command.get("wsComposeSend").and_then(Value::as_bool) == Some(true) {
+                panel.update(cx, |p, cx| p.send(cx));
+            }
+            Ok(())
+        })
+        .unwrap_or_else(|e| Err(e.to_string()));
+    if let Err(err) = result {
+        return Some(json!({ "error": err }));
+    }
+    // Let the sends, the heads and the pages they make stale land.
+    for _ in 0..4 {
+        cx.background_executor().timer(Duration::from_millis(100)).await;
+        let _ = window.update(cx, |_, window, _| window.refresh());
+    }
+    let state = window.update(cx, |_, _, cx| {
+        let p = panel.read(cx);
+        let len = p.len();
+        let rows: Vec<Value> = (len.saturating_sub(20)..len)
+            .filter_map(|i| p.peek_row(i, cx).map(|r| (i, r)))
+            .map(|(i, r)| match r {
+                Row::Ws(m) => json!({
+                    "row": i, "index": m.index, "direction": m.direction, "opcode": m.opcode, "len": m.len,
+                    "preview": pm_view::stream::row_preview(&m),
+                    "flags": pm_view::stream::message_flags(&m).iter().map(|f| f.label()).collect::<Vec<_>>(),
+                }),
+                Row::Sse(e) => json!({"row": i, "index": e.index, "event": e.event, "id": e.id, "data": e.data}),
+            })
+            .collect();
+        let shown = p.shown(cx).map(|r| match r {
+            Row::Ws(m) => json!({"index": m.index, "lines": pm_view::stream::detail_lines(&m, None)}),
+            Row::Sse(e) => json!({"index": e.index, "fields": pm_view::stream::sse_fields(&e)}),
+        });
+        json!({
+            "kind": format!("{:?}", p.kind()),
+            "flow": {"store": p.flow().store, "id": p.flow().id},
+            "open": p.is_open(),
+            "sendable": p.sendable(),
+            "len": len,
+            "total": p.total(),
+            "direction": p.direction(),
+            "search": p.search_text(),
+            "rows": rows,
+            "selectedRow": p.selected_index(),
+            "shown": shown,
+            "original": p.original(),
+            "viewer": p.viewer().map(|v| v.label()),
+            "composeError": p.composer().and_then(|c| c.error.as_ref().map(|e| e.to_string())),
+            "toast": crate::features::clipboard::Toasts::last(cx).map(|t| json!({"title": t.title, "description": t.description})),
+        })
+    });
+    Some(state.unwrap_or_else(|e| json!({ "error": e.to_string() })))
+}
+
 /// The shell's verbs (G2); `None` when `command` has none of them.
 async fn shell_command(command: &Value, window: AnyWindowHandle, cx: &mut AsyncApp) -> Option<Value> {
     use crate::features::{capture, commands, documents};
     use crate::shell;
     use crate::workspace::{SaveKind, Workspace};
 
-    const VERBS: [&str; 20] = [
+    const VERBS: [&str; 21] = [
+        "tableShare",
         "filter",
         "search",
         "protocol",
@@ -431,6 +602,11 @@ async fn shell_command(command: &Value, window: AnyWindowHandle, cx: &mut AsyncA
     let result: Result<(), String> = window
         .update(cx, |_, window, cx| -> Result<(), String> {
             let bar = shell::parts(cx).and_then(|p| p.filter_bar.upgrade());
+            if let Some(share) = command.get("tableShare").and_then(Value::as_f64)
+                && let Some(main) = shell::parts(cx).and_then(|p| p.main.upgrade())
+            {
+                main.update(cx, |m, cx| m.set_table_share(share as f32, cx));
+            }
             if let Some(text) = command.get("filter").and_then(Value::as_str) {
                 let bar = bar.clone().ok_or("no filter bar")?;
                 bar.update(cx, |b, cx| b.type_text(text, window, cx));

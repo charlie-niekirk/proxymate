@@ -49,6 +49,10 @@ gpui_kit::assets::icon_assets!(
         Copy,
         // The inspector (G3).
         TriangleAlert,
+        // The stream panels (G6).
+        Send,
+        Unplug,
+        RotateCcw,
     ]
 );
 
