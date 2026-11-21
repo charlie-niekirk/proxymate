@@ -71,6 +71,15 @@ gpui_kit::assets::icon_assets!(
         Send,
         Unplug,
         RotateCcw,
+        // Editing (G8): the JSON and name/value editors, the Breakpoint
+        // Editor and Compose.
+        Undo2,
+        Redo2,
+        ChevronsUpDown,
+        ChevronsDownUp,
+        CirclePlay,
+        Reply,
+        Binary,
     ]
 );
 

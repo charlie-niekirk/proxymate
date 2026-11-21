@@ -2,14 +2,17 @@
 //! tokens: [`Pill`] (G0), [`FlowGrid`](flow_grid::FlowGrid) with its
 //! coloured URL and app icons (G1), [`KvTable`] (G3), and the [`Assets`]
 //! they draw from. Later phases add HexView, JsonTree and the
-//! CodeView/CodeEditor wrappers (G4) and LineDiff (G9).
+//! CodeView/CodeEditor wrappers (G4), JsonEditor and KvEditor (G8) and
+//! LineDiff (G9).
 
 mod assets;
 pub mod code_editor;
 pub mod code_view;
 pub mod flow_grid;
 pub mod hex_view;
+pub mod json_editor;
 pub mod json_tree;
+pub mod kv_editor;
 pub mod kv_table;
 mod pill;
 

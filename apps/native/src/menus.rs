@@ -1,8 +1,9 @@
 //! The menu bar and the app-level actions. Its items mirror the Tauri app's
 //! `menu.rs`. File's Open…, Import HAR…, Save Session… and Export HAR… are
-//! handled by `features::documents` (G2); New Request (G8) and Scripts
-//! (G10) have no handler yet, so gpui shows them disabled. Feature modules
-//! add their own items through their `register`.
+//! handled by `features::documents` (G2) and New Request… (⌘N) by
+//! `features::compose` (G8); Scripts (G10) has no handler yet, so gpui
+//! shows it disabled. Feature modules add their own items through their
+//! `register`.
 
 use gpui_kit::component::input::{Copy, Cut, Paste, Redo, SelectAll, Undo};
 use gpui_kit::{App, AppContext as _, KeyBinding, Menu, MenuItem, OsAction, PromptLevel, SystemMenuType};
