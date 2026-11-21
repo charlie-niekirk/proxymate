@@ -49,7 +49,9 @@
 //!   `{"testRule": true}`, `{"deleteRule": "<id>"}`, `{"throttle": "Edge" | null}`,
 //!   `{"noCache": true}`, `{"noCookies": false}`, `{"breakpointTimeout": 30}`,
 //!   `{"rulesMenu": "rule:<id>" | "group:<id>" | "picker:<key>" | "throttle", "run": "<label>"}`,
-//!   `{"rulesClick": "<element id>"}` and `{"rulesScreenshot": "/abs/x.png"}`.
+//!   `{"rulesClick": "<element id>"}`, `{"rulesDrag": ["rule-row-<id>", "rule-row-<id>" | "group-header-<id>"]}`,
+//!   `{"rulesSelect": "<id>"}`, `{"rulesRename": "<name>"}` (the group being renamed)
+//!   and `{"rulesScreenshot": "/abs/x.png"}`.
 //!
 //! Every phase adds the verbs its surfaces need (see `docs/PLAN.md`).
 
@@ -210,7 +212,7 @@ async fn run(command: Value, cx: &mut AsyncApp) -> Value {
         let offscreen = command.get("offscreen").and_then(Value::as_bool).unwrap_or(false);
         return screenshot(window, PathBuf::from(path), offscreen, cx).await;
     }
-    json!({"error": "unknown command: try theme, screenshot, click, select, selectIds, selectAll, scrollTo, headerColumns, filter, search, protocol, content, scope, keys, palette, command, store, openDocument, closeDocument, saveSession, exportHar, recording, clear, contextMenu, sidebarFilter, workspace, autoSelect, table, requestTab, responseTab, focus, curl, inspector, rules, openRule, newRule, preset, ruleEdit, saveRule, testRule, deleteRule, throttle, noCache, noCookies, breakpointTimeout, rulesMenu, rulesClick or rulesScreenshot"})
+    json!({"error": "unknown command: try theme, screenshot, click, select, selectIds, selectAll, scrollTo, headerColumns, filter, search, protocol, content, scope, keys, palette, command, store, openDocument, closeDocument, saveSession, exportHar, recording, clear, contextMenu, sidebarFilter, workspace, autoSelect, table, requestTab, responseTab, focus, curl, inspector, rules, openRule, newRule, preset, ruleEdit, saveRule, testRule, deleteRule, throttle, noCache, noCookies, breakpointTimeout, rulesMenu, rulesClick, rulesDrag, rulesSelect, rulesRename or rulesScreenshot"})
 }
 
 pub(crate) async fn screenshot(window: AnyWindowHandle, path: PathBuf, offscreen: bool, cx: &mut AsyncApp) -> Value {

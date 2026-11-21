@@ -194,7 +194,7 @@ impl RuleForm {
     }
 
     pub fn can_save(&self) -> bool {
-        !self.saving && self.invalid.is_none() && self.is_unsaved()
+        !self.saving && self.invalid.is_none() && self.field_errors.is_empty() && self.is_unsaved()
     }
 
     // ---- Edits ----
@@ -309,7 +309,7 @@ impl RuleForm {
     // ---- Save, delete, test ----
 
     pub fn save(&mut self, cx: &mut Context<Self>) {
-        if !self.can_save() || !self.field_errors.is_empty() {
+        if !self.can_save() {
             return;
         }
         self.saving = true;
@@ -579,7 +579,11 @@ impl RuleForm {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let mono = cx.theme().mono_font_family.clone();
+        let font = if key == "name" {
+            cx.theme().font_family.clone()
+        } else {
+            cx.theme().mono_font_family.clone()
+        };
         let error = self.field_errors.contains_key(key);
         let Field::Line(state) = self.input(key, None, placeholder, window, cx) else {
             return div().into_any_element();
@@ -589,7 +593,7 @@ impl RuleForm {
         div()
             .flex_1()
             .min_w(px(60.))
-            .font_family(mono)
+            .font_family(font)
             .text_size(px(12.))
             .when(error, |d| d.rounded(px(6.)).border_1().border_color(t.s_failed.hsla()))
             .child(
@@ -641,10 +645,10 @@ impl RuleForm {
             .gap(px(2.))
             .children(options.iter().map(|(value, text)| {
                 let (k, v) = (key.to_owned(), (*value).to_owned());
-                Button::new(SharedString::from(format!("choice-{key}-{value}")))
-                    .outline()
+                let on = current == *value;
+                toggled(Button::new(SharedString::from(format!("choice-{key}-{value}"))), on)
                     .xsmall()
-                    .selected(current == *value)
+                    .selected(on)
                     .label(*text)
                     .accessibility_label(SharedString::from(format!("{label}: {text}")))
                     .on_click(cx.listener(move |this, _, window, cx| this.choose(&k, &v, window, cx)))
@@ -715,8 +719,7 @@ impl RuleForm {
         let ci_key = format!("{key}.ci");
         let ci = edit::chosen(&self.rule, &ci_key).as_deref() == Some("true");
         let t = *cx.tokens();
-        let toggle = Button::new(SharedString::from(format!("toggle-{ci_key}")))
-            .ghost()
+        let toggle = toggled(Button::new(SharedString::from(format!("toggle-{ci_key}"))), ci)
             .xsmall()
             .selected(ci)
             .tooltip("Case-insensitive")
@@ -724,7 +727,11 @@ impl RuleForm {
                 "{label}: case-insensitive {}",
                 if ci { "on" } else { "off" }
             )))
-            .child(pm_widgets::icon(IconName::CaseSensitive, t.foreground.hsla(), 14.))
+            .child(pm_widgets::icon(
+                IconName::CaseSensitive,
+                if ci { t.primary_foreground } else { t.foreground }.hsla(),
+                14.,
+            ))
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.choose(&ci_key, if ci { "false" } else { "true" }, window, cx);
             }));
@@ -803,8 +810,7 @@ impl RuleForm {
             .children(rules::METHODS.iter().map(|m| {
                 let on = methods.iter().any(|x| x == m);
                 let method = (*m).to_owned();
-                Button::new(SharedString::from(format!("method-{m}")))
-                    .outline()
+                toggled(Button::new(SharedString::from(format!("method-{m}"))), on)
                     .xsmall()
                     .selected(on)
                     .label(*m)
@@ -1360,6 +1366,11 @@ impl RuleForm {
     }
 }
 
+/// A toggle button: filled while on, outlined while off.
+fn toggled(button: Button, on: bool) -> Button {
+    if on { button.primary() } else { button.outline() }
+}
+
 /// The picker value for "no group".
 pub const NO_GROUP: &str = "none";
 /// The picker value shown for a script or recording that isn't chosen (or
@@ -1766,7 +1777,7 @@ impl Render for RuleForm {
                 Button::new("save-rule")
                     .primary()
                     .small()
-                    .disabled(!self.can_save() || !self.field_errors.is_empty())
+                    .disabled(!self.can_save())
                     .accessibility_label(if saved { "Save" } else { "Save rule" })
                     .child(
                         div()

@@ -2,7 +2,8 @@
 //! toolbar, sidebar, document tabs, filter bar, footer; the ⌘K palette)
 //! and the inspector (G3: a decrypted flow with notes, an OpenAPI line and
 //! rule badges on its TLS tab; a failed flow with its banner on Timing),
-//! rendered by gpui's real
+//! and the Rules window (G7: groups, origin badges, a rule with every kind
+//! of action form and a dry run), rendered by gpui's real
 //! offscreen renderer (Metal on macOS, WGPU on Linux; CI uses Mesa's
 //! lavapipe) in both themes, from injected snapshots: no engine, no proxy.
 //! The pane and row pixels must be their tokens, and each capture is
@@ -521,12 +522,208 @@ mod render {
         );
     }
 
+    /// Rules in a group and out of one, from the user, a preset and an
+    /// agent; the agent's rule selected, with a form for many action kinds
+    /// and a matched dry run.
+    fn rule_book() -> pm_model::RuleBook {
+        use pm_model::{Action, MapLocalSource, Pattern, PresetKind, Rule, RuleGroup, WsOp};
+        use pm_view::rules::{default_action, new_rule};
+        let rule = |id: &str, name: &str, origin, group: Option<&str>, enabled| Rule {
+            id: id.into(),
+            name: name.into(),
+            enabled,
+            origin,
+            group: group.map(Into::into),
+            ..new_rule()
+        };
+        let mut agent = rule(
+            "r-agent",
+            "Mock the cart",
+            RuleOrigin::Agent {
+                client: "claude-code".into(),
+                session: None,
+                created_at_ms: 0.,
+            },
+            None,
+            true,
+        );
+        agent.matcher.methods = vec!["GET".into(), "POST".into()];
+        agent.matcher.host = Some(Pattern::glob("*.example.com"));
+        agent.matcher.path = Some(Pattern::exact("/v1/cart"));
+        agent.actions = vec![
+            Action::MapLocal {
+                source: MapLocalSource::Inline {
+                    body: "{\"items\": []}".into(),
+                },
+                status: 200,
+                headers: vec![],
+                content_type: Some("application/json".into()),
+            },
+            default_action("JsonSet").unwrap(),
+            Action::WsMessage {
+                direction: None,
+                filter: None,
+                op: WsOp::Drop,
+            },
+            default_action("ServeFrom").unwrap(),
+            default_action("Comment").unwrap(),
+        ];
+        let mut preset = rule(
+            "r-preset",
+            "Map Local · GET api.example.com/v1/users",
+            RuleOrigin::Preset {
+                preset: PresetKind::MapLocal,
+            },
+            None,
+            true,
+        );
+        preset.actions = vec![default_action("MapLocal").unwrap()];
+        let mut off = rule("r-off", "Slow 3G", RuleOrigin::User, Some("g1"), false);
+        off.actions = vec![default_action("Throttle").unwrap()];
+        let mut on = rule("r-on", "Strip cookies", RuleOrigin::User, Some("g1"), true);
+        on.actions = vec![default_action("RemoveHeader").unwrap()];
+        pm_model::RuleBook {
+            rules: vec![agent, preset, off, on],
+            groups: vec![RuleGroup {
+                id: "g1".into(),
+                name: "Ticket 42".into(),
+                enabled: true,
+                order: 1,
+                origin: RuleOrigin::User,
+            }],
+        }
+    }
+
+    fn rules_renders(mode: Mode) {
+        use proxymate_native::features::rules::form::TestState;
+        use proxymate_native::features::rules::window::{LIST_WIDTH, RulesWindow, Target};
+
+        let mut cx = context();
+        cx.update(|cx| {
+            use proxymate_native::prefs::{self, Appearance};
+            prefs::update(cx, |p| {
+                p.appearance = if mode.is_dark() {
+                    Appearance::Dark
+                } else {
+                    Appearance::Light
+                }
+            });
+            pm_theme::kit::apply(mode, cx);
+        });
+        let handle = cx
+            .update(|cx| {
+                let book = proxymate_native::bridge::rule_book(cx);
+                book.update(cx, |b, _| b.value = Some(rule_book()));
+                let settings = keys::rules_caches(cx).settings;
+                settings.update(cx, |c, cx| c.set((), pm_model::RuleSettings::default(), cx));
+                let options = WindowOptions {
+                    window_bounds: Some(WindowBounds::Windowed(gpui_kit::Bounds {
+                        origin: point(px(0.), px(0.)),
+                        size: size(px(SIZE.0), px(SIZE.1)),
+                    })),
+                    focus: false,
+                    show: false,
+                    ..Default::default()
+                };
+                cx.open_window(options, |window, cx| {
+                    let view = cx.new(|cx| {
+                        let mut w = RulesWindow::new(book, None, window, cx);
+                        w.go(Target::Rule("r-agent".into()), window, cx);
+                        w
+                    });
+                    cx.new(|cx| gpui_kit::base::Root::new(view, window, cx))
+                })
+            })
+            .expect("open the Rules window");
+        cx.run_until_parked();
+        let form = cx
+            .update_window(handle.into(), |root, _, cx| {
+                let root = root.downcast::<gpui_kit::base::Root>().unwrap();
+                let view = root.read(cx).view().clone().downcast::<RulesWindow>().unwrap();
+                view.read(cx).form().cloned()
+            })
+            .unwrap()
+            .expect("the agent rule's form");
+        cx.update(|cx| {
+            form.update(cx, |f, cx| {
+                let request = pm_model::RequestHead {
+                    method: "GET".into(),
+                    url: "https://api.example.com/v1/cart".into(),
+                    version: pm_model::HttpVersion::Http11,
+                    headers: vec![],
+                };
+                f.set_test(
+                    TestState {
+                        result: Some(pm_model::RuleTestResult {
+                            matched: true,
+                            mismatch: None,
+                            response_matched: Some(true),
+                            request,
+                            request_body: None,
+                            response: None,
+                            response_body: None,
+                            notes: vec!["Answered by Map Local; the upstream isn't contacted.".into()],
+                            request_body_truncated: false,
+                            response_body_truncated: false,
+                        }),
+                        error: None,
+                        busy: false,
+                    },
+                    cx,
+                );
+            });
+        });
+        let scale = cx
+            .update_window(handle.into(), |_, window, cx| {
+                window.render_frame(cx);
+                window.scale_factor()
+            })
+            .unwrap();
+        let name = if mode.is_dark() { "dark" } else { "light" };
+        let image = capture(&mut cx, handle.into(), format!("rules-{name}.png"));
+        let t = mode.tokens();
+        // The form's pane: its plain background right of the name field.
+        assert_pixel(&image, scale, (SIZE.0 - 30., 75.), t.background, "the form");
+        // The list: its tinted background, a selected row and a group header.
+        let list = over(
+            Rgba {
+                a: t.muted.a * 0.2,
+                ..t.muted
+            },
+            t.background,
+        );
+        assert_pixel(&image, scale, (LIST_WIDTH / 2., SIZE.1 - 90.), list, "the rule list");
+        let column = |want: Rgba| {
+            (60..SIZE.1 as u32 - 60).any(|y| {
+                let px = image.get_pixel((4. * scale) as u32, (y as f32 * scale) as u32).0;
+                let want = [want.r, want.g, want.b].map(|c| (c * 255.0).round() as i32);
+                (0..3).all(|i| (px[i] as i32 - want[i]).abs() <= 3)
+            })
+        };
+        assert!(column(over(t.selection_bg, list)), "a selected rule row");
+        assert!(
+            column(over(
+                Rgba {
+                    a: t.muted.a * 0.6,
+                    ..t.muted
+                },
+                list
+            )),
+            "a group header"
+        );
+    }
+
     pub fn run() {
         for mode in [Mode::Dark, Mode::Light] {
             println!("running shell_renders ({mode:?})");
             shell_renders(mode);
             println!("passed shell_renders ({mode:?})");
+            println!("running rules_renders ({mode:?})");
+            rules_renders(mode);
+            println!("passed rules_renders ({mode:?})");
         }
-        println!("render: 2 passed (real offscreen renderer; shell, inspector and palette in each theme)");
+        println!(
+            "render: 4 passed (real offscreen renderer; shell, inspector, palette and Rules window in each theme)"
+        );
     }
 }

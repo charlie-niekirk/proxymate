@@ -17,7 +17,8 @@ use crate::features::rules::form::RuleForm;
 use crate::features::rules::tools::ToolState;
 use crate::features::rules::{self as feature, RulesWindow, Target};
 
-const VERBS: [&str; 17] = [
+const VERBS: [&str; 18] = [
+    "rulesDrag",
     "rules",
     "openRule",
     "newRule",
@@ -144,7 +145,7 @@ pub async fn command(command: &Value, cx: &mut AsyncApp) -> Option<Value> {
                                         .ok_or("removeRow takes [which, index]")?;
                                     f.edit_structure(window, cx, |r| edit::remove_row(r, &value, i));
                                 }
-                                _ if key == "group" || edit::chosen(f.rule(), &key).is_some() => {
+                                _ if key == "group" || key == "m.method" || edit::chosen(f.rule(), &key).is_some() => {
                                     f.choose(&key, &value, window, cx);
                                 }
                                 _ if edit::text(f.rule(), &key).is_some() => f.type_text(&key, &value, window, cx),
@@ -297,6 +298,30 @@ pub async fn command(command: &Value, cx: &mut AsyncApp) -> Option<Value> {
             Err(err) => return Some(json!({ "error": err.to_string() })),
         }
         cx.background_executor().timer(Duration::from_millis(100)).await;
+    }
+    if let Some([from, to]) = command
+        .get("rulesDrag")
+        .and_then(|v| serde_json::from_value::<[String; 2]>(v.clone()).ok())
+    {
+        let Some(handle) = cx.update(|cx| RulesWindow::global(cx).map(|(h, _)| h)) else {
+            return Some(json!({"error": "the Rules window isn't open"}));
+        };
+        let (from, to) = (ElementId::Name(from.into()), ElementId::Name(to.into()));
+        let dragged = handle.update(cx, |_, window, cx| {
+            if window.try_find(from.clone()).is_none() || window.try_find(to.clone()).is_none() {
+                return Err(
+                    "rulesDrag takes two element ids (rule-row-<id>, group-header-<id>, rule-section-ungrouped)",
+                );
+            }
+            window.drag_to(from, to, cx);
+            Ok(())
+        });
+        match dragged {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => return Some(json!({ "error": err })),
+            Err(err) => return Some(json!({ "error": err.to_string() })),
+        }
+        cx.background_executor().timer(Duration::from_millis(200)).await;
     }
     // Let pushes (the rule book, a toast) land.
     cx.background_executor().timer(Duration::from_millis(120)).await;

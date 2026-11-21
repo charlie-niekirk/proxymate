@@ -104,6 +104,8 @@ pub struct RulesWindow {
     form: Option<Entity<RuleForm>>,
     collapsed: HashSet<String>,
     renaming: Option<(String, Entity<InputState>, Subscription)>,
+    /// A group to rename once the book has it (just created).
+    pending_rename: Option<String>,
     timeout: Option<(Entity<InputState>, Subscription)>,
     focus: FocusHandle,
     _subscriptions: Vec<Subscription>,
@@ -142,10 +144,7 @@ pub fn open_or_focus(target: Target, cx: &mut App) {
             w.go(target, window, cx);
             w
         });
-        cx.set_global(Open {
-            window: window.window_handle(),
-            view: view.downgrade(),
-        });
+        RulesWindow::register(window.window_handle(), &view, cx);
         let focus = view.read(cx).focus.clone();
         window.focus(&focus, cx);
         cx.new(|cx| gpui_kit::base::Root::new(view, window, cx))
@@ -182,11 +181,21 @@ impl RulesWindow {
             form: None,
             collapsed: HashSet::new(),
             renaming: None,
+            pending_rename: None,
             timeout: None,
             focus: cx.focus_handle(),
             _subscriptions: subscriptions,
             _form_events: None,
         }
+    }
+
+    /// Makes `view` the Rules window the actions and the dev remote act on
+    /// (tests open theirs directly).
+    pub fn register(window: AnyWindowHandle, view: &Entity<RulesWindow>, cx: &mut App) {
+        cx.set_global(Open {
+            window,
+            view: view.downgrade(),
+        });
     }
 
     /// The open window and its view.
@@ -195,24 +204,30 @@ impl RulesWindow {
         Some((open.window, open.view.upgrade()?))
     }
 
-    /// Runs `f` on the open window's view, in its window.
+    /// Runs `f` on the open window's view, in its window. Deferred: an
+    /// app-level action handler runs while its window (maybe this one) is
+    /// still dispatching the action.
     pub fn update_global(
         cx: &mut App,
         f: impl FnOnce(&mut RulesWindow, &mut Window, &mut Context<RulesWindow>) + 'static,
     ) {
-        let Some((window, view)) = RulesWindow::global(cx) else {
-            return;
-        };
-        let _ = window.update(cx, |_, window, cx| view.update(cx, |w, cx| f(w, window, cx)));
+        cx.defer(move |cx| {
+            let Some((window, view)) = RulesWindow::global(cx) else {
+                return;
+            };
+            let _ = window.update(cx, |_, window, cx| view.update(cx, |w, cx| f(w, window, cx)));
+        });
     }
 
-    /// Runs `f` on the open form, in its window.
+    /// Runs `f` on the open form, in its window (deferred, as above).
     pub fn update_form(cx: &mut App, f: impl FnOnce(&mut RuleForm, &mut Window, &mut Context<RuleForm>) + 'static) {
-        let Some((window, view)) = RulesWindow::global(cx) else {
-            return;
-        };
-        let Some(form) = view.read(cx).form.clone() else { return };
-        let _ = window.update(cx, |_, window, cx| form.update(cx, |f2, cx| f(f2, window, cx)));
+        cx.defer(move |cx| {
+            let Some((window, view)) = RulesWindow::global(cx) else {
+                return;
+            };
+            let Some(form) = view.read(cx).form.clone() else { return };
+            let _ = window.update(cx, |_, window, cx| form.update(cx, |f2, cx| f(f2, window, cx)));
+        });
     }
 
     pub fn form(&self) -> Option<&Entity<RuleForm>> {
@@ -295,6 +310,11 @@ impl RulesWindow {
 
     fn book_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let book = self.book(cx);
+        if let Some(id) = self.pending_rename.clone()
+            && book.groups.iter().any(|g| g.id == id)
+        {
+            self.start_rename(&id, window, cx);
+        }
         if let Some(id) = self.pending.clone()
             && book.rules.iter().any(|r| r.id == id)
         {
@@ -331,8 +351,10 @@ impl RulesWindow {
     /// Shows the group's name as a field: ↩ or leaving saves, Escape cancels.
     pub fn start_rename(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         let Some(group) = self.book(cx).groups.into_iter().find(|g| g.id == id) else {
+            self.pending_rename = Some(id.to_owned());
             return;
         };
+        self.pending_rename = None;
         self.collapsed.remove(id);
         let state = cx.new(|cx| InputState::new(window, cx).default_value(group.name.clone()));
         let gid = id.to_owned();
@@ -755,6 +777,7 @@ impl RulesWindow {
                     .text_color(t.muted_foreground.hsla())
                     .child(count),
             )
+            .test_support()
             .into_any_element()
     }
 
@@ -805,6 +828,7 @@ impl RulesWindow {
                     })
                     .on_drop(cx.listener(|this, d: &RuleDrag, _, cx| this.drop_rule_on_section(d, None, cx)))
                     .child("UNGROUPED")
+                    .test_support()
                     .into_any_element(),
             );
         }
