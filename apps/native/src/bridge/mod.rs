@@ -7,7 +7,14 @@
 //! stream drains its channel into a gpui entity and notifies. The bridge
 //! subscribes once to each single-slot stream and every window observes the
 //! same entity.
+//!
+//! Server state that views read on demand (a flow's detail, a body) is in
+//! keyed [`resource`] caches ([`keys`]); writes go through [`mutations`],
+//! which invalidate what they make stale.
 
+pub mod keys;
+pub mod mutations;
+pub mod resource;
 pub mod stream;
 
 use std::path::PathBuf;

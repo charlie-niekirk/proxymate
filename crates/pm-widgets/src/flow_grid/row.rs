@@ -419,8 +419,20 @@ pub fn cell(ix: usize, row: &GridRow, column: &PlacedColumn, cx: &CellContext) -
                     d.child(icon(gpui_kit::assets::IconName::PencilLine, cx.tint(t.rule), 12.))
                 })
                 .into_any_element(),
-            // The row's "…" (its flow menu) arrives with the menu in G3.
-            Builtin::Tools => div().into_any_element(),
+            // The row's "…": its flow menu (the grid opens it on a click
+            // in this column). Shown on hover and on the selected row.
+            Builtin::Tools => div()
+                .flex()
+                .items_center()
+                .justify_center()
+                .size(px(16.))
+                .rounded(px(3.))
+                .when(!cx.look.selected, |d| {
+                    d.opacity(0.).group_hover(ROW_GROUP, |s| s.opacity(1.))
+                })
+                .hover(|s| s.bg(t.pane_row_hover.hsla()))
+                .child(icon(gpui_kit::assets::IconName::Ellipsis, cx.dim(), 14.))
+                .into_any_element(),
         },
     };
     match tooltip(row, column) {
@@ -522,6 +534,9 @@ fn url_cell(row: &GridRow, cx: &CellContext) -> AnyElement {
         .into_any_element()
 }
 
+/// The group every row is, for its cells' hover styles (the "…" button).
+const ROW_GROUP: &str = "flow-row";
+
 /// The row: its cells, or a placeholder while its page loads.
 pub fn row_element(
     index: usize,
@@ -546,6 +561,7 @@ pub fn row_element(
     };
     let base = div()
         .id(id)
+        .group(ROW_GROUP)
         .role(Role::Row)
         .aria_row_index(index + 2)
         .aria_selected(look.selected)

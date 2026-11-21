@@ -139,7 +139,7 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | FT-10 | Proto column: short HTTP version, full version in the tooltip | `components/FlowTable/FlowRow.tsx` `RowCell` | G1 | ☑ | G1: `flow_grid/row.rs` (label and tooltip) |
 | FT-11 | SSL column: lock (decrypted), open lock (passed through), shield alert (likely pinned), with tooltips | `components/FlowTable/cells.tsx` `SslIcon` | G1 | ☑ | G1: `flow_grid/row.rs` `ssl_cell` with `pm-view` `flow::ssl_title` tooltips |
 | FT-12 | Notes column: label dot, comment icon (comment in the tooltip), pencil when a rule changed the flow | `components/FlowTable/FlowRow.tsx` `RowCell` | G1 | ☑ | G1: `flow_grid/row.rs` (label dot, comment icon with the comment as tooltip, pencil) |
-| FT-13 | Tools column: "…" button on hover opens the row menu under it | `components/FlowTable/FlowRow.tsx` `openRowMenu` | G1 | ☐ | G1 draws the column; its "…" opens the row menu, which G3 builds |
+| FT-13 | Tools column: "…" button on hover opens the row menu under it | `components/FlowTable/FlowRow.tsx` `openRowMenu` | G1 | ☑ | G3: the Tools column draws "…" on hover and on the selected row (`flow_grid/row.rs`); a click there raises `FlowGridEvent::RowMenu` with no column (`pm-widgets` `flow_grid::tests::right_clicks_and_the_tools_button_ask_for_the_row_menu`) |
 | FT-14 | Header columns show the header's value or "—", with the value as tooltip | `components/FlowTable/FlowRow.tsx`, `components/FlowTable/columns.ts` | G11 | ☐ | |
 | FT-15 | Alternating row shading, hover, selection colours; the focused row of a multi-selection is outlined | `components/FlowTable/FlowRow.tsx` | G1 | ☑ | G1: `tests/render.rs` checks row, odd-row and selection pixels in both themes; focused-row outline in `docs/native/g1/table-light-multi-header-columns.png` |
 | FT-16 | Click a sortable title (#, URL, Method, Status, Duration, Request, Response, header columns) to sort; again to reverse; arrow on the sorted column | `components/FlowTable/Header.tsx` | G1 | ☑ | G1: `pm-widgets` `flow_grid::tests::sorting_resizing_and_hiding_change_the_prefs`, `pm-view` `columns::tests::sorting_by_a_column_toggles_its_direction` |
@@ -153,9 +153,9 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | FT-24 | Column order, widths, hidden columns and the sort persist across launches | `store/prefs.ts` | G1 | ☑ | G1: `ui-prefs.json`, `prefs::tests::prefs_round_trip_and_tolerate_unknown_or_missing_fields`, `pm-view` `columns::tests::saved_prefs_merge_with_new_and_removed_columns` |
 | FT-25 | Click selects; ⌘-click toggles a flow; ⇧-click selects a range (the whole view becomes a view selection, not ids) | `components/FlowTable/FlowTable.tsx` | G1 | ☑ | G1: `pm-widgets` `flow_grid::tests::click_cmd_click_and_shift_click_select_by_id`, `a_shift_range_beyond_the_loaded_rows_is_fetched_in_steps`; `pm-view` `selection::tests::*` |
 | FT-26 | Keys ↑/↓, PgUp/PgDn, Home/End move the selection; with ⇧ they extend it | `components/FlowTable/keys.ts` `tableKey` | G1 | ☑ | G1: `pm-widgets` `flow_grid::tests::arrows_pages_and_home_end_move_the_selection`, `shift_arrows_extend_and_escape_collapses`; `pm-view` `keys::tests::*` |
-| FT-27 | ↩ focuses the inspector; Escape in a multi-selection collapses to the focused flow | `components/FlowTable/keys.ts` `tableKey` | G1 | ☐ | G1: Escape in `pm-widgets` `flow_grid::tests::shift_arrows_extend_and_escape_collapses`; ↩ raises `FlowGridEvent::Inspect` (`flow_grid::tests::cmd_a_enter_and_backspace`), and G3 moves the focus into its inspector |
+| FT-27 | ↩ focuses the inspector; Escape in a multi-selection collapses to the focused flow | `components/FlowTable/keys.ts` `tableKey` | G1 | ☑ | G1: Escape in `pm-widgets` `flow_grid::tests::shift_arrows_extend_and_escape_collapses`; G3: ↩ (`FlowTableEvent::Inspect`) focuses the inspector (`tests/inspector.rs` `enter_and_escape_move_the_keyboard_between_the_table_and_the_inspector`) |
 | FT-28 | A keyboard move onto a row not loaded yet selects it once it loads | `components/FlowTable/FlowTable.tsx` | G1 | ☑ | G1: `pm-widgets` `flow_grid::tests::arrows_pages_and_home_end_move_the_selection` (End); a ⇧-move waits too |
-| FT-29 | Right-click inside a multi-selection keeps it (bulk menu); elsewhere it selects the row first; outside any row there is no menu | `components/FlowTable/FlowTable.tsx` | G1 | ☐ | G1: the selection half (`FlowGrid::press_row`); the row menu is G3, the bulk menu G11 |
+| FT-29 | Right-click inside a multi-selection keeps it (bulk menu); elsewhere it selects the row first; outside any row there is no menu | `components/FlowTable/FlowTable.tsx` | G1 | ☑ | G1: the selection half (`FlowGrid::press_row`); G3: `FlowGridEvent::RowMenu` opens the row menu (`FlowTable::row_menu_for`), or the bulk menu G11 registers (`flow_menu::set_bulk`; its items are FM-27–FM-31) |
 | FT-30 | Auto Select: scrolls to and selects the newest flow as traffic arrives | `components/FlowTable/FlowTable.tsx` | G1 | ☑ | G1: `pm-widgets` `flow_grid::tests::auto_select_follows_the_newest_flow` |
 | FT-31 | Empty state "Waiting for traffic" with the `curl -x http://<proxy> http://example.com/` example and its "Copy command" menu | `components/FlowTable/EmptyState.tsx` | G1 | ☑ | G2: the empty state's command opens `toolbar::empty_state_menu` on right-click (`FlowGridEvent::EmptyStateMenu`); `tests/shell.rs` `the_empty_state_copies_its_command` |
 | FT-32 | Empty states "No flows match the current filter" and "Searching headers and bodies…" | `components/FlowTable/EmptyState.tsx` | G1 | ☑ | G1: `features/flow_table.rs` `update_overlay` (`Overlay::NoMatch`, `Overlay::Searching`) |
@@ -167,20 +167,20 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 
 | ID | Behaviour | Source | Phase | Status | Evidence |
 |---|---|---|---|---|---|
-| FM-01 | Copy <column> <value>: the cell right-clicked (Number, State, App, Method, Status, Time, Duration, sizes, Protocol, Comment, header column) | `components/FlowTable/FlowContextMenu.tsx` `cellText` | G3 | ☐ | |
-| FM-02 | Copy URL | `components/FlowTable/FlowContextMenu.tsx` | G3 | ☐ | |
-| FM-03 | Copy as cURL (disabled for CONNECT) | `components/FlowTable/FlowContextMenu.tsx` | G3 | ☐ | |
+| FM-01 | Copy <column> <value>: the cell right-clicked (Number, State, App, Method, Status, Time, Duration, sizes, Protocol, Comment, header column) | `components/FlowTable/FlowContextMenu.tsx` `cellText` | G3 | ☑ | G3: `features/flow_menu.rs` (`pm_view::inspector::cell_text`, column from `FlowGrid::column_at`); `tests/inspector.rs` `the_flow_row_menu_copies_cells_and_filters`; `pm-view` `inspector::tests::cells_copy_as_shown` |
+| FM-02 | Copy URL | `components/FlowTable/FlowContextMenu.tsx` | G3 | ☑ | G3: `flow_menu.rs` (`CopyFlowUrl`, the recorded URL); live through the dev remote (`contextMenu: row:1`) |
+| FM-03 | Copy as cURL (disabled for CONNECT) | `components/FlowTable/FlowContextMenu.tsx` | G3 | ☑ | G3: `flow_menu.rs` (`CopyFlowCurl` → `Engine::curl_command`, disabled for CONNECT); live: the copied command in the PR |
 | FM-04 | Copy as Code ▸ JavaScript (fetch), Python (requests), HTTPie, Go (net/http), Swift (URLSession), Kotlin (OkHttp), PowerShell (disabled for CONNECT and WebSockets) | `components/FlowTable/FlowContextMenu.tsx`, `lib/flow.ts` | G11 | ☐ | |
-| FM-05 | Copy ▸ Host, Path | `components/FlowTable/FlowContextMenu.tsx` | G3 | ☐ | |
-| FM-06 | Copy ▸ Request headers, Response headers ("No response yet" error) | `components/FlowTable/FlowContextMenu.tsx` `headersOf` | G3 | ☐ | |
-| FM-07 | Copy ▸ Request body, Response body (binary bodies explain they need Base64 from the Body tab) | `components/FlowTable/FlowContextMenu.tsx` `bodyOf` | G3 | ☐ | |
-| FM-08 | Copy ▸ Raw request, Raw response | `components/FlowTable/FlowContextMenu.tsx` `rawOf` | G3 | ☐ | |
+| FM-05 | Copy ▸ Host, Path | `components/FlowTable/FlowContextMenu.tsx` | G3 | ☑ | G3: `flow_menu.rs` Copy ▸ Host, Path; `tests/inspector.rs` `the_flow_row_menu_copies_cells_and_filters` |
+| FM-06 | Copy ▸ Request headers, Response headers ("No response yet" error) | `components/FlowTable/FlowContextMenu.tsx` `headersOf` | G3 | ☑ | G3: `inspector/actions.rs` `headers_of` ("No response yet"); live `Copy › Response headers` through the dev remote |
+| FM-07 | Copy ▸ Request body, Response body (binary bodies explain they need Base64 from the Body tab) | `components/FlowTable/FlowContextMenu.tsx` `bodyOf` | G3 | ☑ | G3: `inspector/actions.rs` `body_of` (`pm_view::inspector::copy_body_text` explains binary bodies; its test) |
+| FM-08 | Copy ▸ Raw request, Raw response | `components/FlowTable/FlowContextMenu.tsx` `rawOf` | G3 | ☑ | G3: `inspector/actions.rs` `raw_of`; live `Copy › Raw response` through the dev remote |
 | FM-09 | Filter by <header> on a header column cell (adds a `reqheader:`/`resheader:` term) | `components/FlowTable/FlowContextMenu.tsx` | G11 | ☐ | |
-| FM-10 | Filter by ▸ Host, Method, Status, App (adds a term to the search box) | `components/menus/filter.tsx` `FilterBySub` | G3 | ☐ | |
+| FM-10 | Filter by ▸ Host, Method, Status, App (adds a term to the search box) | `components/menus/filter.tsx` `FilterBySub` | G3 | ☑ | G3: `inspector/menus.rs` `filter_by` (a submenu of the row and URL bar menus); `tests/inspector.rs` ("Filter by › App: Safari" sets `app:Safari`) |
 | FM-11 | Replay ⌘R (disabled for CONNECT and WebSockets) | `components/FlowTable/FlowContextMenu.tsx` | G8 | ☐ | |
 | FM-12 | Edit & Replay… | `components/FlowTable/FlowContextMenu.tsx` | G8 | ☐ | |
 | FM-13 | Repeat… ⌥⌘R | `components/FlowTable/FlowContextMenu.tsx` | G11 | ☐ | |
-| FM-14 | Pin / Unpin | `components/FlowTable/FlowContextMenu.tsx` | G3 | ☐ | |
+| FM-14 | Pin / Unpin | `components/FlowTable/FlowContextMenu.tsx` | G3 | ☑ | G3: `flow_menu.rs` Pin/Unpin → `bridge::mutations::pin_flows`; live: Pin then the menu offers Unpin |
 | FM-15 | Label ▸ Red, Orange, Yellow, Green, Blue, Purple (✓ on the current), No label | `components/FlowTable/FlowContextMenu.tsx` `LabelSub` | G11 | ☐ | |
 | FM-16 | Mark for Compare | `components/FlowTable/FlowContextMenu.tsx` | G11 | ☐ | |
 | FM-17 | Compare with Marked (#N, ", other tab" across tabs) | `components/FlowTable/FlowContextMenu.tsx` | G11 | ☐ | |
@@ -189,10 +189,10 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | FM-20 | Breakpoint… (preset, opens an unsaved rule) | `components/FlowTable/FlowContextMenu.tsx` | G7 | ☐ | |
 | FM-21 | Rewrite… | `components/FlowTable/FlowContextMenu.tsx` | G9 | ☐ | |
 | FM-22 | Script ▸ New view script…, New rewrite script…, New mock script… | `components/FlowTable/FlowContextMenu.tsx` | G10 | ☐ | |
-| FM-23 | Export HAR… (this flow) | `components/FlowTable/FlowContextMenu.tsx` | G3 | ☐ | |
-| FM-24 | Add <host> to SSL bypass (HTTPS flows only) | `components/FlowTable/FlowContextMenu.tsx` | G3 | ☐ | |
-| FM-25 | Never record <host>, then a toast "Not recording <host>" with a Settings action | `components/FlowTable/FlowContextMenu.tsx`, `lib/actions.ts` `neverRecordHost` | G3 | ☐ | |
-| FM-26 | Delete ⌫ (disabled while the flow is active or paused) | `components/FlowTable/FlowContextMenu.tsx` | G3 | ☐ | |
+| FM-23 | Export HAR… (this flow) | `components/FlowTable/FlowContextMenu.tsx` | G3 | ☑ | G3: `flow_menu.rs` → `documents::save(SaveKind::Har, ids)` (this flow alone, through the save panel) |
+| FM-24 | Add <host> to SSL bypass (HTTPS flows only) | `components/FlowTable/FlowContextMenu.tsx` | G3 | ☑ | G3: `flow_menu.rs` (`AddSslBypass`, disabled unless HTTPS/WSS) |
+| FM-25 | Never record <host>, then a toast "Not recording <host>" with a Settings action | `components/FlowTable/FlowContextMenu.tsx`, `lib/actions.ts` `neverRecordHost` | G3 | ☑ | G3: `bridge::mutations::never_record` then `clipboard::success_with_action` (the Settings button opens Settings › Storage); `docs/native/g3/never-record-toast-dark.png` |
+| FM-26 | Delete ⌫ (disabled while the flow is active or paused) | `components/FlowTable/FlowContextMenu.tsx` | G3 | ☑ | G3: `flow_menu.rs` Delete → `mutations::remove_flows`, disabled while active or paused; `tests/inspector.rs` |
 | FM-27 | Bulk menu header "N flows selected" | `components/FlowTable/FlowContextMenu.tsx` `BulkMenu` | G11 | ☐ | |
 | FM-28 | Bulk: Copy URLs, Copy as cURL | `components/FlowTable/FlowContextMenu.tsx` `BulkMenu` | G11 | ☐ | |
 | FM-29 | Bulk: Replay in Order | `components/FlowTable/FlowContextMenu.tsx` `BulkMenu` | G8 | ☐ | |
@@ -238,24 +238,24 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | ID | Behaviour | Source | Phase | Status | Evidence |
 |---|---|---|---|---|---|
 | CP-01 | ⌘K toggles the palette: "Type a command…", groups Flows, Capture, Navigate, Windows, Settings, keyword matching, shortcut labels, only commands that apply now; "No matching command" | `components/CommandPalette.tsx` | G2 | ☑ | G2: `features/commands.rs` palette (groups, shortcuts, only registered commands that apply, "No matching command"); `tests/shell.rs` `the_palette_opens_with_cmd_k_and_runs_a_command`; `tests/render.rs` renders it in both themes |
-| CP-02 | Escape in the inspector returns focus to the flow table (unless a dialog is open) | `hooks/useShortcuts.ts` | G3 | ☐ | |
+| CP-02 | Escape in the inspector returns focus to the flow table (unless a dialog is open) | `hooks/useShortcuts.ts` | G3 | ☑ | G3: Escape is `FocusTable` in the `Inspector` key context (dialogs take the focus, so they keep Escape); `tests/inspector.rs` `enter_and_escape_move_the_keyboard_between_the_table_and_the_inspector` |
 | CP-03 | Shortcut rules: ⇧ never matches; ⌥ matches the physical key; ⌘⌫ and ⌘F are left to text fields and code editors; bare ⌫ and ⌘A only in the flow table | `lib/commands.ts` `commandForKey` | G2 | ☑ | G2: `features/commands.rs` `bind_keys` (exact bindings, so ⇧ never matches; gpui matches the physical key; ⌘⌫ yields to text fields via `!Input`; bare ⌫ and ⌘A are `FlowGrid`'s); `tests/shell.rs` `cmd_backspace_in_a_text_field_edits_the_text`. ⌘F in code editors is G4's |
 | CP-04 | "Replay selected flow" ⌘R ("Nothing to replay", "Can't replay this flow" for tunnels and WebSockets) | `lib/commands.ts` | G8 | ☐ | |
 | CP-05 | "Edit & Replay selected flow…" | `lib/commands.ts` | G8 | ☐ | |
 | CP-06 | "Rewrite selected flow…" | `lib/commands.ts` | G9 | ☐ | |
-| CP-07 | "Pin or unpin selected flow" (live capture only) | `lib/commands.ts` | G3 | ☐ | |
-| CP-08 | "Copy URL of selected flow" (every selected URL with several) | `lib/commands.ts` | G3 | ☐ | |
+| CP-07 | "Pin or unpin selected flow" (live capture only) | `lib/commands.ts` | G3 | ☑ | G3: `features/inspector/mod.rs` `pin` (live capture only; toggles the focused row's pin) |
+| CP-08 | "Copy URL of selected flow" (every selected URL with several) | `lib/commands.ts` | G3 | ☑ | G3: `inspector/mod.rs` `copy-url` (every URL of a multi-selection through `Engine::flow_urls`) |
 | CP-09 | "Copy selected flow as <language>", one per Copy as Code language | `lib/commands.ts` | G11 | ☐ | |
 | CP-10 | "Repeat selected flow…" ⌥⌘R | `lib/commands.ts` | G11 | ☐ | |
 | CP-11 | "Select all flows" ⌘A (in the flow table) | `lib/commands.ts` | G1 | ☑ | G1: `pm-widgets` `flow_grid::tests::cmd_a_enter_and_backspace` (`flow_grid::SelectAll`, ⌘A in the `FlowGrid` context) |
-| CP-12 | "Delete selected flows" ⌫ (in the flow table) | `lib/commands.ts` | G3 | ☐ | |
+| CP-12 | "Delete selected flows" ⌫ (in the flow table) | `lib/commands.ts` | G3 | ☑ | G3: `inspector/mod.rs` `delete` → `FlowTable::delete_selection` (⌫ stays `FlowGrid`'s binding) |
 | CP-13 | "Replay selected flows in order" (two or more) | `lib/commands.ts` | G8 | ☐ | |
 | CP-14 | "Compare the two selected flows" | `lib/commands.ts` | G11 | ☐ | |
 | CP-15 | "Comment on selected flow…" | `lib/commands.ts` | G11 | ☐ | |
 | CP-16 | "Label selected flows <Colour>", one per colour | `lib/commands.ts` | G11 | ☐ | |
 | CP-17 | "Remove label from selected flows" | `lib/commands.ts` | G11 | ☐ | |
 | CP-18 | "Add header column…" | `lib/commands.ts` | G11 | ☐ | |
-| CP-19 | "Copy selected flow as cURL" | `lib/commands.ts` | G3 | ☐ | |
+| CP-19 | "Copy selected flow as cURL" | `lib/commands.ts` | G3 | ☑ | G3: `inspector/mod.rs` `copy-curl` |
 | CP-20 | "New request…" | `lib/commands.ts` | G8 | ☐ | |
 | CP-21 | "Clear all flows" ⌘⌫ (live capture only) | `lib/commands.ts` | G2 | ☑ | G2: `features/capture.rs` (live only); `tests/shell.rs` `cmd_backspace_in_a_text_field_edits_the_text` |
 | CP-22 | "Start recording" / "Stop recording" ⌘E (one key, whichever applies) | `lib/commands.ts` | G2 | ☑ | G2: `features/capture.rs`; `commands::tests::only_registered_commands_that_apply_are_listed_and_keys_pick_the_one_that_applies`, `tests/shell.rs` `the_palette_opens_with_cmd_k_and_runs_a_command` |
@@ -276,8 +276,8 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | CP-37 | "Show labelled flows" (`is:labelled`) | `lib/commands.ts` | G2 | ☑ | G2: `features/navigate.rs` (`labelled`) |
 | CP-38 | "Show commented flows" (`is:commented`) | `lib/commands.ts` | G2 | ☑ | G2: `features/navigate.rs` (`commented`) |
 | CP-39 | "Search request and response bodies…" appends `body:` and focuses the box | `lib/commands.ts` | G2 | ☑ | G2: `features/navigate.rs` (`deep-search`, `pm_view::commands::with_body_term`, caret at the end) |
-| CP-40 | "Focus the flow table" | `lib/commands.ts`, `lib/focus.ts` | G3 | ☐ | |
-| CP-41 | "Focus the inspector" (with a selection) | `lib/commands.ts`, `lib/focus.ts` | G3 | ☐ | |
+| CP-40 | "Focus the flow table" | `lib/commands.ts`, `lib/focus.ts` | G3 | ☑ | G3: `inspector/mod.rs` `table` → `shell::focus_table` |
+| CP-41 | "Focus the inspector" (with a selection) | `lib/commands.ts`, `lib/focus.ts` | G3 | ☑ | G3: `inspector/mod.rs` `inspector` (with a flow focused); `tests/inspector.rs` runs it from the command list |
 | CP-42 | "Show live capture" (on a document tab) | `lib/commands.ts` | G2 | ☑ | G2: `features/documents.rs` (`live`, only on a document tab); `tests/shell.rs` checks it is hidden on Live |
 | CP-43 | "Rules…" | `lib/commands.ts` | G7 | ☐ | |
 | CP-44 | "Scripts…" | `lib/commands.ts` | G10 | ☐ | |
@@ -292,48 +292,48 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 
 | ID | Behaviour | Source | Phase | Status | Evidence |
 |---|---|---|---|---|---|
-| IN-01 | Nothing selected: "Select a flow to inspect it" | `components/DetailPane.tsx` | G3 | ☐ | |
-| IN-02 | Load error: "Couldn't load this flow", the error, Try again | `components/DetailPane.tsx` | G3 | ☐ | |
-| IN-03 | Gone: "This flow is no longer available" | `components/DetailPane.tsx` | G3 | ☐ | |
-| IN-04 | While loading, a blank pane (no message flashing on every arrow key) | `components/DetailPane.tsx` | G3 | ☐ | |
-| IN-05 | URL bar: method pill, URL coloured for the bar (blue host, green path) with sent and GraphQL badges, status pill, HTTP version, "duration · size" | `components/DetailPane.tsx` | G3 | ☐ | |
-| IN-06 | URL bar: "Rewrite…" button (not CONNECT or WebSocket) | `components/DetailPane.tsx` | G9 | ☐ | |
-| IN-07 | URL bar: "Bypass SSL" button on decrypted or pinned flows; "In SSL bypass" (disabled) once added; tooltip explains | `components/DetailPane.tsx` `BypassButton` | G3 | ☐ | |
-| IN-08 | URL bar menu: Copy URL, Copy host, Copy path, Copy path and query, Copy method, Copy status, Copy as cURL | `components/DetailPane.tsx` `UrlBarMenu` | G3 | ☐ | |
-| IN-09 | URL bar menu: Filter by ▸ Host, Method, Status, App | `components/DetailPane.tsx` `UrlBarMenu` | G3 | ☐ | |
-| IN-10 | Notes bar: label chip and comment; click opens the comment dialog | `components/DetailPane.tsx` | G3 | ☐ | |
-| IN-11 | OpenAPI line: "OpenAPI" tag, operationId, summary, "path · spec" | `components/DetailPane.tsx` `OperationLine` | G3 | ☐ | |
-| IN-12 | Rule badges: one per applied rule with req/resp, agent rules as "AI · <client>"; click opens the rule | `components/Inspector/RuleBadges.tsx` | G3 | ☐ | |
-| IN-13 | Rule badge menu: Copy rule name, Copy rule id, Open rule, Disable rule | `components/Inspector/RuleBadges.tsx` | G3 | ☐ | |
-| IN-14 | Rule notes: "Mocked: the response didn't come from the upstream.", "A breakpoint timed out; the flow continued unmodified.", why a rewrite skipped a body | `components/Inspector/RuleBadges.tsx` | G3 | ☐ | |
+| IN-01 | Nothing selected: "Select a flow to inspect it" | `components/DetailPane.tsx` | G3 | ☑ | G3: `inspector/mod.rs` `message`; `tests/inspector.rs` `the_inspector_follows_the_focused_flow_and_says_when_it_cant` |
+| IN-02 | Load error: "Couldn't load this flow", the error, Try again | `components/DetailPane.tsx` | G3 | ☑ | G3: `Load::Failed` → the error and a gpui-kit "Try again" (`Resource::retry`); `bridge::resource::tests::failures_wait_for_retry_and_values_can_be_set` |
+| IN-03 | Gone: "This flow is no longer available" | `components/DetailPane.tsx` | G3 | ☑ | G3: a cached `None` (the store has no such flow); `tests/inspector.rs` |
+| IN-04 | While loading, a blank pane (no message flashing on every arrow key) | `components/DetailPane.tsx` | G3 | ☑ | G3: `Load::Loading` (or a stale flow of another id) paints a blank pane |
+| IN-05 | URL bar: method pill, URL coloured for the bar (blue host, green path) with sent and GraphQL badges, status pill, HTTP version, "duration · size" | `components/DetailPane.tsx` | G3 | ☑ | G3: `inspector/parts.rs` `url_bar` (bar-toned URL as selectable text, sent and GraphQL badges, status pill, version tag, "duration · size"); `docs/native/g3/https-flow-dark.png`, `https-flow-light.png` |
+| IN-06 | URL bar: "Rewrite…" button (not CONNECT or WebSocket) | `components/DetailPane.tsx` | G9 | ☐ | G3 draws the button (`parts.rs`), which dispatches `RewriteFlow`; G9 replaces its stub handler |
+| IN-07 | URL bar: "Bypass SSL" button on decrypted or pinned flows; "In SSL bypass" (disabled) once added; tooltip explains | `components/DetailPane.tsx` `BypassButton` | G3 | ☑ | G3: `parts.rs` `bypass_button` ("In SSL bypass" disabled once added, tooltips); live: the fix added `localhost` and the next CONNECT was tunnelled (`docs/native/g3/bypass-tunnel-dark.png`) |
+| IN-08 | URL bar menu: Copy URL, Copy host, Copy path, Copy path and query, Copy method, Copy status, Copy as cURL | `components/DetailPane.tsx` `UrlBarMenu` | G3 | ☑ | G3: `inspector/menus.rs` `url_bar`; `features/inspector/menus.rs` tests; `tests/inspector.rs` `the_url_bar_and_tables_copy_the_right_text` |
+| IN-09 | URL bar menu: Filter by ▸ Host, Method, Status, App | `components/DetailPane.tsx` `UrlBarMenu` | G3 | ☑ | G3: `menus::url_bar`'s Filter by submenu; `features/inspector/menus.rs` tests |
+| IN-10 | Notes bar: label chip and comment; click opens the comment dialog | `components/DetailPane.tsx` | G3 | ☑ | G3: `parts.rs` `notes_bar` (label chip, comment); its click dispatches `OpenComment`, which G11's dialog handles (a toast until then); `docs/native/g3/offscreen-inspector-light.png` |
+| IN-11 | OpenAPI line: "OpenAPI" tag, operationId, summary, "path · spec" | `components/DetailPane.tsx` `OperationLine` | G3 | ☑ | G3: `parts.rs` `operation_line` from the `operation` cache (`Engine::flow_operation_in`); `docs/native/g3/offscreen-inspector-light.png` |
+| IN-12 | Rule badges: one per applied rule with req/resp, agent rules as "AI · <client>"; click opens the rule | `components/Inspector/RuleBadges.tsx` | G3 | ☑ | G3: `parts.rs` `rule_badges` (agent rules "AI · client" in the agent colours); a click dispatches `OpenRule` (G7's window; a toast until then); `tests/render.rs` checks a badge's pixels |
+| IN-13 | Rule badge menu: Copy rule name, Copy rule id, Open rule, Disable rule | `components/Inspector/RuleBadges.tsx` | G3 | ☑ | G3: `menus::rule_badge` (Disable rule → `mutations::set_rule_enabled`; Open rule as above); `tests/inspector.rs` `rule_badges_and_the_failure_banner` |
+| IN-14 | Rule notes: "Mocked: the response didn't come from the upstream.", "A breakpoint timed out; the flow continued unmodified.", why a rewrite skipped a body | `components/Inspector/RuleBadges.tsx` | G3 | ☑ | G3: `parts.rs` `rule_badges` notes; `docs/native/g3/offscreen-inspector-light.png` (Mocked) |
 | IN-15 | Script failure badge "Script “<name>” failed · phase · message"; menu Copy error, Copy script name, Open script | `components/Inspector/RuleBadges.tsx` | G10 | ☐ | |
-| IN-16 | Pinned banner (client rejected the certificate) with "Certificate wizard…" and "Add <host> to SSL bypass" | `components/DetailPane.tsx` | G3 | ☐ | |
-| IN-17 | Request and Response side by side (resizable, each at least 240 px); WebSocket and SSE flows add a stream panel below (40/60) | `components/DetailPane.tsx` | G3 | ☐ | |
-| IN-18 | Synthetic flow: "Synthetic flow: no recorded messages" | `components/DetailPane.tsx` `NoDetail` | G3 | ☐ | |
-| IN-19 | Request tabs Header, Query, Body, Raw; the chosen tab stays across flows | `components/DetailPane.tsx` `RequestPane` | G3 | ☐ | |
-| IN-20 | Response tabs Header, Body, Raw, TLS, Timing; the chosen tab stays across flows | `components/DetailPane.tsx` `ResponsePane` | G3 | ☐ | |
-| IN-21 | Request Header tab: name/value table with display-cased names | `components/DetailPane.tsx`, `components/Inspector/KvTable.tsx` | G3 | ☐ | |
-| IN-22 | Query tab: decoded pairs, or "No query parameters" | `components/DetailPane.tsx` | G3 | ☐ | |
-| IN-23 | Response Header tab, with a "Trailers" table when there are trailers | `components/DetailPane.tsx` | G3 | ☐ | |
-| IN-24 | No response: "Waiting for the response…" or "No response" | `components/DetailPane.tsx` | G3 | ☐ | |
-| IN-25 | Raw tab: "Rebuilt from the parsed message, not the exact bytes on the wire"; body placeholders for encoded, streaming, over 1 MB and binary bodies | `components/Inspector/RawView.tsx` | G3 | ☐ | |
-| IN-26 | Raw menu: Copy request line / Copy status line, Copy headers, plus the code menu | `components/Inspector/RawView.tsx` | G3 | ☐ | |
-| IN-27 | Tunnel note: "Not decrypted: <host> is in the SSL exclude or bypass list. N sent, N received through the tunnel." | `components/DetailPane.tsx` | G3 | ☐ | |
-| IN-28 | TLS tab, Connection: Client SNI, Client offered ALPN, Negotiated ALPN, Upstream TLS version, Upstream cipher, Upstream certificate (Verified, Not verified, Failed), Upstream proxy, Client certificate | `components/Inspector/TlsView.tsx` | G3 | ☐ | |
-| IN-29 | TLS tab, Upstream certificate chain: per certificate subject, leaf tag, Issuer, Valid (with "expired when captured"), Names, Serial, SHA-256 | `components/Inspector/TlsView.tsx` `CertCard` | G3 | ☐ | |
-| IN-30 | TLS placeholders: not decrypted, "Plain HTTP: no TLS", "The upstream presented no certificate" | `components/Inspector/TlsView.tsx` | G3 | ☐ | |
-| IN-31 | Certificate menu: Copy subject, Copy SHA-256, Copy SHA-256 without colons, Copy serial, Copy names | `components/Inspector/TlsView.tsx` `CertCard` | G3 | ☐ | |
-| IN-32 | Timing tab: waterfall of phases with times, Total, "Reused an open upstream connection", route rows | `components/Inspector/TimingView.tsx` | G3 | ☐ | |
-| IN-33 | Timing placeholders: "Waiting for the upstream…", "No timings recorded" | `components/Inspector/TimingView.tsx` | G3 | ☐ | |
-| IN-34 | Timing menu: Copy <phase>, Copy timing as table (tab-separated) | `components/Inspector/TimingView.tsx` `TimingMenu` | G3 | ☐ | |
-| IN-35 | Table row menu: Copy name, Copy value, Copy as "Name: value" (headers) / Copy as name=value (query, form) / Copy row (plain) | `components/Inspector/KvTable.tsx` `RowItems` | G3 | ☐ | |
-| IN-36 | Table row menu: Copy token (Authorization), Copy cookie value / Copy cookie ▸ <name> | `components/Inspector/KvTable.tsx` `RowItems` | G3 | ☐ | |
-| IN-37 | Table row menu: Filter flows with this header | `components/Inspector/KvTable.tsx` `RowItems` | G3 | ☐ | |
-| IN-38 | Table menu: Copy all headers / parameters / fields / rows, Copy all as JSON | `components/Inspector/KvTable.tsx` `KvMenu` | G3 | ☐ | |
-| IN-39 | Failure banner: headline and the engine's message; menu Copy error, Copy title and error | `components/DetailPane.tsx` `FailureBanner` | G3 | ☐ | |
-| IN-40 | Failure headlines by error kind (client rejected cert, client TLS, client cert required, upstream proxy auth, loop, unreachable, cert untrusted, cert invalid, old TLS, upstream TLS, DNS, timeout, refused, client gone, other) | `lib/errors.ts` | G3 | ☐ | |
-| IN-41 | Fix buttons: Certificate wizard…, Bypass SSL, Allow insecure upstream / Verify upstream again, Timeouts…, Network settings…, SSL Proxying… | `components/DetailPane.tsx` `FailureBanner` | G3 | ☐ | |
-| IN-42 | Text in the URL bar, tables and notes is selectable | `components/DetailPane.tsx` | G3 | ☐ | |
+| IN-16 | Pinned banner (client rejected the certificate) with "Certificate wizard…" and "Add <host> to SSL bypass" | `components/DetailPane.tsx` | G3 | ☑ | G3: `parts.rs` `pinned_banner` (Certificate wizard… dispatches `OpenCertWizard`, G13's; the bypass button) |
+| IN-17 | Request and Response side by side (resizable, each at least 240 px); WebSocket and SSE flows add a stream panel below (40/60) | `components/DetailPane.tsx` | G3 | ☑ | G3: `inspector/mod.rs` `messages` (drag the handle, each ≥ 240 px, double-click resets); WebSocket and SSE flows get the 40/60 split with G6's panel slot (`stream_panel`) |
+| IN-18 | Synthetic flow: "Synthetic flow: no recorded messages" | `components/DetailPane.tsx` `NoDetail` | G3 | ☑ | G3: `panes.rs` `no_detail`; `tests/inspector.rs` |
+| IN-19 | Request tabs Header, Query, Body, Raw; the chosen tab stays across flows | `components/DetailPane.tsx` `RequestPane` | G3 | ☑ | G3: `panes.rs` `request_pane` (the tab is `Inspector` state, kept across flows); the Body tab is G4's slot (`body_tab`) |
+| IN-20 | Response tabs Header, Body, Raw, TLS, Timing; the chosen tab stays across flows | `components/DetailPane.tsx` `ResponsePane` | G3 | ☑ | G3: `panes.rs` `response_pane` (kept across flows); Body as above |
+| IN-21 | Request Header tab: name/value table with display-cased names | `components/DetailPane.tsx`, `components/Inspector/KvTable.tsx` | G3 | ☑ | G3: `pm_widgets::KvTable` with `pm_view::http::header_rows` (display-cased); `tests/inspector.rs` |
+| IN-22 | Query tab: decoded pairs, or "No query parameters" | `components/DetailPane.tsx` | G3 | ☑ | G3: `pm_view::http::query_pairs` (`URLSearchParams` decoding; its test); `docs/native/g3/tls-query-dark.png` |
+| IN-23 | Response Header tab, with a "Trailers" table when there are trailers | `components/DetailPane.tsx` | G3 | ☑ | G3: `panes.rs` response Header with the Trailers table (`response-trailers`) |
+| IN-24 | No response: "Waiting for the response…" or "No response" | `components/DetailPane.tsx` | G3 | ☑ | G3: `panes.rs` `no_response`; `docs/native/g3/untrusted-cert-dark.png` ("No response") |
+| IN-25 | Raw tab: "Rebuilt from the parsed message, not the exact bytes on the wire"; body placeholders for encoded, streaming, over 1 MB and binary bodies | `components/Inspector/RawView.tsx` | G3 | ☑ | G3: `inspector/raw.rs` (virtualised, selectable) with `pm_view::inspector::raw_body` (its test covers every placeholder); `tests/inspector.rs` `the_raw_tab_rebuilds_the_message_and_copies_its_parts`; `docs/native/g3/timing-raw-dark.png` |
+| IN-26 | Raw menu: Copy request line / Copy status line, Copy headers, plus the code menu | `components/Inspector/RawView.tsx` | G3 | ☑ | G3: `menus::raw` (Copy selection, Copy request/status line, Copy headers, Copy all); `tests/inspector.rs`. Select all and Find come with G4's CodeView |
+| IN-27 | Tunnel note: "Not decrypted: <host> is in the SSL exclude or bypass list. N sent, N received through the tunnel." | `components/DetailPane.tsx` | G3 | ☑ | G3: `parts.rs` `tunnel_note`; `docs/native/g3/bypass-tunnel-dark.png` |
+| IN-28 | TLS tab, Connection: Client SNI, Client offered ALPN, Negotiated ALPN, Upstream TLS version, Upstream cipher, Upstream certificate (Verified, Not verified, Failed), Upstream proxy, Client certificate | `components/Inspector/TlsView.tsx` | G3 | ☑ | G3: `pm_view::tls::connection_rows` (its test); `docs/native/g3/tls-query-dark.png` |
+| IN-29 | TLS tab, Upstream certificate chain: per certificate subject, leaf tag, Issuer, Valid (with "expired when captured"), Names, Serial, SHA-256 | `components/Inspector/TlsView.tsx` `CertCard` | G3 | ☑ | G3: `panes.rs` `tls_view` cards with `pm_view::tls::cert_rows` (expiry at capture time; its test); `docs/native/g3/offscreen-inspector-light.png` |
+| IN-30 | TLS placeholders: not decrypted, "Plain HTTP: no TLS", "The upstream presented no certificate" | `components/Inspector/TlsView.tsx` | G3 | ☑ | G3: `panes.rs` `tls_view` placeholders; `docs/native/g3/bypass-tunnel-dark.png`, `dns-failure-dark.png` |
+| IN-31 | Certificate menu: Copy subject, Copy SHA-256, Copy SHA-256 without colons, Copy serial, Copy names | `components/Inspector/TlsView.tsx` `CertCard` | G3 | ☑ | G3: `menus::certificate`; `features/inspector/menus.rs` tests; `tests/inspector.rs` |
+| IN-32 | Timing tab: waterfall of phases with times, Total, "Reused an open upstream connection", route rows | `components/Inspector/TimingView.tsx` | G3 | ☑ | G3: `panes.rs` `timing_view` (`pm_view::tls::timing_phases`, `route_rows`; their tests); `docs/native/g3/timing-raw-dark.png` |
+| IN-33 | Timing placeholders: "Waiting for the upstream…", "No timings recorded" | `components/Inspector/TimingView.tsx` | G3 | ☑ | G3: `panes.rs` `timing_view` placeholders |
+| IN-34 | Timing menu: Copy <phase>, Copy timing as table (tab-separated) | `components/Inspector/TimingView.tsx` `TimingMenu` | G3 | ☑ | G3: `menus::timing` (tab-separated); `tests/inspector.rs` |
+| IN-35 | Table row menu: Copy name, Copy value, Copy as "Name: value" (headers) / Copy as name=value (query, form) / Copy row (plain) | `components/Inspector/KvTable.tsx` `RowItems` | G3 | ☑ | G3: `menus::kv` with `pm_view::inspector::row_copies` (its test); `tests/inspector.rs` |
+| IN-36 | Table row menu: Copy token (Authorization), Copy cookie value / Copy cookie ▸ <name> | `components/Inspector/KvTable.tsx` `RowItems` | G3 | ☑ | G3: `menus::kv` (Copy token; Copy cookie value, or Copy cookie ▸ name); `tests/inspector.rs` |
+| IN-37 | Table row menu: Filter flows with this header | `components/Inspector/KvTable.tsx` `RowItems` | G3 | ☑ | G3: `menus::kv` → `AddFilterTerm` (`reqheader:`/`resheader:`); `tests/inspector.rs` |
+| IN-38 | Table menu: Copy all headers / parameters / fields / rows, Copy all as JSON | `components/Inspector/KvTable.tsx` `KvMenu` | G3 | ☑ | G3: `menus::kv`; `tests/inspector.rs` |
+| IN-39 | Failure banner: headline and the engine's message; menu Copy error, Copy title and error | `components/DetailPane.tsx` `FailureBanner` | G3 | ☑ | G3: `parts.rs` `failure_banner`, `menus::failure`; `tests/inspector.rs` `rule_badges_and_the_failure_banner`; `tests/render.rs` checks its pixels |
+| IN-40 | Failure headlines by error kind (client rejected cert, client TLS, client cert required, upstream proxy auth, loop, unreachable, cert untrusted, cert invalid, old TLS, upstream TLS, DNS, timeout, refused, client gone, other) | `lib/errors.ts` | G3 | ☑ | G3: `pm_view::errors::explain` (ported with `errors.test.ts`, keyed on `error_kind`; `every_kind_has_a_headline`); live DNS and untrusted-certificate flows (`docs/native/g3/`) |
+| IN-41 | Fix buttons: Certificate wizard…, Bypass SSL, Allow insecure upstream / Verify upstream again, Timeouts…, Network settings…, SSL Proxying… | `components/DetailPane.tsx` `FailureBanner` | G3 | ☑ | G3: `parts.rs` fix buttons; live: Allow insecure upstream put `localhost` in the list and the retried request returned 200 (`docs/native/g3/insecure-upstream-fixed-dark.png`), Bypass SSL tunnelled the next CONNECT; Timeouts… opens Settings › Advanced (`tests/inspector.rs`); the wizard and Settings are G13's and G12's |
+| IN-42 | Text in the URL bar, tables and notes is selectable | `components/DetailPane.tsx` | G3 | ☑ | G3: gpui-kit `SelectableText` in the URL bar, tables, notes, banners and Raw |
 
 ## Body viewers
 
@@ -681,7 +681,7 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | DV-02 | Dev remote: `click` by test id | `dev/remote.ts` | G2 | ☑ | G2: G0's `click`, now on every chrome control (`.test_support()` on plain elements); `tests/shell.rs` clicks chips, rows and tabs |
 | DV-03 | Dev remote: `select`, `selectIds`, `selectAll`, `scrollTo` | `dev/remote.ts` | G1 | ☑ | G1: `apps/native/src/dev/mod.rs` `select`, `selectIds`, `selectAll`, `scrollTo` (plus `headerColumns`, `filter`, `autoSelect`, `table`) |
 | DV-04 | Dev remote: `filter`, `palette`, `store`, `openDocument`, `closeDocument`, `saveSession`, `exportHar`, `contextMenu`, `reload` | `dev/remote.ts` | G2 | ☑ | G2: `apps/native/src/dev/mod.rs` `filter`, `search`, `palette`, `command`, `keys`, `store`, `openDocument`, `closeDocument`, `saveSession`, `exportHar`, `contextMenu` (with `run`), `workspace`, … (`reload` has no meaning without a web view) |
-| DV-05 | Dev remote: `requestTab`, `responseTab`, `curl` | `dev/remote.ts` | G3 | ☐ | |
+| DV-05 | Dev remote: `requestTab`, `responseTab`, `curl` | `dev/remote.ts` | G3 | ☑ | G3: `dev/mod.rs` `requestTab`, `responseTab`, `curl` (also `focus`, `inspector`, and `contextMenu` for the inspector's menus and `row:<id>[:<column>]`) |
 | DV-06 | Dev remote: `viewer` | `dev/remote.ts` | G4 | ☐ | |
 | DV-07 | Dev remote: `wsSend`, `wsClose` | `dev/remote.ts` | G6 | ☐ | |
 | DV-08 | Dev remote: `rules`, `rulesEditor`, `preset`, `saveRule`, `testRule`, `deleteRule`, `throttle`, `noCache`, `noCookies` | `dev/remote.ts` | G7 | ☐ | |
@@ -694,7 +694,7 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | DV-15 | `VITE_PM_AUTO_SELECT`: start with Auto Select on | `dev/harness.ts` | G1 | ☑ | G1: `PROXYMATE_DEV_AUTO_SELECT=1` (`features/flow_table.rs`, `dev_env.rs`) |
 | DV-16 | Perf probe (`PROXYMATE_SYNTH_FLOWS` + `VITE_PM_PERF_PROBE`): `[perf-probe]` scroll and filter timings | `dev/perfProbe.ts` | G1 | ☑ | G1: `apps/native/src/perf_probe.rs`, `PROXYMATE_DEV_PERF_PROBE=1`; numbers in the G1 PR |
 | DV-17 | `VITE_PM_FILTER`: start with search text | `dev/harness.ts` | G2 | ☑ | G2: `PROXYMATE_DEV_FILTER` (`dev_env::value`, `Workspace::new`) |
-| DV-18 | `VITE_PM_RESPONSE_TAB`: open the response pane on a tab | `dev/harness.ts` | G3 | ☐ | |
+| DV-18 | `VITE_PM_RESPONSE_TAB`: open the response pane on a tab | `dev/harness.ts` | G3 | ☑ | G3: `PROXYMATE_DEV_RESPONSE_TAB` (`features/inspector/mod.rs`) |
 | DV-19 | `VITE_PM_OPEN=rules` | `dev/harness.ts` | G7 | ☐ | |
 | DV-20 | `VITE_PM_OPEN=breakpoints` | `dev/harness.ts` | G8 | ☐ | |
 | DV-21 | `VITE_PM_OPEN=scripts` | `dev/harness.ts` | G10 | ☐ | |
@@ -710,9 +710,9 @@ Rows per owning phase. G14 also audits every row; its own row is the browser-onl
 | Phase | Rows | Done (`☑`) |
 |---|---|---|
 | G0 | 14 | 14 |
-| G1 | 39 | 35 |
+| G1 | 39 | 38 |
 | G2 | 91 | 89 (2 `≈`: WM-13, WM-28) |
-| G3 | 62 | 0 |
+| G3 | 62 | 62 |
 | G4 | 31 | 0 |
 | G5 | 10 | 0 |
 | G6 | 19 | 0 |
@@ -725,4 +725,4 @@ Rows per owning phase. G14 also audits every row; its own row is the browser-onl
 | G13 | 29 | 0 |
 | G14 | 1 | 0 |
 | G15 | 5 | 5 |
-| **Total** | **524** | **143** |
+| **Total** | **524** | **208** |

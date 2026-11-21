@@ -4,11 +4,12 @@
 //! opaque token except the sidebar, which is transparent on macOS so the
 //! `NSVisualEffectView` shows through.
 //!
-//! G1 put the flow table in the content area, over an inspector
-//! placeholder (G3 fills it), with the sidebar's width and the table's
-//! share of the column draggable. G2 adds the chrome around it: the
-//! [`toolbar`], [`sidebar`], document [`tabs`], [`filter_bar`] and
-//! [`footer`], over the shared [`Workspace`].
+//! G1 put the flow table in the content area, over the inspector, with the
+//! sidebar's width and the table's share of the column draggable. G2 adds
+//! the chrome around it: the [`toolbar`], [`sidebar`], document [`tabs`],
+//! [`filter_bar`] and [`footer`], over the shared [`Workspace`]. G3 fills
+//! the inspector ([`Inspector`]); ↩ in the table moves the keyboard into
+//! it and Escape back.
 
 mod chrome;
 pub mod filter_bar;
@@ -31,7 +32,8 @@ use pm_theme::Tokens;
 use pm_theme::kit::TokensExt as _;
 
 use crate::bridge::{self, Bridge, stream::Latest};
-use crate::features::flow_table::FlowTable;
+use crate::features::flow_table::{FlowTable, FlowTableEvent};
+use crate::features::inspector::Inspector;
 use crate::workspace::{Workspace, WorkspaceEvent};
 use filter_bar::FilterBar;
 use footer::Footer;
@@ -172,6 +174,7 @@ pub struct ShellParts {
     pub sidebar: WeakEntity<Sidebar>,
     pub filter_bar: WeakEntity<FilterBar>,
     pub table: WeakEntity<FlowTable>,
+    pub inspector: WeakEntity<Inspector>,
 }
 
 impl Global for ShellParts {}
@@ -209,6 +212,18 @@ pub fn focus_table(window: &mut Window, cx: &mut App) {
     }
 }
 
+/// The inspector, while it shows a flow (↩ in the table, "Focus the
+/// inspector").
+pub fn focus_inspector(window: &mut Window, cx: &mut App) {
+    let Some(inspector) = parts(cx).and_then(|p| p.inspector.upgrade()) else {
+        return;
+    };
+    if inspector.read(cx).key(cx).is_some() {
+        let focus = inspector.read(cx).focus_handle(cx);
+        window.focus(&focus, cx);
+    }
+}
+
 /// Numbers with thousands separators, as the Tauri UI's `toLocaleString`.
 pub fn thousands(n: u64) -> String {
     let digits = n.to_string();
@@ -228,6 +243,7 @@ pub struct MainWindow {
     sidebar: Entity<Sidebar>,
     filter_bar: Entity<FilterBar>,
     footer: Entity<Footer>,
+    inspector: Entity<Inspector>,
     sidebar_width: f32,
     table_share: f32,
     _subscriptions: Vec<Subscription>,
@@ -254,7 +270,16 @@ impl MainWindow {
         });
         let filter_bar = cx.new(|cx| FilterBar::new(workspace.clone(), table.clone(), snapshot.clone(), window, cx));
         let footer = cx.new(|cx| Footer::new(workspace.clone(), table.clone(), storage.clone(), cx));
+        let inspector = cx.new(|cx| Inspector::new(workspace.clone(), table.clone(), cx));
         let subscriptions = vec![
+            cx.subscribe_in(&table, window, |this, _, e: &FlowTableEvent, window, cx| match e {
+                FlowTableEvent::Inspect => {
+                    if this.inspector.read(cx).key(cx).is_some() {
+                        let focus = this.inspector.read(cx).focus_handle(cx);
+                        window.focus(&focus, cx);
+                    }
+                }
+            }),
             cx.observe(&table, |_, _, cx| cx.notify()),
             cx.observe(&workspace, |this, ws, cx| {
                 let addr = ws.read(cx).proxy.listening.clone();
@@ -289,6 +314,7 @@ impl MainWindow {
             sidebar: sidebar.downgrade(),
             filter_bar: filter_bar.downgrade(),
             table: table.downgrade(),
+            inspector: inspector.downgrade(),
         });
         // The table has the keyboard from the start.
         let focus = table.read(cx).grid().focus_handle(cx);
@@ -299,6 +325,7 @@ impl MainWindow {
             sidebar,
             filter_bar,
             footer,
+            inspector,
             sidebar_width: SIDEBAR_WIDTH,
             table_share: TABLE_SHARE,
             _subscriptions: subscriptions,
@@ -319,6 +346,10 @@ impl MainWindow {
 
     pub fn sidebar(&self) -> &Entity<Sidebar> {
         &self.sidebar
+    }
+
+    pub fn inspector(&self) -> &Entity<Inspector> {
+        &self.inspector
     }
 
     /// A split's handle: drag to resize, double-click for the default.
@@ -380,7 +411,7 @@ impl MainWindow {
             )
     }
 
-    /// The flow table over the inspector placeholder.
+    /// The flow table over the inspector.
     fn content(&self, t: &Tokens, cx: &mut Context<Self>) -> impl IntoElement {
         let share = self.table_share;
         div()
@@ -417,40 +448,15 @@ impl MainWindow {
                     .border_color(t.border.hsla())
                     .child(self.handle(Split::Inspector, t, cx)),
             )
-            .child(self.inspector(t, cx))
-    }
-
-    /// G3's inspector goes here; until then, what is selected.
-    fn inspector(&self, t: &Tokens, cx: &App) -> impl IntoElement {
-        let grid = self.table.read(cx).grid().read(cx);
-        let count = grid.selection_count();
-        let focused = grid.selected().focused;
-        let line: SharedString = match (count, focused) {
-            (0, _) => "No flow selected".into(),
-            (1, Some(id)) => {
-                let url = (0..grid.len())
-                    .filter_map(|i| grid.row(i))
-                    .find(|r| r.id() == id)
-                    .map(|r| format!("{} {}", r.method, r.url));
-                format!("Flow #{}{}", id + 1, url.map(|u| format!(" · {u}")).unwrap_or_default()).into()
-            }
-            (n, _) => format!("{n} flows selected").into(),
-        };
-        div()
-            .id("inspector")
-            .role(Role::Region)
-            .aria_label("Inspector")
-            .flex_1()
-            .min_h(px(PANE_MIN_HEIGHT))
-            .flex()
-            .flex_col()
-            .items_center()
-            .justify_center()
-            .gap(px(6.))
-            .bg(t.background.hsla())
-            .text_color(t.muted_foreground.hsla())
-            .child(div().text_color(t.foreground.hsla()).child(line))
-            .child(div().text_size(px(12.)).child("The inspector arrives in G3."))
+            .child(
+                div()
+                    .id("inspector-pane")
+                    .flex_1()
+                    .min_h(px(PANE_MIN_HEIGHT))
+                    .flex()
+                    .bg(t.background.hsla())
+                    .child(self.inspector.clone()),
+            )
     }
 }
 

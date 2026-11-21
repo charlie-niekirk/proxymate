@@ -1,5 +1,7 @@
-//! The main window's shell with the flow table (G1) and its chrome (G2:
-//! toolbar, sidebar, document tabs, filter bar, footer; the ⌘K palette),
+//! The main window's shell with the flow table (G1), its chrome (G2:
+//! toolbar, sidebar, document tabs, filter bar, footer; the ⌘K palette)
+//! and the inspector (G3: a decrypted flow with notes, an OpenAPI line and
+//! rule badges on its TLS tab; a failed flow with its banner on Timing),
 //! rendered by gpui's real
 //! offscreen renderer (Metal on macOS, WGPU on Linux; CI uses Mesa's
 //! lavapipe) in both themes, from injected snapshots: no engine, no proxy.
@@ -28,10 +30,14 @@ mod render {
         AppCount, ContentGroup, ContentKind, DocumentInfo, DocumentKind, DomainNode, FlowLabel, FlowRow, FlowState,
         HostCount, HttpVersion, ProxyStatus, SaveProgress, Scheme, SentBy, SidebarSnapshot, StorageStatus, TlsStatus,
     };
+    use pm_model::{AppliedRule, OperationMatch, Phase, RuleOrigin};
     use pm_theme::{Mode, Rgba};
     use pm_view::columns::{HEADER_HEIGHT, ROW_HEIGHT};
+    use pm_view::sample;
+    use proxymate_native::bridge::keys::{self, FlowKey, Inspected};
     use proxymate_native::bridge::stream::Latest;
     use proxymate_native::features::flow_table::FlowTable;
+    use proxymate_native::features::inspector::{RequestTab, ResponseTab};
     use proxymate_native::shell::{self, MainWindow, Parts, filter_bar, tabs};
     use proxymate_native::workspace::{SaveJob, Workspace};
 
@@ -335,6 +341,8 @@ mod render {
             assert_pixel(&image, scale, (4., SIZE.1 - 60.), t.sidebar, "sidebar");
         }
 
+        inspector_renders(&mut cx, handle.into(), scale, mode, top, content);
+
         // The ⌘K palette over the shell, with the commands G2 registers.
         cx.update_window(handle.into(), |_, window, cx| {
             proxymate_native::features::commands::open_palette(window, cx)
@@ -350,6 +358,150 @@ mod render {
         image.save(&path).unwrap();
         println!("wrote {}", path.display());
         palette_checks(&image, scale, &t);
+    }
+
+    /// Shows `flow` (with `detail`) in the inspector by putting it in the
+    /// cache and selecting its row.
+    fn inspect(
+        cx: &mut HeadlessAppContext,
+        flow: pm_model::FlowSummary,
+        detail: pm_model::FlowDetail,
+        tabs: (RequestTab, ResponseTab),
+        operation: Option<pm_model::OperationMatch>,
+    ) {
+        cx.update(|cx| {
+            let caches = keys::caches(cx);
+            let key = FlowKey::new(0, flow.id);
+            let id = flow.id;
+            caches.inspected.update(cx, |c, cx| {
+                c.set(
+                    key,
+                    Some(Arc::new(Inspected {
+                        flow,
+                        detail: Some(detail),
+                    })),
+                    cx,
+                )
+            });
+            caches.operation.update(cx, |c, cx| c.set(key, operation, cx));
+            let inspector = shell::parts(cx)
+                .and_then(|p| p.inspector.upgrade())
+                .expect("the inspector");
+            inspector.update(cx, |i, cx| {
+                i.set_request_tab(tabs.0, cx);
+                i.set_response_tab(tabs.1, cx);
+            });
+            let table = proxymate_native::features::flow_table::first(cx).expect("a table");
+            let grid = table.read(cx).grid().clone();
+            grid.update(cx, |g, cx| g.select(Some(id), cx));
+        });
+        cx.run_until_parked();
+    }
+
+    fn capture(cx: &mut HeadlessAppContext, handle: gpui_kit::AnyWindowHandle, file: String) -> image::RgbaImage {
+        for _ in 0..3 {
+            cx.update_window(handle, |_, window, cx| window.render_frame(cx))
+                .unwrap();
+            cx.run_until_parked();
+        }
+        let image = cx.capture_screenshot(handle).expect("an inspector frame");
+        let path = snapshot_dir().join(file);
+        image.save(&path).unwrap();
+        println!("wrote {}", path.display());
+        image
+    }
+
+    fn inspector_renders(
+        cx: &mut HeadlessAppContext,
+        handle: gpui_kit::AnyWindowHandle,
+        scale: f32,
+        mode: Mode,
+        top: f32,
+        content: f32,
+    ) {
+        let t = mode.tokens();
+        let name = if mode.is_dark() { "dark" } else { "light" };
+        // Under the table's 58%, its 1 px border and the 5 px handle.
+        let inspector_top = top + content * shell::TABLE_SHARE + 6.;
+
+        // A decrypted flow with a label, a comment, an OpenAPI operation and
+        // two rules, on the TLS tab.
+        let mut flow = sample::summary();
+        flow.id = 1;
+        flow.label = Some(FlowLabel::Blue);
+        flow.comment = Some("check the page size".into());
+        let mut detail = sample::detail();
+        detail.id = 1;
+        detail.rules.applied = vec![
+            AppliedRule {
+                rule_id: "r1".into(),
+                name: "Mock users".into(),
+                origin: RuleOrigin::User,
+                phase: Phase::Response,
+            },
+            AppliedRule {
+                rule_id: "r2".into(),
+                name: "Slow down".into(),
+                origin: RuleOrigin::Agent {
+                    client: "claude".into(),
+                    session: None,
+                    created_at_ms: 0.,
+                },
+                phase: Phase::Request,
+            },
+        ];
+        detail.rules.mocked = true;
+        let operation = OperationMatch {
+            spec_id: 1,
+            spec_name: "Users API".into(),
+            operation_id: Some("listUsers".into()),
+            summary: Some("List the users, a page at a time".into()),
+            method: "GET".into(),
+            path: "/v1/users".into(),
+        };
+        inspect(
+            cx,
+            flow,
+            detail,
+            (RequestTab::Header, ResponseTab::Tls),
+            Some(operation),
+        );
+        let image = capture(cx, handle, format!("inspector-{name}.png"));
+        // The URL bar (its plain background between the URL and the pills).
+        assert_pixel(&image, scale, (700., inspector_top + 16.), t.background, "the URL bar");
+        // The first rule badge, under the URL bar (32), notes (24) and
+        // OpenAPI line (24), above its text.
+        assert_pixel(
+            &image,
+            scale,
+            (300., inspector_top + 80. + 6.),
+            over(t.rule_bg, t.background),
+            "a rule badge",
+        );
+
+        // A failed flow: the banner above the Timing tab.
+        let mut failed = sample::summary();
+        failed.id = 5;
+        failed.state = FlowState::Failed;
+        failed.status = None;
+        failed.resp_size = 0;
+        let mut detail = sample::detail();
+        detail.id = 5;
+        detail.response = None;
+        detail.error = Some("connecting to api.example.com:443 timed out".into());
+        detail.error_kind = Some(pm_model::ErrorKind::Timeout);
+        inspect(cx, failed, detail, (RequestTab::Raw, ResponseTab::Timing), None);
+        let image = capture(cx, handle, format!("inspector-failed-{name}.png"));
+        // The Response pane starts past the Request pane's half and the
+        // 5 px handle; its banner is under the URL bar and the tab strip.
+        let response_left = shell::SIDEBAR_WIDTH + (SIZE.0 - shell::SIDEBAR_WIDTH) * 0.5 + 5.;
+        assert_pixel(
+            &image,
+            scale,
+            (response_left + 320., inspector_top + 64. + 3.),
+            over(t.s_5xx_bg, t.background),
+            "the failure banner",
+        );
     }
 
     /// The palette's panel is drawn in the popover colour, centred under
@@ -375,6 +527,6 @@ mod render {
             shell_renders(mode);
             println!("passed shell_renders ({mode:?})");
         }
-        println!("render: 2 passed (real offscreen renderer)");
+        println!("render: 2 passed (real offscreen renderer; shell, inspector and palette in each theme)");
     }
 }

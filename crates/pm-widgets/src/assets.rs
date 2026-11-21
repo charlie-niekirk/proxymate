@@ -47,6 +47,8 @@ gpui_kit::assets::icon_assets!(
         HardDriveDownload,
         EyeOff,
         Copy,
+        // The inspector (G3).
+        TriangleAlert,
     ]
 );
 

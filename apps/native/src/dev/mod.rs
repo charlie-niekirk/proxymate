@@ -31,6 +31,14 @@
 //!   running one), `{"sidebarFilter": "saf"}` and `{"workspace": true}`;
 //!   each answers with the workspace's state (store, documents, filter,
 //!   proxy, save status, last toast).
+//! - The inspector (G3): `{"requestTab": "Raw"}`, `{"responseTab": "TLS"}`,
+//!   `{"focus": "inspector" | "table"}`, `{"curl": 3}` (Copy as cURL's
+//!   command for flow 3 of the tab shown) and `{"inspector": true}`; each
+//!   answers with the inspector's state (flow, tabs, failure, rule badges,
+//!   which pane has the keyboard). `contextMenu` also takes the inspector's
+//!   menus (`url`, `kv:<table>[:<row>]`, `rule:<n>`, `cert:<n>`,
+//!   `timing[:<row>]`, `failure`, `raw:request|response`) and the flow row
+//!   menu, `row:<flow id>[:<column id>]` (`row:3:status`).
 //!
 //! Every phase adds the verbs its surfaces need (see `docs/PLAN.md`).
 
@@ -40,7 +48,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use gpui_kit::test::TestWindowExt as _;
-use gpui_kit::{AnyWindowHandle, App, AppContext as _, AsyncApp, ElementId};
+use gpui_kit::{AnyWindowHandle, App, AppContext as _, AsyncApp, ElementId, Focusable as _};
 use serde_json::{Value, json};
 
 use crate::prefs::Appearance;
@@ -163,14 +171,25 @@ async fn run(command: Value, cx: &mut AsyncApp) -> Value {
     if let Some(answer) = shell_command(&command, window, cx).await {
         return answer;
     }
-    if let Some(answer) = table_command(&command, cx) {
+    // Table verbs first, so `{"select": 3, "responseTab": "TLS"}` selects
+    // then switches the tab, answering with the inspector.
+    let table = table_command(&command, cx);
+    if let Some(Value::Object(err)) = &table
+        && err.contains_key("error")
+    {
+        return Value::Object(err.clone());
+    }
+    if let Some(answer) = inspector_command(&command, window, cx).await {
+        return answer;
+    }
+    if let Some(answer) = table {
         return answer;
     }
     if let Some(path) = command.get("screenshot").and_then(Value::as_str) {
         let offscreen = command.get("offscreen").and_then(Value::as_bool).unwrap_or(false);
         return screenshot(window, PathBuf::from(path), offscreen, cx).await;
     }
-    json!({"error": "unknown command: try theme, screenshot, click, select, selectIds, selectAll, scrollTo, headerColumns, filter, search, protocol, content, scope, keys, palette, command, store, openDocument, closeDocument, saveSession, exportHar, recording, clear, contextMenu, sidebarFilter, workspace, autoSelect or table"})
+    json!({"error": "unknown command: try theme, screenshot, click, select, selectIds, selectAll, scrollTo, headerColumns, filter, search, protocol, content, scope, keys, palette, command, store, openDocument, closeDocument, saveSession, exportHar, recording, clear, contextMenu, sidebarFilter, workspace, autoSelect, table, requestTab, responseTab, focus, curl or inspector"})
 }
 
 async fn screenshot(window: AnyWindowHandle, path: PathBuf, offscreen: bool, cx: &mut AsyncApp) -> Value {
@@ -268,6 +287,110 @@ fn table_command(command: &Value, cx: &mut AsyncApp) -> Option<Value> {
             })),
         })
     }))
+}
+
+/// The flow row menu: `<flow id>[:<column id>]`.
+fn row_menu(spec: &str, cx: &App) -> Option<crate::features::context_menu::Menu> {
+    let (id, column) = spec.split_once(':').map_or((spec, None), |(i, c)| (i, Some(c)));
+    let id: pm_model::FlowId = id.parse().ok()?;
+    let column = column.and_then(pm_view::columns::ColumnId::parse);
+    let table = crate::features::flow_table::first(cx)?;
+    table.read(cx).row_menu_for(id, column.as_ref(), cx)
+}
+
+/// One of the inspector's menus, with the text selected now.
+fn inspector_menu(
+    name: &str,
+    window: &mut gpui_kit::Window,
+    cx: &mut App,
+) -> Option<crate::features::context_menu::Menu> {
+    let inspector = crate::shell::parts(cx)?.inspector.upgrade()?;
+    let selected = crate::features::context_menu::selected_text(window, cx);
+    inspector.read(cx).menu_for(name, selected, cx)
+}
+
+/// The inspector's verbs (G3); `None` when `command` has none of them.
+async fn inspector_command(command: &Value, window: AnyWindowHandle, cx: &mut AsyncApp) -> Option<Value> {
+    use crate::features::inspector::{RequestTab, ResponseTab};
+
+    const VERBS: [&str; 5] = ["requestTab", "responseTab", "focus", "curl", "inspector"];
+    if !VERBS.iter().any(|v| command.get(v).is_some()) {
+        return None;
+    }
+    let Some(inspector) = cx.update(|cx| crate::shell::parts(cx).and_then(|p| p.inspector.upgrade())) else {
+        return Some(json!({"error": "no inspector"}));
+    };
+    let mut extra = serde_json::Map::new();
+    if let Some(id) = command.get("curl").and_then(Value::as_u64) {
+        let engine = cx.update(|cx| crate::bridge::Bridge::engine(cx));
+        let store =
+            cx.update(|cx| crate::workspace::Workspace::global(cx).map_or(pm_model::LIVE_STORE, |w| w.read(cx).store));
+        let curl = cx
+            .background_spawn(async move { engine.curl_command(store, id as pm_model::FlowId) })
+            .await;
+        match curl {
+            Ok(curl) => extra.insert("curl".into(), json!(curl)),
+            Err(err) => return Some(json!({ "error": err.to_string() })),
+        };
+    }
+    let result: Result<(), String> = window
+        .update(cx, |_, window, cx| -> Result<(), String> {
+            if let Some(tab) = command.get("requestTab").and_then(Value::as_str) {
+                let tab = RequestTab::parse(tab).ok_or_else(|| format!("no request tab {tab:?}"))?;
+                inspector.update(cx, |i, cx| i.set_request_tab(tab, cx));
+            }
+            if let Some(tab) = command.get("responseTab").and_then(Value::as_str) {
+                let tab = ResponseTab::parse(tab).ok_or_else(|| format!("no response tab {tab:?}"))?;
+                inspector.update(cx, |i, cx| i.set_response_tab(tab, cx));
+            }
+            match command.get("focus").and_then(Value::as_str) {
+                Some("inspector") => crate::shell::focus_inspector(window, cx),
+                Some("table") => crate::shell::focus_table(window, cx),
+                Some(other) => return Err(format!("focus takes inspector or table, not {other:?}")),
+                None => {}
+            }
+            Ok(())
+        })
+        .unwrap_or_else(|e| Err(e.to_string()));
+    if let Err(err) = result {
+        return Some(json!({ "error": err }));
+    }
+    // Let a refetch of the inspected flow land.
+    cx.background_executor().timer(Duration::from_millis(150)).await;
+    let state = window.update(cx, |_, window, cx| {
+        let i = inspector.read(cx);
+        let insp = i.inspected(cx);
+        let focus = i.focus_handle(cx);
+        let table_focus = crate::shell::parts(cx)
+            .and_then(|p| p.table.upgrade())
+            .map(|t| t.read(cx).grid().focus_handle(cx));
+        let focused = if focus.contains_focused(window, cx) {
+            "inspector"
+        } else if table_focus.is_some_and(|f| f.is_focused(window)) {
+            "table"
+        } else {
+            "elsewhere"
+        };
+        json!({
+            "flow": i.key(cx).map(|k| json!({"store": k.store, "id": k.id})),
+            "url": insp.as_ref().and_then(|x| x.detail.as_ref()).map(|d| d.request.url.clone()),
+            "status": insp.as_ref().and_then(|x| x.flow.status),
+            "tls": insp.as_ref().map(|x| x.flow.tls),
+            "failure": insp.as_ref().and_then(|x| pm_view::errors::explain_failure(&x.flow, x.detail.as_ref()))
+                .map(|h| json!({"title": h.title, "detail": h.detail, "actions": format!("{:?}", h.actions)})),
+            "rules": insp.as_ref().and_then(|x| x.detail.as_ref())
+                .map(|d| d.rules.applied.iter().map(|r| r.name.clone()).collect::<Vec<_>>()),
+            "requestTab": i.request_tab().label(),
+            "responseTab": i.response_tab().label(),
+            "focused": focused,
+            "toast": crate::features::clipboard::Toasts::last(cx).map(|t| json!({"title": t.title, "description": t.description})),
+        })
+    });
+    let mut answer = state.unwrap_or_else(|e| json!({ "error": e.to_string() }));
+    if let Value::Object(map) = &mut answer {
+        map.extend(extra);
+    }
+    Some(answer)
 }
 
 /// The shell's verbs (G2); `None` when `command` has none of them.
@@ -397,7 +520,8 @@ async fn shell_command(command: &Value, window: AnyWindowHandle, cx: &mut AsyncA
                         .ok()
                         .and_then(|store| shell::tabs::current_tab_menu(store, cx)),
                     Some(("sidebar", key)) => shell::sidebar::menu_for(key, cx),
-                    _ => None,
+                    Some(("row", rest)) => row_menu(rest, cx),
+                    _ => inspector_menu(name, window, cx),
                 }
                 .ok_or_else(|| format!("no menu {name:?} now"))?;
                 extra.insert("menu".into(), menu.to_json());
