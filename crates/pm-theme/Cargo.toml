@@ -8,10 +8,12 @@ publish.workspace = true
 
 [features]
 # The mapping onto gpui-kit's theme and the active-tokens global (the native app).
-kit = ["dep:gpui-kit"]
+kit = ["dep:gpui-kit", "dep:serde_json"]
 
 [dependencies]
 gpui-kit = { workspace = true, optional = true }
+# The editor's syntax colours, built as gpui-kit's highlight-theme JSON (G4).
+serde_json = { workspace = true, optional = true }
 
 [lints]
 workspace = true

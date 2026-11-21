@@ -7,7 +7,13 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-gpui-kit.workspace = true
+# The code editor's grammars for the body viewers (G4); XML uses HTML's.
+gpui-kit = { workspace = true, features = [
+    "tree-sitter-css",
+    "tree-sitter-graphql",
+    "tree-sitter-html",
+    "tree-sitter-javascript",
+] }
 pm-model.workspace = true
 pm-theme = { workspace = true, features = ["kit"] }
 pm-view.workspace = true

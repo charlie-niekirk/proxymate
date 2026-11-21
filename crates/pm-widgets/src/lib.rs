@@ -5,7 +5,11 @@
 //! CodeView/CodeEditor wrappers (G4) and LineDiff (G9).
 
 mod assets;
+pub mod code_editor;
+pub mod code_view;
 pub mod flow_grid;
+pub mod hex_view;
+pub mod json_tree;
 pub mod kv_table;
 mod pill;
 

@@ -414,9 +414,54 @@ fn graphql(line: &str) -> Spans {
     out
 }
 
+/// `top` laid over `base` (both sorted, each without overlaps): the
+/// result is split at every boundary, and where both cover a piece its
+/// style is `combine(base, top)`. Highlight runs need exactly this shape.
+pub fn layer<T: Clone>(
+    base: &[(Range<usize>, T)],
+    top: &[(Range<usize>, T)],
+    combine: impl Fn(&T, &T) -> T,
+) -> Vec<(Range<usize>, T)> {
+    if top.is_empty() {
+        return base.to_vec();
+    }
+    let mut cuts: Vec<usize> = base
+        .iter()
+        .chain(top)
+        .flat_map(|(r, _)| [r.start, r.end])
+        .collect();
+    cuts.sort_unstable();
+    cuts.dedup();
+    let find = |spans: &[(Range<usize>, T)], at: usize| {
+        let i = spans.partition_point(|(r, _)| r.end <= at);
+        spans.get(i).filter(|(r, _)| r.start <= at).map(|(_, t)| t.clone())
+    };
+    let mut out: Vec<(Range<usize>, T)> = Vec::new();
+    for w in cuts.windows(2) {
+        let (a, b) = (w[0], w[1]);
+        let style = match (find(base, a), find(top, a)) {
+            (Some(x), Some(y)) => Some(combine(&x, &y)),
+            (x, y) => x.or(y),
+        };
+        if let Some(style) = style {
+            out.push((a..b, style));
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn layers_split_at_every_boundary() {
+        let base = [(0..4, 'a'), (6..8, 'b')];
+        let top = [(2..7, 'm')];
+        let got = layer(&base, &top, |x, y| if *x == 'a' { 'A' } else { (*y).max(*x) });
+        assert_eq!(got, [(0..2, 'a'), (2..4, 'A'), (4..6, 'm'), (6..7, 'm'), (7..8, 'b')]);
+        assert_eq!(layer(&base, &[], |x, _| *x), base);
+    }
 
     fn spans(lang: Lang, line: &str) -> Vec<(&str, Tone)> {
         highlight_line(lang, line)

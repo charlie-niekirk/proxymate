@@ -7606,6 +7606,7 @@ name = "pm-theme"
 version = "0.6.0"
 dependencies = [
  "gpui-kit",
+ "serde_json",
 ]
 
 [[package]]
