@@ -2,8 +2,9 @@
 //! bar: Record (⌘E), Compose (G8 fills it), Clear, and the "Listening on…"
 //! pill with its copy menu. Its empty space drags the window. The tools on
 //! the right (Intercept, Rules, Scripts, throttling, breakpoints, system
-//! proxy, certificate, MCP, Settings) arrive with G7, G10, G12 and G13 in
-//! [`TOOLS_ID`]'s slot.
+//! proxy, certificate, MCP, Settings) are views that phases register with
+//! [`add_tool`] at their [`order`] (G7 adds Rules, the noise toggles, the
+//! throttle and the breakpoints badge); they fill [`TOOLS_ID`]'s slot.
 
 use gpui_kit::assets::IconName;
 use gpui_kit::base::TestSupportExt as _;
@@ -11,7 +12,9 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{Disableable as _, Sizable as _};
 use gpui_kit::prelude::*;
-use gpui_kit::{App, Context, MouseButton, MouseDownEvent, Role, SharedString, div, px};
+use std::rc::Rc;
+
+use gpui_kit::{AnyView, App, Context, Global, MouseButton, MouseDownEvent, Role, SharedString, Window, div, px};
 use pm_model::{ListenerKind, ProxyStatus};
 use pm_theme::Tokens;
 
@@ -22,8 +25,52 @@ use crate::features::{capture, flow_table};
 use crate::shell::{MainWindow, TOOLBAR_HEIGHT, chrome};
 use crate::workspace::Workspace;
 
-/// The empty slot later phases put their toolbar buttons in.
+/// The slot the registered tools fill.
 pub const TOOLS_ID: &str = "toolbar-tools";
+
+/// Where each phase's tools sit, left to right, as in `Toolbar.tsx`. A
+/// separator comes before the first tool at [`order::TRUST`] or after.
+pub mod order {
+    pub const INTERCEPT: i32 = 10;
+    pub const RULES: i32 = 20;
+    pub const SCRIPTS: i32 = 30;
+    /// No Caching, Block Cookies.
+    pub const NOISE: i32 = 40;
+    pub const THROTTLE: i32 = 50;
+    pub const BREAKPOINTS: i32 = 60;
+    pub const TRUST: i32 = 80;
+    pub const SYSTEM_PROXY: i32 = 90;
+    pub const CERTIFICATE: i32 = 100;
+    pub const MCP: i32 = 110;
+    pub const SETTINGS: i32 = 120;
+}
+
+type MakeTool = Rc<dyn Fn(&mut Window, &mut App) -> AnyView>;
+
+#[derive(Default)]
+struct Tools(Vec<(i32, MakeTool)>);
+
+impl Global for Tools {}
+
+/// Registers a toolbar tool: `make` builds its view (which observes what it
+/// shows) once per main window. Call from a feature's `register`.
+pub fn add_tool(order: i32, make: impl Fn(&mut Window, &mut App) -> AnyView + 'static, cx: &mut App) {
+    let tools = &mut cx.default_global::<Tools>().0;
+    tools.push((order, Rc::new(make)));
+    tools.sort_by_key(|(order, _)| *order);
+}
+
+/// The registered tools' views for a new main window, with their orders.
+pub fn make_tools(window: &mut Window, cx: &mut App) -> Vec<(i32, AnyView)> {
+    let makers: Vec<(i32, MakeTool)> = cx
+        .try_global::<Tools>()
+        .map(|t| t.0.iter().map(|(o, m)| (*o, m.clone())).collect())
+        .unwrap_or_default();
+    makers
+        .into_iter()
+        .map(|(order, make)| (order, make(window, cx)))
+        .collect()
+}
 
 /// The pill's dot colour and text.
 pub fn listening(proxy: &ProxyStatus, t: &Tokens) -> (pm_theme::Rgba, String) {
@@ -86,7 +133,13 @@ fn shortcut(key: &str) -> String {
     pm_view::commands::shortcut_label(key, false, false, MAC)
 }
 
-pub fn render(proxy: &ProxyStatus, live: bool, t: &Tokens, cx: &mut Context<MainWindow>) -> impl IntoElement {
+pub fn render(
+    proxy: &ProxyStatus,
+    live: bool,
+    tools: &[(i32, AnyView)],
+    t: &Tokens,
+    cx: &mut Context<MainWindow>,
+) -> impl IntoElement {
     let recording = proxy.recording;
     let record_tip: SharedString = if recording {
         format!("Stop recording · traffic is still forwarded · {}", shortcut("e")).into()
@@ -149,7 +202,34 @@ pub fn render(proxy: &ProxyStatus, live: bool, t: &Tokens, cx: &mut Context<Main
                 .justify_center()
                 .child(pill(proxy, t, cx)),
         )
-        .child(div().id(TOOLS_ID).flex().items_center().gap(px(4.)))
+        .child(
+            div()
+                .id(TOOLS_ID)
+                .flex()
+                .items_center()
+                .gap(px(2.))
+                .children(tools_with_separator(tools, t)),
+        )
+}
+
+fn tools_with_separator(tools: &[(i32, AnyView)], t: &Tokens) -> Vec<gpui_kit::AnyElement> {
+    let mut out = Vec::with_capacity(tools.len() + 1);
+    let mut separated = false;
+    for (i, (order, view)) in tools.iter().enumerate() {
+        if *order >= order::TRUST && !separated && i > 0 {
+            separated = true;
+            out.push(
+                div()
+                    .mx(px(4.))
+                    .w(px(1.))
+                    .h(px(20.))
+                    .bg(t.border.hsla())
+                    .into_any_element(),
+            );
+        }
+        out.push(view.clone().into_any_element());
+    }
+    out
 }
 
 fn pill(proxy: &ProxyStatus, t: &Tokens, cx: &mut Context<MainWindow>) -> impl IntoElement {

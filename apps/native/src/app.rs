@@ -29,6 +29,7 @@ pub fn run(data_dir: Option<PathBuf>, lock: Option<Lock>) {
             serve_later_launches(lock, cx);
             install_quit(data_dir, cx);
             crate::shell::open_main_window(cx);
+            crate::features::rules::open_from_env(cx);
             #[cfg(feature = "dev-harness")]
             crate::dev::init(cx);
             crate::perf_probe::init(cx);
@@ -73,8 +74,11 @@ fn install_quit(data_dir: Option<PathBuf>, cx: &mut App) {
         async {}
     })
     .detach();
+    // Closing the main window quits, as in the Tauri app (whose Rules
+    // Editor was a dialog in it), even with the Rules window open.
     cx.on_window_closed(|cx, _| {
-        if cx.windows().is_empty() {
+        let main_gone = crate::shell::parts(cx).is_some_and(|p| !cx.windows().contains(&p.window));
+        if cx.windows().is_empty() || main_gone {
             cx.quit();
         }
     })

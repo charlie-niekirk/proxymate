@@ -52,6 +52,19 @@
 //!   {"flow": 3, "direction": "received", "payload": "hi", "binary": false}}`
 //!   sends into a live WebSocket and `{"wsClose": 3}` closes it.
 //!
+//! - Rules (G7, `dev/rules.rs`): `{"rules": true}` (opens the Rules window
+//!   and answers with its state), `{"openRule": "<id>"}`, `{"newRule": true}`,
+//!   `{"preset": {"flow": 3, "kind": "map_local" | "breakpoint"}}`,
+//!   `{"ruleEdit": [["name", "Mock"], ["add", "MapLocal"], ["a.0.inline", "{}"], …]}`
+//!   (field keys of `pm_view::rules::edit`; also `remove`/`up`/`down` with
+//!   an action index, `addRow`/`removeRow`), `{"saveRule": true}`,
+//!   `{"testRule": true}`, `{"deleteRule": "<id>"}`, `{"throttle": "Edge" | null}`,
+//!   `{"noCache": true}`, `{"noCookies": false}`, `{"breakpointTimeout": 30}`,
+//!   `{"rulesMenu": "rule:<id>" | "group:<id>" | "picker:<key>" | "throttle", "run": "<label>"}`,
+//!   `{"rulesClick": "<element id>"}`, `{"rulesDrag": ["rule-row-<id>", "rule-row-<id>" | "group-header-<id>"]}`,
+//!   `{"rulesSelect": "<id>"}`, `{"rulesRename": "<name>"}` (the group being renamed)
+//!   and `{"rulesScreenshot": "/abs/x.png"}`.
+//!
 //! Every phase adds the verbs its surfaces need (see `docs/PLAN.md`).
 
 use std::io::{BufRead, BufReader, Read, Write};
@@ -64,6 +77,8 @@ use gpui_kit::{AnyWindowHandle, App, AppContext as _, AsyncApp, ElementId, Focus
 use serde_json::{Value, json};
 
 use crate::prefs::Appearance;
+
+mod rules;
 
 pub const DEFAULT_PORT: u16 = 1430;
 const PATH: &str = "/__pm_remote";
@@ -152,7 +167,12 @@ fn read_request(stream: &TcpStream) -> Result<Value, String> {
 }
 
 async fn run(command: Value, cx: &mut AsyncApp) -> Value {
-    let Some(window) = cx.update(|cx| cx.windows().first().copied()) else {
+    // The main window: the Rules window (G7) is another one.
+    let Some(window) = cx.update(|cx| {
+        crate::shell::parts(cx)
+            .map(|p| p.window)
+            .or_else(|| cx.windows().first().copied())
+    }) else {
         return json!({"error": "no window"});
     };
     if let Some(theme) = command.get("theme").and_then(Value::as_str) {
@@ -180,6 +200,9 @@ async fn run(command: Value, cx: &mut AsyncApp) -> Value {
             Err(err) => json!({ "error": err.to_string() }),
         };
     }
+    if let Some(answer) = rules::command(&command, cx).await {
+        return answer;
+    }
     if let Some(answer) = shell_command(&command, window, cx).await {
         return answer;
     }
@@ -204,10 +227,10 @@ async fn run(command: Value, cx: &mut AsyncApp) -> Value {
         let offscreen = command.get("offscreen").and_then(Value::as_bool).unwrap_or(false);
         return screenshot(window, PathBuf::from(path), offscreen, cx).await;
     }
-    json!({"error": "unknown command: try theme, screenshot, click, select, selectIds, selectAll, scrollTo, headerColumns, filter, search, protocol, content, scope, keys, palette, command, store, openDocument, closeDocument, saveSession, exportHar, recording, clear, contextMenu, sidebarFilter, workspace, autoSelect, table, requestTab, responseTab, focus, curl, inspector, streamSelect, streamDirection, streamSearch, streamViewer, wsOriginal, wsCompose, wsComposeSend, stream, wsSend or wsClose"})
+    json!({"error": "unknown command: try theme, screenshot, click, select, selectIds, selectAll, scrollTo, headerColumns, filter, search, protocol, content, scope, keys, palette, command, store, openDocument, closeDocument, saveSession, exportHar, recording, clear, contextMenu, sidebarFilter, workspace, autoSelect, table, requestTab, responseTab, focus, curl, inspector, streamSelect, streamDirection, streamSearch, streamViewer, wsOriginal, wsCompose, wsComposeSend, stream, wsSend, wsClose, rules, openRule, newRule, preset, ruleEdit, saveRule, testRule, deleteRule, throttle, noCache, noCookies, breakpointTimeout, rulesMenu, rulesClick, rulesDrag, rulesSelect, rulesRename or rulesScreenshot"})
 }
 
-async fn screenshot(window: AnyWindowHandle, path: PathBuf, offscreen: bool, cx: &mut AsyncApp) -> Value {
+pub(crate) async fn screenshot(window: AnyWindowHandle, path: PathBuf, offscreen: bool, cx: &mut AsyncApp) -> Value {
     // Front and active, so the vibrancy shows its active material; then let
     // the frames of earlier commands (a theme switch, a click) land.
     let _ = window.update(cx, |_, window, cx| {

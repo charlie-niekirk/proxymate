@@ -320,10 +320,14 @@ fn rule_badges_and_the_failure_banner(cx: &mut TestAppContext) {
     cx.update(|window, cx| window.click("fix-timeouts", cx));
     cx.run_until_parked();
     assert_eq!(last_toast(cx).0, "Settings › Advanced");
-    // A badge's click opens the rule (G7's window).
+    // A badge's click opens the rule in the Rules window (G7).
     cx.update(|window, cx| window.click(("rule-badge", 0usize), cx));
     cx.run_until_parked();
-    assert_eq!(last_toast(cx).0, "Rules");
+    let selected = cx.update(|_, cx| {
+        proxymate_native::features::rules::RulesWindow::global(cx)
+            .and_then(|(_, w)| w.read(cx).selected().map(str::to_owned))
+    });
+    assert_eq!(selected.as_deref(), Some("r-7"));
 }
 
 #[gpui_kit::test]
@@ -367,6 +371,9 @@ fn the_flow_row_menu_copies_cells_and_filters(cx: &mut TestAppContext) {
             "Filter by",
             "—",
             "Pin",
+            "—",
+            "Map Local…",
+            "Breakpoint…",
             "—",
             "Export HAR…",
             "Add api.example.com to SSL bypass",

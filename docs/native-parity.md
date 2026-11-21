@@ -68,12 +68,12 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | TB-10 | Pill menu: Device setup…, Proxy settings…, Network settings… | `components/Toolbar.tsx` `ListeningStatus` | G2 | ☑ | G2: the items are there (`toolbar::listening_menu`); their windows arrive with G12 and G13, which replace the handlers |
 | TB-11 | "N devices waiting" button for LAN devices whose Allow prompt was dismissed; click reopens the prompt | `components/Toolbar.tsx` `WaitingDevices` | G13 | ☐ | |
 | TB-12 | Intercept button (crosshair) with the count of running intercepted apps, tooltip "Intercept: a terminal or browser that goes through Proxymate" | `components/InterceptMenu.tsx` | G13 | ☐ | |
-| TB-13 | Rules button, tooltip "Rules: Map Local, rewrites, breakpoints, Map Remote, block" | `components/Toolbar.tsx` `RulesButton` | G7 | ☐ | |
+| TB-13 | Rules button, tooltip "Rules: Map Local, rewrites, breakpoints, Map Remote, block" | `components/Toolbar.tsx` `RulesButton` | G7 | ☑ | G7: `features/rules/tools.rs` `RulesButton` (`RULES_TIP`); `docs/native/g7/toolbar-tools-dark.png` |
 | TB-14 | Scripts button, tooltip "Scripts: decode bodies, rewrite and mock with JavaScript" | `components/Toolbar.tsx` `ScriptsButton` | G10 | ☐ | |
-| TB-15 | No Caching toggle: icon only when off, "No Caching" label and warning colour when on, tooltips for both states | `components/InterceptMenu.tsx` `NoiseToggles` | G7 | ☐ | |
-| TB-16 | Block Cookies toggle: same pattern as No Caching | `components/InterceptMenu.tsx` `NoiseToggles` | G7 | ☐ | |
-| TB-17 | Network conditions (gauge) button: shows the active throttle preset's name in warning colour | `components/Rules/ThrottleMenu.tsx` | G7 | ☐ | |
-| TB-18 | Breakpoints badge: paused count in a pill, tooltip "N paused at a breakpoint" or "Breakpoints · none paused"; opens the Breakpoint Editor | `components/Breakpoints/BreakpointBadge.tsx` | G7 | ☐ | |
+| TB-15 | No Caching toggle: icon only when off, "No Caching" label and warning colour when on, tooltips for both states | `components/InterceptMenu.tsx` `NoiseToggles` | G7 | ☑ | G7: `tools.rs` `toggle` (icon alone off; label in `--s-4xx` on; both tooltips); `tests/rules.rs` `the_toolbar_tools_flip_the_builtin_rules`; `docs/native/g7/toolbar-tools-dark.png` |
+| TB-16 | Block Cookies toggle: same pattern as No Caching | `components/InterceptMenu.tsx` `NoiseToggles` | G7 | ☑ | G7: `tools.rs` `toggle` for Block Cookies; `tests/rules.rs` `the_toolbar_tools_flip_the_builtin_rules` |
+| TB-17 | Network conditions (gauge) button: shows the active throttle preset's name in warning colour | `components/Rules/ThrottleMenu.tsx` | G7 | ☑ | G7: `tools.rs` network conditions button (the active preset's name in `--s-4xx`); `tests/rules.rs` `the_toolbar_tools_flip_the_builtin_rules`; `docs/native/g7/toolbar-tools-dark.png` |
+| TB-18 | Breakpoints badge: paused count in a pill, tooltip "N paused at a breakpoint" or "Breakpoints · none paused"; opens the Breakpoint Editor | `components/Breakpoints/BreakpointBadge.tsx` | G7 | ☑ | G7: `tools.rs` breakpoint badge (count pill in `--s-paused`, `ToolState::breakpoints_tip`), from `bridge::breakpoints`; `tests/rules.rs` `the_toolbar_tools_flip_the_builtin_rules`; a request held live in `docs/native/g7/breakpoint-queued-dark.png`. It dispatches `OpenBreakpoints`, a toast until G8 replaces the handler |
 | TB-19 | "Certificate not trusted" warning button while listening and the CA isn't verified (keychain supported); opens the certificate wizard | `components/Toolbar.tsx` `TrustWarning` | G13 | ☐ | |
 | TB-20 | System proxy (globe) button, green while on | `components/SystemProxyMenu.tsx` | G13 | ☐ | |
 | TB-21 | Certificate (shield) button: alert shield while untrusted | `components/CertificateMenu.tsx` | G13 | ☐ | |
@@ -185,8 +185,8 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | FM-16 | Mark for Compare | `components/FlowTable/FlowContextMenu.tsx` | G11 | ☐ | |
 | FM-17 | Compare with Marked (#N, ", other tab" across tabs) | `components/FlowTable/FlowContextMenu.tsx` | G11 | ☐ | |
 | FM-18 | Comment… / Edit Comment… | `components/FlowTable/FlowContextMenu.tsx` | G11 | ☐ | |
-| FM-19 | Map Local… (preset, opens an unsaved rule) | `components/FlowTable/FlowContextMenu.tsx` | G7 | ☐ | |
-| FM-20 | Breakpoint… (preset, opens an unsaved rule) | `components/FlowTable/FlowContextMenu.tsx` | G7 | ☐ | |
+| FM-19 | Map Local… (preset, opens an unsaved rule) | `components/FlowTable/FlowContextMenu.tsx` | G7 | ☑ | G7: `features/rules/menus.rs` `flow_presets` at `flow_menu::Slot::Rules` (disabled for CONNECT and WebSocket); `tests/inspector.rs` `the_flow_row_menu_copies_cells_and_filters`; live: row menu › Map Local… drafted the rule from the flow (PR) |
+| FM-20 | Breakpoint… (preset, opens an unsaved rule) | `components/FlowTable/FlowContextMenu.tsx` | G7 | ☑ | G7: `flow_presets` Breakpoint…; live: the preset held a request (`docs/native/g7/breakpoint-queued-dark.png`) |
 | FM-21 | Rewrite… | `components/FlowTable/FlowContextMenu.tsx` | G9 | ☐ | |
 | FM-22 | Script ▸ New view script…, New rewrite script…, New mock script… | `components/FlowTable/FlowContextMenu.tsx` | G10 | ☐ | |
 | FM-23 | Export HAR… (this flow) | `components/FlowTable/FlowContextMenu.tsx` | G3 | ☑ | G3: `flow_menu.rs` → `documents::save(SaveKind::Har, ids)` (this flow alone, through the save panel) |
@@ -261,8 +261,8 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | CP-22 | "Start recording" / "Stop recording" ⌘E (one key, whichever applies) | `lib/commands.ts` | G2 | ☑ | G2: `features/capture.rs`; `commands::tests::only_registered_commands_that_apply_are_listed_and_keys_pick_the_one_that_applies`, `tests/shell.rs` `the_palette_opens_with_cmd_k_and_runs_a_command` |
 | CP-23 | "Toggle Auto Select" | `lib/commands.ts` | G1 | ☑ | G2: `features/capture.rs` (`auto-select`) in the palette |
 | CP-24 | "Intercept: New Terminal window", "New iTerm window", "Launch Google Chrome", "Launch Microsoft Edge", "Launch Brave Browser", "Launch Arc", "Launch Firefox" (hidden when not installed) | `lib/commands.ts`, `lib/capture.ts` | G13 | ☐ | |
-| CP-25 | "Toggle No Caching" | `lib/commands.ts` | G7 | ☐ | |
-| CP-26 | "Toggle Block Cookies" | `lib/commands.ts` | G7 | ☐ | |
+| CP-25 | "Toggle No Caching" | `lib/commands.ts` | G7 | ☑ | G7: `features/rules/mod.rs` `commands::add("no-cache")`; live `{"command": "no-cache"}` (PR) |
+| CP-26 | "Toggle Block Cookies" | `lib/commands.ts` | G7 | ☑ | G7: `commands::add("no-cookies")`; `tests/rules.rs` `the_toolbar_tools_flip_the_builtin_rules` (the actions) |
 | CP-27 | "Auto-save now" | `lib/commands.ts` | G12 | ☐ | |
 | CP-28 | "Open session, HAR or Charles file…" | `lib/commands.ts` | G2 | ☑ | G2: `features/documents.rs` (`open`) |
 | CP-29 | "Mock from this session…" | `lib/commands.ts` | G12 | ☐ | |
@@ -279,7 +279,7 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | CP-40 | "Focus the flow table" | `lib/commands.ts`, `lib/focus.ts` | G3 | ☑ | G3: `inspector/mod.rs` `table` → `shell::focus_table` |
 | CP-41 | "Focus the inspector" (with a selection) | `lib/commands.ts`, `lib/focus.ts` | G3 | ☑ | G3: `inspector/mod.rs` `inspector` (with a flow focused); `tests/inspector.rs` runs it from the command list |
 | CP-42 | "Show live capture" (on a document tab) | `lib/commands.ts` | G2 | ☑ | G2: `features/documents.rs` (`live`, only on a document tab); `tests/shell.rs` checks it is hidden on Live |
-| CP-43 | "Rules…" | `lib/commands.ts` | G7 | ☐ | |
+| CP-43 | "Rules…" | `lib/commands.ts` | G7 | ☑ | G7: `commands::add("rules")` opens the Rules window |
 | CP-44 | "Scripts…" | `lib/commands.ts` | G10 | ☐ | |
 | CP-45 | "Breakpoints…" | `lib/commands.ts` | G8 | ☐ | |
 | CP-46 | "Device setup…" | `lib/commands.ts` | G13 | ☐ | |
@@ -303,7 +303,7 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | IN-09 | URL bar menu: Filter by ▸ Host, Method, Status, App | `components/DetailPane.tsx` `UrlBarMenu` | G3 | ☑ | G3: `menus::url_bar`'s Filter by submenu; `features/inspector/menus.rs` tests |
 | IN-10 | Notes bar: label chip and comment; click opens the comment dialog | `components/DetailPane.tsx` | G3 | ☑ | G3: `parts.rs` `notes_bar` (label chip, comment); its click dispatches `OpenComment`, which G11's dialog handles (a toast until then); `docs/native/g3/offscreen-inspector-light.png` |
 | IN-11 | OpenAPI line: "OpenAPI" tag, operationId, summary, "path · spec" | `components/DetailPane.tsx` `OperationLine` | G3 | ☑ | G3: `parts.rs` `operation_line` from the `operation` cache (`Engine::flow_operation_in`); `docs/native/g3/offscreen-inspector-light.png` |
-| IN-12 | Rule badges: one per applied rule with req/resp, agent rules as "AI · <client>"; click opens the rule | `components/Inspector/RuleBadges.tsx` | G3 | ☑ | G3: `parts.rs` `rule_badges` (agent rules "AI · client" in the agent colours); a click dispatches `OpenRule` (G7's window; a toast until then); `tests/render.rs` checks a badge's pixels |
+| IN-12 | Rule badges: one per applied rule with req/resp, agent rules as "AI · <client>"; click opens the rule | `components/Inspector/RuleBadges.tsx` | G3 | ☑ | G3: `parts.rs` `rule_badges` (agent rules "AI · client" in the agent colours); a click dispatches `OpenRule`, which G7 handles: the rule in the Rules window; `tests/render.rs` checks a badge's pixels |
 | IN-13 | Rule badge menu: Copy rule name, Copy rule id, Open rule, Disable rule | `components/Inspector/RuleBadges.tsx` | G3 | ☑ | G3: `menus::rule_badge` (Disable rule → `mutations::set_rule_enabled`; Open rule as above); `tests/inspector.rs` `rule_badges_and_the_failure_banner` |
 | IN-14 | Rule notes: "Mocked: the response didn't come from the upstream.", "A breakpoint timed out; the flow continued unmodified.", why a rewrite skipped a body | `components/Inspector/RuleBadges.tsx` | G3 | ☑ | G3: `parts.rs` `rule_badges` notes; `docs/native/g3/offscreen-inspector-light.png` (Mocked) |
 | IN-15 | Script failure badge "Script “<name>” failed · phase · message"; menu Copy error, Copy script name, Open script | `components/Inspector/RuleBadges.tsx` | G10 | ☐ | |
@@ -408,56 +408,56 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 
 | ID | Behaviour | Source | Phase | Status | Evidence |
 |---|---|---|---|---|---|
-| RU-01 | Rules window: title, description, rule list beside the form; "Select a rule, or create one from a flow's context menu." | `components/Rules/RulesEditor.tsx` | G7 | ☐ | |
-| RU-02 | New rule button | `components/Rules/RuleList.tsx` | G7 | ☐ | |
-| RU-03 | New group button | `components/Rules/RuleList.tsx` | G7 | ☐ | |
-| RU-04 | Remove agent rules (when an agent made any) | `components/Rules/RuleList.tsx` | G7 | ☐ | |
-| RU-05 | Unsaved draft shown as "Unsaved rule"; "No rules yet." | `components/Rules/RuleList.tsx` | G7 | ☐ | |
-| RU-06 | Rule row: grip, enabled checkbox (tooltips for on, off, group off), name or "Untitled", origin badge, matcher summary, action summary; muted when off | `components/Rules/RuleList.tsx` `RuleRow`, `components/Rules/RuleOriginBadge.tsx` | G7 | ☐ | |
-| RU-07 | Drag rules to reorder, into a group or back to the ungrouped section | `components/Rules/RuleList.tsx` | G7 | ☐ | |
-| RU-08 | Group header: collapse chevron, on/off checkbox, name, "n of m rules enabled"; double-click renames inline (↩ saves, Escape cancels) | `components/Rules/RuleList.tsx` `GroupHeader` | G7 | ☐ | |
-| RU-09 | Empty group: "No rules: drag rules here, or use a rule's Move to Group menu." | `components/Rules/RuleList.tsx` | G7 | ☐ | |
-| RU-10 | Rule menu: Open, Enable / Disable, Duplicate | `components/Rules/RuleList.tsx` `RuleItems` | G7 | ☐ | |
+| RU-01 | Rules window: title, description, rule list beside the form; "Select a rule, or create one from a flow's context menu." | `components/Rules/RulesEditor.tsx` | G7 | ☑ | G7: `features/rules/window.rs` (a separate native window: title, `DESCRIPTION`, list beside the form, `EMPTY`); `tests/render.rs` `rules_renders` (both themes; `docs/native/g7/offscreen-rules-*.png`) |
+| RU-02 | New rule button | `components/Rules/RuleList.tsx` | G7 | ☑ | G7: `window.rs` New rule (`NewRule`); `tests/rules.rs` `the_form_validates_saves_and_its_pickers_apply` opens a draft |
+| RU-03 | New group button | `components/Rules/RuleList.tsx` | G7 | ☑ | G7: `window.rs` New group (`NewGroup`); `tests/rules.rs` `the_rule_menu_reorders_groups_duplicates_and_deletes` |
+| RU-04 | Remove agent rules (when an agent made any) | `components/Rules/RuleList.tsx` | G7 | ☑ | G7: `window.rs` Remove agent rules (shown when an agent made any) → `Engine::delete_agent_rules`, which toasts how many; `tests/render.rs` `rules_renders` (both themes; `docs/native/g7/offscreen-rules-*.png`) |
+| RU-05 | Unsaved draft shown as "Unsaved rule"; "No rules yet." | `components/Rules/RuleList.tsx` | G7 | ☑ | G7: `window.rs` `list` ("Unsaved rule", "No rules yet."); `docs/native/g7/preset-json-error-dark.png` |
+| RU-06 | Rule row: grip, enabled checkbox (tooltips for on, off, group off), name or "Untitled", origin badge, matcher summary, action summary; muted when off | `components/Rules/RuleList.tsx` `RuleRow`, `components/Rules/RuleOriginBadge.tsx` | G7 | ☑ | G7: `window.rs` `rule_row` (grip, checkbox with the on, off and group-off tooltips and an accessible name, name or "Untitled", `origin_badge`, `pm_view::rules::matcher_summary` and `actions_summary`; muted when off); `tests/render.rs` `rules_renders` (both themes; `docs/native/g7/offscreen-rules-*.png`) |
+| RU-07 | Drag rules to reorder, into a group or back to the ungrouped section | `components/Rules/RuleList.tsx` | G7 | ☑ | G7: `window.rs` `on_drag`/`on_drop` (`RuleDrag` on rules, group headers and Ungrouped; `GroupDrag` on headers); `tests/rules.rs` `dragging_a_rule_reorders_and_moves_it_between_sections`; live `rulesDrag` (PR) |
+| RU-08 | Group header: collapse chevron, on/off checkbox, name, "n of m rules enabled"; double-click renames inline (↩ saves, Escape cancels) | `components/Rules/RuleList.tsx` `GroupHeader` | G7 | ☑ | G7: `window.rs` `group_header` (chevron, checkbox, name, `pm_view::rules::group_count`; double-click renames, ↩ or leaving saves, Escape cancels); `tests/rules.rs` `the_rule_menu_reorders_groups_duplicates_and_deletes`; `docs/native/g7/rules-groups-*.png` |
+| RU-09 | Empty group: "No rules: drag rules here, or use a rule's Move to Group menu." | `components/Rules/RuleList.tsx` | G7 | ☑ | G7: `window.rs` `list` (the empty group's note) |
+| RU-10 | Rule menu: Open, Enable / Disable, Duplicate | `components/Rules/RuleList.tsx` `RuleItems` | G7 | ☑ | G7: `menus.rs` `rule_menu`; `features::rules::menus::tests::a_rule_menu_moves_within_its_section_and_copies`; `tests/rules.rs` `the_rule_menu_reorders_groups_duplicates_and_deletes` |
 | RU-11 | Rule menu: Edit visually… (visual rewrites) | `components/Rules/RuleList.tsx` `RuleItems` | G9 | ☐ | |
-| RU-12 | Rule menu: Move to top, Move to bottom (within its section) | `components/Rules/RuleList.tsx` `RuleItems` | G7 | ☐ | |
-| RU-13 | Rule menu: Move to group ▸ each group, New group…, No group | `components/Rules/RuleList.tsx` `RuleItems` | G7 | ☐ | |
-| RU-14 | Rule menu: Copy name, Copy as JSON, Delete | `components/Rules/RuleList.tsx` `RuleItems` | G7 | ☐ | |
-| RU-15 | Group menu: Turn group on / off, New rule in group, Rename… | `components/Rules/RuleList.tsx` `GroupItems` | G7 | ☐ | |
-| RU-16 | Group menu: Move up, Move down, Copy name | `components/Rules/RuleList.tsx` `GroupItems` | G7 | ☐ | |
-| RU-17 | Group menu: Delete group, keep its rules; Delete group and its N rules | `components/Rules/RuleList.tsx` `GroupItems` | G7 | ☐ | |
-| RU-18 | Breakpoint timeout field under the list (seconds, 0 waits forever) | `components/Rules/RuleList.tsx` `BreakpointTimeout` | G7 | ☐ | |
-| RU-19 | Rule form header: name, "Disabled", origin badge, group picker ("No group"), "Group off", "Unsaved" | `components/Rules/RulesEditor.tsx` `RuleForm` | G7 | ☐ | |
+| RU-12 | Rule menu: Move to top, Move to bottom (within its section) | `components/Rules/RuleList.tsx` `RuleItems` | G7 | ☑ | G7: `rule_menu` (`pm_view::rules::order_to_edge`; disabled at the section's ends); `tests/rules.rs` `the_rule_menu_reorders_groups_duplicates_and_deletes` |
+| RU-13 | Rule menu: Move to group ▸ each group, New group…, No group | `components/Rules/RuleList.tsx` `RuleItems` | G7 | ☑ | G7: `rule_menu` Move to group ▸; `tests/rules.rs` `the_rule_menu_reorders_groups_duplicates_and_deletes` |
+| RU-14 | Rule menu: Copy name, Copy as JSON, Delete | `components/Rules/RuleList.tsx` `RuleItems` | G7 | ☑ | G7: `rule_menu` (Copy as JSON is `rule_json`); `tests/rules.rs` `the_rule_menu_reorders_groups_duplicates_and_deletes` |
+| RU-15 | Group menu: Turn group on / off, New rule in group, Rename… | `components/Rules/RuleList.tsx` `GroupItems` | G7 | ☑ | G7: `menus.rs` `group_menu`; `menus::tests::a_group_menu_counts_its_rules`; `tests/rules.rs` `the_rule_menu_reorders_groups_duplicates_and_deletes` |
+| RU-16 | Group menu: Move up, Move down, Copy name | `components/Rules/RuleList.tsx` `GroupItems` | G7 | ☑ | G7: `group_menu` (`pm_view::rules::group_order_after_move`); `menus::tests::a_group_menu_counts_its_rules` |
+| RU-17 | Group menu: Delete group, keep its rules; Delete group and its N rules | `components/Rules/RuleList.tsx` `GroupItems` | G7 | ☑ | G7: `group_menu`; `tests/rules.rs` `the_rule_menu_reorders_groups_duplicates_and_deletes` |
+| RU-18 | Breakpoint timeout field under the list (seconds, 0 waits forever) | `components/Rules/RuleList.tsx` `BreakpointTimeout` | G7 | ☑ | G7: `window.rs` `timeout_row` (the `rule_settings` cache, `mutations::set_rule_settings`); live: set to 20 s, a held request continued after 20.0 s (PR) |
+| RU-19 | Rule form header: name, "Disabled", origin badge, group picker ("No group"), "Group off", "Unsaved" | `components/Rules/RulesEditor.tsx` `RuleForm` | G7 | ☑ | G7: `features/rules/form.rs` header (name, "Disabled", origin badge, group picker with "No group", "Group off", "Unsaved"); `docs/native/g7/rules-groups-light.png` |
 | RU-20 | Rule form: Edit visually button for rules with visual rewrites | `components/Rules/RulesEditor.tsx` `RuleForm` | G9 | ☐ | |
-| RU-21 | Live validation as you type (engine compiles the rule), error in the footer; Delete; Save / Save rule (disabled when invalid or unchanged) | `components/Rules/RulesEditor.tsx` `RuleForm` | G7 | ☐ | |
-| RU-22 | Match: Methods (GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS) | `components/Rules/MatcherBuilder.tsx` | G7 | ☐ | |
-| RU-23 | Match: Scheme (Any, http, https) · port | `components/Rules/MatcherBuilder.tsx` | G7 | ☐ | |
-| RU-24 | Match: Host and Path patterns with an Exact / Glob / Regex picker | `components/Rules/MatcherBuilder.tsx`, `components/Rules/fields.tsx` `PatternInput` | G7 | ☐ | |
-| RU-25 | Match: Query and Headers rows (name, value pattern or "present", not, remove; + Query parameter, + Header) | `components/Rules/MatcherBuilder.tsx` `KvRows` | G7 | ☐ | |
-| RU-26 | Match: Client app pattern | `components/Rules/MatcherBuilder.tsx` | G7 | ☐ | |
-| RU-27 | Match: "Only for some responses" adds Response status ranges and Content-Type; removable | `components/Rules/MatcherBuilder.tsx` `ResponseMatcherRow` | G7 | ☐ | |
-| RU-28 | Actions: Add action menu grouped Headers, Query, Body, Status, Routing, Flow control, Scripts, WebSocket, Annotate; "No actions yet: the rule matches but does nothing." | `components/Rules/ActionListEditor.tsx`, `lib/rules.ts` `ACTION_TYPES` | G7 | ☐ | |
-| RU-29 | Action row: phase picker Request / Response, Move up, Move down, Remove action | `components/Rules/ActionListEditor.tsx` | G7 | ☐ | |
-| RU-30 | Actions Set header, Add header value, Remove header, Replace in header | `components/Rules/ActionListEditor.tsx` | G7 | ☐ | |
-| RU-31 | Actions Set query parameter, Remove query parameter | `components/Rules/ActionListEditor.tsx` | G7 | ☐ | |
-| RU-32 | Actions Set body (with Content-Type), Replace in body (Find, Replace with, "$1 for a regex group") | `components/Rules/ActionListEditor.tsx` | G7 | ☐ | |
-| RU-33 | Actions JSON set (JSON pointer, Value (JSON)), JSON remove | `components/Rules/ActionListEditor.tsx` | G7 | ☐ | |
-| RU-34 | Actions Form field set, Form field remove | `components/Rules/ActionListEditor.tsx` | G7 | ☐ | |
-| RU-35 | Action Set status | `components/Rules/ActionListEditor.tsx` | G7 | ☐ | |
-| RU-36 | Action Map Local: Answer from A file / A directory / Inline body, path with Choose… | `components/Rules/ActionListEditor.tsx`, `components/PathInput.tsx` | G7 | ☐ | |
-| RU-37 | Action Map Remote: Scheme, Host · port, Path, Keep the original Host header | `components/Rules/ActionListEditor.tsx` | G7 | ☐ | |
-| RU-38 | Action Serve from recording: Recording picker, Also compare (query, request body), Several match, None match | `components/Rules/ActionListEditor.tsx` `ServeFromForm` | G7 | ☐ | |
-| RU-39 | Action Breakpoint (Pause at request or response) | `components/Rules/ActionListEditor.tsx` | G7 | ☐ | |
-| RU-40 | Action Delay (ms) | `components/Rules/ActionListEditor.tsx` | G7 | ☐ | |
-| RU-41 | Action Throttle: Down · up (kbps, 0 unlimited), Latency | `components/Rules/ActionListEditor.tsx` | G7 | ☐ | |
-| RU-42 | Action Block with A status or A connection reset | `components/Rules/ActionListEditor.tsx` | G7 | ☐ | |
-| RU-43 | Action Run script: script picker ("Choose a script…", "(missing script)") | `components/Rules/ActionListEditor.tsx` | G7 | ☐ | |
-| RU-44 | Action WebSocket message: Messages (Both ways, Sent by the client, From the server), Containing, Do Replace / JSON set / JSON remove / Drop / Delay / Breakpoint | `components/Rules/ActionListEditor.tsx`, `lib/rules.ts` `WS_OP_LABELS` | G7 | ☐ | |
-| RU-45 | Action Comment on flow | `components/Rules/ActionListEditor.tsx` | G7 | ☐ | |
-| RU-46 | Dry run: Test against selected flow ("Select a flow in the table first"); match or why not; resulting request and response; menu Copy headers, Copy body, Copy notes | `components/Rules/RuleTestPanel.tsx` | G7 | ☐ | |
-| RU-47 | Presets (Map Local…, Breakpoint…) pre-fill a rule from the flow and open it unsaved | `lib/actions.ts` `openPreset` | G7 | ☐ | |
-| RU-48 | Opening a rule by id (badges, breakpoints, scripts) selects it in the window | `store/ui.ts` `openRulesEditor` | G7 | ☐ | |
-| RU-49 | Built-in rules (throttle, No Caching, Block Cookies) are hidden from the list | `components/Rules/RulesEditor.tsx`, `lib/rules.ts` | G7 | ☐ | |
-| RU-50 | Throttle popover "Throttle all traffic": Off (Full speed), LTE, Fast 3G, 3G, Edge, Very bad network with speeds and latency; ✓ on the active one; Custom when edited elsewhere | `components/Rules/ThrottleMenu.tsx`, `lib/rules.ts` `THROTTLE_PRESETS` | G7 | ☐ | |
+| RU-21 | Live validation as you type (engine compiles the rule), error in the footer; Delete; Save / Save rule (disabled when invalid or unchanged) | `components/Rules/RulesEditor.tsx` `RuleForm` | G7 | ☑ | G7: `form.rs` (`Engine::validate_rule` `VALIDATE_AFTER` 200 ms after each change; unparsed JSON, numbers and status ranges block Save too); `tests/rules.rs` `the_form_validates_saves_and_its_pickers_apply` |
+| RU-22 | Match: Methods (GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS) | `components/Rules/MatcherBuilder.tsx` | G7 | ☑ | G7: `form.rs` `matcher` (method toggles, "any method"); `pm_view::rules::tests::the_editor_reads_and_writes_matcher_fields` |
+| RU-23 | Match: Scheme (Any, http, https) · port | `components/Rules/MatcherBuilder.tsx` | G7 | ☑ | G7: `form.rs` `matcher` (Any/http/https · port); `pm_view::rules::tests::the_editor_reads_and_writes_matcher_fields` |
+| RU-24 | Match: Host and Path patterns with an Exact / Glob / Regex picker | `components/Rules/MatcherBuilder.tsx`, `components/Rules/fields.tsx` `PatternInput` | G7 | ☑ | G7: `form.rs` `pattern` (Exact/Glob/Regex, value, case toggle); `pm_view::rules::tests::the_editor_reads_and_writes_matcher_fields` |
+| RU-25 | Match: Query and Headers rows (name, value pattern or "present", not, remove; + Query parameter, + Header) | `components/Rules/MatcherBuilder.tsx` `KvRows` | G7 | ☑ | G7: `form.rs` `matcher` query and header rows; `pm_view::rules::tests::the_editor_reads_and_writes_matcher_fields` |
+| RU-26 | Match: Client app pattern | `components/Rules/MatcherBuilder.tsx` | G7 | ☑ | G7: `form.rs` `matcher` Client app; `pm_view::rules::tests::the_editor_reads_and_writes_matcher_fields` |
+| RU-27 | Match: "Only for some responses" adds Response status ranges and Content-Type; removable | `components/Rules/MatcherBuilder.tsx` `ResponseMatcherRow` | G7 | ☑ | G7: `form.rs` `matcher` response rows (`pm_view::rules::parse_status_ranges`); `pm_view::rules::tests::the_editor_reads_and_writes_matcher_fields` |
+| RU-28 | Actions: Add action menu grouped Headers, Query, Body, Status, Routing, Flow control, Scripts, WebSocket, Annotate; "No actions yet: the rule matches but does nothing." | `components/Rules/ActionListEditor.tsx`, `lib/rules.ts` `ACTION_TYPES` | G7 | ☑ | G7: `menus.rs` `add_action_menu` (a submenu per group) and the empty note; `menus::tests::add_action_lists_all_23_by_group` |
+| RU-29 | Action row: phase picker Request / Response, Move up, Move down, Remove action | `components/Rules/ActionListEditor.tsx` | G7 | ☑ | G7: `form.rs` `actions` (Request/Response, Move up, Move down, Remove action); `tests/rules.rs` `the_form_validates_saves_and_its_pickers_apply` |
+| RU-30 | Actions Set header, Add header value, Remove header, Replace in header | `components/Rules/ActionListEditor.tsx` | G7 | ☑ | G7: `form.rs` `action_form`; `pm_view::rules::tests::the_editor_reads_and_writes_every_actions_fields` |
+| RU-31 | Actions Set query parameter, Remove query parameter | `components/Rules/ActionListEditor.tsx` | G7 | ☑ | G7: `form.rs` `action_form`; `pm_view::rules::tests::the_editor_reads_and_writes_every_actions_fields` |
+| RU-32 | Actions Set body (with Content-Type), Replace in body (Find, Replace with, "$1 for a regex group") | `components/Rules/ActionListEditor.tsx` | G7 | ☑ | G7: `form.rs` `action_form` (the body in a plain text area until G4's editor); `pm_view::rules::tests::the_editor_reads_and_writes_every_actions_fields` |
+| RU-33 | Actions JSON set (JSON pointer, Value (JSON)), JSON remove | `components/Rules/ActionListEditor.tsx` | G7 | ☑ | G7: `form.rs` `json_value` (exact text kept; "Not JSON yet"); `pm_view::rules::tests::the_editor_reads_and_writes_every_actions_fields`; live: a 20-digit number set exactly on the gzipped upstream (PR); `docs/native/g7/preset-json-error-dark.png` |
+| RU-34 | Actions Form field set, Form field remove | `components/Rules/ActionListEditor.tsx` | G7 | ☑ | G7: `form.rs` `action_form`; `pm_view::rules::tests::the_editor_reads_and_writes_every_actions_fields` |
+| RU-35 | Action Set status | `components/Rules/ActionListEditor.tsx` | G7 | ☑ | G7: `form.rs` `action_form`; `pm_view::rules::tests::the_editor_reads_and_writes_every_actions_fields` |
+| RU-36 | Action Map Local: Answer from A file / A directory / Inline body, path with Choose… | `components/Rules/ActionListEditor.tsx`, `components/PathInput.tsx` | G7 | ☑ | G7: `form.rs` Map Local (`choose_path`: gpui's open panel); `pm_view::rules::tests::the_editor_reads_and_writes_every_actions_fields`; `tests/rules.rs` `the_form_validates_saves_and_its_pickers_apply`; live Map Local (PR) |
+| RU-37 | Action Map Remote: Scheme, Host · port, Path, Keep the original Host header | `components/Rules/ActionListEditor.tsx` | G7 | ☑ | G7: `form.rs` Map Remote; `pm_view::rules::tests::the_editor_reads_and_writes_every_actions_fields` |
+| RU-38 | Action Serve from recording: Recording picker, Also compare (query, request body), Several match, None match | `components/Rules/ActionListEditor.tsx` `ServeFromForm` | G7 | ☑ | G7: `form.rs` ServeFrom (the `mock_sources` cache, Library…); `pm_view::rules::tests::the_editor_reads_and_writes_every_actions_fields`; `tests/render.rs` `rules_renders` (both themes; `docs/native/g7/offscreen-rules-*.png`) |
+| RU-39 | Action Breakpoint (Pause at request or response) | `components/Rules/ActionListEditor.tsx` | G7 | ☑ | G7: `form.rs` Breakpoint; `pm_view::rules::tests::the_editor_reads_and_writes_every_actions_fields`; live (PR) |
+| RU-40 | Action Delay (ms) | `components/Rules/ActionListEditor.tsx` | G7 | ☑ | G7: `form.rs` Delay; `pm_view::rules::tests::the_editor_reads_and_writes_every_actions_fields` |
+| RU-41 | Action Throttle: Down · up (kbps, 0 unlimited), Latency | `components/Rules/ActionListEditor.tsx` | G7 | ☑ | G7: `form.rs` Throttle; `pm_view::rules::tests::the_editor_reads_and_writes_every_actions_fields` |
+| RU-42 | Action Block with A status or A connection reset | `components/Rules/ActionListEditor.tsx` | G7 | ☑ | G7: `form.rs` Block; `pm_view::rules::tests::the_editor_reads_and_writes_every_actions_fields`; live: 451, then a reset (PR) |
+| RU-43 | Action Run script: script picker ("Choose a script…", "(missing script)") | `components/Rules/ActionListEditor.tsx` | G7 | ☑ | G7: `form.rs` script picker (the `scripts` cache, view scripts left out); `pm_view::rules::tests::the_editor_reads_and_writes_every_actions_fields`. Its Edit…/Scripts… button opens G10's window, so G10 adds it |
+| RU-44 | Action WebSocket message: Messages (Both ways, Sent by the client, From the server), Containing, Do Replace / JSON set / JSON remove / Drop / Delay / Breakpoint | `components/Rules/ActionListEditor.tsx`, `lib/rules.ts` `WS_OP_LABELS` | G7 | ☑ | G7: `form.rs` WebSocket message; `pm_view::rules::tests::the_editor_reads_and_writes_every_actions_fields`; `tests/render.rs` `rules_renders` (both themes; `docs/native/g7/offscreen-rules-*.png`) |
+| RU-45 | Action Comment on flow | `components/Rules/ActionListEditor.tsx` | G7 | ☑ | G7: `form.rs` Comment; `pm_view::rules::tests::the_editor_reads_and_writes_every_actions_fields`; `tests/render.rs` `rules_renders` (both themes; `docs/native/g7/offscreen-rules-*.png`) |
+| RU-46 | Dry run: Test against selected flow ("Select a flow in the table first"); match or why not; resulting request and response; menu Copy headers, Copy body, Copy notes | `components/Rules/RuleTestPanel.tsx` | G7 | ☑ | G7: `form.rs` `dry_run` (`Engine::test_rule_in` on the bridge's runtime) and `test_menu`; `tests/render.rs` `rules_renders` (both themes; `docs/native/g7/offscreen-rules-*.png`); live (PR) |
+| RU-47 | Presets (Map Local…, Breakpoint…) pre-fill a rule from the flow and open it unsaved | `lib/actions.ts` `openPreset` | G7 | ☑ | G7: `features/rules/mod.rs` `open_preset` (`Engine::draft_rule_in`, the flow selected); live (PR) |
+| RU-48 | Opening a rule by id (badges, breakpoints, scripts) selects it in the window | `store/ui.ts` `openRulesEditor` | G7 | ☑ | G7: `OpenRule` opens the window on the rule (pending until the book has it); `tests/inspector.rs` `rule_badges_and_the_failure_banner`; live from a badge (`docs/native/g7/rule-badges-dark.png`) |
+| RU-49 | Built-in rules (throttle, No Caching, Block Cookies) are hidden from the list | `components/Rules/RulesEditor.tsx`, `lib/rules.ts` | G7 | ☑ | G7: `features/rules/mod.rs` `user_rules`; `tests/rules.rs` `the_toolbar_tools_flip_the_builtin_rules` |
+| RU-50 | Throttle popover "Throttle all traffic": Off (Full speed), LTE, Fast 3G, 3G, Edge, Very bad network with speeds and latency; ✓ on the active one; Custom when edited elsewhere | `components/Rules/ThrottleMenu.tsx`, `lib/rules.ts` `THROTTLE_PRESETS` | G7 | ☑ | G7: `menus.rs` `throttle_menu` (a native menu; each preset's speeds after its name); `menus::tests::the_throttle_menu_checks_the_active_preset`; `tests/rules.rs` `the_toolbar_tools_flip_the_builtin_rules` |
 
 ## Breakpoints & editing
 
@@ -684,7 +684,7 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | DV-05 | Dev remote: `requestTab`, `responseTab`, `curl` | `dev/remote.ts` | G3 | ☑ | G3: `dev/mod.rs` `requestTab`, `responseTab`, `curl` (also `focus`, `inspector`, and `contextMenu` for the inspector's menus and `row:<id>[:<column>]`) |
 | DV-06 | Dev remote: `viewer` | `dev/remote.ts` | G4 | ☐ | |
 | DV-07 | Dev remote: `wsSend`, `wsClose` | `dev/remote.ts` | G6 | ☑ | G6: `wsSend`, `wsClose`, plus `streamSelect`, `streamDirection`, `streamSearch`, `streamViewer`, `wsOriginal`, `wsCompose`, `wsComposeSend`, `stream`, `tableShare`; `contextMenu` `stream:<row>` and `payload` (`dev/mod.rs`) |
-| DV-08 | Dev remote: `rules`, `rulesEditor`, `preset`, `saveRule`, `testRule`, `deleteRule`, `throttle`, `noCache`, `noCookies` | `dev/remote.ts` | G7 | ☐ | |
+| DV-08 | Dev remote: `rules`, `rulesEditor`, `preset`, `saveRule`, `testRule`, `deleteRule`, `throttle`, `noCache`, `noCookies` | `dev/remote.ts` | G7 | ☑ | G7: `dev/rules.rs` `rules`, `openRule`, `newRule`, `preset`, `ruleEdit`, `saveRule`, `testRule`, `deleteRule`, `throttle`, `noCache`, `noCookies` (also `breakpointTimeout`, `rulesMenu`, `rulesClick`, `rulesDrag`, `rulesSelect`, `rulesRename`, `rulesScreenshot`) |
 | DV-09 | Dev remote: `replay`, `editReplay`, `compose`, `composeSend`, `breakpoints`, `breakpointAction` | `dev/remote.ts` | G8 | ☐ | |
 | DV-10 | Dev remote: `rewrite`, `rewriteEdit` | `dev/remote.ts` | G9 | ☐ | |
 | DV-11 | Dev remote: `scripts`, `scriptTemplate`, `scriptSource`, `saveScript`, `testScript` | `dev/remote.ts` | G10 | ☐ | |
@@ -695,7 +695,7 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | DV-16 | Perf probe (`PROXYMATE_SYNTH_FLOWS` + `VITE_PM_PERF_PROBE`): `[perf-probe]` scroll and filter timings | `dev/perfProbe.ts` | G1 | ☑ | G1: `apps/native/src/perf_probe.rs`, `PROXYMATE_DEV_PERF_PROBE=1`; numbers in the G1 PR |
 | DV-17 | `VITE_PM_FILTER`: start with search text | `dev/harness.ts` | G2 | ☑ | G2: `PROXYMATE_DEV_FILTER` (`dev_env::value`, `Workspace::new`) |
 | DV-18 | `VITE_PM_RESPONSE_TAB`: open the response pane on a tab | `dev/harness.ts` | G3 | ☑ | G3: `PROXYMATE_DEV_RESPONSE_TAB` (`features/inspector/mod.rs`) |
-| DV-19 | `VITE_PM_OPEN=rules` | `dev/harness.ts` | G7 | ☐ | |
+| DV-19 | `VITE_PM_OPEN=rules` | `dev/harness.ts` | G7 | ☑ | G7: `PROXYMATE_DEV_OPEN=rules` (`features::rules::open_from_env`) |
 | DV-20 | `VITE_PM_OPEN=breakpoints` | `dev/harness.ts` | G8 | ☐ | |
 | DV-21 | `VITE_PM_OPEN=scripts` | `dev/harness.ts` | G10 | ☐ | |
 | DV-22 | `VITE_PM_OPEN=settings:<page>` | `dev/harness.ts` | G12 | ☐ | |
@@ -716,7 +716,7 @@ Rows per owning phase. G14 also audits every row; its own row is the browser-onl
 | G4 | 31 | 0 |
 | G5 | 10 | 0 |
 | G6 | 19 | 19 |
-| G7 | 60 | 0 |
+| G7 | 60 | 60 |
 | G8 | 32 | 0 |
 | G9 | 19 | 0 |
 | G10 | 23 | 0 |
@@ -725,4 +725,4 @@ Rows per owning phase. G14 also audits every row; its own row is the browser-onl
 | G13 | 29 | 0 |
 | G14 | 1 | 0 |
 | G15 | 5 | 5 |
-| **Total** | **524** | **227** |
+| **Total** | **524** | **287** |
