@@ -40,7 +40,7 @@ use gpui_kit::{
 };
 use pm_model::{FlowId, FlowRow, FlowSelection, SortSpec, ViewDelta, ViewId};
 use pm_theme::kit::TokensExt as _;
-use pm_view::columns::{ColumnId, HEADER_HEIGHT, PlacedColumn, ROW_HEIGHT, TablePrefs, min_table_width};
+use pm_view::columns::{Builtin, ColumnId, HEADER_HEIGHT, PlacedColumn, ROW_HEIGHT, TablePrefs, min_table_width};
 use pm_view::keys::{Key, TableAction, TableKey, TableState, table_key};
 use pm_view::row_cache::{Fetch, MAX_ROWS_PER_CALL, RowCache};
 use pm_view::selection::{Selected, TableSelection};
@@ -134,6 +134,15 @@ pub enum FlowGridEvent {
     /// Right-click on the empty state's command, at this window position:
     /// the owner shows its "Copy command" menu.
     EmptyStateMenu(gpui_kit::Point<gpui_kit::Pixels>),
+    /// A row's menu, at this window position: a right-click on the row (in
+    /// `column`, for "Copy <column>"), or its "…" button (no column). The
+    /// selection is already what the menu acts on: inside a
+    /// multi-selection it is kept (the bulk menu), else the row alone.
+    RowMenu {
+        id: FlowId,
+        column: Option<ColumnId>,
+        position: gpui_kit::Point<gpui_kit::Pixels>,
+    },
 }
 
 pub struct FlowGrid {
@@ -466,8 +475,8 @@ impl FlowGrid {
     }
 
     /// A right-click: inside a multi-selection it keeps the selection (the
-    /// bulk menu's case); elsewhere it selects the row first. The menus
-    /// themselves arrive with G3 (row) and G11 (bulk).
+    /// bulk menu's case); elsewhere it selects the row first. The owner
+    /// shows the menu ([`FlowGridEvent::RowMenu`]).
     fn press_row(&mut self, index: usize, id: FlowId, cx: &mut Context<Self>) {
         let len = self.cache.len();
         if self.selected.selection.is_multi(len) && self.selected.selection.is_selected(id) {
@@ -511,6 +520,15 @@ impl FlowGrid {
                 }
             });
         }));
+    }
+
+    /// The column under window x `x` (the table scrolls sideways; the URL
+    /// column takes the width the others leave).
+    pub fn column_at(&self, x: gpui_kit::Pixels) -> Option<&PlacedColumn> {
+        let bounds = self.hscroll.bounds();
+        let offset = self.hscroll.offset();
+        let x = f32::from(x - bounds.origin.x - offset.x);
+        column_at(&self.placed, f32::from(bounds.size.width), x)
     }
 
     /// True while a ⇧-range is fetching ids.
@@ -718,15 +736,32 @@ impl FlowGrid {
                         gpui_kit::MouseButton::Left,
                         cx.listener(move |this, e: &gpui_kit::MouseDownEvent, window, cx| {
                             window.focus(&this.focus, cx);
+                            let column = this.column_at(e.position.x).map(|c| c.id.clone());
+                            if column == Some(ColumnId::Builtin(Builtin::Tools)) && !e.modifiers.modified() {
+                                // The row's "…": its menu, under the button.
+                                this.press_row(index, id, cx);
+                                cx.emit(FlowGridEvent::RowMenu {
+                                    id,
+                                    column: None,
+                                    position: e.position,
+                                });
+                                return;
+                            }
                             let toggle = e.modifiers.platform || e.modifiers.control;
                             this.click_row(index, id, e.modifiers.shift, toggle, cx);
                         }),
                     )
                     .on_mouse_down(
                         gpui_kit::MouseButton::Right,
-                        cx.listener(move |this, _: &gpui_kit::MouseDownEvent, window, cx| {
+                        cx.listener(move |this, e: &gpui_kit::MouseDownEvent, window, cx| {
                             window.focus(&this.focus, cx);
                             this.press_row(index, id, cx);
+                            let column = this.column_at(e.position.x).map(|c| c.id.clone());
+                            cx.emit(FlowGridEvent::RowMenu {
+                                id,
+                                column,
+                                position: e.position,
+                            });
                         }),
                     ),
                 None => element,
@@ -811,6 +846,24 @@ impl FlowGrid {
 }
 
 use gpui_kit::component::Sizable as _;
+
+/// The column at `x` px from the table's left edge, in a table `width` px
+/// wide: the growing column (the URL) takes what the others leave.
+fn column_at(columns: &[PlacedColumn], width: f32, x: f32) -> Option<&PlacedColumn> {
+    if x < 0. {
+        return None;
+    }
+    let fixed: f32 = columns.iter().filter(|c| !c.grow).map(|c| c.px).sum();
+    let mut left = 0.;
+    for c in columns {
+        let w = if c.grow { c.px.max(width - fixed) } else { c.px };
+        if x < left + w {
+            return Some(c);
+        }
+        left += w;
+    }
+    None
+}
 
 /// The ids of rows `lo..=hi`, from the view, in steps the engine allows.
 fn ids_between(source: &RowSource, lo: usize, hi: usize) -> Result<Vec<FlowId>, String> {

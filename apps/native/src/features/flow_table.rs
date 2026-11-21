@@ -16,12 +16,16 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use gpui_kit::prelude::*;
-use gpui_kit::{App, Context, Entity, Global, SharedString, Subscription, WeakEntity, Window, canvas, div};
+use gpui_kit::{
+    App, Context, Entity, EventEmitter, Global, SharedString, Subscription, WeakEntity, Window, canvas, div,
+};
 use pm_core::Engine;
 use pm_model::{DeepProgress, FilterSpec, FlowRow, LIVE_STORE, SortSpec, StoreId, ViewDelta, ViewId};
 use pm_widgets::flow_grid::{self, FlowGrid, FlowGridEvent, Overlay, RowSource};
 
-use crate::bridge::Bridge;
+use crate::bridge::{Bridge, keys, mutations};
+use crate::features::context_menu::Menu;
+use crate::features::flow_menu::{self, RowContext};
 
 /// How long typing in the search box waits before refiltering
 /// (`FILTER_DEBOUNCE_MS`).
@@ -79,6 +83,15 @@ pub struct FlowTable {
     filter_timing: Option<FilterTiming>,
     _subscriptions: Vec<Subscription>,
 }
+
+/// What the table asks of the window around it.
+#[derive(Clone, Debug, PartialEq)]
+pub enum FlowTableEvent {
+    /// ↩: move the keyboard into the inspector.
+    Inspect,
+}
+
+impl EventEmitter<FlowTableEvent> for FlowTable {}
 
 /// The tables open now, for the dev remote and the perf probe.
 #[derive(Default)]
@@ -319,6 +332,7 @@ impl FlowTable {
         }
         self.total = delta.total as usize;
         self.deep = delta.deep;
+        keys::flows_changed(self.store, delta, cx);
         if delta.total == 0 && self.grid.read(cx).selected().focused.is_some() {
             // Cleared.
             self.grid.update(cx, |g, cx| g.select(None, cx));
@@ -433,7 +447,19 @@ impl FlowTable {
 
     fn on_grid_event(&mut self, _: Entity<FlowGrid>, event: &FlowGridEvent, cx: &mut Context<Self>) {
         match event {
-            FlowGridEvent::SelectionChanged | FlowGridEvent::Inspect => cx.notify(),
+            FlowGridEvent::SelectionChanged => cx.notify(),
+            FlowGridEvent::Inspect => cx.emit(FlowTableEvent::Inspect),
+            FlowGridEvent::RowMenu { id, column, position } => {
+                let menu = self.row_menu_for(*id, column.as_ref(), cx);
+                let position = *position;
+                let Some((menu, window)) = menu.zip(cx.active_window()) else {
+                    return;
+                };
+                // After the click's dispatch, which holds the window.
+                cx.defer(move |cx| {
+                    let _ = window.update(cx, |_, window, cx| menu.show(position, window, cx));
+                });
+            }
             FlowGridEvent::SortChanged(sort) => self.set_sort(*sort, cx),
             FlowGridEvent::PrefsChanged => self.prefs_changed(cx),
             FlowGridEvent::Delete(selection) => self.delete(selection.clone(), cx),
@@ -465,19 +491,59 @@ impl FlowTable {
     }
 
     fn delete(&mut self, selection: pm_model::FlowSelection, cx: &mut Context<Self>) {
-        let Backend::Engine(engine) = self.backend.clone() else {
+        if !matches!(self.backend, Backend::Engine(_)) {
             return;
+        }
+        let grid = self.grid.downgrade();
+        mutations::remove_flows(
+            self.store,
+            selection,
+            move |n, cx| {
+                if n > 0 {
+                    let _ = grid.update(cx, |g, cx| g.select(None, cx));
+                }
+            },
+            cx,
+        );
+    }
+
+    /// Deletes the selected flows ("Delete selected flows").
+    pub fn delete_selection(&mut self, cx: &mut Context<Self>) {
+        if self.grid.read(cx).selection_count() > 0 {
+            let selection = self.grid.read(cx).flow_selection();
+            self.delete(selection, cx);
+        }
+    }
+
+    /// The menu a right-click on flow `id` opens (in `column`): the row
+    /// menu, or G11's bulk menu inside a multi-selection. `None` if the
+    /// row isn't loaded.
+    pub fn row_menu_for(
+        &self,
+        id: pm_model::FlowId,
+        column: Option<&pm_view::columns::ColumnId>,
+        cx: &App,
+    ) -> Option<Menu> {
+        let grid = self.grid.read(cx);
+        let count = grid.selection_count();
+        if count > 1 && grid.selected().selection.is_selected(id) {
+            return flow_menu::bulk_menu(self.store, grid.flow_selection(), count, cx);
+        }
+        let row = (0..grid.len())
+            .filter_map(|i| grid.row(i))
+            .find(|r| r.id() == id)?
+            .row
+            .clone();
+        let column = column
+            .and_then(|c| grid.columns().iter().find(|p| &p.id == c))
+            .map(|p| p.column.clone());
+        let ctx = RowContext {
+            store: self.store,
+            row,
+            column,
+            live: self.store == LIVE_STORE,
         };
-        let store = self.store;
-        let removed = cx.background_spawn(async move { engine.remove_flows_in(store, &selection) });
-        cx.spawn(async move |this, cx| match removed.await {
-            Ok(n) if n > 0 => {
-                let _ = this.update(cx, |this, cx| this.grid.update(cx, |g, cx| g.select(None, cx)));
-            }
-            Ok(_) => {}
-            Err(err) => eprintln!("flow table: delete failed: {err}"),
-        })
-        .detach();
+        Some(flow_menu::row_menu(&ctx, cx))
     }
 
     /// The empty state's `curl -x …` example, while it shows.

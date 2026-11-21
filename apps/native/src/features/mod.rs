@@ -12,7 +12,9 @@ pub mod clipboard;
 pub mod commands;
 pub mod context_menu;
 pub mod documents;
+pub mod flow_menu;
 pub mod flow_table;
+pub mod inspector;
 pub mod navigate;
 
 pub fn register(cx: &mut App) {
@@ -22,6 +24,7 @@ pub fn register(cx: &mut App) {
     chrome::register(cx);
     documents::register(cx);
     flow_table::register(cx);
+    inspector::register(cx);
     navigate::register(cx);
     commands::bind_keys(cx);
 }

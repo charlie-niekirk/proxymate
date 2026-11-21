@@ -51,6 +51,8 @@ pub struct Toast {
     pub kind: ToastKind,
     pub title: SharedString,
     pub description: Option<SharedString>,
+    /// The label of its button, if it has one.
+    pub action: Option<SharedString>,
 }
 
 /// The toasts shown so far (the last few), and the copy toast's sequence
@@ -128,6 +130,7 @@ fn copied(what: Option<&str>, cx: &mut App) {
             kind: ToastKind::Success,
             title: title.clone(),
             description: None,
+            action: None,
         },
         cx,
     );
@@ -171,6 +174,7 @@ fn toast(kind: ToastKind, title: &str, description: Option<String>, cx: &mut App
         kind,
         title: title.to_owned().into(),
         description: description.map(Into::into),
+        action: None,
     };
     record(toast.clone(), cx);
     in_window(cx, move |window, cx| {
@@ -186,6 +190,39 @@ fn toast(kind: ToastKind, title: &str, description: Option<String>, cx: &mut App
         if let Some(description) = toast.description.clone() {
             note = note.message(description);
         }
+        window.push_notification(note, cx);
+    });
+}
+
+/// A success toast with a button (`Not recording x` › Settings): it stays
+/// until dismissed or its button is clicked, which dispatches `action`.
+pub fn success_with_action(
+    title: &str,
+    description: &str,
+    label: &str,
+    action: Box<dyn gpui_kit::Action>,
+    cx: &mut App,
+) {
+    let toast = Toast {
+        kind: ToastKind::Success,
+        title: title.to_owned().into(),
+        description: Some(description.to_owned().into()),
+        action: Some(label.to_owned().into()),
+    };
+    record(toast.clone(), cx);
+    in_window(cx, move |window, cx| {
+        let label = toast.action.clone().unwrap_or_default();
+        let note = Notification::new()
+            .placement(PLACEMENT)
+            .with_type(NotificationType::Success)
+            .title(toast.title.clone())
+            .message(toast.description.clone().unwrap_or_default())
+            .action(move |_, _, _| {
+                let action = action.boxed_clone();
+                gpui_kit::component::button::Button::new("toast-action")
+                    .label(label.clone())
+                    .on_click(move |_, window, cx| window.dispatch_action(action.boxed_clone(), cx))
+            });
         window.push_notification(note, cx);
     });
 }

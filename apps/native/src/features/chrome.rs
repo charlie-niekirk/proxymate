@@ -1,7 +1,9 @@
 //! The shell chrome's actions (toolbar, sidebar, filter bar, footer):
 //! the sidebar's scopes and SSL toggles, and the targets that belong to
-//! later phases (Compose: G8; Settings: G12; Device setup: G13), which say
-//! so in a toast until those phases replace the handlers.
+//! later phases (Compose: G8; Settings: G12; Device setup and the
+//! certificate wizard: G13; the inspector's Open rule: G7, Comment…: G11,
+//! Rewrite…: G9), which say so in a toast until those phases replace the
+//! handlers.
 
 use gpui_kit::{App, SharedString};
 
@@ -57,7 +59,30 @@ pub struct OpenSettings {
     pub page: SharedString,
 }
 
-gpui_kit::actions!(proxymate, [OpenDeviceSetup, Compose]);
+/// The Rules window on one rule (G7 builds it).
+#[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
+#[action(namespace = proxymate, no_json)]
+pub struct OpenRule {
+    pub id: SharedString,
+}
+
+/// The Comment… dialog for one flow (G11 builds it).
+#[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
+#[action(namespace = proxymate, no_json)]
+pub struct OpenComment {
+    pub store: pm_model::StoreId,
+    pub id: pm_model::FlowId,
+}
+
+/// The Rewrite dialog for one flow (G9 builds it).
+#[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
+#[action(namespace = proxymate, no_json)]
+pub struct RewriteFlow {
+    pub store: pm_model::StoreId,
+    pub id: pm_model::FlowId,
+}
+
+gpui_kit::actions!(proxymate, [OpenDeviceSetup, Compose, OpenCertWizard]);
 
 pub fn register(cx: &mut App) {
     cx.on_action(|a: &ShowApp, cx| {
@@ -103,6 +128,22 @@ pub fn register(cx: &mut App) {
     });
     cx.on_action(|_: &Compose, cx| {
         info("Compose", Some("Compose arrives in G8.".into()), cx);
+    });
+    cx.on_action(|_: &OpenCertWizard, cx| {
+        info(
+            "Certificate wizard",
+            Some("The certificate wizard arrives in G13.".into()),
+            cx,
+        );
+    });
+    cx.on_action(|_: &OpenRule, cx| {
+        info("Rules", Some("The Rules window arrives in G7.".into()), cx);
+    });
+    cx.on_action(|_: &OpenComment, cx| {
+        info("Comment", Some("The Comment dialog arrives in G11.".into()), cx);
+    });
+    cx.on_action(|_: &RewriteFlow, cx| {
+        info("Rewrite", Some("The Rewrite dialog arrives in G9.".into()), cx);
     });
 }
 

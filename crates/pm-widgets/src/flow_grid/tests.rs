@@ -469,3 +469,39 @@ fn dragging_a_header_onto_another_reorders(cx: &mut TestAppContext) {
     assert_eq!(&order[..2], [method, id], "Method now goes before #");
     assert!(h.took(&FlowGridEvent::PrefsChanged));
 }
+
+#[gpui_kit::test]
+fn right_clicks_and_the_tools_button_ask_for_the_row_menu(cx: &mut TestAppContext) {
+    let fake = Fake::new(40);
+    let mut h = setup(cx, &fake);
+    h.click(1, Modifiers::none());
+    let row_y = |row: usize| HEADER_HEIGHT + ROW_HEIGHT * row as f32 + ROW_HEIGHT / 2.;
+    // A right-click in the Status column of row 4: selects it, names the column.
+    let status = ColumnId::Builtin(Builtin::Status);
+    let x = right_edge(&mut h, &status) - 10.;
+    h.cx.simulate_event(gpui_kit::MouseDownEvent {
+        button: gpui_kit::MouseButton::Right,
+        position: point(px(x), px(row_y(4))),
+        modifiers: Modifiers::none(),
+        click_count: 1,
+        first_mouse: false,
+    });
+    h.cx.run_until_parked();
+    assert_eq!(h.focused(), Some(4));
+    let menu = h.events.lock().unwrap().iter().find_map(|e| match e {
+        FlowGridEvent::RowMenu { id, column, .. } => Some((*id, column.clone())),
+        _ => None,
+    });
+    assert_eq!(menu, Some((4, Some(status))));
+    h.events.lock().unwrap().clear();
+    // The "…" in the Tools column (the last): the row's menu with no column.
+    let tools = right_edge(&mut h, &ColumnId::Builtin(Builtin::Tools)) - 10.;
+    h.cx.simulate_click(point(px(tools), px(row_y(6))), Modifiers::none());
+    h.cx.run_until_parked();
+    assert_eq!(h.focused(), Some(6));
+    let menu = h.events.lock().unwrap().iter().find_map(|e| match e {
+        FlowGridEvent::RowMenu { id, column, .. } => Some((*id, column.clone())),
+        _ => None,
+    });
+    assert_eq!(menu, Some((6, None)));
+}
