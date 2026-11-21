@@ -7,6 +7,7 @@
 //! menus and Raw tab (G3, with [`sample`] fixtures); `json/doc.ts`
 //! (G8), `rewrite/*` (G9), `compare.ts` (G11) and the body helpers (G4, G5).
 
+pub mod body;
 pub mod columns;
 pub mod commands;
 pub mod copy_formats;
