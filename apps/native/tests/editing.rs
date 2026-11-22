@@ -315,11 +315,18 @@ fn compose_sends_with_cmd_enter(cx: &mut TestAppContext) {
     });
     cx.run_until_parked();
     assert!(cx.update(|_, cx| view.read(cx).is_edit_replay()));
-    cx.simulate_keystrokes("cmd-enter");
+    // ⌘↩ on macOS, Ctrl+↩ elsewhere.
+    cx.simulate_keystrokes(if cfg!(target_os = "macos") {
+        "cmd-enter"
+    } else {
+        "ctrl-enter"
+    });
     let mut sent = None;
-    for _ in 0..200 {
+    for _ in 0..500 {
         cx.run_until_parked();
         sent = cx.update(|_, cx| view.read(cx).sent);
+        let error = cx.update(|_, cx| view.read(cx).error().map(str::to_owned));
+        assert!(error.is_none(), "the send failed: {error:?}");
         if sent.is_some() {
             break;
         }
