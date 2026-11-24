@@ -28,7 +28,8 @@ pub fn curl_example(listening: Option<&str>, cert_path: &str) -> String {
 
 /// The verifier's own wording, minus the rustls error enum, as a sentence.
 pub fn trust_detail(detail: &str) -> String {
-    let text = match detail.rfind(" (") {
+    // `/ \(.*\)$/`: from the first " (" when the text ends in ")".
+    let text = match detail.find(" (") {
         Some(at) if detail.ends_with(')') => &detail[..at],
         _ => detail,
     };
@@ -255,6 +256,13 @@ mod tests {
             detail: None,
         };
         assert!(wizard_checks(Some(&trusted)).iter().all(|c| c.state == CheckState::Ok));
+        assert_eq!(
+            trust_detail(
+                "the system doesn't trust the Proxymate CA yet (Other(OtherError(\"“Proxymate CA (Mac, 2026)” is \
+                 not trusted: -67843\")))"
+            ),
+            "The system doesn't trust the Proxymate CA yet."
+        );
         assert_eq!(trust_error(true, "x"), "Cancelled. Nothing was changed.");
         assert!(trust_warning(true, Some(&untrusted)));
         assert!(!trust_warning(false, Some(&untrusted)));
