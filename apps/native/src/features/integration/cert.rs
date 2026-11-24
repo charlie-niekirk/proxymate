@@ -548,11 +548,17 @@ impl Render for CertPanel {
                     .items_center()
                     .justify_between()
                     .gap(px(8.))
-                    .child(div().text_color(t.muted_foreground.hsla()).child(if confirming {
-                        "Every device must trust the new CA again."
-                    } else {
-                        "A new CA must be trusted again."
-                    }))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .text_color(t.muted_foreground.hsla())
+                            .child(if confirming {
+                                "Every device must trust the new CA again."
+                            } else {
+                                "A new CA must be trusted again."
+                            }),
+                    )
                     .child({
                         let b = Button::new("regenerate-ca")
                             .xsmall()

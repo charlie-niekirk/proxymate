@@ -182,6 +182,8 @@ impl Render for SystemProxyPanel {
             .gap(px(8.))
             .child(
                 div()
+                    .min_w_0()
+                    .flex_1()
                     .text_color(t.muted_foreground.hsla())
                     .child("For curl, Node, Python and other terminal tools"),
             )
