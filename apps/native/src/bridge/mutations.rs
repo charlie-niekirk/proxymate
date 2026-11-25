@@ -338,3 +338,141 @@ pub fn ws_close(flow: keys::FlowKey, cx: &mut App) {
         cx,
     );
 }
+
+// ---- Editing (G8): breakpoints, Replay, Compose ----
+
+/// Lets a paused flow go on (Execute, Abort, Respond, Send, Drop). The
+/// first resolution wins, from here or an agent; `done` gets the engine's
+/// answer so the form can show an error inline. The queue's next push
+/// drops the flow from the editor.
+pub fn resolve_breakpoint(
+    id: pm_model::BreakpointId,
+    resolution: pm_model::BreakpointResolution,
+    done: impl FnOnce(Result<(), String>, &mut App) + 'static,
+    cx: &mut App,
+) {
+    let Some(engine) = engine(cx) else {
+        cx.defer(move |cx| done(Err("No engine".into()), cx));
+        return;
+    };
+    let task = cx.background_spawn(async move { engine.resolve_breakpoint(id, resolution) });
+    cx.spawn(async move |cx| {
+        let answer = task.await.map_err(|e| e.to_string());
+        cx.update(|cx| done(answer, cx));
+    })
+    .detach();
+}
+
+/// The tokio runtime async engine calls run on: the bridge's, else the
+/// caller's (tests enter one).
+fn runtime(cx: &App) -> Option<tokio::runtime::Handle> {
+    cx.try_global::<super::Bridge>()
+        .map(|_| super::Bridge::runtime(cx))
+        .or_else(|| tokio::runtime::Handle::try_current().ok())
+}
+
+/// Runs an async engine call on the runtime, then `done` with its answer.
+fn run_async<T: Send + 'static, F>(
+    call: impl FnOnce(Arc<Engine>) -> F,
+    done: impl FnOnce(Result<T, String>, &mut App) + 'static,
+    cx: &mut App,
+) where
+    F: std::future::Future<Output = Result<T, String>> + Send + 'static,
+{
+    let (Some(engine), Some(runtime)) = (engine(cx), runtime(cx)) else {
+        cx.defer(move |cx| done(Err("No engine".into()), cx));
+        return;
+    };
+    let task = runtime.spawn(call(engine));
+    cx.spawn(async move |cx| {
+        let answer = task.await.unwrap_or_else(|e| Err(e.to_string()));
+        cx.update(|cx| done(answer, cx));
+    })
+    .detach();
+}
+
+fn user_send(apply_rules: bool) -> pm_model::SendOpts {
+    pm_model::SendOpts {
+        apply_rules,
+        wait: false,
+        origin: pm_model::SendOrigin::User,
+    }
+}
+
+/// Compose's Send: records the request as a new live flow (marked as sent
+/// by the user). The new flow reaches the table with the next delta.
+pub fn send_request(
+    spec: pm_model::RequestSpec,
+    apply_rules: bool,
+    done: impl FnOnce(Result<pm_model::FlowId, String>, &mut App) + 'static,
+    cx: &mut App,
+) {
+    run_async(
+        move |engine| async move {
+            engine
+                .send(spec, user_send(apply_rules))
+                .await
+                .map_err(|e| e.to_string())
+        },
+        done,
+        cx,
+    );
+}
+
+/// Replay: sends a recorded request again, as it was sent, through the
+/// rules.
+pub fn replay(
+    store: StoreId,
+    id: pm_model::FlowId,
+    done: impl FnOnce(Result<pm_model::FlowId, String>, &mut App) + 'static,
+    cx: &mut App,
+) {
+    run_async(
+        move |engine| async move {
+            engine
+                .replay(store, id, user_send(true))
+                .await
+                .map_err(|e| e.to_string())
+        },
+        done,
+        cx,
+    );
+}
+
+/// Replay in Order: the selected requests again, one after the other, in
+/// arrival order; tunnels and WebSockets are skipped. `done` gets the last
+/// new flow and how many failed of how many tried.
+pub fn replay_in_order(
+    store: StoreId,
+    selection: FlowSelection,
+    done: impl FnOnce(Result<(Option<pm_model::FlowId>, usize, usize), String>, &mut App) + 'static,
+    cx: &mut App,
+) {
+    run_async(
+        move |engine| async move {
+            let ids = {
+                let engine = engine.clone();
+                tokio::task::spawn_blocking(move || engine.selected_ids(store, &selection))
+                    .await
+                    .map_err(|e| e.to_string())?
+                    .map_err(|e| e.to_string())?
+            };
+            let (mut last, mut failed) = (None, 0);
+            for &id in &ids {
+                let Some(flow) = engine.get_flow_in(store, id) else {
+                    continue;
+                };
+                if !pm_view::compose::is_sendable(&flow.method, flow.scheme) {
+                    continue;
+                }
+                match engine.replay(store, id, user_send(true)).await {
+                    Ok(new) => last = Some(new),
+                    Err(_) => failed += 1,
+                }
+            }
+            Ok((last, failed, ids.len()))
+        },
+        done,
+        cx,
+    );
+}
