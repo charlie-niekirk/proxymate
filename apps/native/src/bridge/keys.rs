@@ -398,6 +398,77 @@ pub fn websocket_changed(flow: FlowKey, cx: &mut App) {
     streams_changed(flow.store, |id| id == flow.id, false, cx);
 }
 
+// ---- macOS integration (G13) ----
+
+/// `trustStatusKey`: the keychain's say and a real handshake through the
+/// proxy (an async engine call: the fetch blocks on the bridge's runtime).
+pub type TrustCache = Resource<(), pm_model::TrustStatus>;
+/// `caInfoKey`: the root CA's name, dates, fingerprint and PEM path.
+pub type CaInfoCache = Resource<(), pm_model::CaInfo>;
+/// `systemProxyKey`: whether the OS proxy points at us (runs `networksetup`).
+pub type SystemProxyCache = Resource<(), pm_model::SystemProxyStatus>;
+/// `deviceAccessKey`: LAN access, the interface, the setup URL and QR code.
+pub type DeviceAccessCache = Resource<(), pm_model::DeviceAccess>;
+/// `simulatorKey`: booted simulators (runs `xcrun simctl`).
+pub type SimulatorCache = Resource<(), pm_model::SimulatorStatus>;
+/// `androidKey`: what `adb` sees.
+pub type AndroidCache = Resource<(), pm_model::AndroidStatus>;
+/// `interceptAppsKey`: the Intercept menu's apps and whether they're installed.
+pub type InterceptAppsCache = Resource<(), Vec<pm_model::InterceptApp>>;
+/// `interceptsKey`: the running intercepted launches.
+pub type InterceptsCache = Resource<(), Vec<pm_model::InterceptSession>>;
+
+#[derive(Clone)]
+pub struct IntegrationCaches {
+    pub trust: Entity<TrustCache>,
+    pub ca: Entity<CaInfoCache>,
+    pub system_proxy: Entity<SystemProxyCache>,
+    pub access: Entity<DeviceAccessCache>,
+    pub simulator: Entity<SimulatorCache>,
+    pub android: Entity<AndroidCache>,
+    pub intercept_apps: Entity<InterceptAppsCache>,
+    pub intercepts: Entity<InterceptsCache>,
+}
+
+impl Global for IntegrationCaches {}
+
+/// The integration surfaces' caches, made on first use. Their fetchers
+/// only read; every change to the machine is a mutation.
+pub fn integration_caches(cx: &mut App) -> IntegrationCaches {
+    if let Some(caches) = cx.try_global::<IntegrationCaches>() {
+        return caches.clone();
+    }
+    let bridge = Bridge::try_async(cx);
+    fn fetcher<V: 'static>(
+        bridge: &Option<(Arc<pm_core::Engine>, tokio::runtime::Handle)>,
+        read: impl Fn(&Arc<pm_core::Engine>, &tokio::runtime::Handle) -> V + Send + Sync + 'static,
+    ) -> Option<Fetcher<(), V>> {
+        bridge
+            .clone()
+            .map(|(engine, runtime)| Arc::new(move |_: &()| Ok(read(&engine, &runtime))) as Fetcher<(), V>)
+    }
+    let trust = fetcher(&bridge, |e, rt| rt.block_on(e.trust_status()));
+    let ca = fetcher(&bridge, |e, _| e.ca_info());
+    let system_proxy = fetcher(&bridge, |e, _| e.system_proxy_status());
+    let access = fetcher(&bridge, |e, _| e.device_access());
+    let simulator = fetcher(&bridge, |e, rt| rt.block_on(e.simulator_status()));
+    let android = fetcher(&bridge, |e, rt| rt.block_on(e.android_status()));
+    let intercept_apps = fetcher(&bridge, |e, _| e.intercept_apps());
+    let intercepts = fetcher(&bridge, |e, _| e.intercepts());
+    let caches = IntegrationCaches {
+        trust: cx.new(|_| Resource::new(trust)),
+        ca: cx.new(|_| Resource::new(ca)),
+        system_proxy: cx.new(|_| Resource::new(system_proxy)),
+        access: cx.new(|_| Resource::new(access)),
+        simulator: cx.new(|_| Resource::new(simulator)),
+        android: cx.new(|_| Resource::new(android)),
+        intercept_apps: cx.new(|_| Resource::new(intercept_apps)),
+        intercepts: cx.new(|_| Resource::new(intercepts)),
+    };
+    cx.set_global(caches.clone());
+    caches
+}
+
 // ---- Editing (G8) ----
 
 /// `breakpointBodyKey`: a paused message's body, decoded, as the engine
@@ -437,7 +508,8 @@ pub type McpAuditCache = Resource<u32, Arc<pm_model::McpAuditPage>>;
 /// One cache per settings row or list the Settings window reads (the
 /// `*SettingsKey`s of `lib/query.ts`). Each holds one value under `()`,
 /// except the audit log's pages. The rule settings and the mock library
-/// are G7's ([`rules_caches`]); the SSL lists are the workspace's; the
+/// are G7's ([`rules_caches`]); LAN access and the system proxy are G13's
+/// ([`integration_caches`]); the SSL lists are the workspace's; the
 /// storage status, LAN devices and MCP status are pushes (`bridge`).
 #[derive(Clone)]
 pub struct SettingsCaches {
@@ -453,9 +525,6 @@ pub struct SettingsCaches {
     pub mcp_token: Entity<Resource<(), String>>,
     pub mcp_audit: Entity<McpAuditCache>,
     pub updates: Entity<Resource<(), pm_model::UpdateSettings>>,
-    pub device_access: Entity<Resource<(), pm_model::DeviceAccess>>,
-    /// Runs `networksetup`: fetched off the foreground like every key.
-    pub system_proxy: Entity<Resource<(), pm_model::SystemProxyStatus>>,
     pub terminal_env: Entity<Resource<(), String>>,
 }
 
@@ -504,8 +573,6 @@ pub fn settings_caches(cx: &mut App) -> SettingsCaches {
         mcp_token: single(&e, |e| Ok(e.mcp_token()), cx),
         mcp_audit: cx.new(|_| Resource::new(audit)),
         updates: single(&e, |e| Ok(e.update_settings()), cx),
-        device_access: single(&e, |e| Ok(e.device_access()), cx),
-        system_proxy: single(&e, |e| Ok(e.system_proxy_status()), cx),
         terminal_env: single(&e, |e| Ok(e.terminal_env()), cx),
     };
     cx.set_global(caches.clone());
@@ -516,7 +583,8 @@ pub fn settings_caches(cx: &mut App) -> SettingsCaches {
 /// address goes stale.
 pub fn proxy_moved(cx: &mut App) {
     let c = settings_caches(cx);
-    c.device_access.update(cx, |c, cx| c.invalidate(|_, _| true, cx));
     c.terminal_env.update(cx, |c, cx| c.invalidate(|_, _| true, cx));
-    c.system_proxy.update(cx, |c, cx| c.invalidate(|_, _| true, cx));
+    let i = integration_caches(cx);
+    i.access.update(cx, |c, cx| c.invalidate(|_, _| true, cx));
+    i.system_proxy.update(cx, |c, cx| c.invalidate(|_, _| true, cx));
 }

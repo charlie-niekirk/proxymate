@@ -106,6 +106,11 @@ where
         self.entries.get(key)?.value.as_ref()?.as_ref().ok()
     }
 
+    /// Whether a fetch of `key` is running (a Refresh button's spinner).
+    pub fn is_fetching(&self, key: &K) -> bool {
+        self.entries.get(key).is_some_and(|e| e.fetching)
+    }
+
     /// Sets a value (tests, offscreen renders, a mutation's answer).
     pub fn set(&mut self, key: K, value: V, cx: &mut Context<Self>) {
         self.clock += 1;

@@ -3,7 +3,7 @@
 //! busy, the fields typed and Network's draft) plus what the engine holds
 //! for that page. The Tauri remote's M16, M20 and M21 verbs work without
 //! the window (as its `remote.ts` does) and answer with the lists they
-//! change.
+//! change; `neverRecord` is G13's (`dev/integration.rs`).
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -28,7 +28,7 @@ const WINDOW_VERBS: [&str; 8] = [
     "settingsState",
 ];
 
-const ENGINE_VERBS: [&str; 14] = [
+const ENGINE_VERBS: [&str; 13] = [
     "appearance",
     "mockFrom",
     "mockFromFile",
@@ -38,7 +38,6 @@ const ENGINE_VERBS: [&str; 14] = [
     "removeOpenApi",
     "importProto",
     "removeProto",
-    "neverRecord",
     "recordingLists",
     "autosave",
     "autosaveNow",
@@ -349,10 +348,6 @@ async fn engine_command(command: &Value, cx: &mut AsyncApp) -> Value {
                 cx,
             )
         });
-    }
-    if let Some(host) = command.get("neverRecord").and_then(Value::as_str) {
-        let host = host.to_owned();
-        cx.update(|cx| mutations::never_record(host, cx));
     }
     if let Some(lists) = command.get("recordingLists") {
         match serde_json::from_value::<pm_model::RecordingSettings>(lists.clone()) {

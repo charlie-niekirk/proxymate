@@ -22,7 +22,7 @@ use pm_model::{DevicesSnapshot, McpStatus, NetworkSettings, StorageStatus};
 use pm_view::settings::{self as logic, network};
 
 use super::pages;
-use crate::bridge::keys::{self, RulesCaches, SettingsCaches};
+use crate::bridge::keys::{self, IntegrationCaches, RulesCaches, SettingsCaches};
 use crate::bridge::stream::Latest;
 use crate::bridge::{self, mutations};
 use crate::features::clipboard::{self, report_error};
@@ -77,6 +77,8 @@ pub struct SettingsWindow {
     page: &'static str,
     pub(crate) caches: SettingsCaches,
     pub(crate) rules: RulesCaches,
+    /// LAN access and the system proxy (G13's caches).
+    pub(crate) integration: IntegrationCaches,
     pub(crate) storage: Entity<Latest<StorageStatus>>,
     pub(crate) devices: Entity<Latest<DevicesSnapshot>>,
     pub(crate) mcp: Entity<Latest<McpStatus>>,
@@ -143,6 +145,7 @@ impl SettingsWindow {
     pub fn new(page: &'static str, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let caches = keys::settings_caches(cx);
         let rules = keys::rules_caches(cx);
+        let integration = keys::integration_caches(cx);
         let storage = bridge::storage(cx);
         let devices = bridge::devices(cx);
         let mcp = bridge::mcp(cx);
@@ -168,8 +171,8 @@ impl SettingsWindow {
             caches.mcp_token,
             caches.mcp_audit,
             caches.updates,
-            caches.device_access,
-            caches.system_proxy,
+            integration.access,
+            integration.system_proxy,
             caches.terminal_env,
             rules.mock_sources,
         );
@@ -193,6 +196,7 @@ impl SettingsWindow {
             page: logic::page_or_default(page),
             caches,
             rules,
+            integration,
             storage,
             devices,
             mcp,
@@ -301,8 +305,8 @@ impl SettingsWindow {
             c.scripts,
             c.mcp_token,
             c.updates,
-            c.device_access,
-            c.system_proxy,
+            self.integration.access,
+            self.integration.system_proxy,
             c.terminal_env,
             self.rules.settings,
             self.rules.mock_sources,
@@ -598,9 +602,9 @@ impl SettingsWindow {
         let on = value == "true";
         match key {
             "page" => return self.go(value, window, cx),
-            "proxy.lan" => mutations::set_lan_access(on, cx),
+            "proxy.lan" => mutations::set_lan_access(on, |_| {}, cx),
             "proxy.interface" => mutations::set_lan_interface(value.to_owned(), cx),
-            "proxy.sysproxy" => mutations::set_system_proxy(on, cx),
+            "proxy.sysproxy" => mutations::set_system_proxy(on, |_| {}, cx),
             "autosave.enabled" => {
                 let mut next = match self.autosave_draft(cx) {
                     Ok(draft) => draft,
@@ -657,6 +661,18 @@ impl SettingsWindow {
             w.errors.insert(form, err);
             cx.notify();
         });
+    }
+
+    /// A G13 write's answer: its failure goes under `form` (a cancelled
+    /// prompt changed nothing, so it says nothing).
+    fn failed_with(form: &'static str) -> impl FnOnce(Result<(), mutations::Failure>, &mut App) + 'static {
+        move |answer, cx| {
+            if let Err(err) = answer
+                && !err.cancelled
+            {
+                Self::fail(form, err.message, cx);
+            }
+        }
     }
 
     /// A write is over: its form isn't busy any more.
@@ -827,11 +843,11 @@ impl SettingsWindow {
                     .then(|| logic::normalized(&self.text(&format!("client.{arg_owned}"), cx)).map(str::to_owned))
                     .flatten();
                 self.errors.remove("clients");
-                mutations::decide_device(arg_owned, allow, nickname, |err, cx| Self::fail("clients", err, cx), cx);
+                mutations::decide_device(arg_owned, allow, nickname, Self::failed_with("clients"), cx);
             }
             "client.forget" => {
                 self.errors.remove("clients");
-                mutations::forget_device(arg_owned, |err, cx| Self::fail("clients", err, cx), cx);
+                mutations::forget_device(arg_owned, Self::failed_with("clients"), cx);
             }
             "copy" => {
                 if let Some(field) = self.copy_field(&arg_owned, cx) {

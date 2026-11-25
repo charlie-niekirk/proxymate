@@ -258,7 +258,8 @@ pub fn seed(cx: &mut App) {
     });
     c.updates
         .update(cx, |c, cx| c.set((), UpdateSettings { check_at_launch: true }, cx));
-    c.device_access.update(cx, |c, cx| {
+    let i = keys::integration_caches(cx);
+    i.access.update(cx, |c, cx| {
         c.set(
             (),
             DeviceAccess {
@@ -283,7 +284,7 @@ pub fn seed(cx: &mut App) {
             cx,
         )
     });
-    c.system_proxy.update(cx, |c, cx| {
+    i.system_proxy.update(cx, |c, cx| {
         c.set(
             (),
             SystemProxyStatus {

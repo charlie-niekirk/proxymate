@@ -99,6 +99,17 @@ gpui_kit::assets::icon_assets!(
         CirclePlay,
         Reply,
         Binary,
+        // macOS integration (G13): certificate, system proxy, device setup,
+        // Intercept and the MCP indicator.
+        ShieldCheck,
+        ShieldPlus,
+        Crosshair,
+        Smartphone,
+        MonitorSmartphone,
+        RefreshCw,
+        SquareTerminal,
+        AppWindow,
+        Wifi,
     ]
 );
 

@@ -129,6 +129,9 @@ jobs:
       - run: cargo nextest run -p proxymate-native -p pm-widgets -p pm-theme -p pm-view -p pm-app --locked --profile ci --no-tests=warn
       - name: Shell renders offscreen in both themes
         run: cargo test -p proxymate-native --test render --locked
+      # G13: the certificate wizard and popovers, Device setup, the LAN prompt.
+      - name: Integration surfaces render offscreen in both themes
+        run: cargo test -p proxymate-native --test render_integration --locked
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:

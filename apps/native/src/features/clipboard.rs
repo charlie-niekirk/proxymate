@@ -161,6 +161,11 @@ pub fn report_error(what: &str, err: impl std::fmt::Display, cx: &mut App) {
     toast(ToastKind::Error, what, Some(err.to_string()), cx);
 }
 
+/// A success toast (an intercepted launch: "Started Google Chrome").
+pub fn success(title: &str, description: Option<String>, cx: &mut App) {
+    toast(ToastKind::Success, title, description, cx);
+}
+
 /// An informational toast (a stub's "arrives in G…" note, say).
 pub fn info(title: &str, description: Option<String>, cx: &mut App) {
     toast(ToastKind::Info, title, description, cx);

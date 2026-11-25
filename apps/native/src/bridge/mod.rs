@@ -62,6 +62,13 @@ impl Bridge {
         Bridge::global(cx).runtime.handle().clone()
     }
 
+    /// The engine and its runtime, for the engine's async methods (trust,
+    /// simctl, adb); `None` without a bridge (tests, offscreen renders).
+    pub fn try_async(cx: &App) -> Option<(Arc<Engine>, tokio::runtime::Handle)> {
+        cx.try_global::<Bridge>()
+            .map(|b| (b.engine.clone(), b.runtime.handle().clone()))
+    }
+
     /// The runtime async engine writes run on (G12's settings): the
     /// bridge's, or the one a test set with [`set_runtime`].
     pub fn try_runtime(cx: &App) -> Option<tokio::runtime::Handle> {
@@ -150,9 +157,11 @@ pub fn breakpoints(cx: &mut App) -> Entity<Latest<Vec<BreakpointInfo>>> {
     entity
 }
 
-/// LAN devices and their activity (Settings › Clients; G13's prompts),
-/// pushed when one connects, is decided or forgotten. Without an engine,
-/// as [`rule_book`].
+/// LAN clients (pending prompts first) and the Simulator's and emulator's
+/// activity, pushed whenever they change (Settings › Clients, G12; G13's
+/// prompts and device setup). The engine's devices sink is single-slot, so
+/// every reader shares this one. Without an engine, as [`rule_book`]: tests
+/// and the dev remote set its value.
 pub fn devices(cx: &mut App) -> Entity<Latest<DevicesSnapshot>> {
     if let Some(entity) = cx.default_global::<Streams>().devices.clone() {
         return entity;
@@ -165,9 +174,9 @@ pub fn devices(cx: &mut App) -> Entity<Latest<DevicesSnapshot>> {
     entity
 }
 
-/// The MCP server's state: its settings, where it serves or why not, and
-/// the connected clients (Settings › MCP; G13's indicator). Pushed when
-/// any of it changes. Without an engine, as [`rule_book`].
+/// The MCP server's status (its settings, where it serves or why not) and
+/// connected agents (Settings › MCP, G12; the toolbar's indicator, G13),
+/// pushed whenever it changes. Without an engine, as [`rule_book`].
 pub fn mcp(cx: &mut App) -> Entity<Latest<McpStatus>> {
     if let Some(entity) = cx.default_global::<Streams>().mcp.clone() {
         return entity;

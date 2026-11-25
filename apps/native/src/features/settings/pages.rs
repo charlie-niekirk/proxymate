@@ -93,8 +93,8 @@ fn proxy(w: &mut SettingsWindow, window: &mut Window, cx: &mut Context<SettingsW
         .map(|ws| ws.read(cx).proxy.clone())
         .unwrap_or_default();
     let settings = load(&w.caches.proxy, cx);
-    let access = load(&w.caches.device_access, cx);
-    let sysproxy = load(&w.caches.system_proxy, cx);
+    let access = load(&w.integration.access, cx);
+    let sysproxy = load(&w.integration.system_proxy, cx);
     load(&w.caches.terminal_env, cx);
 
     let (ok, line) = logic::listening_line(&status);
@@ -754,7 +754,7 @@ fn ssl(w: &mut SettingsWindow, window: &mut Window, cx: &mut Context<SettingsWin
 
 fn clients(w: &mut SettingsWindow, window: &mut Window, cx: &mut Context<SettingsWindow>) -> Vec<AnyElement> {
     let t = *cx.tokens();
-    let access = load(&w.caches.device_access, cx);
+    let access = load(&w.integration.access, cx);
     let devices = w.devices.read(cx).value.clone().map(|d| d.devices).unwrap_or_default();
     let lan_on = access.as_ref().is_some_and(|a| a.enabled);
     let mut body = Vec::new();

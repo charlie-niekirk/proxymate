@@ -128,7 +128,7 @@ impl SettingsWindow {
                     .when_some_copy(status.error.as_deref(), "Copy error", "error")
             }
             "lan-interface" => {
-                let access = self.caches.device_access.read(cx).peek(&())?;
+                let access = self.integration.access.read(cx).peek(&())?;
                 let ip = access
                     .interfaces
                     .iter()
@@ -221,7 +221,7 @@ impl SettingsWindow {
     pub fn picker_options(&self, key: &str, cx: &App) -> Option<(Vec<(String, String)>, String)> {
         let pairs = |list: &[(&str, &str)]| list.iter().map(|(v, l)| ((*v).into(), (*l).into())).collect();
         if key == "proxy.interface" {
-            let access = self.caches.device_access.read(cx).peek(&())?;
+            let access = self.integration.access.read(cx).peek(&())?;
             let options = access
                 .interfaces
                 .iter()
