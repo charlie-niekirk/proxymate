@@ -190,7 +190,7 @@ pub fn focused(cx: &App) -> Option<(StoreId, FlowId)> {
 }
 
 /// The focused flow's table row, if it is loaded.
-fn focused_row(cx: &App) -> Option<pm_model::FlowRow> {
+pub fn focused_row(cx: &App) -> Option<pm_model::FlowRow> {
     let table = crate::features::flow_table::first(cx)?;
     let grid = table.read(cx).grid().read(cx);
     let id = grid.selected().focused?;

@@ -33,7 +33,7 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | WM-08 | Proxymate › Services submenu | `src-tauri/src/menu.rs` | G0 | ☑ | G0: apps/native/src/menus.rs |
 | WM-09 | Proxymate › Hide Proxymate ⌘H, Hide Others ⌥⌘H, Show All | `src-tauri/src/menu.rs` | G0 | ☑ | G0: apps/native/src/menus.rs |
 | WM-10 | Proxymate › Quit Proxymate ⌘Q | `src-tauri/src/menu.rs` | G0 | ☑ | G0: apps/native/src/menus.rs |
-| WM-11 | File › New Request… ⌘N opens Compose | `src-tauri/src/menu.rs`, `hooks/useAppMenu.ts` | G8 | ☐ | |
+| WM-11 | File › New Request… ⌘N opens Compose | `src-tauri/src/menu.rs`, `hooks/useAppMenu.ts` | G8 | ☑ | G8: `menus.rs` File › New Request… ⌘N → `features::compose` (`NewRequest`); live: dev remote `keys: cmd-n` opened Compose |
 | WM-12 | File › Open… ⌘O: pick a session, HAR or Charles file and open it in a new tab | `src-tauri/src/menu.rs`, `hooks/useAppMenu.ts` | G2 | ☑ | G2: `features/documents.rs` `open` (File menu ⌘O, palette); dev remote `openDocument` opened a session and a HAR live (`docs/native/g2/document-tabs-suggestions.png`) |
 | WM-13 | File › Import HAR… ⇧⌘O: the open dialog filtered to HAR | `src-tauri/src/menu.rs`, `hooks/useAppMenu.ts` | G2 | ≈ | G2: File › Import HAR… ⇧⌘O opens the panel with the prompt "Open a HAR file"; gpui's open panel takes no file-type filter, so other files show and the engine refuses what it can't read |
 | WM-14 | File › Save Session… ⌘S: saves every flow of the active tab | `src-tauri/src/menu.rs`, `hooks/useAppMenu.ts` | G2 | ☑ | G2: `features/documents.rs` `save` (⌘S): every flow of the active tab, in the background; live save to a `.proxymate` file with progress (PR) |
@@ -57,7 +57,7 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | ID | Behaviour | Source | Phase | Status | Evidence |
 |---|---|---|---|---|---|
 | TB-01 | Record button: red square while recording ("Stop recording · traffic is still forwarded · ⌘E"), green play when paused ("Start recording · traffic is forwarded either way · ⌘E") | `components/Toolbar.tsx` | G2 | ☑ | G2: `shell/toolbar.rs` (filled square / play, tooltips with ⌘E); `tests/shell.rs` `the_palette_opens_with_cmd_k_and_runs_a_command` toggles recording with ⌘E |
-| TB-02 | Compose (+) button, tooltip "Compose a request · ⌘N" (stub until Compose exists) | `components/Toolbar.tsx` | G2 | ☑ | G2: `shell/toolbar.rs` Compose button and tooltip; `features::chrome::Compose` says "Compose arrives in G8" until G8 replaces the handler |
+| TB-02 | Compose (+) button, tooltip "Compose a request · ⌘N" (stub until Compose exists) | `components/Toolbar.tsx` | G2 | ☑ | G2: `shell/toolbar.rs` Compose button and tooltip; G8's `features::compose` handles `Compose` (the stub is gone) |
 | TB-03 | Clear (trash) button, tooltip "Clear all flows · ⌘⌫", disabled on a document tab | `components/Toolbar.tsx` | G2 | ☑ | G2: `shell/toolbar.rs` Clear, disabled on a document tab (`docs/native/g2/document-tabs-suggestions.png`) |
 | TB-04 | Empty toolbar space drags the window | `components/Toolbar.tsx` | G2 | ☑ | G2: the toolbar is `shell::chrome::drag`; its controls take their own presses |
 | TB-05 | Listening pill: dot and text "Starting proxy…", "Listening on <addr>", "Listening on <addr> · paused", "Proxy not running: <error>" | `components/Toolbar.tsx` `ListeningStatus` | G2 | ☑ | G2: `toolbar::listening` and its pill; `toolbar::tests::a_failed_proxy_offers_its_error` |
@@ -73,7 +73,7 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | TB-15 | No Caching toggle: icon only when off, "No Caching" label and warning colour when on, tooltips for both states | `components/InterceptMenu.tsx` `NoiseToggles` | G7 | ☑ | G7: `tools.rs` `toggle` (icon alone off; label in `--s-4xx` on; both tooltips); `tests/rules.rs` `the_toolbar_tools_flip_the_builtin_rules`; `docs/native/g7/toolbar-tools-dark.png` |
 | TB-16 | Block Cookies toggle: same pattern as No Caching | `components/InterceptMenu.tsx` `NoiseToggles` | G7 | ☑ | G7: `tools.rs` `toggle` for Block Cookies; `tests/rules.rs` `the_toolbar_tools_flip_the_builtin_rules` |
 | TB-17 | Network conditions (gauge) button: shows the active throttle preset's name in warning colour | `components/Rules/ThrottleMenu.tsx` | G7 | ☑ | G7: `tools.rs` network conditions button (the active preset's name in `--s-4xx`); `tests/rules.rs` `the_toolbar_tools_flip_the_builtin_rules`; `docs/native/g7/toolbar-tools-dark.png` |
-| TB-18 | Breakpoints badge: paused count in a pill, tooltip "N paused at a breakpoint" or "Breakpoints · none paused"; opens the Breakpoint Editor | `components/Breakpoints/BreakpointBadge.tsx` | G7 | ☑ | G7: `tools.rs` breakpoint badge (count pill in `--s-paused`, `ToolState::breakpoints_tip`), from `bridge::breakpoints`; `tests/rules.rs` `the_toolbar_tools_flip_the_builtin_rules`; a request held live in `docs/native/g7/breakpoint-queued-dark.png`. It dispatches `OpenBreakpoints`, a toast until G8 replaces the handler |
+| TB-18 | Breakpoints badge: paused count in a pill, tooltip "N paused at a breakpoint" or "Breakpoints · none paused"; opens the Breakpoint Editor | `components/Breakpoints/BreakpointBadge.tsx` | G7 | ☑ | G7: `tools.rs` breakpoint badge (count pill in `--s-paused`, `ToolState::breakpoints_tip`), from `bridge::breakpoints`; `tests/rules.rs` `the_toolbar_tools_flip_the_builtin_rules`; a request held live in `docs/native/g7/breakpoint-queued-dark.png`. It dispatches `OpenBreakpoints`, which G8's Breakpoint Editor handles |
 | TB-19 | "Certificate not trusted" warning button while listening and the CA isn't verified (keychain supported); opens the certificate wizard | `components/Toolbar.tsx` `TrustWarning` | G13 | ☐ | |
 | TB-20 | System proxy (globe) button, green while on | `components/SystemProxyMenu.tsx` | G13 | ☐ | |
 | TB-21 | Certificate (shield) button: alert shield while untrusted | `components/CertificateMenu.tsx` | G13 | ☐ | |
@@ -177,8 +177,8 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | FM-08 | Copy ▸ Raw request, Raw response | `components/FlowTable/FlowContextMenu.tsx` `rawOf` | G3 | ☑ | G3: `inspector/actions.rs` `raw_of`; live `Copy › Raw response` through the dev remote |
 | FM-09 | Filter by <header> on a header column cell (adds a `reqheader:`/`resheader:` term) | `components/FlowTable/FlowContextMenu.tsx` | G11 | ☐ | |
 | FM-10 | Filter by ▸ Host, Method, Status, App (adds a term to the search box) | `components/menus/filter.tsx` `FilterBySub` | G3 | ☑ | G3: `inspector/menus.rs` `filter_by` (a submenu of the row and URL bar menus); `tests/inspector.rs` ("Filter by › App: Safari" sets `app:Safari`) |
-| FM-11 | Replay ⌘R (disabled for CONNECT and WebSockets) | `components/FlowTable/FlowContextMenu.tsx` | G8 | ☐ | |
-| FM-12 | Edit & Replay… | `components/FlowTable/FlowContextMenu.tsx` | G8 | ☐ | |
+| FM-11 | Replay ⌘R (disabled for CONNECT and WebSockets) | `components/FlowTable/FlowContextMenu.tsx` | G8 | ☑ | G8: `replay::send_items` at the flow menu's `Send` slot (off for CONNECT and WebSockets), ⌘R through the `replay` command; `tests/editing.rs` `the_flow_menu_offers_replay_for_plain_requests`, `tests/inspector.rs` row menu; live: the row menu's Replay recorded and selected a new flow |
+| FM-12 | Edit & Replay… | `components/FlowTable/FlowContextMenu.tsx` | G8 | ☑ | G8: `replay::EditReplayFlow` (`Engine::request_spec_in` editable, body decoded) opens Compose titled Edit & Replay; live: dev remote `editReplay` |
 | FM-13 | Repeat… ⌥⌘R | `components/FlowTable/FlowContextMenu.tsx` | G11 | ☐ | |
 | FM-14 | Pin / Unpin | `components/FlowTable/FlowContextMenu.tsx` | G3 | ☑ | G3: `flow_menu.rs` Pin/Unpin → `bridge::mutations::pin_flows`; live: Pin then the menu offers Unpin |
 | FM-15 | Label ▸ Red, Orange, Yellow, Green, Blue, Purple (✓ on the current), No label | `components/FlowTable/FlowContextMenu.tsx` `LabelSub` | G11 | ☐ | |
@@ -195,7 +195,7 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | FM-26 | Delete ⌫ (disabled while the flow is active or paused) | `components/FlowTable/FlowContextMenu.tsx` | G3 | ☑ | G3: `flow_menu.rs` Delete → `mutations::remove_flows`, disabled while active or paused; `tests/inspector.rs` |
 | FM-27 | Bulk menu header "N flows selected" | `components/FlowTable/FlowContextMenu.tsx` `BulkMenu` | G11 | ☐ | |
 | FM-28 | Bulk: Copy URLs, Copy as cURL | `components/FlowTable/FlowContextMenu.tsx` `BulkMenu` | G11 | ☐ | |
-| FM-29 | Bulk: Replay in Order | `components/FlowTable/FlowContextMenu.tsx` `BulkMenu` | G8 | ☐ | |
+| FM-29 | Bulk: Replay in Order | `components/FlowTable/FlowContextMenu.tsx` `BulkMenu` | G11 | ☐ | Moved from G8: the bulk menu is G11's (`flow_menu::set_bulk`); G8 provides `replay::ReplaySelection` and the palette command (CP-13) for it to dispatch |
 | FM-30 | Bulk: Compare (enabled with exactly two) | `components/FlowTable/FlowContextMenu.tsx` `BulkMenu` | G11 | ☐ | |
 | FM-31 | Bulk: Pin, Unpin | `components/FlowTable/FlowContextMenu.tsx` `BulkMenu` | G11 | ☐ | |
 | FM-32 | Bulk: Label ▸ | `components/FlowTable/FlowContextMenu.tsx` `BulkMenu` | G11 | ☐ | |
@@ -240,8 +240,8 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | CP-01 | ⌘K toggles the palette: "Type a command…", groups Flows, Capture, Navigate, Windows, Settings, keyword matching, shortcut labels, only commands that apply now; "No matching command" | `components/CommandPalette.tsx` | G2 | ☑ | G2: `features/commands.rs` palette (groups, shortcuts, only registered commands that apply, "No matching command"); `tests/shell.rs` `the_palette_opens_with_cmd_k_and_runs_a_command`; `tests/render.rs` renders it in both themes |
 | CP-02 | Escape in the inspector returns focus to the flow table (unless a dialog is open) | `hooks/useShortcuts.ts` | G3 | ☑ | G3: Escape is `FocusTable` in the `Inspector` key context (dialogs take the focus, so they keep Escape); `tests/inspector.rs` `enter_and_escape_move_the_keyboard_between_the_table_and_the_inspector` |
 | CP-03 | Shortcut rules: ⇧ never matches; ⌥ matches the physical key; ⌘⌫ and ⌘F are left to text fields and code editors; bare ⌫ and ⌘A only in the flow table | `lib/commands.ts` `commandForKey` | G2 | ☑ | G2: `features/commands.rs` `bind_keys` (exact bindings, so ⇧ never matches; gpui matches the physical key; ⌘⌫ yields to text fields via `!Input`; bare ⌫ and ⌘A are `FlowGrid`'s); `tests/shell.rs` `cmd_backspace_in_a_text_field_edits_the_text`. G4: ⌘F yields to the CodeView and the code editor (`CODE_VIEWS_KEEP`); `tests/body.rs` |
-| CP-04 | "Replay selected flow" ⌘R ("Nothing to replay", "Can't replay this flow" for tunnels and WebSockets) | `lib/commands.ts` | G8 | ☐ | |
-| CP-05 | "Edit & Replay selected flow…" | `lib/commands.ts` | G8 | ☐ | |
+| CP-04 | "Replay selected flow" ⌘R ("Nothing to replay", "Can't replay this flow" for tunnels and WebSockets) | `lib/commands.ts` | G8 | ☑ | G8: `replay.rs` `replay` command (⌘R): "Nothing to replay" without a focused flow, "Can't replay this flow" for tunnels and WebSockets (`pm_view::compose::is_sendable`); live: `keys: cmd-r` recorded and selected a new flow |
+| CP-05 | "Edit & Replay selected flow…" | `lib/commands.ts` | G8 | ☑ | G8: `replay.rs` `edit-replay` command |
 | CP-06 | "Rewrite selected flow…" | `lib/commands.ts` | G9 | ☐ | |
 | CP-07 | "Pin or unpin selected flow" (live capture only) | `lib/commands.ts` | G3 | ☑ | G3: `features/inspector/mod.rs` `pin` (live capture only; toggles the focused row's pin) |
 | CP-08 | "Copy URL of selected flow" (every selected URL with several) | `lib/commands.ts` | G3 | ☑ | G3: `inspector/mod.rs` `copy-url` (every URL of a multi-selection through `Engine::flow_urls`) |
@@ -249,14 +249,14 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | CP-10 | "Repeat selected flow…" ⌥⌘R | `lib/commands.ts` | G11 | ☐ | |
 | CP-11 | "Select all flows" ⌘A (in the flow table) | `lib/commands.ts` | G1 | ☑ | G1: `pm-widgets` `flow_grid::tests::cmd_a_enter_and_backspace` (`flow_grid::SelectAll`, ⌘A in the `FlowGrid` context) |
 | CP-12 | "Delete selected flows" ⌫ (in the flow table) | `lib/commands.ts` | G3 | ☑ | G3: `inspector/mod.rs` `delete` → `FlowTable::delete_selection` (⌫ stays `FlowGrid`'s binding) |
-| CP-13 | "Replay selected flows in order" (two or more) | `lib/commands.ts` | G8 | ☐ | |
+| CP-13 | "Replay selected flows in order" (two or more) | `lib/commands.ts` | G8 | ☑ | G8: `replay.rs` `replay-selection` command → `mutations::replay_in_order`; live: two selected flows replayed in order, the last selected |
 | CP-14 | "Compare the two selected flows" | `lib/commands.ts` | G11 | ☐ | |
 | CP-15 | "Comment on selected flow…" | `lib/commands.ts` | G11 | ☐ | |
 | CP-16 | "Label selected flows <Colour>", one per colour | `lib/commands.ts` | G11 | ☐ | |
 | CP-17 | "Remove label from selected flows" | `lib/commands.ts` | G11 | ☐ | |
 | CP-18 | "Add header column…" | `lib/commands.ts` | G11 | ☐ | |
 | CP-19 | "Copy selected flow as cURL" | `lib/commands.ts` | G3 | ☑ | G3: `inspector/mod.rs` `copy-curl` |
-| CP-20 | "New request…" | `lib/commands.ts` | G8 | ☐ | |
+| CP-20 | "New request…" | `lib/commands.ts` | G8 | ☑ | G8: `compose.rs` `compose` command (and the toolbar's Compose button, which replaced G2's stub) |
 | CP-21 | "Clear all flows" ⌘⌫ (live capture only) | `lib/commands.ts` | G2 | ☑ | G2: `features/capture.rs` (live only); `tests/shell.rs` `cmd_backspace_in_a_text_field_edits_the_text` |
 | CP-22 | "Start recording" / "Stop recording" ⌘E (one key, whichever applies) | `lib/commands.ts` | G2 | ☑ | G2: `features/capture.rs`; `commands::tests::only_registered_commands_that_apply_are_listed_and_keys_pick_the_one_that_applies`, `tests/shell.rs` `the_palette_opens_with_cmd_k_and_runs_a_command` |
 | CP-23 | "Toggle Auto Select" | `lib/commands.ts` | G1 | ☑ | G2: `features/capture.rs` (`auto-select`) in the palette |
@@ -281,7 +281,7 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | CP-42 | "Show live capture" (on a document tab) | `lib/commands.ts` | G2 | ☑ | G2: `features/documents.rs` (`live`, only on a document tab); `tests/shell.rs` checks it is hidden on Live |
 | CP-43 | "Rules…" | `lib/commands.ts` | G7 | ☑ | G7: `commands::add("rules")` opens the Rules window |
 | CP-44 | "Scripts…" | `lib/commands.ts` | G10 | ☐ | |
-| CP-45 | "Breakpoints…" | `lib/commands.ts` | G8 | ☐ | |
+| CP-45 | "Breakpoints…" | `lib/commands.ts` | G8 | ☑ | G8: `breakpoints.rs` handles `OpenBreakpoints` (G7's command, badge and dev open) with the editor window |
 | CP-46 | "Device setup…" | `lib/commands.ts` | G13 | ☐ | |
 | CP-47 | "Certificate wizard…" | `lib/commands.ts` | G13 | ☐ | |
 | CP-48 | "Settings…" ⌘, | `lib/commands.ts` | G12 | ☑ | G12: palette `settings` with ⌘, (and Proxymate › Settings…); `tests/settings.rs` `appearance_and_the_palette` |
@@ -463,27 +463,27 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 
 | ID | Behaviour | Source | Phase | Status | Evidence |
 |---|---|---|---|---|---|
-| BE-01 | Breakpoint Editor window: the queue beside the selected item; "Nothing is paused." | `components/Breakpoints/BreakpointEditor.tsx` | G8 | ☐ | |
-| BE-02 | Queue item: phase pill, rule name, countdown m:ss or "no timeout" | `components/Breakpoints/BreakpointEditor.tsx` `QueueItem` | G8 | ☐ | |
-| BE-03 | Queue item menu: Copy URL, Copy method, Show flow #N, Open rule "<name>", Continue unmodified, Abort / Drop the message | `components/Breakpoints/BreakpointEditor.tsx` | G8 | ☐ | |
-| BE-04 | Paused request: method, URL, headers (add, remove), body | `components/Breakpoints/BreakpointEditor.tsx` | G8 | ☐ | |
-| BE-05 | Paused response: Status, headers, body (size and note) | `components/Breakpoints/BreakpointEditor.tsx` | G8 | ☐ | |
-| BE-06 | Execute (with edits) and Abort | `components/Breakpoints/BreakpointEditor.tsx` | G8 | ☐ | |
-| BE-07 | Respond… shows "Answer the client with" status, headers, body, then Send response | `components/Breakpoints/BreakpointEditor.tsx` | G8 | ☐ | |
-| BE-08 | Held WebSocket message: Text / Tree / Hex, hex and UTF-8 validation messages, Send and Drop | `components/Breakpoints/BreakpointEditor.tsx` | G8 | ☐ | |
-| BE-09 | Body editor: Text / Tree for JSON; "The text isn't valid JSON" | `components/Breakpoints/BreakpointEditor.tsx` | G8 | ☐ | |
-| BE-10 | JSON editor: virtualised editable tree, typed inline editors, rows tinted where they differ from the original, count of removed members | `components/JsonEditor/JsonEditor.tsx` | G8 | ☐ | |
-| BE-11 | JSON editor keys: ↑↓ move, ←→ collapse/expand, ↩ edit, F2 rename, ⌘↩ add after, ⌘D duplicate, ⌫ remove, ⌘Z / ⇧⌘Z / ⌘Y, Escape cancels | `components/JsonEditor/JsonEditor.tsx` | G8 | ☐ | |
-| BE-12 | JSON editor toolbar: Undo, Redo, Expand all, Collapse all | `components/JsonEditor/JsonEditor.tsx` | G8 | ☐ | |
-| BE-13 | JSON editor menu: edit value, Rename, change type ▸, Duplicate, Reset, Remove, Copy value, Copy JSON pointer; add-member menu by type | `components/JsonEditor/JsonEditor.tsx` | G8 | ☐ | |
-| BE-14 | JSON editor rejects a key already used in the object | `components/JsonEditor/JsonEditor.tsx` | G8 | ☐ | |
-| BE-15 | Name/value editor: changed rows tinted, removed rows struck through with Put back, repeated names removable only, framing headers locked; menu Copy name, Copy value | `components/Rewrite/KvEditor.tsx` | G8 | ☐ | |
-| BE-16 | Compose dialog: method, URL, headers (add, remove), body with content type (None, JSON, Form, Text, XML, HTML, JavaScript, GraphQL, custom), Apply rules switch, Send (⌘↩), error line | `components/Compose/ComposeDialog.tsx`, `lib/compose.ts` | G8 | ☐ | |
-| BE-17 | Edit & Replay: Compose titled "Edit & Replay", prefilled from the flow; a binary body is "sent as recorded" with Clear | `components/Compose/ComposeDialog.tsx` | G8 | ☐ | |
-| BE-18 | Compose body editor: search, history, indent with Tab | `components/Compose/CodeMirrorEditor.tsx` | G8 | ☐ | |
-| BE-19 | Sending records a new live flow marked Replay and selects it | `lib/actions.ts` `sendComposed` | G8 | ☐ | |
-| BE-20 | Replay sends the recorded request again as a new flow | `lib/actions.ts` `replayFlow` | G8 | ☐ | |
-| BE-21 | Replay in Order sends the selection one after another | `lib/actions.ts` `replaySelection` | G8 | ☐ | |
+| BE-01 | Breakpoint Editor window: the queue beside the selected item; "Nothing is paused." | `components/Breakpoints/BreakpointEditor.tsx` | G8 | ☑ | G8: `features/breakpoints/window.rs` (a native window: the queue beside the shown flow; "Nothing is paused."); it opens itself when something pauses and closes when the queue empties (`watch_queue`); `tests/editing.rs` `the_window_opens_when_something_pauses_and_closes_when_empty`; `docs/native/g8/breakpoints-empty-light.png` |
+| BE-02 | Queue item: phase pill, rule name, countdown m:ss or "no timeout" | `components/Breakpoints/BreakpointEditor.tsx` `QueueItem` | G8 | ☑ | G8: queue rows with phase pill, method pill or WebSocket direction, flow #, URL, rule and a 1 s countdown (`pm_view::breakpoints::countdown`, tested); `tests/render.rs` `editing_renders` |
+| BE-03 | Queue item menu: Copy URL, Copy method, Show flow #N, Open rule "<name>", Continue unmodified, Abort / Drop the message | `components/Breakpoints/BreakpointEditor.tsx` | G8 | ☑ | G8: `BreakpointsWindow::menu_for` from `pm_view::breakpoints::queue_menu`; `tests/editing.rs` `the_queue_menu_names_the_flow_and_rule`; live: dev remote `breakpointMenu` … `Continue unmodified` released a held message |
+| BE-04 | Paused request: method, URL, headers (add, remove), body | `components/Breakpoints/BreakpointEditor.tsx` | G8 | ☑ | G8: `breakpoints/form.rs` (method, URL, KvEditor headers, body); `tests/editing.rs` `the_request_form_sends_only_its_edits`; `docs/native/g8/breakpoint-request-tree-dark.png`, `breakpoint-headers-respond-dark.png` |
+| BE-05 | Paused response: Status, headers, body (size and note) | `components/Breakpoints/BreakpointEditor.tsx` | G8 | ☑ | G8: the response form (request line, Status, headers, body with size and note); `tests/editing.rs` `a_response_form_edits_the_status_and_responds`; `docs/native/g8/breakpoint-response-dark.png` |
+| BE-06 | Execute (with edits) and Abort | `components/Breakpoints/BreakpointEditor.tsx` | G8 | ☑ | G8: Execute sends only what changed (`HttpDraft::edits`, tested), Abort; live against `upstream`: a paused POST edited (URL, body as a tree) and executed, then its response edited (201, body) and executed: the client got `201` with the edited body |
+| BE-07 | Respond… shows "Answer the client with" status, headers, body, then Send response | `components/Breakpoints/BreakpointEditor.tsx` | G8 | ☑ | G8: Respond… (`Answer`, status checked); live: the client got `418` with the answer's body |
+| BE-08 | Held WebSocket message: Text / Tree / Hex, hex and UTF-8 validation messages, Send and Drop | `components/Breakpoints/BreakpointEditor.tsx` | G8 | ☑ | G8: `breakpoints/message.rs` over `pm_view::breakpoints::MessageDraft` (Text, Tree, Hex; "The bytes aren't UTF-8 text…", "That isn't hex…", tested); `tests/editing.rs` `a_held_message_is_edited_as_a_tree_text_or_hex`; live: a held `ws-client` message edited as a tree, sent from Hex, forwarded `Edited` and echoed edited; `docs/native/g8/websocket-message-tree-light.png`, `websocket-message-hex-dark.png` |
+| BE-09 | Body editor: Text / Tree for JSON; "The text isn't valid JSON" | `components/Breakpoints/BreakpointEditor.tsx` | G8 | ☑ | G8: `editing/body.rs` BodyEditor: Text (G4's code editor, language from the live Content-Type) or Tree for JSON with an original; "The text isn't valid JSON" |
+| BE-10 | JSON editor: virtualised editable tree, typed inline editors, rows tinted where they differ from the original, count of removed members | `components/JsonEditor/JsonEditor.tsx` | G8 | ☑ | G8: `pm_widgets::json_editor::JsonEditor` over `pm_view::json` (lossless ordered document with ids, `doc.test.ts` ported; editor model tests); rows tinted against the original, `−N` removed counts; `tests/render.rs` `editing_renders` |
+| BE-11 | JSON editor keys: ↑↓ move, ←→ collapse/expand, ↩ edit, F2 rename, ⌘↩ add after, ⌘D duplicate, ⌫ remove, ⌘Z / ⇧⌘Z / ⌘Y, Escape cancels | `components/JsonEditor/JsonEditor.tsx` | G8 | ☑ | G8: `JsonEditor::on_key_down` → `pm_view::json::editor::Key`; `pm_widgets` gpui tests `its_keys_add_duplicate_remove_rename_and_undo`, `edits_a_number_inline_and_keeps_escape` (Escape cancels and stays in the editor) |
+| BE-12 | JSON editor toolbar: Undo, Redo, Expand all, Collapse all | `components/JsonEditor/JsonEditor.tsx` | G8 | ☑ | G8: the JsonEditor toolbar (Undo, Redo disabled without history, Expand all, Collapse all, the keys hint) |
+| BE-13 | JSON editor menu: edit value, Rename, change type ▸, Duplicate, Reset, Remove, Copy value, Copy JSON pointer; add-member menu by type | `components/JsonEditor/JsonEditor.tsx` | G8 | ☑ | G8: `editing/menus.rs` `json_row` from `MenuSpec` (Edit value, Rename, Change type ▸, Add key/item ▸, Add after ▸, Duplicate, Reset to original, Remove, Copy value, Copy JSON pointer); `pm_widgets` gpui test `the_menu_actions_act_on_the_selected_row` |
+| BE-14 | JSON editor rejects a key already used in the object | `components/JsonEditor/JsonEditor.tsx` | G8 | ☑ | G8: `JsonEditorModel::commit` ("\"n\" is already a key here"); `pm_view::json::editor` test `edits_values_and_keys_inline_with_validation` |
+| BE-15 | Name/value editor: changed rows tinted, removed rows struck through with Put back, repeated names removable only, framing headers locked; menu Copy name, Copy value | `components/Rewrite/KvEditor.tsx` | G8 | ☑ | G8: `pm_widgets::kv_editor::KvEditor` over `pm_view::kv` (added/changed tints, removed rows struck through with Put back and their menu, framing headers locked, repeated names removable only; tested in both); used for the Breakpoint Editor's and Compose's headers; `docs/native/g8/breakpoint-headers-respond-dark.png` |
+| BE-16 | Compose dialog: method, URL, headers (add, remove), body with content type (None, JSON, Form, Text, XML, HTML, JavaScript, GraphQL, custom), Apply rules switch, Send (⌘↩), error line | `components/Compose/ComposeDialog.tsx`, `lib/compose.ts` | G8 | ☑ | G8: `features/compose.rs` (a native window): method with its picker, URL, KvEditor headers, body with the content-type picker (the eight types and a custom one), Apply rules, ⌘↩, error line; `tests/editing.rs` `compose_sends_with_cmd_enter`; `docs/native/g8/compose-light.png` |
+| BE-17 | Edit & Replay: Compose titled "Edit & Replay", prefilled from the flow; a binary body is "sent as recorded" with Clear | `components/Compose/ComposeDialog.tsx` | G8 | ☑ | G8: Edit & Replay titles the window and starts from `request_spec_in` (editable); a binary body shows "Binary body · size · sent as recorded" with Replace with text; `docs/native/g8/compose-dark.png` |
+| BE-18 | Compose body editor: search, history, indent with Tab | `components/Compose/CodeMirrorEditor.tsx` | G8 | ☑ | G8: Compose's body is G4's CodeEditor (gpui-kit's editor: ⌘F search, undo history, Tab indents) |
+| BE-19 | Sending records a new live flow marked Replay and selects it | `lib/actions.ts` `sendComposed` | G8 | ☑ | G8: `mutations::send_request` (`Engine::send`, origin User) then `replay::show_live_flow` (live tab, the new flow selected); live: dev remote `composeSend` answered with the new flow, selected |
+| BE-20 | Replay sends the recorded request again as a new flow | `lib/actions.ts` `replayFlow` | G8 | ☑ | G8: `mutations::replay` (`Engine::replay`); live: `replay` recorded flow 3 from flow 2 and selected it |
+| BE-21 | Replay in Order sends the selection one after another | `lib/actions.ts` `replaySelection` | G8 | ☑ | G8: `mutations::replay_in_order` (`selected_ids`, tunnels and WebSockets skipped, failures counted); live: `replaySelection` over two flows |
 
 ## Rewrite
 
@@ -685,7 +685,7 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | DV-06 | Dev remote: `viewer` | `dev/remote.ts` | G4 | ☑ | G4: `dev/mod.rs` `viewer` (also `loadAll`, `highlightAnyway`, `body`, `contextMenu: "body:<part>"`) |
 | DV-07 | Dev remote: `wsSend`, `wsClose` | `dev/remote.ts` | G6 | ☑ | G6: `wsSend`, `wsClose`, plus `streamSelect`, `streamDirection`, `streamSearch`, `streamViewer`, `wsOriginal`, `wsCompose`, `wsComposeSend`, `stream`, `tableShare`; `contextMenu` `stream:<row>` and `payload` (`dev/mod.rs`) |
 | DV-08 | Dev remote: `rules`, `rulesEditor`, `preset`, `saveRule`, `testRule`, `deleteRule`, `throttle`, `noCache`, `noCookies` | `dev/remote.ts` | G7 | ☑ | G7: `dev/rules.rs` `rules`, `openRule`, `newRule`, `preset`, `ruleEdit`, `saveRule`, `testRule`, `deleteRule`, `throttle`, `noCache`, `noCookies` (also `breakpointTimeout`, `rulesMenu`, `rulesClick`, `rulesDrag`, `rulesSelect`, `rulesRename`, `rulesScreenshot`) |
-| DV-09 | Dev remote: `replay`, `editReplay`, `compose`, `composeSend`, `breakpoints`, `breakpointAction` | `dev/remote.ts` | G8 | ☐ | |
+| DV-09 | Dev remote: `replay`, `editReplay`, `compose`, `composeSend`, `breakpoints`, `breakpointAction` | `dev/remote.ts` | G8 | ☑ | G8: `dev/editing.rs`: `replay`, `editReplay`, `replaySelection`, `compose`, `composeEdit`, `composeSend`, `composeScreenshot`, `breakpoints`, `breakpoint`, `breakpointSelect`, `breakpointEdit`, `breakpointKeys`, `breakpointType`, `breakpointAction` (execute, abort, respond), `breakpointMenu`, `breakpointScreenshot` |
 | DV-10 | Dev remote: `rewrite`, `rewriteEdit` | `dev/remote.ts` | G9 | ☐ | |
 | DV-11 | Dev remote: `scripts`, `scriptTemplate`, `scriptSource`, `saveScript`, `testScript` | `dev/remote.ts` | G10 | ☐ | |
 | DV-12 | Dev remote: `label`, `comment`, `headerColumns`, `compare`, `repeat`, `code`, `deleteSelection` | `dev/remote.ts` | G11 | ☐ | |
@@ -696,7 +696,7 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | DV-17 | `VITE_PM_FILTER`: start with search text | `dev/harness.ts` | G2 | ☑ | G2: `PROXYMATE_DEV_FILTER` (`dev_env::value`, `Workspace::new`) |
 | DV-18 | `VITE_PM_RESPONSE_TAB`: open the response pane on a tab | `dev/harness.ts` | G3 | ☑ | G3: `PROXYMATE_DEV_RESPONSE_TAB` (`features/inspector/mod.rs`) |
 | DV-19 | `VITE_PM_OPEN=rules` | `dev/harness.ts` | G7 | ☑ | G7: `PROXYMATE_DEV_OPEN=rules` (`features::rules::open_from_env`) |
-| DV-20 | `VITE_PM_OPEN=breakpoints` | `dev/harness.ts` | G8 | ☐ | |
+| DV-20 | `VITE_PM_OPEN=breakpoints` | `dev/harness.ts` | G8 | ☑ | G8: `PROXYMATE_DEV_OPEN=breakpoints` (and `compose`); checked live |
 | DV-21 | `VITE_PM_OPEN=scripts` | `dev/harness.ts` | G10 | ☐ | |
 | DV-22 | `VITE_PM_OPEN=settings:<page>` | `dev/harness.ts` | G12 | ☑ | G12: `PROXYMATE_DEV_OPEN=settings[:<page>]` (`features::settings::open_from_env`) |
 | DV-23 | `VITE_PM_OPEN=cert-wizard` and `device-setup:<tab>` | `dev/harness.ts` | G13 | ☐ | |
@@ -717,12 +717,12 @@ Rows per owning phase. G14 also audits every row; its own row is the browser-onl
 | G5 | 10 | 0 |
 | G6 | 19 | 19 |
 | G7 | 60 | 60 |
-| G8 | 32 | 0 |
+| G8 | 31 | 31 |
 | G9 | 19 | 0 |
 | G10 | 23 | 0 |
-| G11 | 36 | 0 |
+| G11 | 37 | 0 |
 | G12 | 53 | 53 |
 | G13 | 29 | 0 |
 | G14 | 1 | 0 |
 | G15 | 5 | 5 |
-| **Total** | **524** | **340** |
+| **Total** | **524** | **402** |
