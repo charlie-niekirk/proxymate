@@ -7,8 +7,9 @@
 //! menus and Raw tab (G3, with [`sample`] fixtures); `stream.ts` and the
 //! WebSocket and SSE panels' logic (G6); `rules.ts` (G7); `json/doc.ts`,
 //! the JSON and name/value editors, `compose.ts` and the Breakpoint Editor
-//! (G8); `rewrite/*` (G9), `compare.ts` (G11), `devices.ts` and the
-//! toolbar's integration surfaces (G13) and the body helpers (G4, G5).
+//! (G8); `rewrite/*` (G9), `compare.ts` (G11); `components/Settings/*` and
+//! `lib/mcp.ts` (G12); `devices.ts` and the toolbar's integration surfaces
+//! (G13); and the body helpers (G4, G5).
 
 pub mod body;
 pub mod breakpoints;
@@ -30,5 +31,6 @@ pub mod row_cache;
 pub mod rules;
 pub mod sample;
 pub mod selection;
+pub mod settings;
 pub mod stream;
 pub mod tls;

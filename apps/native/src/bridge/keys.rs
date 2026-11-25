@@ -332,7 +332,7 @@ pub fn rules_caches(cx: &mut App) -> RulesCaches {
     if let Some(caches) = cx.try_global::<RulesCaches>() {
         return caches.clone();
     }
-    let engine = cx.try_global::<Bridge>().map(|b| b.engine.clone());
+    let engine = settings_engine(cx);
     let settings = engine
         .clone()
         .map(|engine| Arc::new(move |_: &()| Ok(engine.rule_settings())) as Fetcher<(), pm_model::RuleSettings>);
@@ -498,4 +498,93 @@ pub fn editing_caches(cx: &mut App) -> EditingCaches {
     };
     cx.set_global(caches.clone());
     caches
+}
+
+// ---- Settings (G12) ----
+
+/// `mcpAuditKey`: the newest `limit` calls of the audit log.
+pub type McpAuditCache = Resource<u32, Arc<pm_model::McpAuditPage>>;
+
+/// One cache per settings row or list the Settings window reads (the
+/// `*SettingsKey`s of `lib/query.ts`). Each holds one value under `()`,
+/// except the audit log's pages. The rule settings and the mock library
+/// are G7's ([`rules_caches`]); LAN access and the system proxy are G13's
+/// ([`integration_caches`]); the SSL lists are the workspace's; the
+/// storage status, LAN devices and MCP status are pushes (`bridge`).
+#[derive(Clone)]
+pub struct SettingsCaches {
+    pub proxy: Entity<Resource<(), pm_model::ProxySettings>>,
+    pub network: Entity<Resource<(), pm_model::NetworkSettings>>,
+    pub storage: Entity<Resource<(), pm_model::StorageSettings>>,
+    pub recording: Entity<Resource<(), pm_model::RecordingSettings>>,
+    pub autosave: Entity<Resource<(), pm_model::AutoSaveSettings>>,
+    pub proto_schemas: Entity<Resource<(), Vec<pm_model::ProtoSchema>>>,
+    pub proto_mappings: Entity<Resource<(), Vec<pm_model::ProtoMapping>>>,
+    pub openapi_specs: Entity<Resource<(), Vec<pm_model::OpenApiSpec>>>,
+    pub scripts: Entity<Resource<(), pm_model::ScriptSettings>>,
+    pub mcp_token: Entity<Resource<(), String>>,
+    pub mcp_audit: Entity<McpAuditCache>,
+    pub updates: Entity<Resource<(), pm_model::UpdateSettings>>,
+    pub terminal_env: Entity<Resource<(), String>>,
+}
+
+impl Global for SettingsCaches {}
+
+/// The engine the settings caches read: the bridge's, else the
+/// workspace's (tests drive the window against their own engine).
+fn settings_engine(cx: &App) -> Option<Arc<pm_core::Engine>> {
+    cx.try_global::<Bridge>()
+        .map(|b| b.engine.clone())
+        .or_else(|| crate::workspace::Workspace::global(cx).and_then(|ws| ws.read(cx).engine().cloned()))
+}
+
+/// A cache of one value read by `read`.
+fn single<V: Clone + Send + 'static>(
+    engine: &Option<Arc<pm_core::Engine>>,
+    read: impl Fn(&pm_core::Engine) -> Result<V, String> + Send + Sync + 'static,
+    cx: &mut App,
+) -> Entity<Resource<(), V>> {
+    let fetch = engine
+        .clone()
+        .map(|engine| Arc::new(move |_: &()| read(&engine)) as Fetcher<(), V>);
+    cx.new(|_| Resource::new(fetch))
+}
+
+/// The Settings window's caches, made on first use.
+pub fn settings_caches(cx: &mut App) -> SettingsCaches {
+    if let Some(caches) = cx.try_global::<SettingsCaches>() {
+        return caches.clone();
+    }
+    let e = settings_engine(cx);
+    let audit = e.clone().map(|engine| {
+        Arc::new(move |limit: &u32| engine.mcp_audit(None, *limit).map(Arc::new).map_err(|e| e.to_string()))
+            as Fetcher<u32, Arc<pm_model::McpAuditPage>>
+    });
+    let caches = SettingsCaches {
+        proxy: single(&e, |e| Ok(e.proxy_settings()), cx),
+        network: single(&e, |e| Ok(e.network_settings()), cx),
+        storage: single(&e, |e| Ok(e.storage_settings()), cx),
+        recording: single(&e, |e| Ok(e.recording_settings()), cx),
+        autosave: single(&e, |e| Ok(e.autosave_settings()), cx),
+        proto_schemas: single(&e, |e| Ok(e.proto_schemas()), cx),
+        proto_mappings: single(&e, |e| Ok(e.proto_mappings()), cx),
+        openapi_specs: single(&e, |e| Ok(e.openapi_specs()), cx),
+        scripts: single(&e, |e| Ok(e.script_settings()), cx),
+        mcp_token: single(&e, |e| Ok(e.mcp_token()), cx),
+        mcp_audit: cx.new(|_| Resource::new(audit)),
+        updates: single(&e, |e| Ok(e.update_settings()), cx),
+        terminal_env: single(&e, |e| Ok(e.terminal_env()), cx),
+    };
+    cx.set_global(caches.clone());
+    caches
+}
+
+/// The proxy moved (a new port, LAN access on or off): what shows its
+/// address goes stale.
+pub fn proxy_moved(cx: &mut App) {
+    let c = settings_caches(cx);
+    c.terminal_env.update(cx, |c, cx| c.invalidate(|_, _| true, cx));
+    let i = integration_caches(cx);
+    i.access.update(cx, |c, cx| c.invalidate(|_, _| true, cx));
+    i.system_proxy.update(cx, |c, cx| c.invalidate(|_, _| true, cx));
 }

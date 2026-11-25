@@ -1,9 +1,10 @@
 //! The shell chrome's actions (toolbar, sidebar, filter bar, footer):
 //! the sidebar's scopes and SSL toggles, and the targets that belong to
-//! later phases (Settings: G12; the inspector's Comment…: G11, Rewrite…:
-//! G9), which say so in a toast until those phases replace the handlers.
-//! G7's `features::rules` handles [`OpenRule`]; G8's `features::compose`
-//! handles [`Compose`]; G13's `features::integration` handles
+//! later phases (the inspector's Comment…: G11, Rewrite…: G9), which say
+//! so in a toast until those phases replace the handlers. G7's
+//! `features::rules` handles [`OpenRule`]; G8's `features::compose`
+//! handles [`Compose`]; G12's `features::settings` handles
+//! [`OpenSettings`]; G13's `features::integration` handles
 //! [`OpenDeviceSetup`] and [`OpenCertWizard`].
 
 use gpui_kit::{App, SharedString};
@@ -53,7 +54,7 @@ pub struct SetAppSslExcluded {
     pub excluded: bool,
 }
 
-/// Settings › `page` (G12 builds the window).
+/// Settings › `page` (`features::settings`; empty: as it was).
 #[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
 #[action(namespace = proxymate, no_json)]
 pub struct OpenSettings {
@@ -117,24 +118,10 @@ pub fn register(cx: &mut App) {
         let (app, excluded) = (a.app.to_string(), a.excluded);
         with_workspace(cx, |w, cx| w.set_app_ssl_excluded(app, excluded, cx));
     });
-    cx.on_action(|a: &OpenSettings, cx| {
-        info(
-            &format!("Settings › {}", page_title(&a.page)),
-            Some("The Settings window arrives in G12.".into()),
-            cx,
-        );
-    });
     cx.on_action(|_: &OpenComment, cx| {
         info("Comment", Some("The Comment dialog arrives in G11.".into()), cx);
     });
     cx.on_action(|_: &RewriteFlow, cx| {
         info("Rewrite", Some("The Rewrite dialog arrives in G9.".into()), cx);
     });
-}
-
-fn page_title(page: &str) -> &str {
-    pm_view::commands::SETTINGS_PAGES
-        .iter()
-        .find(|(id, _)| *id == page)
-        .map_or(page, |(_, title)| title)
 }

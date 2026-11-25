@@ -2,7 +2,7 @@
 //! each opened session, HAR or Charles file. Shown only while a document is
 //! open; the table (and G3's inspector) follow the active tab. A tab's
 //! menu copies its file's name or path, saves or exports it (switching to
-//! it first) and closes it.
+//! it first), mocks from it or from a file (G12) and closes it.
 
 use gpui_kit::assets::IconName;
 use gpui_kit::base::TestSupportExt as _;
@@ -14,6 +14,7 @@ use pm_theme::Tokens;
 
 use crate::features::context_menu::Menu;
 use crate::features::documents::{CloseDocument, ExportStore, SaveStore, ShowStore};
+use crate::features::settings::{MockFromFile, MockFromStore};
 use crate::workspace::Workspace;
 
 pub const TABS_HEIGHT: f32 = 28.;
@@ -29,6 +30,8 @@ pub fn tab_menu(store: StoreId, doc: Option<&DocumentInfo>) -> Menu {
     }
     menu.item("Save session…", SaveStore { store })
         .item("Export HAR…", ExportStore { store })
+        .item("Mock from session…", MockFromStore { store })
+        .item("Mock from a file…", MockFromFile)
         .when(store != LIVE_STORE, |m| {
             m.separator().item("Close", CloseDocument { store })
         })
@@ -196,11 +199,21 @@ mod tests {
                 "—",
                 "Save session…",
                 "Export HAR…",
+                "Mock from session…",
+                "Mock from a file…",
                 "—",
                 "Close"
             ]
         );
         assert_eq!(menu.copy_text("Copy name"), Some("capture.chlsj"));
-        assert_eq!(tab_menu(LIVE_STORE, None).labels(), ["Save session…", "Export HAR…"]);
+        assert_eq!(
+            tab_menu(LIVE_STORE, None).labels(),
+            [
+                "Save session…",
+                "Export HAR…",
+                "Mock from session…",
+                "Mock from a file…"
+            ]
+        );
     }
 }

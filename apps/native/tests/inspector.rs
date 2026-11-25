@@ -316,10 +316,13 @@ fn rule_badges_and_the_failure_banner(cx: &mut TestAppContext) {
         Some("The server didn't answer in time\nconnecting to api.example.com:443 timed out")
     );
     assert!(cx.update(|window, _| window.try_find("failure-banner").is_some()));
-    // The fix opens Settings › Advanced (G12's window says so until then).
+    // The fix opens Settings › Advanced (G12).
     cx.update(|window, cx| window.click("fix-timeouts", cx));
     cx.run_until_parked();
-    assert_eq!(last_toast(cx).0, "Settings › Advanced");
+    let page = cx.update(|_, cx| {
+        proxymate_native::features::settings::SettingsWindow::global(cx).map(|(_, w)| w.read(cx).page())
+    });
+    assert_eq!(page, Some("advanced"));
     // A badge's click opens the rule in the Rules window (G7).
     cx.update(|window, cx| window.click(("rule-badge", 0usize), cx));
     cx.run_until_parked();

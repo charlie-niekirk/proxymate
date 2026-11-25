@@ -23,6 +23,7 @@ pub mod integration;
 pub mod navigate;
 pub mod replay;
 pub mod rules;
+pub mod settings;
 
 pub fn register(cx: &mut App) {
     clipboard::register(cx);
@@ -36,6 +37,7 @@ pub fn register(cx: &mut App) {
     integration::register(cx);
     navigate::register(cx);
     rules::register(cx);
+    settings::register(cx);
     breakpoints::register(cx);
     compose::register(cx);
     replay::register(cx);
