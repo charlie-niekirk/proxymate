@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use gpui_kit::{App, Entity, Global};
 use pm_core::Engine;
-use pm_model::{BreakpointInfo, RuleBook, SidebarSnapshot, StorageStatus};
+use pm_model::{BreakpointInfo, DevicesSnapshot, McpStatus, RuleBook, SidebarSnapshot, StorageStatus};
 
 use stream::Latest;
 
@@ -61,6 +61,13 @@ impl Bridge {
     pub fn runtime(cx: &App) -> tokio::runtime::Handle {
         Bridge::global(cx).runtime.handle().clone()
     }
+
+    /// The engine and its runtime, for the engine's async methods (trust,
+    /// simctl, adb); `None` without a bridge (tests, offscreen renders).
+    pub fn try_async(cx: &App) -> Option<(Arc<Engine>, tokio::runtime::Handle)> {
+        cx.try_global::<Bridge>()
+            .map(|b| (b.engine.clone(), b.runtime.handle().clone()))
+    }
 }
 
 /// The single-slot streams every window shares, subscribed on first use.
@@ -70,6 +77,8 @@ pub struct Streams {
     sidebar: Option<Entity<Latest<SidebarSnapshot>>>,
     rules: Option<Entity<Latest<RuleBook>>>,
     breakpoints: Option<Entity<Latest<Vec<BreakpointInfo>>>>,
+    devices: Option<Entity<Latest<DevicesSnapshot>>>,
+    mcp: Option<Entity<Latest<McpStatus>>>,
 }
 
 impl Global for Streams {}
@@ -124,5 +133,34 @@ pub fn breakpoints(cx: &mut App) -> Entity<Latest<Vec<BreakpointInfo>>> {
         None => stream::latest(cx, |_| {}),
     };
     cx.global_mut::<Streams>().breakpoints = Some(entity.clone());
+    entity
+}
+
+/// LAN clients (pending prompts first) and the Simulator's and emulator's
+/// activity (G13), pushed whenever they change. Without an engine, as
+/// [`rule_book`]: tests and the dev remote set its value.
+pub fn devices(cx: &mut App) -> Entity<Latest<DevicesSnapshot>> {
+    if let Some(entity) = cx.default_global::<Streams>().devices.clone() {
+        return entity;
+    }
+    let entity = match cx.try_global::<Bridge>().map(|b| b.engine.clone()) {
+        Some(engine) => stream::latest(cx, move |sink| engine.subscribe_devices(sink)),
+        None => stream::latest(cx, |_| {}),
+    };
+    cx.global_mut::<Streams>().devices = Some(entity.clone());
+    entity
+}
+
+/// The MCP server's status and connected agents (the toolbar's indicator,
+/// G13), pushed whenever it changes. Without an engine, as [`rule_book`].
+pub fn mcp(cx: &mut App) -> Entity<Latest<McpStatus>> {
+    if let Some(entity) = cx.default_global::<Streams>().mcp.clone() {
+        return entity;
+    }
+    let entity = match cx.try_global::<Bridge>().map(|b| b.engine.clone()) {
+        Some(engine) => stream::latest(cx, move |sink| engine.subscribe_mcp(sink)),
+        None => stream::latest(cx, |_| {}),
+    };
+    cx.global_mut::<Streams>().mcp = Some(entity.clone());
     entity
 }

@@ -1,9 +1,10 @@
 //! The shell chrome's actions (toolbar, sidebar, filter bar, footer):
 //! the sidebar's scopes and SSL toggles, and the targets that belong to
-//! later phases (Settings: G12; Device setup and the certificate wizard:
-//! G13; the inspector's Comment…: G11, Rewrite…: G9), which say so in a
-//! toast until those phases replace the handlers. G7's `features::rules`
-//! handles [`OpenRule`]; G8's `features::compose` handles [`Compose`].
+//! later phases (Settings: G12; the inspector's Comment…: G11, Rewrite…:
+//! G9), which say so in a toast until those phases replace the handlers.
+//! G7's `features::rules` handles [`OpenRule`]; G8's `features::compose`
+//! handles [`Compose`]; G13's `features::integration` handles
+//! [`OpenDeviceSetup`] and [`OpenCertWizard`].
 
 use gpui_kit::{App, SharedString};
 
@@ -120,16 +121,6 @@ pub fn register(cx: &mut App) {
         info(
             &format!("Settings › {}", page_title(&a.page)),
             Some("The Settings window arrives in G12.".into()),
-            cx,
-        );
-    });
-    cx.on_action(|_: &OpenDeviceSetup, cx| {
-        info("Device setup", Some("Device setup arrives in G13.".into()), cx);
-    });
-    cx.on_action(|_: &OpenCertWizard, cx| {
-        info(
-            "Certificate wizard",
-            Some("The certificate wizard arrives in G13.".into()),
             cx,
         );
     });

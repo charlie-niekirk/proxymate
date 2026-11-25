@@ -30,6 +30,7 @@ pub fn run(data_dir: Option<PathBuf>, lock: Option<Lock>) {
             install_quit(data_dir, cx);
             crate::shell::open_main_window(cx);
             crate::features::rules::open_from_env(cx);
+            crate::features::integration::open_from_env(cx);
             crate::features::breakpoints::open_from_env(cx);
             crate::features::compose::open_from_env(cx);
             #[cfg(feature = "dev-harness")]

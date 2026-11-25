@@ -95,6 +95,15 @@
 //!   (answers with the sent flow, now selected) and `{"composeScreenshot":
 //!   "/abs/x.png"}`; Compose verbs answer with its draft.
 //!
+//! - macOS integration (G13, `dev/integration.rs`): `{"open": "cert-wizard"
+//!   | "device-setup:<tab>" | "intercept" | "system-proxy" | "certificate"}`,
+//!   `{"close": true}`, `{"deviceTab": "android"}`, `{"intercept": "chrome"}`
+//!   (a real launch: the user's OK only), `{"neverRecord": "example.com"}`,
+//!   `{"injectDevices": <DevicesSnapshot>}` (a waiting LAN device) and
+//!   `{"integration": true}`; `click` takes the sheet's and dialogs'
+//!   controls (`simulator-install`, `lan-access`, `install-ca`, …) and
+//!   `contextMenu` takes `integration:<name>`.
+//!
 //! Every phase adds the verbs its surfaces need (see `docs/PLAN.md`).
 
 use std::io::{BufRead, BufReader, Read, Write};
@@ -109,6 +118,7 @@ use serde_json::{Value, json};
 use crate::prefs::Appearance;
 
 mod editing;
+mod integration;
 mod rules;
 pub mod zoo;
 
@@ -238,6 +248,9 @@ async fn run(command: Value, cx: &mut AsyncApp) -> Value {
     if let Some(answer) = rules::command(&command, cx).await {
         return answer;
     }
+    if let Some(answer) = integration::command(&command, cx).await {
+        return answer;
+    }
     if let Some(answer) = shell_command(&command, window, cx).await {
         return answer;
     }
@@ -265,7 +278,7 @@ async fn run(command: Value, cx: &mut AsyncApp) -> Value {
         let offscreen = command.get("offscreen").and_then(Value::as_bool).unwrap_or(false);
         return screenshot(window, PathBuf::from(path), offscreen, cx).await;
     }
-    json!({"error": "unknown command: try theme, screenshot, click, select, selectIds, selectAll, scrollTo, headerColumns, filter, search, protocol, content, scope, keys, palette, command, store, openDocument, closeDocument, saveSession, exportHar, recording, clear, contextMenu, sidebarFilter, workspace, autoSelect, table, requestTab, responseTab, focus, curl, inspector, streamSelect, streamDirection, streamSearch, streamViewer, wsOriginal, wsCompose, wsComposeSend, stream, wsSend, wsClose, rules, openRule, newRule, preset, ruleEdit, saveRule, testRule, deleteRule, throttle, noCache, noCookies, breakpointTimeout, rulesMenu, rulesClick, rulesDrag, rulesSelect, rulesRename, rulesScreenshot, viewer, loadAll, highlightAnyway, body, breakpoints, breakpoint, breakpointSelect, breakpointEdit, breakpointKeys, breakpointType, breakpointAction, breakpointMenu, breakpointScreenshot, replay, editReplay, replaySelection, compose, composeEdit, composeSend or composeScreenshot"})
+    json!({"error": "unknown command: try theme, screenshot, click, select, selectIds, selectAll, scrollTo, headerColumns, filter, search, protocol, content, scope, keys, palette, command, store, openDocument, closeDocument, saveSession, exportHar, recording, clear, contextMenu, sidebarFilter, workspace, autoSelect, table, requestTab, responseTab, focus, curl, inspector, streamSelect, streamDirection, streamSearch, streamViewer, wsOriginal, wsCompose, wsComposeSend, stream, wsSend, wsClose, rules, openRule, newRule, preset, ruleEdit, saveRule, testRule, deleteRule, throttle, noCache, noCookies, breakpointTimeout, rulesMenu, rulesClick, rulesDrag, rulesSelect, rulesRename, rulesScreenshot, viewer, loadAll, highlightAnyway, body, breakpoints, breakpoint, breakpointSelect, breakpointEdit, breakpointKeys, breakpointType, breakpointAction, breakpointMenu, breakpointScreenshot, replay, editReplay, replaySelection, compose, composeEdit, composeSend, composeScreenshot, open, close, deviceTab, intercept, neverRecord, injectDevices or integration"})
 }
 
 pub(crate) async fn screenshot(window: AnyWindowHandle, path: PathBuf, offscreen: bool, cx: &mut AsyncApp) -> Value {
@@ -836,6 +849,7 @@ async fn shell_command(command: &Value, window: AnyWindowHandle, cx: &mut AsyncA
                     Some(("sidebar", key)) => shell::sidebar::menu_for(key, cx),
                     Some(("row", rest)) => row_menu(rest, cx),
                     Some(("body", part)) => body_menu(part, window, cx),
+                    Some(("integration", rest)) => crate::features::integration::menu_for(rest, cx),
                     _ => inspector_menu(name, window, cx),
                 }
                 .ok_or_else(|| format!("no menu {name:?} now"))?;

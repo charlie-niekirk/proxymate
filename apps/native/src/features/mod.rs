@@ -19,6 +19,7 @@ pub mod editing;
 pub mod flow_menu;
 pub mod flow_table;
 pub mod inspector;
+pub mod integration;
 pub mod navigate;
 pub mod replay;
 pub mod rules;
@@ -32,6 +33,7 @@ pub fn register(cx: &mut App) {
     documents::register(cx);
     flow_table::register(cx);
     inspector::register(cx);
+    integration::register(cx);
     navigate::register(cx);
     rules::register(cx);
     breakpoints::register(cx);

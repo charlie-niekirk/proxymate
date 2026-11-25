@@ -66,18 +66,18 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | TB-08 | Pill menu: Copy reverse proxy <addr> → <target>, one per reverse listener | `components/Toolbar.tsx` `ListeningStatus` | G2 | ☑ | G2: `toolbar::tests::the_pill_menu_copies_every_address` (reverse TLS listener) |
 | TB-09 | Pill menu: Copy terminal environment; Copy error when the proxy failed | `components/Toolbar.tsx` `ListeningStatus` | G2 | ☑ | G2: `toolbar::listening_menu` (terminal environment, error); `toolbar::tests::a_failed_proxy_offers_its_error` |
 | TB-10 | Pill menu: Device setup…, Proxy settings…, Network settings… | `components/Toolbar.tsx` `ListeningStatus` | G2 | ☑ | G2: the items are there (`toolbar::listening_menu`); their windows arrive with G12 and G13, which replace the handlers |
-| TB-11 | "N devices waiting" button for LAN devices whose Allow prompt was dismissed; click reopens the prompt | `components/Toolbar.tsx` `WaitingDevices` | G13 | ☐ | |
-| TB-12 | Intercept button (crosshair) with the count of running intercepted apps, tooltip "Intercept: a terminal or browser that goes through Proxymate" | `components/InterceptMenu.tsx` | G13 | ☐ | |
+| TB-11 | "N devices waiting" button for LAN devices whose Allow prompt was dismissed; click reopens the prompt | `components/Toolbar.tsx` `WaitingDevices` | G13 | ☑ | G13: `prompt::WaitingDevices` (left of Intercept: no centre slot beside the pill); `tests/integration.rs` dismisses two prompts with Escape, sees it, clicks it and is asked again; `tests/render_integration.rs` `toolbar-tools` |
+| TB-12 | Intercept button (crosshair) with the count of running intercepted apps, tooltip "Intercept: a terminal or browser that goes through Proxymate" | `components/InterceptMenu.tsx` | G13 | ☑ | G13: `intercept::InterceptTool` (count of running launches, the tooltip); `docs/native/g13/``intercept-running-dark.png` |
 | TB-13 | Rules button, tooltip "Rules: Map Local, rewrites, breakpoints, Map Remote, block" | `components/Toolbar.tsx` `RulesButton` | G7 | ☑ | G7: `features/rules/tools.rs` `RulesButton` (`RULES_TIP`); `docs/native/g7/toolbar-tools-dark.png` |
 | TB-14 | Scripts button, tooltip "Scripts: decode bodies, rewrite and mock with JavaScript" | `components/Toolbar.tsx` `ScriptsButton` | G10 | ☐ | |
 | TB-15 | No Caching toggle: icon only when off, "No Caching" label and warning colour when on, tooltips for both states | `components/InterceptMenu.tsx` `NoiseToggles` | G7 | ☑ | G7: `tools.rs` `toggle` (icon alone off; label in `--s-4xx` on; both tooltips); `tests/rules.rs` `the_toolbar_tools_flip_the_builtin_rules`; `docs/native/g7/toolbar-tools-dark.png` |
 | TB-16 | Block Cookies toggle: same pattern as No Caching | `components/InterceptMenu.tsx` `NoiseToggles` | G7 | ☑ | G7: `tools.rs` `toggle` for Block Cookies; `tests/rules.rs` `the_toolbar_tools_flip_the_builtin_rules` |
 | TB-17 | Network conditions (gauge) button: shows the active throttle preset's name in warning colour | `components/Rules/ThrottleMenu.tsx` | G7 | ☑ | G7: `tools.rs` network conditions button (the active preset's name in `--s-4xx`); `tests/rules.rs` `the_toolbar_tools_flip_the_builtin_rules`; `docs/native/g7/toolbar-tools-dark.png` |
 | TB-18 | Breakpoints badge: paused count in a pill, tooltip "N paused at a breakpoint" or "Breakpoints · none paused"; opens the Breakpoint Editor | `components/Breakpoints/BreakpointBadge.tsx` | G7 | ☑ | G7: `tools.rs` breakpoint badge (count pill in `--s-paused`, `ToolState::breakpoints_tip`), from `bridge::breakpoints`; `tests/rules.rs` `the_toolbar_tools_flip_the_builtin_rules`; a request held live in `docs/native/g7/breakpoint-queued-dark.png`. It dispatches `OpenBreakpoints`, which G8's Breakpoint Editor handles |
-| TB-19 | "Certificate not trusted" warning button while listening and the CA isn't verified (keychain supported); opens the certificate wizard | `components/Toolbar.tsx` `TrustWarning` | G13 | ☐ | |
-| TB-20 | System proxy (globe) button, green while on | `components/SystemProxyMenu.tsx` | G13 | ☐ | |
-| TB-21 | Certificate (shield) button: alert shield while untrusted | `components/CertificateMenu.tsx` | G13 | ☐ | |
-| TB-22 | MCP indicator: robot icon, connected-client count, colour by state (off, error, serving, clients), tooltip per state; opens Settings › MCP | `components/Settings/McpIndicator.tsx` | G13 | ☐ | |
+| TB-19 | "Certificate not trusted" warning button while listening and the CA isn't verified (keychain supported); opens the certificate wizard | `components/Toolbar.tsx` `TrustWarning` | G13 | ☑ | G13: `cert::TrustWarning` (`pm_view::integration::trust_warning`); `tests/integration.rs` clicks it into the wizard and sees it go once trusted; live: gone after Install & Trust (`docs/native/g13/``wizard-trusted-dark.png`) |
+| TB-20 | System proxy (globe) button, green while on | `components/SystemProxyMenu.tsx` | G13 | ☑ | G13: `sysproxy::SystemProxyTool` (green while on); live `docs/native/g13/``system-proxy-on-dark.png` |
+| TB-21 | Certificate (shield) button: alert shield while untrusted | `components/CertificateMenu.tsx` | G13 | ☑ | G13: `cert::CertificateTool` (alert shield while untrusted, green when verified); `tests/render_integration.rs` `toolbar-tools`, live `docs/native/g13/``wizard-trusted-dark.png` |
+| TB-22 | MCP indicator: robot icon, connected-client count, colour by state (off, error, serving, clients), tooltip per state; opens Settings › MCP | `components/Settings/McpIndicator.tsx` | G13 | ☑ | G13: `mcp::McpIndicator` (`pm_view::integration::mcp_tone`, `mcp_tip`, tests per state); `tests/integration.rs` counts agents; opens Settings › MCP (G12's page) |
 | TB-23 | Settings (gear) button, tooltip "Settings · ⌘," | `components/Toolbar.tsx` `SettingsButton` | G12 | ☐ | |
 
 ## Sidebar
@@ -260,7 +260,7 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | CP-21 | "Clear all flows" ⌘⌫ (live capture only) | `lib/commands.ts` | G2 | ☑ | G2: `features/capture.rs` (live only); `tests/shell.rs` `cmd_backspace_in_a_text_field_edits_the_text` |
 | CP-22 | "Start recording" / "Stop recording" ⌘E (one key, whichever applies) | `lib/commands.ts` | G2 | ☑ | G2: `features/capture.rs`; `commands::tests::only_registered_commands_that_apply_are_listed_and_keys_pick_the_one_that_applies`, `tests/shell.rs` `the_palette_opens_with_cmd_k_and_runs_a_command` |
 | CP-23 | "Toggle Auto Select" | `lib/commands.ts` | G1 | ☑ | G2: `features/capture.rs` (`auto-select`) in the palette |
-| CP-24 | "Intercept: New Terminal window", "New iTerm window", "Launch Google Chrome", "Launch Microsoft Edge", "Launch Brave Browser", "Launch Arc", "Launch Firefox" (hidden when not installed) | `lib/commands.ts`, `lib/capture.ts` | G13 | ☐ | |
+| CP-24 | "Intercept: New Terminal window", "New iTerm window", "Launch Google Chrome", "Launch Microsoft Edge", "Launch Brave Browser", "Launch Arc", "Launch Firefox" (hidden when not installed) | `lib/commands.ts`, `lib/capture.ts` | G13 | ☑ | G13: `intercept-<id>` handlers, enabled only when installed (unknown counts as installed); `tests/integration.rs` runs `intercept-terminal` and checks Arc is hidden |
 | CP-25 | "Toggle No Caching" | `lib/commands.ts` | G7 | ☑ | G7: `features/rules/mod.rs` `commands::add("no-cache")`; live `{"command": "no-cache"}` (PR) |
 | CP-26 | "Toggle Block Cookies" | `lib/commands.ts` | G7 | ☑ | G7: `commands::add("no-cookies")`; `tests/rules.rs` `the_toolbar_tools_flip_the_builtin_rules` (the actions) |
 | CP-27 | "Auto-save now" | `lib/commands.ts` | G12 | ☐ | |
@@ -282,8 +282,8 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | CP-43 | "Rules…" | `lib/commands.ts` | G7 | ☑ | G7: `commands::add("rules")` opens the Rules window |
 | CP-44 | "Scripts…" | `lib/commands.ts` | G10 | ☐ | |
 | CP-45 | "Breakpoints…" | `lib/commands.ts` | G8 | ☑ | G8: `breakpoints.rs` handles `OpenBreakpoints` (G7's command, badge and dev open) with the editor window |
-| CP-46 | "Device setup…" | `lib/commands.ts` | G13 | ☐ | |
-| CP-47 | "Certificate wizard…" | `lib/commands.ts` | G13 | ☐ | |
+| CP-46 | "Device setup…" | `lib/commands.ts` | G13 | ☑ | G13: `devices` opens the sheet (`tests/integration.rs`) |
+| CP-47 | "Certificate wizard…" | `lib/commands.ts` | G13 | ☑ | G13: `certificate` opens the wizard (`OpenCertWizard`) |
 | CP-48 | "Settings…" ⌘, | `lib/commands.ts` | G12 | ☐ | |
 | CP-49 | "Settings: Proxy", "Network", "SSL Proxying", "Clients", "Storage", "Mocking", "Appearance", "Advanced", "MCP" | `lib/commands.ts` | G12 | ☐ | |
 | CP-50 | "Appearance: System", "Appearance: Light", "Appearance: Dark" | `lib/commands.ts` | G2 | ☑ | G2: `features/navigate.rs` (`appearance-*`) |
@@ -645,24 +645,24 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 
 | ID | Behaviour | Source | Phase | Status | Evidence |
 |---|---|---|---|---|---|
-| MI-01 | Certificate wizard: checks "Trusted in the login keychain" and "Verified with a real HTTPS handshake" with detail; CA name | `components/CertWizard.tsx` | G13 | ☐ | |
-| MI-02 | Wizard buttons: Install & Trust ("Waiting for macOS…"), Check again, Done, Remove from keychain; "Cancelled. Nothing was changed." | `components/CertWizard.tsx` | G13 | ☐ | |
-| MI-03 | Wizard: Firefox instructions and Copy terminal env | `components/CertWizard.tsx` | G13 | ☐ | |
-| MI-04 | Certificate popover "HTTPS decryption": trust state with Install & Trust… or Manage… | `components/CertificateMenu.tsx` | G13 | ☐ | |
-| MI-05 | Certificate popover fields: Root CA, Valid until, SHA-256, PEM file (copy button), Try it curl (copy button) | `components/CertificateMenu.tsx` | G13 | ☐ | |
-| MI-06 | CA menu: Copy common name, Copy expiry date, Copy SHA-256, Copy SHA-256 without colons, Copy PEM file path, Copy curl example | `components/CertificateMenu.tsx` | G13 | ☐ | |
-| MI-07 | Regenerate… then Replace CA, with "Remove trust for the old CA from this Mac" switch; error line | `components/CertificateMenu.tsx` | G13 | ☐ | |
-| MI-08 | System proxy popover: "System proxy on/off", description, Services (Copy services), unsupported note, error, Use as system proxy / Turn off | `components/SystemProxyMenu.tsx` | G13 | ☐ | |
-| MI-09 | System proxy popover: Copy terminal env ("Copied") | `components/SystemProxyMenu.tsx` | G13 | ☐ | |
-| MI-10 | Previous system proxy settings come back on quit and after a crash | `components/SystemProxyMenu.tsx` | G13 | ☐ | |
-| MI-11 | Device setup sheet: tabs iOS Simulator, iPhone, Android, Emulator; "Allow devices on your network" switch, interface, proxy address to copy; Devices on your network with Allow, Deny, Forget | `components/DeviceSetup/DeviceSetupSheet.tsx` | G13 | ☐ | |
-| MI-12 | iOS Simulator tab: booted simulators with certificate state, Install / Install again, Install to all booted, system proxy state; "No simulator is booted", simctl missing; Copy name, UDID, runtime | `components/DeviceSetup/SimulatorTab.tsx` | G13 | ☐ | |
-| MI-13 | iPhone tab: steps (Wi-Fi, Server and Port to copy, setup page and QR, profile install, certificate trust) and Status | `components/DeviceSetup/PhoneTabs.tsx`, `components/DeviceSetup/parts.tsx` | G13 | ☐ | |
-| MI-14 | Android tab: steps, certificate download, network_security_config.xml and manifest attribute to copy, Status | `components/DeviceSetup/PhoneTabs.tsx` | G13 | ☐ | |
-| MI-15 | Emulator tab: running emulators, Use / Stop using Proxymate as its proxy, Push certificate, terminal commands to copy; "No emulator is running" | `components/DeviceSetup/EmulatorTab.tsx` | G13 | ☐ | |
-| MI-16 | LAN Allow prompt: "Allow <ip>?" (Copy IP address), nickname, "N connections waiting · refused in N s", Deny, Allow; dismissing keeps it waiting | `components/DeviceAllowPrompt.tsx` | G13 | ☐ | |
-| MI-17 | Intercept popover: terminals (Terminal, iTerm: "curl, node, python, git…"), browsers with a fresh profile (Chrome, Edge, Brave, Arc, Firefox; "not installed" disabled), Running list with pid | `components/InterceptMenu.tsx` | G13 | ☐ | |
-| MI-18 | Intercept launch toast "Started <name>" with notes; intercepted flows named "<App> (Intercepted)"; "Can't start the app" | `lib/actions.ts` `intercept` | G13 | ☐ | |
+| MI-01 | Certificate wizard: checks "Trusted in the login keychain" and "Verified with a real HTTPS handshake" with detail; CA name | `components/CertWizard.tsx` | G13 | ☑ | G13: `cert::CertWizard` with `pm_view::integration::wizard_checks` (detail from `trust_detail`); `tests/render_integration.rs` `wizard-untrusted`, `wizard-trusted`; live `docs/native/g13/``wizard-untrusted-dark.png` |
+| MI-02 | Wizard buttons: Install & Trust ("Waiting for macOS…"), Check again, Done, Remove from keychain; "Cancelled. Nothing was changed." | `components/CertWizard.tsx` | G13 | ☑ | G13: Install & Trust ("Waiting for macOS…"), Check again (`Resource::retry`), Done, Remove; a cancelled prompt is `Failure::cancelled` from `Error::kind()`; `tests/integration.rs`; live: installed and removed through the macOS prompt |
+| MI-03 | Wizard: Firefox instructions and Copy terminal env | `components/CertWizard.tsx` | G13 | ☑ | G13: the Firefox and terminal notes, Copy terminal env ("Copied" for 1.5 s); `tests/render_integration.rs` |
+| MI-04 | Certificate popover "HTTPS decryption": trust state with Install & Trust… or Manage… | `components/CertificateMenu.tsx` | G13 | ☑ | G13: `cert::CertPanel` (Install & Trust… or Manage…, which closes the popover and opens the wizard; `tests/integration.rs`) |
+| MI-05 | Certificate popover fields: Root CA, Valid until, SHA-256, PEM file (copy button), Try it curl (copy button) | `components/CertificateMenu.tsx` | G13 | ☑ | G13: the details with copy fields for the PEM path and the curl line; `tests/render_integration.rs` `certificate-popover`, `docs/native/g13/``offscreen-certificate-popover-light.png` |
+| MI-06 | CA menu: Copy common name, Copy expiry date, Copy SHA-256, Copy SHA-256 without colons, Copy PEM file path, Copy curl example | `components/CertificateMenu.tsx` | G13 | ☑ | G13: `cert::ca_menu` (`integration:ca`); `tests/integration.rs` copies the colon SHA-256 and the curl line |
+| MI-07 | Regenerate… then Replace CA, with "Remove trust for the old CA from this Mac" switch; error line | `components/CertificateMenu.tsx` | G13 | ☑ | G13: Regenerate… then Replace CA with the untrust switch (default: whether this Mac trusts the CA); `tests/integration.rs` checks the journal's `regenerate_ca remove_old_trust=true` |
+| MI-08 | System proxy popover: "System proxy on/off", description, Services (Copy services), unsupported note, error, Use as system proxy / Turn off | `components/SystemProxyMenu.tsx` | G13 | ☑ | G13: `sysproxy::SystemProxyPanel` (title, description, services with Copy services, unsupported note, error, Use as system proxy / Turn off); `tests/integration.rs`; live `docs/native/g13/``system-proxy-on-dark.png` |
+| MI-09 | System proxy popover: Copy terminal env ("Copied") | `components/SystemProxyMenu.tsx` | G13 | ☑ | G13: Copy terminal env ("Copied"); `tests/render_integration.rs` `system-proxy-popover` |
+| MI-10 | Previous system proxy settings come back on quit and after a crash | `components/SystemProxyMenu.tsx` | G13 | ☑ | G13: live, `kill -9` of the native app with the system proxy on: the guardian restored the previous setting in 0.156 s; quit restores through `pm_app::quit` as before |
+| MI-11 | Device setup sheet: tabs iOS Simulator, iPhone, Android, Emulator; "Allow devices on your network" switch, interface, proxy address to copy; Devices on your network with Allow, Deny, Forget | `components/DeviceSetup/DeviceSetupSheet.tsx` | G13 | ☑ | G13: `devices::DeviceSetup` sheet (four tabs, the access bar with a switch, the interface menu, the proxy address; known devices with Allow, Deny, Forget and `device_menu`); `tests/integration.rs`; `tests/render_integration.rs`; live `docs/native/g13/``device-setup-iphone-lan-dark.png` |
+| MI-12 | iOS Simulator tab: booted simulators with certificate state, Install / Install again, Install to all booted, system proxy state; "No simulator is booted", simctl missing; Copy name, UDID, runtime | `components/DeviceSetup/SimulatorTab.tsx` | G13 | ☑ | G13: `devices/simulator.rs` (checks, booted rows with their menu, Install to all booted / Install again, Refresh, the system proxy check and button, a 4 s poll); `tests/integration.rs`; live: installed on a booted iPhone 17 Pro (`docs/native/g13/``simulator-installed-dark.png`) |
+| MI-13 | iPhone tab: steps (Wi-Fi, Server and Port to copy, setup page and QR, profile install, certificate trust) and Status | `components/DeviceSetup/PhoneTabs.tsx`, `components/DeviceSetup/parts.tsx` | G13 | ☑ | G13: `devices/phones.rs` iPhone tab (QR card from the engine's SVG, steps with Server and Port to copy, Status); `tests/render_integration.rs` `device-setup-iphone`; live with LAN access on |
+| MI-14 | Android tab: steps, certificate download, network_security_config.xml and manifest attribute to copy, Status | `components/DeviceSetup/PhoneTabs.tsx` | G13 | ☑ | G13: Android tab (steps, the snippets to copy, Status); `tests/render_integration.rs` `device-setup-android` |
+| MI-15 | Emulator tab: running emulators, Use / Stop using Proxymate as its proxy, Push certificate, terminal commands to copy; "No emulator is running" | `components/DeviceSetup/EmulatorTab.tsx` | G13 | ☑ | G13: `devices/emulator.rs` (adb and emulator checks, Push certificate, the proxy switch, row menu, terminal commands); `tests/integration.rs`; `tests/render_integration.rs` `device-setup-emulator` |
+| MI-16 | LAN Allow prompt: "Allow <ip>?" (Copy IP address), nickname, "N connections waiting · refused in N s", Deny, Allow; dismissing keeps it waiting | `components/DeviceAllowPrompt.tsx` | G13 | ☑ | G13: `prompt::AllowPrompt` (title menu, nickname, countdown, Deny, Allow; Escape keeps it waiting); `tests/integration.rs`; `tests/render_integration.rs` `allow-prompt`, `docs/native/g13/``offscreen-allow-prompt-dark.png` |
+| MI-17 | Intercept popover: terminals (Terminal, iTerm: "curl, node, python, git…"), browsers with a fresh profile (Chrome, Edge, Brave, Arc, Firefox; "not installed" disabled), Running list with pid | `components/InterceptMenu.tsx` | G13 | ☑ | G13: `intercept::panel` (terminals, browsers with "not installed" disabled, Running with pid); `tests/integration.rs`; live `docs/native/g13/``intercept-running-dark.png` |
+| MI-18 | Intercept launch toast "Started <name>" with notes; intercepted flows named "<App> (Intercepted)"; "Can't start the app" | `lib/actions.ts` `intercept` | G13 | ☑ | G13: `mutations::intercept` toasts `pm_view::integration::intercept_started` or "Can't start the app"; live: "Started Terminal", tracked by its shell's pid (flow naming is M21's engine code, unchanged) |
 
 ## Updates
 
@@ -690,7 +690,7 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | DV-11 | Dev remote: `scripts`, `scriptTemplate`, `scriptSource`, `saveScript`, `testScript` | `dev/remote.ts` | G10 | ☐ | |
 | DV-12 | Dev remote: `label`, `comment`, `headerColumns`, `compare`, `repeat`, `code`, `deleteSelection` | `dev/remote.ts` | G11 | ☐ | |
 | DV-13 | Dev remote: `settings`, `appearance`, `mockFrom`, `mockFromFile`, `importOpenApi`, `generateMocks`, `removeMockSource`, `removeOpenApi`, `importProto`, `removeProto`, `neverRecord`, `recordingLists`, `autosave`, `autosaveNow` | `dev/remote.ts` | G12 | ☐ | |
-| DV-14 | Dev remote: `intercept`, `deviceTab` | `dev/remote.ts` | G13 | ☐ | |
+| DV-14 | Dev remote: `intercept`, `deviceTab` | `dev/remote.ts` | G13 | ☑ | G13: `dev/integration.rs`: `intercept`, `deviceTab`, `neverRecord`, plus `open`, `close`, `injectDevices`, `integration`, `contextMenu: integration:<name>` |
 | DV-15 | `VITE_PM_AUTO_SELECT`: start with Auto Select on | `dev/harness.ts` | G1 | ☑ | G1: `PROXYMATE_DEV_AUTO_SELECT=1` (`features/flow_table.rs`, `dev_env.rs`) |
 | DV-16 | Perf probe (`PROXYMATE_SYNTH_FLOWS` + `VITE_PM_PERF_PROBE`): `[perf-probe]` scroll and filter timings | `dev/perfProbe.ts` | G1 | ☑ | G1: `apps/native/src/perf_probe.rs`, `PROXYMATE_DEV_PERF_PROBE=1`; numbers in the G1 PR |
 | DV-17 | `VITE_PM_FILTER`: start with search text | `dev/harness.ts` | G2 | ☑ | G2: `PROXYMATE_DEV_FILTER` (`dev_env::value`, `Workspace::new`) |
@@ -699,7 +699,7 @@ Source paths are relative to `apps/desktop/ui/src` unless they start with `src-t
 | DV-20 | `VITE_PM_OPEN=breakpoints` | `dev/harness.ts` | G8 | ☑ | G8: `PROXYMATE_DEV_OPEN=breakpoints` (and `compose`); checked live |
 | DV-21 | `VITE_PM_OPEN=scripts` | `dev/harness.ts` | G10 | ☐ | |
 | DV-22 | `VITE_PM_OPEN=settings:<page>` | `dev/harness.ts` | G12 | ☐ | |
-| DV-23 | `VITE_PM_OPEN=cert-wizard` and `device-setup:<tab>` | `dev/harness.ts` | G13 | ☐ | |
+| DV-23 | `VITE_PM_OPEN=cert-wizard` and `device-setup:<tab>` | `dev/harness.ts` | G13 | ☑ | G13: `integration::open_from_env` (`cert-wizard`, `device-setup:<tab>`) |
 | DV-24 | Body-viewer zoo: one flow per fixture in `crates/pm-testkit/fixtures/zoo/` for viewer screenshots | `dev/zoo.ts` | G4 | ☑ | G4: `PROXYMATE_DEV_ZOO=1` (`dev/zoo.rs`): 31 fixtures through the app's proxy; `docs/native/g4/` |
 | DV-25 | Browser-only harness: mock backend and URL parameters (`?zoo`, `?select`, `?requestTab`, `?rules`, `?rewrite`, `?scripts`, `?theme`, `?mocks`, `?devicePrompt`…) | `dev/harness.ts`, `lib/mockBackend.ts` | G14 | ☐ | |
 
@@ -722,7 +722,7 @@ Rows per owning phase. G14 also audits every row; its own row is the browser-onl
 | G10 | 23 | 0 |
 | G11 | 37 | 0 |
 | G12 | 53 | 0 |
-| G13 | 29 | 0 |
+| G13 | 29 | 29 |
 | G14 | 1 | 0 |
 | G15 | 5 | 5 |
-| **Total** | **524** | **318** |
+| **Total** | **524** | **378** |
