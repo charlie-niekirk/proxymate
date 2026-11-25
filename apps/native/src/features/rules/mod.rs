@@ -20,7 +20,7 @@ use pm_view::rules;
 
 use crate::bridge::{self, mutations};
 use crate::features::chrome::OpenRule;
-use crate::features::clipboard::{self, report_error};
+use crate::features::clipboard::report_error;
 use crate::features::commands;
 use crate::features::flow_menu::{self, Slot};
 use crate::features::inspector::actions::FlowRef;
@@ -232,9 +232,6 @@ pub fn register(cx: &mut App) {
     cx.on_action(|_: &ThrottleCustom, _| {});
     cx.on_action(|_: &ToggleNoCache, cx| toggle_builtin(rules::NO_CACHE_RULE_ID, cx));
     cx.on_action(|_: &ToggleNoCookies, cx| toggle_builtin(rules::NO_COOKIES_RULE_ID, cx));
-    cx.on_action(|_: &OpenBreakpoints, cx| {
-        clipboard::info("Breakpoints", Some("The Breakpoint Editor arrives in G8.".into()), cx);
-    });
     cx.on_action(|a: &FormChoice, cx| {
         let (key, value) = (a.key.to_string(), a.value.to_string());
         RulesWindow::update_form(cx, move |f, window, cx| f.choose(&key, &value, window, cx));

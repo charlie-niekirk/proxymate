@@ -302,3 +302,46 @@ pub fn sse_page(events: &[SseEvent], open: bool) -> SsePage {
         open,
     }
 }
+
+/// A flow paused at a breakpoint (G8): a JSON POST in the request phase,
+/// or its 200 response in the response phase.
+pub fn breakpoint(id: pm_model::BreakpointId, phase: pm_model::Phase) -> pm_model::BreakpointInfo {
+    let response = (phase == pm_model::Phase::Response).then(|| pm_model::ResponseHead {
+        status: 200,
+        reason: "OK".into(),
+        version: pm_model::HttpVersion::Http11,
+        headers: vec![
+            header("content-type", "application/json"),
+            header("content-length", "27"),
+        ],
+    });
+    pm_model::BreakpointInfo {
+        id,
+        flow_id: Some(id + 2),
+        phase,
+        rule_id: "rule-bp".into(),
+        rule_name: "Pause orders".into(),
+        paused_at_ms: 1_700_000_000_000.,
+        deadline_ms: Some(1_700_000_000_000. + 300_000.),
+        request: pm_model::RequestHead {
+            method: "POST".into(),
+            url: "https://api.example.com/v1/orders?limit=2".into(),
+            version: pm_model::HttpVersion::Http11,
+            headers: vec![
+                header("host", "api.example.com"),
+                header("content-type", "application/json"),
+                header("accept", "*/*"),
+            ],
+        },
+        response,
+        body: pm_model::BreakpointBody {
+            size: 27,
+            editable: true,
+            note: None,
+        },
+        message: None,
+    }
+}
+
+/// The body held by [`breakpoint`].
+pub const BREAKPOINT_BODY: &str = r#"{"id":"o1","total":12.50,"items":[1,2]}"#;

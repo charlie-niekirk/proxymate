@@ -468,3 +468,34 @@ pub fn integration_caches(cx: &mut App) -> IntegrationCaches {
     cx.set_global(caches.clone());
     caches
 }
+
+// ---- Editing (G8) ----
+
+/// `breakpointBodyKey`: a paused message's body, decoded, as the engine
+/// holds it. A breakpoint's body never changes, so it is never stale.
+pub type BreakpointBodyCache = Resource<pm_model::BreakpointId, Arc<Vec<u8>>>;
+
+#[derive(Clone)]
+pub struct EditingCaches {
+    pub breakpoint_body: Entity<BreakpointBodyCache>,
+}
+
+impl Global for EditingCaches {}
+
+/// The Breakpoint Editor's caches, made on first use.
+pub fn editing_caches(cx: &mut App) -> EditingCaches {
+    if let Some(caches) = cx.try_global::<EditingCaches>() {
+        return caches.clone();
+    }
+    let engine = cx.try_global::<Bridge>().map(|b| b.engine.clone());
+    let body = engine.map(|engine| {
+        Arc::new(move |id: &pm_model::BreakpointId| {
+            engine.breakpoint_body(*id).map(Arc::new).map_err(|e| e.to_string())
+        }) as Fetcher<pm_model::BreakpointId, Arc<Vec<u8>>>
+    });
+    let caches = EditingCaches {
+        breakpoint_body: cx.new(|_| Resource::new(body)),
+    };
+    cx.set_global(caches.clone());
+    caches
+}

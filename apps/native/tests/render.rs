@@ -5,7 +5,9 @@
 //! the stream panels (G6: a WebSocket's messages, badges, composer and an
 //! edited message; an event stream's events and fields), the Rules
 //! window (G7: groups, origin badges, a rule with every kind of action
-//! form and a dry run), and the Body tab with every text-family zoo
+//! form and a dry run), the Breakpoint Editor and Compose (G8: header
+//! tints, a removed header, a JSON body edited as a tree, a held message
+//! as hex, Edit & Replay), and the Body tab with every text-family zoo
 //! fixture (G4: JSON, JSON Tree, the 10 MB JSON in the CodeView, XML,
 //! HTML, JS and CSS beautified, text, form, multipart, GraphQL, hex),
 //! rendered by gpui's real
@@ -899,6 +901,250 @@ mod render {
         );
     }
 
+    /// Whether any pixel of `image` (in points `x`, `y` ranges) is `want`.
+    fn has_pixel(
+        image: &image::RgbaImage,
+        scale: f32,
+        xs: std::ops::Range<u32>,
+        ys: std::ops::Range<u32>,
+        want: Rgba,
+    ) -> bool {
+        let want = [want.r, want.g, want.b].map(|c| (c * 255.0).round() as i32);
+        ys.step_by(2).any(|y| {
+            xs.clone().step_by(2).any(|x| {
+                let (px, py) = ((x as f32 * scale) as u32, (y as f32 * scale) as u32);
+                if px >= image.width() || py >= image.height() {
+                    return false;
+                }
+                let got = image.get_pixel(px, py).0;
+                (0..3).all(|i| (got[i] as i32 - want[i]).abs() <= 3)
+            })
+        })
+    }
+
+    fn open_offscreen<V: 'static + gpui_kit::Render>(
+        cx: &mut HeadlessAppContext,
+        build: impl FnOnce(&mut gpui_kit::Window, &mut gpui_kit::App) -> gpui_kit::Entity<V> + 'static,
+    ) -> (gpui_kit::AnyWindowHandle, gpui_kit::Entity<V>) {
+        let options = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(gpui_kit::Bounds {
+                origin: point(px(0.), px(0.)),
+                size: size(px(SIZE.0), px(SIZE.1)),
+            })),
+            focus: false,
+            show: false,
+            ..Default::default()
+        };
+        let handle = cx
+            .update(|cx| {
+                cx.open_window(options, |window, cx| {
+                    let view = build(window, cx);
+                    cx.new(|cx| gpui_kit::base::Root::new(view, window, cx))
+                })
+            })
+            .expect("open the window");
+        cx.run_until_parked();
+        let view = cx
+            .update_window(handle.into(), |root, _, cx| {
+                let root = root.downcast::<gpui_kit::base::Root>().unwrap();
+                root.read(cx).view().clone().downcast::<V>().unwrap()
+            })
+            .unwrap();
+        (handle.into(), view)
+    }
+
+    /// The Breakpoint Editor (G8): a paused request with a header changed,
+    /// one added and one removed, its JSON body as a tree with an edit; a
+    /// held WebSocket message as hex; and Compose (Edit & Replay), in
+    /// each theme.
+    fn editing_renders(mode: Mode) {
+        use proxymate_native::features::breakpoints::window::{BreakpointsWindow, Pane, QUEUE_WIDTH};
+        use proxymate_native::features::compose::ComposeWindow;
+        use proxymate_native::features::editing::body::BodyMode;
+
+        let mut cx = context();
+        cx.update(|cx| pm_theme::kit::apply(mode, cx));
+        let name = if mode.is_dark() { "dark" } else { "light" };
+        let t = mode.tokens();
+        let request = sample::breakpoint(1, Phase::Request);
+        let mut message = sample::breakpoint(2, Phase::Request);
+        message.request.method = "GET".into();
+        message.request.url = "wss://api.example.com/socket".into();
+        message.rule_name = "Hold sent messages".into();
+        message.message = Some(pm_model::HeldMessage {
+            direction: pm_model::WsDirection::Sent,
+            opcode: pm_model::WsOpcode::Text,
+        });
+        let now = request.paused_at_ms + 12_000.;
+        cx.update(|cx| {
+            let bodies = keys::editing_caches(cx).breakpoint_body;
+            bodies.update(cx, |c, cx| {
+                c.set(1, Arc::new(sample::BREAKPOINT_BODY.as_bytes().to_vec()), cx);
+                c.set(2, Arc::new(br#"{"op":"tick","n":0}"#.to_vec()), cx);
+            });
+            let queue = proxymate_native::bridge::breakpoints(cx);
+            queue.update(cx, |q, _| q.value = Some(vec![request, message]));
+        });
+        let (handle, view) = open_offscreen(&mut cx, |window, cx| {
+            let queue = proxymate_native::bridge::breakpoints(cx);
+            cx.new(|cx| BreakpointsWindow::new(queue, window, cx))
+        });
+        cx.update_window(handle, |_, window, cx| {
+            view.update(cx, |w, cx| w.set_now(now, cx));
+            let Some(Pane::Http(form)) = view.read(cx).pane().cloned() else {
+                panic!("the request's form")
+            };
+            form.update(cx, |f, cx| {
+                f.set_head(
+                    None,
+                    Some("https://api.example.com/v1/orders?limit=3"),
+                    None,
+                    window,
+                    cx,
+                );
+                let rows = f.headers().read(cx).rows().to_vec();
+                f.headers().update(cx, |h, cx| {
+                    h.set(rows[2].id, "accept", "application/json", window, cx);
+                    h.remove(rows[0].id, cx);
+                    h.push("x-debug", "1", cx);
+                });
+                let body = f.body().cloned().expect("the body");
+                body.update(cx, |b, cx| b.set_mode(BodyMode::Tree, window, cx));
+                let tree = body.read(cx).tree().cloned().expect("the tree");
+                tree.update(cx, |t, cx| {
+                    t.press(pm_view::json::editor::Key::Down, window, cx);
+                    t.press(pm_view::json::editor::Key::Down, window, cx);
+                    t.press(pm_view::json::editor::Key::Enter, window, cx);
+                    t.type_text("13.00", window, cx);
+                    t.commit_input(window, cx);
+                    t.press(pm_view::json::editor::Key::Down, window, cx);
+                });
+            });
+        })
+        .unwrap();
+        cx.run_until_parked();
+        let scale = cx
+            .update_window(handle, |_, window, cx| {
+                window.render_frame(cx);
+                window.scale_factor()
+            })
+            .unwrap();
+        let image = capture(&mut cx, handle, format!("breakpoint-request-{name}.png"));
+        let queue_bg = t.muted;
+        assert!(
+            has_pixel(&image, scale, 8..(QUEUE_WIDTH as u32 - 8), 70..130, t.selection_bg),
+            "the shown flow selected in the queue"
+        );
+        let _ = queue_bg;
+        let form_x = QUEUE_WIDTH as u32 + 4..SIZE.0 as u32 - 8;
+        assert!(
+            has_pixel(
+                &image,
+                scale,
+                form_x.clone(),
+                70..SIZE.1 as u32,
+                over(t.diff_add_bg, t.background)
+            ),
+            "an added header or row tinted"
+        );
+        assert!(
+            has_pixel(
+                &image,
+                scale,
+                form_x.clone(),
+                70..SIZE.1 as u32,
+                over(t.diff_change_bg, t.background)
+            ),
+            "a changed header or value tinted"
+        );
+        assert!(
+            has_pixel(
+                &image,
+                scale,
+                form_x.clone(),
+                70..SIZE.1 as u32,
+                over(t.diff_del_bg, t.background)
+            ),
+            "the removed header listed"
+        );
+
+        // The held message, as hex.
+        cx.update_window(handle, |_, window, cx| {
+            view.update(cx, |w, cx| w.select(2, window, cx));
+            let Some(Pane::Message(form)) = view.read(cx).pane().cloned() else {
+                panic!("the message's form")
+            };
+            form.update(cx, |f, cx| {
+                f.switch_to(pm_view::breakpoints::MessageMode::Hex, window, cx)
+            });
+        })
+        .unwrap();
+        cx.run_until_parked();
+        cx.update_window(handle, |_, window, cx| window.render_frame(cx))
+            .unwrap();
+        let image = capture(&mut cx, handle, format!("breakpoint-message-{name}.png"));
+        assert!(
+            has_pixel(
+                &image,
+                scale,
+                8..(QUEUE_WIDTH as u32 - 8),
+                60..220,
+                over(t.s_paused_bg, t.muted)
+            ),
+            "the phase pill in the queue"
+        );
+        assert_pixel(
+            &image,
+            scale,
+            (SIZE.0 - 30., SIZE.1 - 120.),
+            t.background,
+            "the payload editor",
+        );
+
+        // Compose, from a recorded request with a JSON body.
+        let spec = pm_model::RequestSpec {
+            method: "POST".into(),
+            url: "https://api.example.com/v1/orders".into(),
+            headers: vec![
+                sample::header("accept", "*/*"),
+                sample::header("content-type", "application/json"),
+            ],
+            body: Some(sample::BREAKPOINT_BODY.into()),
+            body_base64: false,
+        };
+        let (compose, composer) = open_offscreen(&mut cx, move |window, cx| {
+            cx.new(|cx| ComposeWindow::new(Some(spec), window, cx))
+        });
+        cx.update_window(compose, |_, _, cx| {
+            composer.update(cx, |w, cx| w.headers().update(cx, |h, cx| h.push("x-debug", "1", cx)));
+        })
+        .unwrap();
+        cx.run_until_parked();
+        cx.update_window(compose, |_, window, cx| window.render_frame(cx))
+            .unwrap();
+        let image = capture(&mut cx, compose, format!("compose-{name}.png"));
+        assert!(
+            has_pixel(
+                &image,
+                scale,
+                8..(SIZE.0 as u32 / 2),
+                100..SIZE.1 as u32,
+                over(t.diff_add_bg, t.background)
+            ),
+            "the added header tinted"
+        );
+        assert!(
+            has_pixel(
+                &image,
+                scale,
+                (SIZE.0 as u32 - 140)..SIZE.0 as u32,
+                (SIZE.1 as u32 - 50)..SIZE.1 as u32,
+                t.primary
+            ),
+            "the Send button"
+        );
+    }
+
     pub fn run() {
         for mode in [Mode::Dark, Mode::Light] {
             println!("running shell_renders ({mode:?})");
@@ -907,6 +1153,9 @@ mod render {
             println!("running rules_renders ({mode:?})");
             rules_renders(mode);
             println!("passed rules_renders ({mode:?})");
+            println!("running editing_renders ({mode:?})");
+            editing_renders(mode);
+            println!("passed editing_renders ({mode:?})");
         }
         let mut cases = 0;
         for mode in [Mode::Dark, Mode::Light] {
@@ -915,8 +1164,8 @@ mod render {
             println!("passed viewers_render ({mode:?})");
         }
         println!(
-            "render: 4 + {cases} passed (real offscreen renderer; shell, inspector, stream panels, palette \
-             and Rules window, and the zoo's text viewers, in each theme)"
+            "render: 6 + {cases} passed (real offscreen renderer; shell, inspector, stream panels, palette, \
+             Rules window, Breakpoint Editor and Compose, and the zoo's text viewers, in each theme)"
         );
     }
 
