@@ -12,6 +12,6 @@
     "e2e": "npm run e2e -w @proxymate/ui"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.12.4"
+    "@tauri-apps/cli": "^2.12.6"
   }
 }
